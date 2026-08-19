@@ -29,6 +29,7 @@ fn main() {
             commands::project_open,
             commands::project_scan,
             commands::chapter_verses,
+            commands::chapter_verse_data,
             commands::verse_get,
             commands::verse_run_checks,
             commands::verse_decide,

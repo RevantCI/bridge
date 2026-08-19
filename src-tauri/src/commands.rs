@@ -50,6 +50,11 @@ pub async fn chapter_verses(sidecar: State<'_, EngineSidecar>, chapter: String) 
 }
 
 #[tauri::command]
+pub async fn chapter_verse_data(sidecar: State<'_, EngineSidecar>, chapter: String) -> Result<Value, String> {
+    sidecar.send_request("chapter.verseData", serde_json::json!({ "chapter": chapter })).await
+}
+
+#[tauri::command]
 pub async fn verse_get(
     sidecar: State<'_, EngineSidecar>,
     chapter: String,

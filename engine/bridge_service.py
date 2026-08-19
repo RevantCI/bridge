@@ -91,6 +91,7 @@ class Methods:
     PROJECT_OPEN = "project.open"
     PROJECT_SCAN = "project.scan"
     CHAPTER_VERSES = "chapter.verses"
+    CHAPTER_VERSE_DATA = "chapter.verseData"
 
     VERSE_GET = "verse.get"
     VERSE_RUN_CHECKS = "verse.runChecks"
@@ -159,6 +160,23 @@ class BridgeEngine:
             "text": text,
             "alignment": alignment.to_dict(),
         }
+
+    def get_chapter_verse_data(self, chapter: str) -> dict[str, Any]:
+        """Bulk fetch: text + alignment for every verse in a chapter, in
+        ONE call. Used on project open instead of looping verse.get per
+        verse — a chapter with N verses used to mean N sequential round
+        trips before the editor ever appeared, which for a real project
+        (dozens of verses) looked exactly like the app hanging. This
+        collapses that to a single request."""
+        self._require_project()
+        verses = self.project.verses(chapter)
+        out: dict[str, Any] = {}
+        for v in verses:
+            out[v] = {
+                "text": self.project.target_verse_text(chapter, v),
+                "alignment": self.project.load_verse_alignment(chapter, v).to_dict(),
+            }
+        return {"chapter": chapter, "verses": out}
 
     def run_verse_checks(self, chapter: str, verse: str,
                           checks: list[str]) -> list[QaFinding]:
@@ -267,6 +285,8 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.scan_project())
             if m == Methods.CHAPTER_VERSES:
                 return EngineResponse.ok(request.id, result={"verses": self.chapter_verses(p["chapter"])})
+            if m == Methods.CHAPTER_VERSE_DATA:
+                return EngineResponse.ok(request.id, result=self.get_chapter_verse_data(p["chapter"]))
             if m == Methods.VERSE_GET:
                 return EngineResponse.ok(request.id, result=self.get_verse(p["chapter"], p["verse"]))
             if m == Methods.VERSE_RUN_CHECKS:

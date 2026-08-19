@@ -54,6 +54,10 @@ export const bridge = {
     return call("chapter_verses", { chapter });
   },
 
+  chapterVerseData(chapter: string): Promise<{ chapter: string; verses: Record<string, { text: string; alignment: unknown }> }> {
+    return call("chapter_verse_data", { chapter });
+  },
+
   getVerse(chapter: string, verse: string): Promise<VerseData> {
     return call("verse_get", { chapter, verse });
   },

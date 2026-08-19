@@ -76,6 +76,20 @@ def test_verse_get_returns_real_alignment_data(fixture_project):
     assert result["alignment"]["alignments"][0]["bottomWords"][0]["word"] == "தேவன்"
 
 
+def test_chapter_verse_data_returns_all_verses_in_one_call(fixture_project):
+    """This is the fix for the 'app not responding for minutes' bug — a
+    real project chapter with N verses used to mean N sequential Tauri
+    round trips before the editor ever appeared. This proves the bulk
+    endpoint returns the same data in one call."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    result = call(engine, "chapter.verseData", {"chapter": "1"})["result"]
+    assert result["chapter"] == "1"
+    assert "1" in result["verses"]
+    assert "தேவன்" in result["verses"]["1"]["text"]
+    assert result["verses"]["1"]["alignment"]["alignments"][0]["bottomWords"][0]["word"] == "தேவன்"
+
+
 def test_clean_verse_has_no_findings(fixture_project):
     engine = BridgeEngine()
     call(engine, "project.open", {"path": str(fixture_project)})
