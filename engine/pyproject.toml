@@ -1,0 +1,26 @@
+[project]
+name = "bridge-engine"
+version = "0.8.0.dev0"
+description = "Bridge sidecar: tc_ai_bridge business logic + Greek Room QA, one protocol"
+requires-python = ">=3.11"
+dependencies = [
+    # Pin an exact upstream commit once vendored, per doc §31 (Greek Room is Alpha).
+    # "wildebeest",
+    # "greekroom",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pyinstaller>=6.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["greek_room_engine*", "tc_ai_bridge*"]
+
+[tool.setuptools]
+py-modules = ["bridge_service"]

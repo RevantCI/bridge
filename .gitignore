@@ -1,0 +1,62 @@
+# ===== Python (engine/) =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# PyInstaller build artifacts — these are machine/platform-specific
+# outputs, never source. Rebuild locally with `pyinstaller ...`.
+engine/build/
+engine/dist/
+engine/*.spec
+
+# ===== Rust / Tauri (src-tauri/) =====
+src-tauri/target/
+
+# Tauri auto-generates JSON schemas here at build time
+# (referenced by capabilities/default.json's $schema, but not source)
+src-tauri/gen/
+
+# The compiled sidecar binaries are build OUTPUT, not source — each
+# platform needs its own, rebuilt from engine/ via PyInstaller. Never
+# commit these; they're large, binary, and go stale silently.
+src-tauri/binaries/*.exe
+src-tauri/binaries/bridge-engine-*
+!src-tauri/binaries/README.txt
+
+# NOTE: Cargo.lock is intentionally NOT ignored — commit it. This is an
+# application, not a library, and a committed lockfile is what makes
+# `cargo build` reproducible across machines.
+
+# ===== Node / Svelte / Vite =====
+node_modules/
+dist/
+.vite/
+
+# NOTE: package-lock.json is intentionally NOT ignored — commit it for
+# the same reproducibility reason as Cargo.lock.
+
+# ===== Secrets — never commit these =====
+.env
+.env.*
+*.pem
+*.key
+# AppSettings writes to %LOCALAPPDATA%/.translationcore-ai-bridge/ or
+# ~/.translationcore-ai-bridge/ outside this repo by design (see
+# tc_ai_bridge/secret_store.py) — this entry is a safety net only, in
+# case a local settings.json ever ends up inside the repo by accident.
+settings.json
+
+# ===== OS / editor noise =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ===== Test fixtures created at runtime (never source) =====
+# If you ever point a fixture-building test at a path inside the repo
+# instead of tmp_path, this catches the companion dir it would create.
+.apps/translationCoreAI/

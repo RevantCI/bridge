@@ -1,0 +1,17 @@
+[package]
+name = "translationcore-ai-bridge"
+version = "0.7.5-dev"
+description = "translationCore AI Bridge — local-first translation QA workbench"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
