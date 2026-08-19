@@ -14,7 +14,8 @@ only wrapped. See docs/ARCHITECTURE.md for the reasoning.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Optional
 
@@ -24,8 +25,7 @@ from greek_room_engine.protocol import EngineRequest, EngineResponse
 
 from tc_ai_bridge.tc_project import TranslationCoreProject, ProjectError
 from tc_ai_bridge.local_checks import run_local_qa
-from tc_ai_bridge.alignment_engine import realign, validate_proposal, apply_proposal, AlignmentError
-from tc_ai_bridge.models import VerseAlignment, QAIssue
+from tc_ai_bridge.models import QAIssue
 from tc_ai_bridge.secret_store import AppSettings
 
 BRIDGE_VERSION = "0.8.0-dev"
@@ -38,6 +38,21 @@ _SEVERITY_MAP = {
     "editorial": Severity.LOW,
     "info": Severity.INFO,
 }
+
+
+def _stable_finding_id(*, chapter: str, verse: str, engine: str,
+                        check_type: str, disambiguator: str = "") -> str:
+    """Deterministic finding id, NOT a random uuid4.
+
+    QaFinding previously defaulted to uuid4() ids, meaning the SAME finding
+    got a DIFFERENT id every time verse.runChecks was called — so a saved
+    decision (keyed by finding id) could never be matched back to the
+    finding it was made on next time checks ran. This makes ids stable
+    across runs as long as the underlying finding is the same (same
+    chapter/verse/engine/check_type/disambiguator).
+    """
+    key = f"{chapter}:{verse}:{engine}:{check_type}:{disambiguator}"
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:20]
 
 
 def _categorize_qaissue(issue: QAIssue) -> FindingCategory:
@@ -67,14 +82,22 @@ def _categorize_qaissue(issue: QAIssue) -> FindingCategory:
 
 
 def _qaissue_to_finding(issue: QAIssue, *, project_id: str, book: str,
-                         chapter: int, verse: int) -> QaFinding:
+                         chapter: str, verse: str) -> QaFinding:
     """Adapts tc_ai_bridge's QAIssue (tN/tW/local QA) into the same
     QaFinding shape Greek Room findings use, so the UI never has to know
     which engine produced a given finding (architecture doc §6)."""
+    engine_name = issue.source or "local"
+    stable_id = _stable_finding_id(
+        chapter=chapter, verse=verse, engine=engine_name,
+        check_type=issue.check_id or issue.code,
+        # disambiguates multiple issues of the same check_type in one verse
+        disambiguator=issue.group_id or issue.detail,
+    )
     return QaFinding(
+        id=stable_id,
         project_id=project_id,
-        book=book, chapter=chapter, verse=verse,
-        engine=issue.source or "local",
+        book=book, chapter=int(chapter), verse=int(verse),
+        engine=engine_name,
         check_type=issue.check_id or issue.code,
         category=_categorize_qaissue(issue),
         severity=_SEVERITY_MAP.get(issue.severity, Severity.MEDIUM),
@@ -100,6 +123,9 @@ class Methods:
 
     SETTINGS_GET = "settings.get"
     SETTINGS_SET = "settings.set"
+
+    EXPORT_ALIGNED = "export.aligned"
+    EXPORT_NON_ALIGNED = "export.nonAligned"
 
 
 class BridgeEngine:
@@ -183,21 +209,26 @@ class BridgeEngine:
         """The unified check entrypoint: local QA (tN/tW/alignment) +
         Greek Room, merged into one QaFinding list — this IS the
         background chapter/book-wise automation the UI's status bar
-        reflects, called once per verse during that pass."""
+        reflects, called once per verse during that pass.
+
+        Findings get STABLE ids (see _stable_finding_id) and any prior
+        human decision recorded via decide_verse is re-applied here, so
+        reopening a project or re-running checks doesn't reset a verse
+        you already reviewed back to "open"."""
         self._require_project()
         findings: list[QaFinding] = []
         project_id = str(self.project.summary.path)
         book = self.project.summary.book_id
 
-        alignment = self.project.load_verse_alignment(chapter, verse)
         target_text = self.project.target_verse_text(chapter, verse)
 
         if "local" in checks or "tN" in checks or "tW" in checks or "alignment" in checks:
+            alignment = self.project.load_verse_alignment(chapter, verse)
             issues = run_local_qa(self.project, chapter, verse, alignment)
             for issue in issues:
                 findings.append(_qaissue_to_finding(
                     issue, project_id=project_id, book=book,
-                    chapter=int(chapter), verse=int(verse),
+                    chapter=chapter, verse=verse,
                 ))
 
         if "greekroom" in checks or "wildebeest" in checks:
@@ -208,7 +239,29 @@ class BridgeEngine:
                 text=target_text,
                 checks=["wildebeest"],
             )
+            for f in gr_findings:
+                # Greek Room findings default to a random uuid4 id from
+                # QaFinding's dataclass default — override with a stable
+                # one keyed on the span, so the same flagged character
+                # range gets the same id across repeated check runs.
+                f.id = _stable_finding_id(
+                    chapter=chapter, verse=verse, engine=f.engine,
+                    check_type=f.check_type,
+                    disambiguator=f"{f.start_offset}:{f.end_offset}:{f.original_text}",
+                )
             findings.extend(gr_findings)
+
+        # Re-apply any prior human decision so re-running checks (or
+        # reopening the project) doesn't silently forget review state.
+        prior_decisions = self.project.qa_decisions_for_verse(chapter, verse)
+        for finding in findings:
+            record = prior_decisions.get(finding.id)
+            if record:
+                try:
+                    finding.status = FindingStatus(record.get("decision", "open"))
+                except ValueError:
+                    pass
+                finding.human_comment = record.get("note") or None
 
         return findings
 
@@ -244,10 +297,74 @@ class BridgeEngine:
             journal.rollback(rec, reason="edit_verse failed")
             raise
 
+    # -- export -------------------------------------------------------------
+    #
+    # NOTE on scope: there is no existing USFM writer anywhere in
+    # tc_ai_bridge — only a reader (usfm.py has strip_usfm/marker_balance_
+    # issues, not a serializer). target_chapter() JSON only stores
+    # per-verse plain text, not the original book's full USFM structure
+    # (headers, footnotes, poetry markers) — that lives only in the
+    # original .usfm file, keyed by nothing we can round-trip verse-by-
+    # verse. So "non-aligned export" here is a real, working, but
+    # SIMPLIFIED USFM reconstruction (\id, \c, \v markers only) — not a
+    # full-fidelity round-trip of the original file. Documented, not
+    # silently pretended otherwise.
+
+    def export_non_aligned(self, output_path: str) -> dict[str, Any]:
+        """Writes simplified USFM (id/chapter/verse markers only, no
+        footnotes/poetry/section markup) for every chapter to output_path."""
+        self._require_project()
+        summary = self.project.summary
+        lines = [f"\\id {summary.book_id.upper()}"]
+        for chapter in self.project.chapters():
+            lines.append(f"\\c {chapter}")
+            for verse in self.project.verses(chapter):
+                text = self.project.target_verse_text(chapter, verse)
+                if verse.isdigit():
+                    lines.append(f"\\v {verse} {text}")
+        content = "\n".join(lines) + "\n"
+        Path(output_path).write_text(content, encoding="utf-8")
+        return {
+            "written": True, "path": output_path,
+            "bookId": summary.book_id, "chapters": len(self.project.chapters()),
+            "note": "Simplified USFM (id/chapter/verse markers only) — see docstring for scope.",
+        }
+
+    def export_aligned(self, output_path: str) -> dict[str, Any]:
+        """Writes a structured JSON export: per chapter/verse, target text
+        + full alignment groups + any recorded human QA decisions. This is
+        genuinely complete (alignment data IS already the project's native
+        format, nothing simplified here) — unlike the USFM export above."""
+        self._require_project()
+        summary = self.project.summary
+        book = summary.book_id
+        out: dict[str, Any] = {
+            "bookId": book, "bookName": summary.book_name,
+            "targetLanguage": summary.target_language,
+            "chapters": {},
+        }
+        for chapter in self.project.chapters():
+            chapter_out: dict[str, Any] = {}
+            for verse in self.project.verses(chapter):
+                alignment = self.project.load_verse_alignment(chapter, verse)
+                chapter_out[verse] = {
+                    "text": self.project.target_verse_text(chapter, verse),
+                    "alignment": alignment.to_dict(),
+                    "decisions": self.project.qa_decisions_for_verse(chapter, verse),
+                }
+            out["chapters"][chapter] = chapter_out
+        Path(output_path).write_text(
+            json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return {"written": True, "path": output_path, "bookId": book,
+                "chapters": len(self.project.chapters())}
+
     # -- settings ---------------------------------------------------------
 
     def get_settings(self) -> dict[str, Any]:
         return {
+            "provider": self.settings.provider,
+            "apiBaseUrl": self.settings.api_base_url,
             "model": self.settings.model,
             "reviewerName": self.settings.reviewer_name,
             "paratextUsername": self.settings.paratext_username,
@@ -258,6 +375,10 @@ class BridgeEngine:
     def set_settings(self, **kwargs) -> dict[str, Any]:
         if "apiKey" in kwargs:
             self.settings.set_api_key(kwargs["apiKey"])
+        if "provider" in kwargs:
+            self.settings.provider = kwargs["provider"]
+        if "apiBaseUrl" in kwargs:
+            self.settings.api_base_url = kwargs["apiBaseUrl"]
         if "model" in kwargs:
             self.settings.model = kwargs["model"]
         if "reviewerName" in kwargs:
@@ -302,6 +423,10 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.get_settings())
             if m == Methods.SETTINGS_SET:
                 return EngineResponse.ok(request.id, result=self.set_settings(**p))
+            if m == Methods.EXPORT_ALIGNED:
+                return EngineResponse.ok(request.id, result=self.export_aligned(p["outputPath"]))
+            if m == Methods.EXPORT_NON_ALIGNED:
+                return EngineResponse.ok(request.id, result=self.export_non_aligned(p["outputPath"]))
 
             return EngineResponse.fail(request.id, "unknown_method", f"No handler for '{m}'")
         except ProjectError as exc:

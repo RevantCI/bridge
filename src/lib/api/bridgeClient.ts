@@ -86,4 +86,16 @@ export const bridge = {
   setSettings(params: Record<string, unknown>): Promise<SettingsData> {
     return call("settings_set", { params });
   },
+
+  pickSavePath(defaultName: string): Promise<string | null> {
+    return invoke<string | null>("pick_save_path", { defaultName });
+  },
+
+  exportAligned(outputPath: string): Promise<{ written: boolean; path: string; chapters: number }> {
+    return call("export_aligned", { outputPath });
+  },
+
+  exportNonAligned(outputPath: string): Promise<{ written: boolean; path: string; chapters: number }> {
+    return call("export_non_aligned", { outputPath });
+  },
 };

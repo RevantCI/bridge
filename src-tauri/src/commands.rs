@@ -113,3 +113,26 @@ pub async fn settings_get(sidecar: State<'_, EngineSidecar>) -> Result<Value, St
 pub async fn settings_set(sidecar: State<'_, EngineSidecar>, params: Value) -> Result<Value, String> {
     sidecar.send_request("settings.set", params).await
 }
+
+/// Opens a native "Save As" dialog and returns the chosen path, or null
+/// if cancelled. Used by the Export modal before calling export_aligned /
+/// export_non_aligned — the sidecar writes directly to whatever path this
+/// returns.
+#[tauri::command]
+pub async fn pick_save_path(app: tauri::AppHandle, default_name: String) -> Result<Option<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().set_file_name(&default_name).save_file(move |path| {
+        let _ = tx.send(path.map(|p| p.to_string()));
+    });
+    rx.await.map_err(|e| format!("save dialog cancelled unexpectedly: {e}"))
+}
+
+#[tauri::command]
+pub async fn export_aligned(sidecar: State<'_, EngineSidecar>, output_path: String) -> Result<Value, String> {
+    sidecar.send_request("export.aligned", serde_json::json!({ "outputPath": output_path })).await
+}
+
+#[tauri::command]
+pub async fn export_non_aligned(sidecar: State<'_, EngineSidecar>, output_path: String) -> Result<Value, String> {
+    sidecar.send_request("export.nonAligned", serde_json::json!({ "outputPath": output_path })).await
+}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { verseNums, verseTexts, findingsByVerse, selectedVerse, currentChapter, showSource } from "../stores";
+  import { verseNums, verseTexts, findingsByVerse, selectedVerse, currentChapter, showSource, verseKey } from "../stores";
   import { buildSegments } from "../utils/highlight";
 
   export let onSelect: (verse: string) => void;
@@ -9,9 +9,10 @@
   <div class="chapter-label">Chapter {$currentChapter}</div>
 
   {#each $verseNums as v}
-    {@const findings = $findingsByVerse[v] ?? []}
+    {@const key = verseKey($currentChapter, v)}
+    {@const findings = $findingsByVerse[key] ?? []}
     {@const openCount = findings.filter((f) => f.status === "open").length}
-    {@const segments = buildSegments($verseTexts[v] ?? "", findings)}
+    {@const segments = buildSegments($verseTexts[key] ?? "", findings)}
     <div
       class="verse"
       class:active={$selectedVerse === v}

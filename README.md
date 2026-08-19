@@ -66,22 +66,19 @@ npm install
 npm run tauri dev
 ```
 
-## Current status: v0.8.1 — Phase 2 (Svelte frontend wired to real sidecar)
+## Current status: v0.9.0 — Phase 3 (decision persistence, whole-book, Settings & Export)
 
-**Verified end-to-end, including on a real Windows machine (not just this build environment):**
-- ✅ `BridgeEngine` — 17/17 pytest, real fixture project, real file writes (Phase 1)
-- ✅ Svelte frontend — `npm run build` and `svelte-check` both clean, 0 errors, 0 warnings
-- ✅ `cargo tauri dev` — compiles and launches an actual window on Windows (MSVC toolchain)
-- ✅ Real components: `ImportScreen`, `TopBar`, `VerseList` (renders findings as real inline colored marks using actual `start_offset`/`end_offset`), `ReviewPanel` (live Greek Room re-check on verse focus, Accept/Reject/Ignore wired to real `verse.decide`, Edit wired to real `verse.edit`)
-- ✅ `QAIssue` → `QaFinding` category mapping tested against the *actual* codes `local_checks.py` produces
-- ✅ Windows console UTF-8 fix — Tamil/Hebrew verse text no longer crashes the sidecar's stdout (see Troubleshooting below)
+**New in this phase, all verified (24/24 pytest, clean Svelte build + type-check):**
+- ✅ **Stable finding IDs** — findings previously got a random id every time checks ran, so a saved decision could never be matched back later. Fixed via deterministic ids; proven with a real accept → re-check → still-accepted test.
+- ✅ **Decision persistence** — reopening a project or re-running checks now correctly restores prior Accept/Reject/Ignore state instead of resetting to "open".
+- ✅ **Chapter switching** — the top bar's chapter dropdown actually works now (it didn't before).
+- ✅ **"Run whole book"** — wired to actually load and check every chapter, with per-chapter progress. Store keys are now `chapter:verse` composite (`verseKey()` in `stores.ts`) so multiple chapters' data can coexist without collisions.
+- ✅ **Settings modal, for real** — AI provider pane supports **any OpenAI-Responses-API-compatible endpoint**, not just OpenAI: Provider / Base URL / Model / API key are all freely editable and persist via `settings.get`/`settings.set`. Also made `ai_client.py`'s endpoint configurable (was hardcoded to `api.openai.com`) — though note `ai_client.py` still isn't called by any protocol method yet (that's Phase 7); this is groundwork, not a live AI connection.
+- ✅ **Export modal, for real** — two working exporters: `export.aligned` (full JSON: text + alignment + decisions per verse, nothing simplified) and `export.nonAligned` (simplified USFM reconstruction — `\id`/`\c`/`\v` markers only). Export is enabled only once every chapter in the whole book is loaded and approved.
 
-**Pending reconfirmation:**
-- ⬜ Full click-through on a real translationCore project (open → verse list populates → findings show) after the UTF-8 fix — the fix is in and unit-verified, but hasn't yet been reconfirmed against a real project folder end-to-end. Next thing to check.
-
-**Known incomplete (by design, not bugs):**
-- ⬜ Native drag-and-drop file import — Tauri's webview doesn't expose real filesystem paths via the browser `DragEvent` API for security reasons; `ImportScreen.svelte` shows an honest error on drop and directs to the working "Browse for folder" button (real native dialog, wired). Needs `@tauri-apps/api`'s `onDragDropEvent` listener instead — flagged as a follow-up.
-- ⬜ Settings modal, Export modal — currently placeholder text in `App.svelte`; not yet built out to match the approved wireframe.
+**Known, deliberate scope limits (not bugs):**
+- `export.nonAligned`'s USFM is a real reconstruction from `target_chapter()` data, but does **not** preserve the original file's footnotes, section headers, or poetry markup — that structure isn't tracked per-verse anywhere in the current data model. Documented in the exporter's own docstring.
+- "Any API" in Settings means any endpoint speaking the OpenAI Responses API shape — not literally any provider's native request format (e.g. raw Anthropic API has a different schema).
 
 ## Troubleshooting (real issues hit getting this running on Windows)
 

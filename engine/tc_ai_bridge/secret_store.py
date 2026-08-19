@@ -109,6 +109,32 @@ class AppSettings:
         self.save_sanitized()
 
     @property
+    def provider(self) -> str:
+        """Free-text provider label (e.g. 'openai', 'anthropic', 'azure',
+        'local', 'custom'). Added for Bridge so Settings can point at any
+        OpenAI-compatible endpoint, not just OpenAI specifically — see
+        api_base_url below."""
+        return str(self.data.get('provider') or 'openai')
+
+    @provider.setter
+    def provider(self, value: str) -> None:
+        self.data['provider'] = (value or 'openai').strip() or 'openai'
+        self.save_sanitized()
+
+    @property
+    def api_base_url(self) -> str:
+        """Empty string means 'use the provider's default endpoint'.
+        Set explicitly to point at Azure OpenAI, a self-hosted
+        OpenAI-compatible server (vLLM, LM Studio, Ollama's OpenAI-compat
+        mode, OpenRouter, etc), or any other compatible endpoint."""
+        return str(self.data.get('api_base_url') or '')
+
+    @api_base_url.setter
+    def api_base_url(self, value: str) -> None:
+        self.data['api_base_url'] = str(value or '').strip()
+        self.save_sanitized()
+
+    @property
     def reviewer_name(self) -> str:
         return str(self.data.get('reviewer_name') or 'AI Bridge Reviewer')
 

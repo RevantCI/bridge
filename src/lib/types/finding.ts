@@ -78,6 +78,8 @@ export interface VerseData {
 }
 
 export interface SettingsData {
+  provider: string;
+  apiBaseUrl: string;
   model: string;
   reviewerName: string;
   paratextUsername: string;

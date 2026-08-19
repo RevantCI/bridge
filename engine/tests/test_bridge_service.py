@@ -189,3 +189,102 @@ def test_qaissue_categorization_matches_real_local_checks_codes():
     ]
     for issue, expected in cases:
         assert _categorize_qaissue(issue) == expected, f"{issue.code} -> expected {expected}"
+
+
+def test_finding_ids_are_stable_across_repeated_check_runs():
+    """The bug this fixes: findings used to get a random uuid4 id every
+    time verse.runChecks ran, so a saved decision could never be matched
+    back to 'the same' finding later. This proves ids are now stable."""
+    from bridge_service import _stable_finding_id
+    id1 = _stable_finding_id(chapter="1", verse="3", engine="wildebeest", check_type="wildebeest.script.mixed", disambiguator="7:8:a")
+    id2 = _stable_finding_id(chapter="1", verse="3", engine="wildebeest", check_type="wildebeest.script.mixed", disambiguator="7:8:a")
+    assert id1 == id2
+    id3 = _stable_finding_id(chapter="1", verse="4", engine="wildebeest", check_type="wildebeest.script.mixed", disambiguator="7:8:a")
+    assert id1 != id3  # different verse -> different id
+
+
+def test_greek_room_finding_id_is_stable_across_repeated_check_runs(fixture_project):
+    # overwrite verse 1 text with a mixed-script token so Greek Room flags it
+    (fixture_project / "rut" / "1.json").write_text(
+        '{"1": "\\u0ba4\\u0bc7\\u0bb5\\u0ba9a"}', encoding="utf-8"
+    )
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    findings1 = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["greekroom"]})["findings"]
+    findings2 = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["greekroom"]})["findings"]
+    assert len(findings1) >= 1 and len(findings2) >= 1
+    assert findings1[0]["id"] == findings2[0]["id"]
+
+
+def test_decision_persists_across_repeated_check_runs(fixture_project):
+    """The actual feature: accept a finding, re-run checks (simulating
+    reopening the project), and confirm the finding comes back already
+    marked accepted instead of resetting to open."""
+    (fixture_project / "rut" / "1.json").write_text(
+        '{"1": "\\u0ba4\\u0bc7\\u0bb5\\u0ba9a"}', encoding="utf-8"
+    )
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    first_run = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["greekroom"]})["findings"]
+    assert first_run[0]["status"] == "open"
+    finding_id = first_run[0]["id"]
+
+    call(engine, "verse.decide", {
+        "chapter": "1", "verse": "1", "findingId": finding_id,
+        "status": "accepted", "comment": "reviewed",
+    })
+
+    second_run = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["greekroom"]})["findings"]
+    assert second_run[0]["id"] == finding_id
+    assert second_run[0]["status"] == "accepted"
+    assert second_run[0]["human_comment"] == "reviewed"
+
+
+def test_settings_supports_any_provider_not_just_openai(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from tc_ai_bridge.secret_store import AppSettings
+    isolated = AppSettings(path=tmp_path / "settings.json")
+    engine = BridgeEngine(settings=isolated)
+
+    result = call(engine, "settings.set", {
+        "provider": "anthropic",
+        "apiBaseUrl": "https://api.anthropic.com/v1",
+        "model": "claude-sonnet-5",
+        "apiKey": "sk-ant-test",
+    })["result"]
+    assert result["provider"] == "anthropic"
+    assert result["apiBaseUrl"] == "https://api.anthropic.com/v1"
+    assert result["model"] == "claude-sonnet-5"
+    assert result["hasApiKey"] is True
+
+
+def test_export_non_aligned_writes_real_usfm_file(fixture_project, tmp_path):
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    out_path = tmp_path / "export.usfm"
+    result = call(engine, "export.nonAligned", {"outputPath": str(out_path)})["result"]
+    assert result["written"] is True
+    content = out_path.read_text(encoding="utf-8")
+    assert "\\id RUT" in content
+    assert "\\c 1" in content
+    assert "\\v 1" in content
+    assert "தேவன்" in content
+
+
+def test_export_aligned_writes_real_json_with_alignment_and_decisions(fixture_project, tmp_path):
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    call(engine, "verse.decide", {
+        "chapter": "1", "verse": "1", "findingId": "some-finding",
+        "status": "accepted", "comment": "ok",
+    })
+    out_path = tmp_path / "export.json"
+    result = call(engine, "export.aligned", {"outputPath": str(out_path)})["result"]
+    assert result["written"] is True
+    import json as _json
+    data = _json.loads(out_path.read_text(encoding="utf-8"))
+    assert data["bookId"] == "rut"
+    verse1 = data["chapters"]["1"]["1"]
+    assert verse1["alignment"]["alignments"][0]["bottomWords"][0]["word"] == "தேவன்"
+    assert "some-finding" in verse1["decisions"]

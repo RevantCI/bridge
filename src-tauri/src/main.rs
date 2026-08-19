@@ -36,6 +36,9 @@ fn main() {
             commands::verse_edit,
             commands::settings_get,
             commands::settings_set,
+            commands::pick_save_path,
+            commands::export_aligned,
+            commands::export_non_aligned,
         ])
         .run(tauri::generate_context!())
         .expect("error while running translationCore AI Bridge");

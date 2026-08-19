@@ -1,17 +1,27 @@
 <script lang="ts">
-  import { project, currentChapter, selectedVerse, verseNums } from "../stores";
+  import { project, currentChapter } from "../stores";
 
   export let onOpenSettings: () => void;
   export let onOpenExport: () => void;
   export let onGotoVerse: (verse: string) => void;
+  export let onChapterChange: (chapter: string) => void;
   export let exportEnabled: boolean;
 
   let gotoValue = "";
 
   function jump() {
     const parts = gotoValue.trim().split(":");
-    const v = parts[parts.length - 1];
-    if (v) onGotoVerse(v);
+    const chapterPart = parts.length > 1 ? parts[0] : null;
+    const versePart = parts[parts.length - 1];
+    if (chapterPart && chapterPart !== $currentChapter) {
+      onChapterChange(chapterPart);
+    }
+    if (versePart) onGotoVerse(versePart);
+  }
+
+  function handleChapterSelect(e: Event) {
+    const value = (e.target as HTMLSelectElement).value;
+    onChapterChange(value);
   }
 </script>
 
@@ -23,9 +33,9 @@
     <select class="select">
       <option>{$project.bookName}</option>
     </select>
-    <select class="select" style="width:64px;">
+    <select class="select" style="width:72px;" value={$currentChapter} on:change={handleChapterSelect}>
       {#each $project.chapters as ch}
-        <option selected={ch === $currentChapter}>Ch {ch}</option>
+        <option value={ch}>Ch {ch}</option>
       {/each}
     </select>
     <div class="goto">

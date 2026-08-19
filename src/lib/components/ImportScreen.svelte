@@ -1,6 +1,6 @@
 <script lang="ts">
   import { bridge } from "../api/bridgeClient";
-  import { project, currentChapter, verseNums, verseTexts } from "../stores";
+  import { project } from "../stores";
 
   export let onOpened: () => void;
 
@@ -14,16 +14,6 @@
     try {
       const info = await bridge.openProject(path);
       project.set(info);
-      const firstChapter = info.chapters[0] ?? "1";
-      currentChapter.set(firstChapter);
-      const { verses } = await bridge.chapterVerses(firstChapter);
-      verseNums.set(verses);
-      const texts: Record<string, string> = {};
-      for (const v of verses) {
-        const data = await bridge.getVerse(firstChapter, v);
-        texts[v] = data.text;
-      }
-      verseTexts.set(texts);
       onOpened();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

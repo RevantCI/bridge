@@ -2,26 +2,32 @@
   import { bridge } from "../api/bridgeClient";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
-    verseTexts, verseNums,
+    verseTexts, verseKey,
   } from "../stores";
   import type { FindingStatus } from "../types/finding";
 
   let greekRoomChecking = false;
+  let lastCheckedKey = "";
 
   // Re-run Greek Room live whenever the selected verse changes — per the
   // approved design, Greek Room is the one engine that re-checks live on
   // focus; tN/tW/Alignment are already-computed background-pass results.
   $: if ($selectedVerse) {
-    runLiveGreekRoomCheck($selectedVerse);
+    const key = verseKey($currentChapter, $selectedVerse);
+    if (key !== lastCheckedKey) {
+      lastCheckedKey = key;
+      runLiveGreekRoomCheck($currentChapter, $selectedVerse);
+    }
   }
 
-  async function runLiveGreekRoomCheck(verse: string) {
+  async function runLiveGreekRoomCheck(chapter: string, verse: string) {
     greekRoomChecking = true;
     try {
-      const findings = await bridge.runVerseChecks($currentChapter, verse, ["greekroom"]);
+      const findings = await bridge.runVerseChecks(chapter, verse, ["greekroom"]);
+      const key = verseKey(chapter, verse);
       findingsByVerse.update((map) => {
-        const existing = (map[verse] ?? []).filter((f) => f.engine !== "wildebeest");
-        return { ...map, [verse]: [...existing, ...findings] };
+        const existing = (map[key] ?? []).filter((f) => f.engine !== "wildebeest");
+        return { ...map, [key]: [...existing, ...findings] };
       });
     } catch (e) {
       console.error("Greek Room live check failed", e);
@@ -33,11 +39,10 @@
   async function decide(findingId: string, status: FindingStatus) {
     if (!$selectedVerse) return;
     await bridge.decideVerse($currentChapter, $selectedVerse, findingId, status);
+    const key = verseKey($currentChapter, $selectedVerse);
     findingsByVerse.update((map) => {
-      const list = (map[$selectedVerse!] ?? []).map((f) =>
-        f.id === findingId ? { ...f, status } : f
-      );
-      return { ...map, [$selectedVerse!]: list };
+      const list = (map[key] ?? []).map((f) => (f.id === findingId ? { ...f, status } : f));
+      return { ...map, [key]: list };
     });
   }
 
@@ -46,18 +51,18 @@
 
   function startEdit() {
     if (!$selectedVerse) return;
-    editText = $verseTexts[$selectedVerse] ?? "";
+    editText = $verseTexts[verseKey($currentChapter, $selectedVerse)] ?? "";
     editing = true;
   }
 
   async function saveEdit() {
     if (!$selectedVerse) return;
     await bridge.editVerse($currentChapter, $selectedVerse, editText);
-    verseTexts.update((t) => ({ ...t, [$selectedVerse!]: editText }));
+    const key = verseKey($currentChapter, $selectedVerse);
+    verseTexts.update((t) => ({ ...t, [key]: editText }));
     editing = false;
-    // re-run all checks on the edited verse since text changed
     const findings = await bridge.runVerseChecks($currentChapter, $selectedVerse, ["local", "greekroom"]);
-    findingsByVerse.update((map) => ({ ...map, [$selectedVerse!]: findings }));
+    findingsByVerse.update((map) => ({ ...map, [key]: findings }));
   }
 
   const severityBadge: Record<string, string> = {
@@ -87,6 +92,7 @@
             <div class="verdict">
               <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
               <span class="check-id">{f.check_type}</span>
+              {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
             </div>
             <p class="explain">{f.explanation}</p>
             {#if f.evidence.length > 0}
@@ -112,6 +118,7 @@
             <div class="verdict">
               <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
               <span class="check-id">{f.category}</span>
+              {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
             </div>
             <p class="explain">{f.explanation}</p>
             <div class="decision-row">
@@ -161,6 +168,7 @@
   .badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 5px; }
   .badge-wrong { background: var(--danger-bg); color: var(--danger); }
   .badge-review { background: var(--warning-bg); color: var(--warning); }
+  .badge-decided { background: var(--success-bg); color: var(--success); text-transform: capitalize; }
   .check-id { font-size: 11px; color: var(--text-3); }
   .explain { font-size: 12px; color: var(--text-2); line-height: 1.6; margin: 0 0 8px; }
   .evidence { font-size: 11px; color: var(--text-2); padding-left: 16px; margin: 0 0 8px; }

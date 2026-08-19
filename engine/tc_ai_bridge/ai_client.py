@@ -49,7 +49,7 @@ class OpenAIResponsesClient:
     ENDPOINT = 'https://api.openai.com/v1/responses'
     MODELS_ENDPOINT = 'https://api.openai.com/v1/models'
 
-    def __init__(self, api_key: str, model: str = 'gpt-5.6', transport: Transport = default_transport, timeout: float = 240.0, reasoning_effort: str = 'medium'):
+    def __init__(self, api_key: str, model: str = 'gpt-5.6', transport: Transport = default_transport, timeout: float = 240.0, reasoning_effort: str = 'medium', base_url: str = ''):
         if not api_key.strip():
             raise AIError('No OpenAI API key is configured.')
         self.api_key = api_key.strip()
@@ -58,6 +58,20 @@ class OpenAIResponsesClient:
         self.timeout = timeout
         self.reasoning_effort = reasoning_effort if reasoning_effort in ('none','low','medium','high','xhigh','max') else 'medium'
         self.last_usage = AIUsage()
+        # Bridge Settings lets a person point this at any OpenAI-compatible
+        # endpoint (Azure OpenAI, a self-hosted vLLM/LM Studio/Ollama
+        # server, OpenRouter, etc) via api_base_url — empty means use the
+        # class default above. This only changes the URL; the request
+        # payload is still the OpenAI Responses API shape, so "any API"
+        # here means "any OpenAI-Responses-API-compatible endpoint," not
+        # literally any provider's native schema (e.g. raw Anthropic).
+        if base_url.strip():
+            base = base_url.strip().rstrip('/')
+            self.endpoint = f'{base}/responses'
+            self.models_endpoint = f'{base}/models'
+        else:
+            self.endpoint = self.ENDPOINT
+            self.models_endpoint = self.MODELS_ENDPOINT
         self.last_cost_usd = 0.0
         self.last_privacy_manifest: dict[str, Any] = {}
 
@@ -101,7 +115,7 @@ class OpenAIResponsesClient:
         raw = b''
         # Retry only transient transport/server failures. Schema/auth/input errors fail immediately.
         for attempt in range(3):
-            status, raw = self.transport(self.ENDPOINT, headers, body, self.timeout)
+            status, raw = self.transport(self.endpoint, headers, body, self.timeout)
             if status not in (408, 409, 429, 500, 502, 503, 504):
                 break
             if attempt < 2:
@@ -137,7 +151,7 @@ class OpenAIResponsesClient:
 
     def test_connection(self) -> dict[str, Any]:
         """Authenticate the API key and confirm the configured model is accessible without generating tokens."""
-        url = f'{self.MODELS_ENDPOINT}/{urllib.parse.quote(self.model, safe="")}'
+        url = f'{self.models_endpoint}/{urllib.parse.quote(self.model, safe="")}'
         req = urllib.request.Request(url, headers={
             'Authorization': f'Bearer {self.api_key}',
             'User-Agent': 'translationCore-AI-Bridge/0.7.5',
