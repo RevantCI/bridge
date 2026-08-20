@@ -44,6 +44,11 @@ def fixture_project(tmp_path):
         "1": "ஆதியிலே தேவன் வானத்தையும் பூமியையும் படைத்தார்."
     }, ensure_ascii=False), encoding="utf-8")
 
+    (root / "rut.usfm").write_text(
+        "\\id RUT\n\\c 1\n\\v 1 ஆதியிலே தேவன் வானத்தையும் பூமியையும் படைத்தார்.\n",
+        encoding="utf-8",
+    )
+
     return root
 
 
@@ -122,6 +127,38 @@ def test_decide_verse_writes_real_qa_decision_file(fixture_project):
     data = json.loads(written.read_text(encoding="utf-8"))
     assert data["decision"] == "accepted"
     assert data["issueKey"] == "test-finding"
+
+
+def test_usfm_checks_run_once_per_book_not_once_per_verse(fixture_project):
+    """The real checker spawns a subprocess loading a full tag database —
+    calling it once per verse.runChecks call during a whole-book pass would
+    be far too slow. Confirms the book-level cache actually caches, using a
+    stub instead of the real vendored checker so this stays fast and
+    independent of whether it's installed correctly in this environment."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    call_count = 0
+
+    def fake_check_book_usfm(*, project_id, book_id, usfm_text):
+        nonlocal call_count
+        call_count += 1
+        from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity
+        return [QaFinding(
+            project_id=project_id, book=book_id, chapter=1, verse=1,
+            engine="usfm", check_type="usfm.fake_issue",
+            category=FindingCategory.STRUCTURE, severity=Severity.HIGH,
+            explanation="fake finding for the cache test",
+        )]
+
+    engine.greek_room.check_book_usfm = fake_check_book_usfm
+
+    result1 = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+    result2 = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+
+    assert call_count == 1, "check_book_usfm should be cached, not re-run per verse.runChecks call"
+    assert any(f["check_type"] == "usfm.fake_issue" for f in result1["findings"])
+    assert any(f["check_type"] == "usfm.fake_issue" for f in result2["findings"])
 
 
 def test_edit_verse_creates_transaction_backup(fixture_project):

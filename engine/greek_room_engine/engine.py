@@ -10,6 +10,7 @@ from typing import Any
 
 from .adapters.base import CheckAdapter
 from .adapters.wildebeest_adapter import WildebeestAdapter
+from .adapters.usfm_adapter import UsfmAdapter
 from .models.finding import QaFinding
 from .protocol import EngineRequest, EngineResponse, Methods
 
@@ -23,8 +24,9 @@ class GreekRoomEngine:
 
     def _register_default_adapters(self) -> None:
         self.register_adapter(WildebeestAdapter())
-        # OWL, USFM, Versification, Uroman/SED, UAlign adapters are added in
-        # later roadmap stages (v0.7.6+) per doc §35-41 — register here when ready.
+        self.register_adapter(UsfmAdapter())
+        # OWL, Versification, Uroman/SED, UAlign adapters are added in later
+        # roadmap stages per doc §35-41 — register here when ready.
 
     def register_adapter(self, adapter: CheckAdapter) -> None:
         self._adapters[adapter.engine_name] = adapter
@@ -65,6 +67,22 @@ class GreekRoomEngine:
                 f.run_id = run_id
             findings.extend(result)
 
+        return findings
+
+    def check_book_usfm(self, *, project_id: str, book_id: str, usfm_text: str) -> list[QaFinding]:
+        """USFM structural checks (duplicate/missing verses, unclosed
+        markers, ...) operate on a whole book, not one verse — unlike
+        check_verse, this is not part of the per-verse checks list and must
+        be called explicitly, once per book, by the caller (bridge_service
+        caches the result rather than re-running this per verse.runChecks
+        call — see UsfmAdapter's own docstring for why)."""
+        adapter = self._adapters.get("usfm")
+        if adapter is None or not adapter.is_available():
+            return []
+        findings = adapter.check_book(project_id=project_id, book_id=book_id, usfm_text=usfm_text)
+        run_id = str(uuid.uuid4())
+        for f in findings:
+            f.run_id = run_id
         return findings
 
     # -- protocol dispatch --------------------------------------------------

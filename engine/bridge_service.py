@@ -144,6 +144,12 @@ class BridgeEngine:
     def __init__(self, settings: Optional[AppSettings] = None) -> None:
         self.greek_room = GreekRoomEngine()
         self.project: Optional[TranslationCoreProject] = None
+        # USFM structural checks run once per whole book (not once per
+        # verse — each run spawns a subprocess loading a real tag/Unicode
+        # database, far too slow to repeat per verse.runChecks call). Keyed
+        # by project path so switching books/projects naturally invalidates.
+        # Not invalidated by verse.edit — see _usfm_findings_for_book.
+        self._usfm_findings_by_book: dict[str, list[QaFinding]] = {}
         # AppSettings() with no path defaults to a real, persistent location
         # (%LOCALAPPDATA%/.translationcore-ai-bridge/settings.json on
         # Windows), and get_api_key() also checks OPENAI_API_KEY. That's
@@ -277,6 +283,48 @@ class BridgeEngine:
             }
         return {"chapter": chapter, "verses": out}
 
+    def _usfm_findings_for_book(self) -> list[QaFinding]:
+        """Lazily compute + cache whole-book USFM structural findings.
+
+        Not invalidated by verse.edit: re-running the real checker (a
+        subprocess loading a full tag database) after every keystroke-level
+        edit would be far too slow, and a single verse edit essentially
+        never changes book-wide structure (duplicate/missing verse numbers,
+        unclosed markers). Accepted as a known limitation, not an oversight —
+        re-opening the project re-runs it fresh.
+        """
+        book_key = str(self.project.path)
+        cached = self._usfm_findings_by_book.get(book_key)
+        if cached is not None:
+            return cached
+
+        usfm_path = self.project.usfm_path()
+        findings: list[QaFinding] = []
+        if usfm_path is not None:
+            try:
+                usfm_text = usfm_path.read_text(encoding="utf-8-sig")
+            except OSError:
+                usfm_text = ""
+            if usfm_text:
+                findings = self.greek_room.check_book_usfm(
+                    project_id=str(self.project.summary.path),
+                    book_id=self.project.book_id,
+                    usfm_text=usfm_text,
+                )
+                for f in findings:
+                    # Same stabilization as Greek Room findings (see
+                    # run_verse_checks below) — otherwise a fresh subprocess
+                    # run after an app restart would hand out new random
+                    # uuid4 ids for the same underlying issues, and any
+                    # decision recorded on them in a prior session could
+                    # never be matched back.
+                    f.id = _stable_finding_id(
+                        chapter=str(f.chapter), verse=str(f.verse), engine=f.engine,
+                        check_type=f.check_type, disambiguator=f.explanation,
+                    )
+        self._usfm_findings_by_book[book_key] = findings
+        return findings
+
     def run_verse_checks(self, chapter: str, verse: str,
                           checks: list[str]) -> list[QaFinding]:
         """The unified check entrypoint: local QA (tN/tW/alignment) +
@@ -303,6 +351,21 @@ class BridgeEngine:
                     issue, project_id=project_id, book=book,
                     chapter=chapter, verse=verse,
                 ))
+
+        if "local" in checks or "usfm" in checks:
+            # Whole-book findings that fall on this chapter; a finding with
+            # no specific verse (e.g. "chapter is missing verse 4") surfaces
+            # on the chapter's first verse rather than nowhere, since the UI
+            # has no chapter-level display slot.
+            book_verses = self.project.verses(chapter) if chapter in self.project.chapters() else []
+            first_verse = book_verses[0] if book_verses else None
+            for f in self._usfm_findings_for_book():
+                if str(f.chapter) != str(chapter):
+                    continue
+                if str(f.verse) == str(verse):
+                    findings.append(f)
+                elif f.verse == 0 and first_verse is not None and str(verse) == str(first_verse):
+                    findings.append(f)
 
         if "greekroom" in checks or "wildebeest" in checks:
             target_language = self.project.manifest.get("target_language", {})

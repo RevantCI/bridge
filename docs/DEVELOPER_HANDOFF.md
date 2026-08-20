@@ -63,17 +63,15 @@ docs/
   automation, `SettingsModal` (any OpenAI-compatible provider/endpoint/model/key),
   `ExportModal` (aligned JSON + simplified USFM export).
 
-**This import-pipeline work (below) is new ground, not the originally planned Phase 4.**
+**This import-pipeline work (below) was new ground, not the originally planned Phase 4.**
 The original roadmap after Phase 3 was: Phase 4 = USFM structural checker
-(`greek_room_engine/adapters/usfm_adapter.py`, still does not exist) + versification;
-Phase 5 = names/transliteration (Uroman + SED); Phase 6 = alignment intelligence
-(UAlign corpus stats); Phase 7 = Paratext/Logos connectors wired to the protocol + AI
-explain + drag-and-drop import. None of Phases 4-7 have been started — this import work
-was picked up instead because a working import pipeline blocks everything downstream
-(you need real Scripture in the app before checks/alignment/names work matter). Whoever
-picks this up next should decide explicitly whether to continue import work (see
-"Recommended next work" below) or switch to Phase 4, rather than assuming the numbered
-roadmap order still applies.
++ versification; Phase 5 = names/transliteration (Uroman + SED); Phase 6 = alignment
+intelligence (UAlign corpus stats); Phase 7 = Paratext/Logos connectors wired to the
+protocol + AI explain + drag-and-drop import. Import work was picked up first because a
+working import pipeline blocks everything downstream (you need real Scripture in the app
+before checks/alignment/names work matter). **The USFM structural checker half of Phase 4
+is now done (2026-08-20, see below)** — versification, and Phases 5-7, still haven't been
+started.
 
 ### Gotchas still in force (from Phases 1-3, verified still true in the current code)
 
@@ -197,7 +195,110 @@ roadmap order still applies.
 - **Drag-and-drop import is still not wired** — no `onDragDropEvent` listener from
   `@tauri-apps/api` exists in `src/`; `ImportScreen` still requires the file picker.
 
-## Objective
+### USFM structural checker — Phase 4 half done (2026-08-20)
+
+New adapter, `engine/greek_room_engine/adapters/usfm_adapter.py`, registered
+in `GreekRoomEngine`. Catches duplicate/missing verse numbers, unclosed
+inline markers, and other structural USFM problems — a real gap nothing
+else in the app checked before this.
+
+**This is vendored, unpublished third-party code, not a normal
+dependency — read this before touching it.** Unlike Wildebeest,
+`greekroom`'s `usfm` submodule is **not published on PyPI** (only `owl`
+and `gr_utilities` are, confirmed by inspecting the actual installed
+wheel — `usfm`/`versification`/`wildebeest` exist only in the
+`BibleNLP/greek-room` GitHub source tree). The decision to vendor it
+anyway — rather than wait on upstream packaging or build a lesser
+in-house checker — was made explicitly, with the license and long-term
+maintenance cost discussed first. Don't undo that decision by casually
+"cleaning up" or replacing this without the same consideration.
+
+**Where it lives**: `engine/vendor/greekroom-usfm/` — `usfm_check.py`,
+`ualign_utilities.py`, `Bible_USFM_tag_data.jsonl`,
+`Bible_USFM_explanations.txt`, and a nested `greekroom/gr_utilities/`
+package (see below for why). Full provenance — source URL, pinned commit
+`18ddcf0e6c03fa2774b73b21186115d712e4cba9`, BSD 3-Clause license text and
+attribution, and an explicit "don't edit these files in place" policy —
+is in `NOTICE.md` in that directory. **Read `NOTICE.md` before re-syncing
+against upstream or making any change here.**
+
+**How it's invoked**: as a subprocess (`UsfmAdapter.check_book()`), not an
+import — `usfm_check.py` is a 4,000-line CLI/HTML-report tool, not a
+library, and its `import ualign_utilities` is a bare top-level import that
+only resolves with the vendor directory explicitly on `PYTHONPATH`
+(exactly the "path-sensitive internal import" the original Phase 4 plan
+warned about). Writes the book's USFM to a temp file, runs the script with
+`PYTHONPATH` pointed at the vendor root, parses its plain-text report
+(`-o`/`--out`) for findings.
+
+**Its own `-j/--json` output flag is dead code** — accepted by its
+argparse setup but never referenced anywhere else in the 4,000 lines.
+Verified by reading the source, not assumed; don't try to use `-j` and
+expect a file to appear. The `.txt` report is the only real output to
+parse, and its indentation depth to reach an individual issue varies by
+category (3 or 4 levels) — `_parse_report()` in the adapter tracks an
+indentation stack rather than assuming a fixed depth, and recognizes three
+distinct real location-reference formats found by testing (see the
+function's own docstring and `test_usfm_adapter.py` for the real captured
+report text each was found in).
+
+**Two real bugs found and fixed while integrating** — both documented
+inline where fixed, in case they inform an upstream bug report later
+(see the earlier discussion in this doc about contributing a packaging
+fix upstream):
+- A line in `usfm_check.py` used `%-d`/`%-H` in a `strftime` format string
+  — glibc-only extensions Windows' C runtime doesn't support, raising
+  `ValueError` immediately on startup on this Windows dev machine.
+  Patched in place (marked `# BRIDGE PATCH`, per `NOTICE.md`'s policy for
+  changes that are genuinely unavoidable) to the portable zero-padded
+  equivalent — cosmetic only, just a report timestamp.
+- The vendored `usfm_check.py` (pinned commit) calls
+  `general_util.mkdirs_in_path()`, which doesn't exist in the *published*
+  `greekroom==0.0.20` PyPI package's `gr_utilities.general_util` —
+  **upstream's own GitHub source and PyPI release have already drifted
+  apart from each other.** Fixed by also vendoring `general_util.py` from
+  the *same* pinned commit (`greekroom/gr_utilities/` inside the vendor
+  directory) and prioritizing it on the subprocess's own `PYTHONPATH`,
+  rather than relying on the separately pip-installed `greekroom` package
+  for this specific tool's dependencies. This is why the subprocess's
+  `PYTHONPATH` matters — don't "simplify" it to just use whatever
+  `greekroom` happens to be pip-installed.
+
+**Wiring into checks**: whole-book, not per-verse — see
+`UsfmAdapter`'s and `BridgeEngine._usfm_findings_for_book()`'s own
+docstrings for why (each run spawns a subprocess loading a real tag
+database). `bridge_service.py` computes and caches findings once per
+book (keyed by project path), then filters to the requested chapter/verse
+inside `run_verse_checks` whenever `"local"` or `"usfm"` is requested —
+so it activates automatically with the frontend's existing default checks
+list, no frontend change needed. A finding with no specific verse (e.g. a
+whole-chapter "missing verse N") surfaces on that chapter's first verse,
+since the UI has no chapter-level display slot. **Not invalidated by
+`verse.edit`** — re-running the subprocess after every edit would be far
+too slow, and a single verse edit essentially never changes book-wide
+structure; re-opening the project re-runs it fresh. Findings get the same
+stable-id treatment as Wildebeest/tN/tW findings, so decisions persist
+across sessions.
+
+**Verified**: `test_usfm_adapter.py` (parser unit tests against real
+captured report text, not synthetic guesses; real end-to-end subprocess
+tests against real broken and clean USFM; a subprocess-failure test
+confirming graceful degradation) plus a book-level caching test in
+`test_bridge_service.py` confirming the subprocess runs once per book, not
+once per verse. Full suite: 51/51 passing.
+
+**Known gap, not yet resolved — read before doing a PyInstaller build with
+this included**: `UsfmAdapter` invokes the subprocess via
+`[sys.executable, str(CHECKER_SCRIPT), ...]`. In dev mode `sys.executable`
+is a real `python.exe`, so this works. In a **frozen PyInstaller build,
+`sys.executable` is `bridge-engine.exe` itself** — a onefile executable
+does not behave like `python.exe <script>.py` when given a script path
+argument. This was not resolved in this session (it needs either bundling
+a standalone Python interpreter alongside the frozen exe, or a different
+invocation strategy — a real design decision, not something to guess at).
+Until it is, expect USFM checks to silently produce no findings (via the
+same graceful-degradation path already tested) in a frozen build, while
+working normally via `npm run tauri dev` against a dev-mode sidecar.
 
 Continue building Bridge's import workflow so users can bring in individual
 USFM/SFM files, whole-Bible folders, Paratext folders, and translationCore

@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+import json
+import math
+from pathlib import Path
+import os
+import regex
+import sys
+from typing import List, Optional, Tuple
+
+
+def slot_value_in_double_colon_del_list(line: str, slot: str, default: Optional = None) -> str:
+    """For a given slot, e.g. 'cost', get its value from a line such as '::s1 of course ::s2 ::cost 0.3' -> 0.3
+    The value can be an empty string, as for ::s2 in the example above."""
+    if m := regex.match(fr'(?:.*\s)?::{slot}(|\s+\S.*?)(?:\s+::\S.*|\s*)$', line):
+        result = m.group(1).strip()
+        result = result.strip('"')
+        return result
+    else:
+        return default
+
+
+def slot_value_in_single_colon_del_list(line: str, slot: str, default: Optional = None) -> str:
+    """For a given slot, e.g. 'cost', get its value from a line such as ':s1 of course :s2 :cost 0.3' -> 0.3
+    The value can be an empty string, as for :s2 in the example above."""
+    if m := regex.match(fr'(?:.*\s)?:{slot}(|\s+\S.*?)(?:\s+:\S.*|\s*)$', line):
+        result = m.group(1).strip()
+        result = result.strip('"')
+        return result
+    else:
+        return default
+
+
+def slot_values_in_double_colon_del_list(line: str, slot: str, default: Optional = None) -> List[str]:
+    """For a given slot, e.g. 'cost', get its values from a line such as '::form :tense present ::form :tense past'
+    """
+    return regex.findall(fr'::{slot}\s+(\S.*?\S|\S)(?=\s+::\S|\s*$)', line)
+
+
+def forms_in_double_colon_list(line: str) -> List[dict]:
+    result = []
+    for form in slot_values_in_double_colon_del_list(line, 'FORM'):
+        form_dict = {}
+        for form_slot in ("TENSE", "NUMBER", "PERSON", "REF-NUMBER", "REF-PERSON", "REF-GENDER", "GRADE"):
+            if slot_value := slot_value_in_single_colon_del_list(form, form_slot):
+                form_dict[form_slot] = slot_value
+        result.append(form_dict)
+    return result
+
+
+def valid_offset(lst: list, offset: int) -> bool:
+    return isinstance(lst, list) and isinstance(offset, int) and (0 <= offset < len(lst))
+
+
+# cwd_path = Path(os.getcwd())
+# parent_dir = cwd_path.parent
+def find_file(filename: str | Path, dirs: List[str | Path]) -> Path | None:
+    if os.path.exists(filename):
+        return filename if isinstance(filename, Path) else Path(filename)
+    if not filename.startswith('/'):
+        for dir1 in dirs:
+            dir2 = dir1 if isinstance(filename, Path) else Path(dir1)
+            full_filename = dir2 / filename
+            if os.path.exists(full_filename):
+                return full_filename
+    return None
+
+
+def mkdirs_in_path(filename: str | Path):
+    if isinstance(filename, Path):
+        filename = str(filename)
+    if not filename.startswith('/'):
+        path_elements = filename.split('/')
+        for path_len in range(1, len(path_elements)):
+            partial_path = '/'.join(path_elements[0:path_len])
+            if (not os.path.isdir(partial_path)) and (not os.path.isfile(partial_path)):
+                sys.stderr.write(f"Making directory {partial_path}\n")  # maybe just temporary?
+                os.mkdir(partial_path, mode=0o775)
+
+
+def standard_data_dirs() -> List[str]:
+    result = []
+    # https://wiki.archlinux.org/title/XDG_Base_Directory
+    if xdg_data_home := os.getenv("XDG_DATA_HOME", None):
+        if os.path.isdir(xdg_data_home):
+            result.append(xdg_data_home)
+    if os.path.isdir("/usr/share"):
+        result.append("/usr/share")
+    if home := os.getenv("HOME", None):
+        local_share = os.path.join(home, ".local", "share")
+        if os.path.isdir(local_share):
+            result.append(local_share)
+    return result
+
+
+def absolute_path(path: str) -> str:
+    return path if path.startswith("/") else f"{Path(os.path.abspath(os.getcwd()))}/{path}"
+
+
+def pmi(a_count: float, b_count: float, ab_count: float, total_count: float, smoothing: float = 1.0) -> float:
+    if a_count == 0 or b_count == 0 or total_count == 0:
+        return 0
+    else:
+        p_a = a_count / total_count
+        p_b = b_count / total_count
+        expected_ab = p_a * p_b * total_count
+        if expected_ab == 0 and smoothing == 0:
+            return -99
+        else:
+            return math.log((ab_count + smoothing) / (expected_ab + smoothing))
+
+
+def pmi_list(item_counts: List[float], combined_count: float, total_count: float, smoothing: float = 1.0,
+             verbose: bool = False) -> float:
+    if (0 in item_counts) or total_count == 0:
+        return 0
+    else:
+        expected_count = total_count
+        for item_count in item_counts:
+            expected_count *= item_count / total_count
+        if expected_count == 0 and smoothing == 0:
+            return -99
+        else:
+            if verbose:
+                sys.stderr.write(f'  PMI {item_counts}; {combined_count}; {total_count}: {expected_count} -> {(combined_count + smoothing) / (expected_count + smoothing)} -> {math.log((combined_count + smoothing) / (expected_count + smoothing))}\n')
+            return math.log((combined_count + smoothing) / (expected_count + smoothing))
+
+
+
+def findall3(match_regex: str, text: str) -> Tuple[List[str], List[int], List[str]]:
+    """returns matches, inter-matches, start-positions, inter-matches (len(matches)+1)"""
+    full_regex = '(.*?)(' + match_regex + ')(.*)$'
+    matches, start_positions, inter_matches = [], [], []
+    rest, position = text, 0
+    while m := regex.match(full_regex, rest):
+        pre, core, rest = m.group(1, 2, 3)
+        position += len(pre)
+        inter_matches.append(pre)
+        matches.append(core)
+        start_positions.append(position)
+        position += len(core)
+    inter_matches.append(rest)
+    return matches, start_positions, inter_matches
+
+
+def read_corpus_json_info(info_filename: str = "info.json") -> dict | None:
+    """read in content such as '{"id": "tam-A2aO4fh5", "lc": "tam", "lang": "Tamil", "short": "Tamil IRV 202505",
+                                 "full": "Tamil Indian Revised Version (IRV) 2025-05-05"}'"""
+    if os.path.isfile(info_filename):
+        try:
+            f_info = open(info_filename)
+        except IOError:
+            sys.stderr.write(f"Cannot open file {info_filename}\n")
+            return None
+        try:
+            s = f_info.read()
+        except IOError:
+            sys.stderr.write(f"Cannot read file {info_filename}\n")
+            f_info.close()
+            return None
+        f_info.close()
+        try:
+            return json.loads(s)  # keys: id, lc, lang, short, full
+        except ValueError as error:
+            sys.stderr.write(f"JSON format error in file {info_filename}: {error}\n")
+            return None
+    else:
+        # sys.stderr.write(f"Could not find file {info_filename}\n")
+        return None
+
+
+class Corpus:
+    corpora = {}
+
+    def __init__(self, corpus_id: str | None = None):
+        self.snt_id2snt = dict()
+        self.corpus_id = corpus_id
+        if corpus_id:
+            Corpus.corpora[corpus_id] = self
+
+    def __repr__(self):
+        result = f"Corpus {self.corpus_id or ''}"
+        for snt_id in sorted(self.snt_id2snt.keys()):
+            result += f"\n   {snt_id} {self.snt_id2snt.get(snt_id)}"
+        return result
+
+    @staticmethod
+    def find_corpus(corpus_name: str) -> Corpus | None:
+        return Corpus.corpora.get(corpus_name)
+
+    def reset(self) -> None:
+        self.snt_id2snt = dict()
+
+    def load_corpus_with_vref(self, corpus_filename: str, vref_filename: str) -> Tuple[int, str]:
+        """Loads corpus, vref, returning number of entries and any error-message (empty = ok)"""
+        n_entries = 0
+        try:
+            f_in = open(corpus_filename)
+        except IOError:
+            return 0, f"Could not read corpus {corpus_filename}"
+        try:
+            f_vref = open(vref_filename)
+        except IOError:
+            f_in.close()
+            return 0, f"Could not read vref {vref_filename}"
+        for line, vref_line in zip(f_in, f_vref):
+            line = line.rstrip()
+            snt_id = vref_line.rstrip()
+            if regex.search(r'\S', line):
+                n_entries += 1
+                self.snt_id2snt[snt_id] = line
+        f_in.close()
+        f_vref.close()
+        return n_entries, ""
+
+    def load_corpus_from_in_dict(self, check_corpus_list: List[dict]) -> int:
+        n_entries = 0
+        for check_corpus_entry in check_corpus_list:
+            snt_id = check_corpus_entry.get('snt-id', '').strip()
+            snt = check_corpus_entry.get('text', '').strip()
+            if snt and snt_id:
+                self.snt_id2snt[snt_id] = snt
+        return n_entries
+
+    def get_snt_ids(self):
+        return self.snt_id2snt.keys()
+
+    def lookup_snt(self, snt_id: str) -> str:
+        return self.snt_id2snt.get(snt_id)
