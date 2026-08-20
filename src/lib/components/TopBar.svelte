@@ -5,9 +5,15 @@
   export let onOpenExport: () => void;
   export let onGotoVerse: (verse: string) => void;
   export let onChapterChange: (chapter: string) => void;
+  export let onBookChange: (path: string) => void;
   export let exportEnabled: boolean;
 
   let gotoValue = "";
+
+  function handleBookSelect(e: Event) {
+    const value = (e.target as HTMLSelectElement).value;
+    onBookChange(value);
+  }
 
   function jump() {
     const parts = gotoValue.trim().split(":");
@@ -30,9 +36,17 @@
   <div class="divider" />
 
   {#if $project}
-    <select class="select">
-      <option>{$project.bookName}</option>
-    </select>
+    {#if $project.importedProjects && $project.importedProjects.length > 1}
+      <select class="select" value={$project.path} on:change={handleBookSelect}>
+        {#each $project.importedProjects as book}
+          <option value={book.path}>{book.bookName}</option>
+        {/each}
+      </select>
+    {:else}
+      <select class="select">
+        <option>{$project.bookName}</option>
+      </select>
+    {/if}
     <select class="select" style="width:72px;" value={$currentChapter} on:change={handleChapterSelect}>
       {#each $project.chapters as ch}
         <option value={ch}>Ch {ch}</option>

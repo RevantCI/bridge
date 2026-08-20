@@ -23,6 +23,19 @@ export const loadedChapters = writable<Record<string, boolean>>({});
 
 export const selectedVerse = writable<string | null>(null);
 
+// Clears everything keyed by the previously open book's chapter/verse
+// numbers. Chapter "1" in one book is unrelated to chapter "1" in another,
+// so switching books must not let stale entries from the old book show
+// through under the new book's chapter/verse selectors.
+export function resetBookState(): void {
+  chapterVerseNums.set({});
+  verseTexts.set({});
+  findingsByVerse.set({});
+  loadedChapters.set({});
+  selectedVerse.set(null);
+  checkingProgress.set({ running: false, percent: 0, label: "" });
+}
+
 export const checkingProgress = writable<{ running: boolean; percent: number; label: string }>({
   running: false, percent: 0, label: "",
 });

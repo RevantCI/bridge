@@ -10,7 +10,7 @@
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
-    verseKey, settingsOpen, exportOpen, bookApprovedSummary,
+    verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState,
   } from "./lib/stores";
 
   let opened = false;
@@ -29,11 +29,31 @@
 
   async function handleOpened() {
     opened = true;
+    await enterCurrentProject();
+  }
+
+  // Shared by initial open and book switching: land on the first chapter
+  // and its first verse once `project` points at the book to display.
+  async function enterCurrentProject(): Promise<void> {
     const firstChapter = $project?.chapters[0] ?? "1";
     currentChapter.set(firstChapter);
     await loadChapter(firstChapter);
     const verses = $chapterVerseNums[firstChapter] ?? [];
-    if (verses.length > 0) selectedVerse.set(verses[0]);
+    selectedVerse.set(verses.length > 0 ? verses[0] : null);
+  }
+
+  // Switch to a sibling book from a multi-book import. The sidecar's
+  // project.open doesn't echo back importedProjects (only project.import
+  // does), so the sibling list is carried forward on the frontend instead
+  // of being re-fetched.
+  async function switchBook(path: string) {
+    if (!$project || path === $project.path) return;
+    const siblings = $project.importedProjects;
+    const info = await bridge.openProject(path);
+    if (siblings) info.importedProjects = siblings;
+    resetBookState();
+    project.set(info);
+    await enterCurrentProject();
   }
 
   /**
@@ -123,6 +143,7 @@
     onOpenExport={() => exportOpen.set(true)}
     onGotoVerse={gotoVerse}
     onChapterChange={switchChapter}
+    onBookChange={switchBook}
     exportEnabled={allApproved}
   />
 

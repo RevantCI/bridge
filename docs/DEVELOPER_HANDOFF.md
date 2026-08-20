@@ -268,12 +268,39 @@ Acceptance criteria:
 - Resource versions and hashes are visible in provenance.
 - Re-running indexing is deterministic and does not erase human decisions.
 
-### P0 — Multi-book collection navigation
+### P0 — Multi-book collection navigation (done 2026-08-20)
 
-All books are imported, but the current editor opens only the first one. Add a
-book/project selector using the returned `importedProjects` paths. Switching
-books should call `project.open`, reset book-scoped frontend stores safely, and
-start that book's background chapter checks.
+`TopBar.svelte`'s book `<select>` was previously a dead placeholder — one
+hardcoded option, no `on:change`. It now lists every sibling from
+`ProjectInfo.importedProjects` and calls `project.open` on selection.
+
+Implementation notes for whoever touches this next:
+
+- `project.open` does **not** echo back `importedProjects` (only
+  `project.import` does — see `bridge_service.py`'s `_project_info()` vs
+  `import_project()`). The sibling list is therefore carried forward on the
+  frontend across a switch (`App.svelte`'s `switchBook()`) rather than
+  re-fetched from the backend. If the app is closed and reopened, or a book is
+  opened individually via "Open an existing project," the sibling list is
+  gone and the selector falls back to showing just that one book — this is
+  accepted as in-session-only, matching the P0 scope (switching immediately
+  after import).
+- `stores.ts` gained `resetBookState()`, called before switching: chapter and
+  verse numbers restart at 1 in every book, so `chapterVerseNums`,
+  `verseTexts`, `findingsByVerse`, and `loadedChapters` must be cleared on
+  switch or the new book would show the old book's data under matching
+  chapter/verse keys — the same class of bug gotcha #7 was written to avoid,
+  just at the book level instead of the chapter level.
+- `App.svelte` factored the "land on first chapter, load it, select first
+  verse" sequence out of `handleOpened()` into `enterCurrentProject()`, shared
+  by both initial open and `switchBook()`.
+- Verified: `npm run check` (0 errors), `npm run build` (succeeds, same
+  pre-existing chunk-size warning as before). Not exercised in a running
+  Tauri window in this session — no sidecar binary was built/available to
+  launch `npm run tauri dev` end-to-end. Whoever picks this up next should
+  do a real click-through (import a multi-book folder, switch between books,
+  confirm chapter/verse state doesn't bleed across books) before treating
+  this as fully verified.
 
 ### P1 — Full USFM parser and lossless editing/export
 
