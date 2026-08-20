@@ -536,7 +536,6 @@ class BridgeEngine:
             self.settings.model = kwargs["model"]
         if "reviewerName" in kwargs:
             self.settings.reviewer_name = kwargs["reviewerName"]
-        self.settings.save()
         return self.get_settings()
 
     def _require_project(self) -> None:

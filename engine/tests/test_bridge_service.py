@@ -281,6 +281,27 @@ def test_settings_get_reflects_a_saved_api_key(tmp_path, monkeypatch):
     call(engine, "settings.set", {"apiKey": "sk-test-123"})
     result = call(engine, "settings.get")["result"]
     assert result["hasApiKey"] is True
+    persisted = (tmp_path / "settings.json").read_text(encoding="utf-8")
+    assert "sk-test-123" not in persisted
+    assert "_session_api_key" not in persisted
+
+
+def test_settings_load_removes_legacy_plaintext_session_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from tc_ai_bridge.secret_store import AppSettings
+
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps({"model": "gpt-5.6", "_session_api_key": "sk-legacy-plaintext"}),
+        encoding="utf-8",
+    )
+
+    settings = AppSettings(path=settings_path)
+
+    assert settings.get_api_key() == "sk-legacy-plaintext"
+    persisted = settings_path.read_text(encoding="utf-8")
+    assert "sk-legacy-plaintext" not in persisted
+    assert "_session_api_key" not in persisted
 
 
 def test_qaissue_categorization_matches_real_local_checks_codes():

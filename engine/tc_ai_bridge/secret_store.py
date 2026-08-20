@@ -63,9 +63,28 @@ class AppSettings:
             except Exception:
                 self.data = {}
 
+        # Older Bridge builds could accidentally persist session-only values by
+        # calling save() after set_api_key(). Keep the value available for this
+        # process, migrate it to DPAPI where possible, and immediately remove
+        # every private (underscore-prefixed) value from disk.
+        if any(str(key).startswith('_') for key in self.data):
+            legacy_key = str(self.data.get('_session_api_key', '')).strip()
+            if legacy_key and os.name == 'nt' and not self.data.get('api_key_dpapi'):
+                try:
+                    self.data['api_key_dpapi'] = dpapi_protect(legacy_key)
+                except Exception:
+                    # Sanitizing the file is mandatory even if the platform
+                    # credential store is temporarily unavailable.
+                    pass
+            self.save_sanitized()
+
     def save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.data, indent=2), encoding='utf-8')
+        """Persist non-secret settings without serializing session values.
+
+        Retained for compatibility with older callers; all settings writes now
+        use the same safe path.
+        """
+        self.save_sanitized()
 
     def set_api_key(self, key: str, persist: bool = True) -> None:
         self.data.pop('api_key_dpapi', None)
