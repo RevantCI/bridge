@@ -2,6 +2,118 @@
 
 Date: 2026-08-20
 
+## Project context (carried over from the Claude Code sessions that did Phases 1-3)
+
+This section summarizes what the earlier Claude Code work (`docs/CLAUDE_CODE_HANDOVER.md`,
+not committed to this repo — it lives in the original handover doc) established, so this
+file is self-contained for whoever picks it up next.
+
+**What Bridge is:** a local-first Bible translation QA workbench replacing a legacy Python
+Tkinter tool. One window, one Python sidecar process, Tauri/Svelte desktop shell.
+
+**Core principle** (see `docs/ARCHITECTURE.md`):
+- Greek Room says: "This is objectively suspicious."
+- AI says: "Here is what it may mean in this passage."
+- Human says: "This is what the translation should be."
+- Nothing auto-applies to project files without human approval.
+
+**Tech stack:** Tauri v2 (Rust) shell, Svelte 4 + TypeScript + Tailwind frontend, Python 3.13
+PyInstaller-bundled sidecar (`bridge-engine`), Greek Room (Wildebeest adapter, mock fallback
+if the real package isn't installed) plus 29 pre-existing `tc_ai_bridge` business-logic
+modules (alignment, Paratext, Logos, AI, now also import), JSON-over-stdio protocol, pytest.
+Windows is the primary target (`x86_64-pc-windows-msvc`); macOS/Linux are planned.
+
+**Repo layout skeleton:**
+
+```
+engine/
+  bridge_service.py          ← the sidecar dispatcher, read this first
+  main.py                    ← sidecar entrypoint (PyInstaller target)
+  greek_room_engine/         ← QA adapter layer (engine.py, models/finding.py,
+                                protocol.py, adapters/, transport/stdio_transport.py)
+  tc_ai_bridge/               ← 29 existing business-logic modules, not rewritten
+                                (now 30, with project_import.py added — see below)
+  tests/                      ← pytest suite
+
+src/
+  App.svelte, lib/stores.ts, lib/api/bridgeClient.ts, lib/types/finding.ts,
+  lib/components/{ImportScreen,TopBar,VerseList,ReviewPanel,SettingsModal,ExportModal}.svelte
+
+src-tauri/
+  src/{main.rs,sidecar.rs,commands.rs}
+  tauri.conf.json, capabilities/default.json, binaries/, icons/
+
+docs/
+  ARCHITECTURE.md, DEVELOPER_HANDOFF.md (this file), IMPORTS.md
+```
+
+### Phases 1-3 (done, before this import work)
+
+- **Phase 1 — Protocol & sidecar consolidation:** `BridgeEngine` composes
+  `GreekRoomEngine` + `tc_ai_bridge` behind one JSON protocol (`ping`, `engine.info`,
+  `project.open`, `project.scan`, `chapter.verses`, `chapter.verseData`, `verse.get`,
+  `verse.runChecks`, `verse.decide`, `verse.edit`, `settings.get`, `settings.set`,
+  `export.aligned`, `export.nonAligned`). 24/24 pytest passing against a real fixture
+  project with verified real file writes.
+- **Phase 2 — Svelte frontend wired to the real sidecar:** full single-window UI
+  (ImportScreen, TopBar, VerseList with inline colored findings, ReviewPanel with live
+  Greek Room re-check and Accept/Reject/Ignore/Edit). Windows UTF-8 stdout fix applied.
+- **Phase 3 — Decision persistence, chapter switching, whole-book, Settings & Export:**
+  stable finding ids so decisions survive re-runs, chapter switching, "Run whole book"
+  automation, `SettingsModal` (any OpenAI-compatible provider/endpoint/model/key),
+  `ExportModal` (aligned JSON + simplified USFM export).
+
+**This import-pipeline work (below) is new ground, not the originally planned Phase 4.**
+The original roadmap after Phase 3 was: Phase 4 = USFM structural checker
+(`greek_room_engine/adapters/usfm_adapter.py`, still does not exist) + versification;
+Phase 5 = names/transliteration (Uroman + SED); Phase 6 = alignment intelligence
+(UAlign corpus stats); Phase 7 = Paratext/Logos connectors wired to the protocol + AI
+explain + drag-and-drop import. None of Phases 4-7 have been started — this import work
+was picked up instead because a working import pipeline blocks everything downstream
+(you need real Scripture in the app before checks/alignment/names work matter). Whoever
+picks this up next should decide explicitly whether to continue import work (see
+"Recommended next work" below) or switch to Phase 4, rather than assuming the numbered
+roadmap order still applies.
+
+### Gotchas still in force (from Phases 1-3, verified still true in the current code)
+
+1. `TranslationCoreProject.summary` is a `@property`, not a method — calling `summary()` crashes.
+2. `TranslationCoreProject.__init__` creates its own `self.journal`. Never create a second one.
+3. Finding ids are stable (`_stable_finding_id()` in `bridge_service.py`, a sha1 of
+   `chapter:verse:engine:check_type:disambiguator`) so decisions persist across runs.
+   Don't revert to random `uuid4()` ids.
+4. `verse.runChecks` re-applies prior decisions from `qa_decisions_for_verse()` after
+   running checks — this must stay in the check flow, not a separate call.
+5. Windows stdout UTF-8 fix (`sys.stdout.reconfigure(encoding="utf-8")` in
+   `stdio_transport.py`) is critical — without it, non-Latin verse text crashes the
+   sidecar silently and the Rust side just sees a timeout. Never remove it.
+6. `plugins.shell.sidecar` must NOT be in `tauri.conf.json` — not a valid field, causes
+   a startup panic. Sidecar permission comes entirely from `capabilities/default.json`'s
+   `shell:allow-execute` entry.
+7. Store keys are composite `chapter:verse` (e.g. `"1:3"`) — use `verseKey()` from
+   `stores.ts`, not verse-only keys (silently collides data across chapters).
+8. `ai_client.py`'s `OpenAIResponsesClient` endpoint is configurable via `base_url`;
+   don't reintroduce a hardcoded `ENDPOINT` constant.
+9. The sidecar binary name must match the Rust target triple exactly
+   (`bridge-engine-x86_64-pc-windows-msvc.exe` on Windows — get the triple from `rustc -vV`).
+10. Don't use icon-font classes (`ti-settings` etc.) for icon-only controls with no
+    fallback label — PyInstaller/offline builds can't reach CDN icon fonts and they
+    render as empty boxes. Use Unicode characters or pair with a text label.
+
+### Known gaps still open (from Phases 1-3, verified still true in the current code)
+
+- **USFM edit round-trip is still a stub.** `edit_verse()` in `bridge_service.py`
+  (around line 338) journals the transaction but the actual USFM verse-text replacement
+  is a documented no-op comment, not implemented.
+- **`export.nonAligned` is a simplified reconstruction**, not a lossless round trip
+  (`\id`/`\c`/`\v` only — footnotes, section headers, poetry markup not preserved).
+- **OWL repeated-word adapter doesn't exist yet** (`adapters/owl_adapter.py`).
+- **Real Wildebeest package is still untested** — the adapter has a mock fallback
+  (`_WILDEBEEST_AVAILABLE = False` branch) and real integration (`pip install greekroom`)
+  hasn't been exercised.
+- **Drag-and-drop import is still not wired** — no `onDragDropEvent` listener from
+  `@tauri-apps/api` exists in `src/`; `ImportScreen` still requires the file picker.
+
 ## Objective
 
 Continue building Bridge's import workflow so users can bring in individual
@@ -9,9 +121,11 @@ USFM/SFM files, whole-Bible folders, Paratext folders, and translationCore
 projects, then use the normalized data for local QA, Greek Room,
 translationNotes, translationWords, and word alignment.
 
-The import foundation described below is implemented and verified but is not
-committed. Do not reset the working tree; it also contains earlier project
-changes.
+The import foundation described below is implemented and verified. It has since
+been committed as `9ed60cb feat(import): add translationCore-compatible Scripture
+imports` — the working tree is currently clean. The "Working-tree warning" section
+near the end of this document is kept for historical reference (it describes what
+that commit touched) but no longer describes an uncommitted state.
 
 ## What is implemented
 
@@ -256,9 +370,10 @@ Key upstream behavior confirmed:
 - Upstream translationCore rejects multiple-book projects; Bridge deliberately
   imports them as a collection of book-wise projects instead.
 
-## Working-tree warning
+## Working-tree warning (historical — now committed as `9ed60cb`)
 
-The current working tree is uncommitted. Files involved in this import work are:
+At the time this document was originally written the working tree was uncommitted;
+it has since been committed. Files involved in this import work were:
 
 - `engine/tc_ai_bridge/project_import.py` (new)
 - `engine/tests/test_project_import.py` (new)
@@ -274,7 +389,6 @@ The current working tree is uncommitted. Files involved in this import work are:
 - `docs/IMPORTS.md` (new)
 - `README.md`
 
-`src-tauri/Cargo.toml` and `vite.config.ts` were already modified in the broader
-working session and should not be reset casually. Review the complete diff and
-preserve unrelated or earlier changes before committing.
+`src-tauri/Cargo.toml` and `vite.config.ts` were also modified in the broader
+working session and are part of the same commit.
 
