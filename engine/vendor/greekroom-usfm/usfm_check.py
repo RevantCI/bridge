@@ -683,7 +683,7 @@ class CorpusModel:
         known_none_keywords = []
         general_util.mkdirs_in_path(filename)
         # sys.stderr.write(f"BOOK NORM: {sc.ref_stats.book_name_normalization}\n")
-        with (open(filename, 'w') as f):
+        with (open(filename, 'w', encoding='utf-8') as f):
             d = self.stats()
             f.write(f'# Corpus props\n')
             for key in sorted(self.paired_delimiter_count.keys(),
@@ -1135,7 +1135,11 @@ class FileLineStruct:
         self.lines_end_in_cr_lf: bool | None = None
         self.filename = filename
         if filename and not lines:
-            with open(filename, 'r', newline='') as f:
+            # BRIDGE PATCH: USFM is Unicode Scripture. Relying on the process
+            # locale makes a frozen Windows build use cp1252 and crash on
+            # Odia/Tamil/Hebrew even when the parent sets PYTHONUTF8. utf-8-sig
+            # accepts ordinary UTF-8 and strips an optional BOM.
+            with open(filename, 'r', encoding='utf-8-sig', newline='') as f:
                 # lines = f.read().rstrip('\n').split('\n')
                 lines = f.readlines()
                 for i, line in enumerate(lines, 1):
@@ -2947,7 +2951,7 @@ class UsfmCheck:
             self.tag_props.get(key).append(item)
 
     def read_usfm_explanations(self, filename):
-        with open(filename) as f:
+        with open(filename, encoding='utf-8-sig') as f:
             line_number = 0
             n_entries = 0
             current_explanation_id, current_explanation = None, ""
@@ -2976,7 +2980,7 @@ class UsfmCheck:
             sys.stderr.write(f"Loaded {n_entries} explanations from the {line_number} lines of {filename}\n")
 
     def read_tag_prop_data(self, filename):
-        with open(filename) as f:
+        with open(filename, encoding='utf-8-sig') as f:
             line_number = 0
             n_tag_entries = 0
             paragraph_format_tag_set = set()
@@ -3399,7 +3403,7 @@ class UsfmCheck:
             if self.repair_dir:
                 repair_filename = self.repair_dir / file_basename
                 general_util.mkdirs_in_path(repair_filename)
-                self.repair_fh = open(repair_filename, 'w')
+                self.repair_fh = open(repair_filename, 'w', encoding='utf-8')
             fls = FileLineStruct(filename, sc=self)
             merge_markers = ('=======', '<<<<<<<', '>>>>>>>', '|||||||')
             next_ls = fls.first_ls
@@ -3665,7 +3669,7 @@ class UsfmCheck:
         repair_log_filename_with_timestamp = self.repair_dir / f"repair-log-{timestamp}.html"
         repair_log_filename = self.repair_dir / f"repair-log.html"
         general_util.mkdirs_in_path(repair_log_filename_with_timestamp)
-        with open(repair_log_filename_with_timestamp, 'w') as f_log:
+        with open(repair_log_filename_with_timestamp, 'w', encoding='utf-8') as f_log:
             info_filename = None
             info_file_dir_candidates = []
             if dir1 := (Path(os.path.abspath(self.dir)) if self.dir else None):
@@ -3678,7 +3682,7 @@ class UsfmCheck:
                     info_filename = info_file_candidate
                     break
             try:
-                f_info = open(info_filename)
+                f_info = open(info_filename, encoding='utf-8-sig')
                 info_dict = json.loads(f_info.read())
                 f_full = info_dict.get('full') or info_dict.get('short') or info_dict.get('lc') or 'f'
                 f_lang_code = info_dict.get('lc')
@@ -3800,7 +3804,7 @@ def main() -> None:
     lang_code = args.lc
     info_filename = 'info.json'
     try:
-        f_info = open(info_filename)
+        f_info = open(info_filename, encoding='utf-8-sig')
         info_dict = json.loads(f_info.read())
         f_lang_code = info_dict.get('lc')
         f_full = info_dict.get('full') or info_dict.get('short') or f_lang_code or 'f'
@@ -3851,7 +3855,7 @@ def main() -> None:
     if args.html:
         full_html_output_filename = cwd / args.html
         general_util.mkdirs_in_path(args.html)
-        f_html_out = open(args.html, 'w')
+        f_html_out = open(args.html, 'w', encoding='utf-8')
         if f_full and lang_code:
             f_html_out.write(html_head(f'Selected USFM (Paratext format) Checks for  {f_full}', date,
                                        f'USFM {lang_code}'))
@@ -3906,7 +3910,7 @@ def main() -> None:
     usfm_check.final_check()
     if args.out:
         general_util.mkdirs_in_path(args.out)
-        f_txt = open(args.out, 'w')
+        f_txt = open(args.out, 'w', encoding='utf-8')
     else:
         f_txt = sys.stdout
     usfm_check.error_propagation()
@@ -3923,7 +3927,7 @@ def main() -> None:
         f_txt.close()
     if args.scorecard:
         general_util.mkdirs_in_path(args.scorecard)
-        with open(args.scorecard, 'w') as f_scorecard:
+        with open(args.scorecard, 'w', encoding='utf-8') as f_scorecard:
             d = {}
             for top_error_cat in ("Severe errors", "Errors", "Auto-repairable errors", "Warnings"):
                 d[top_error_cat] = usfm_check.error_counts[(top_error_cat,)]
@@ -3949,7 +3953,7 @@ def main() -> None:
     if args.extract and args.extract not in ('None', ):
         try:
             general_util.mkdirs_in_path(args.extract)
-            with open(args.extract, 'w') as f_extract:
+            with open(args.extract, 'w', encoding='utf-8') as f_extract:
                 for key in usfm_check.bible_text_extract_dict:
                     bte = usfm_check.bible_text_extract_dict.get(key)
                     f_extract.write(str(bte))

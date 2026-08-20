@@ -31,8 +31,8 @@ def _fixture_project(root: Path) -> Path:
         "tc_version": "8",
     })
     _write_json(project / "tit" / "1.json", {
-        "1": "First verse.",
-        "3": "Third verse.",
+        "1": "ପ୍ରଥମ ପଦ।",
+        "3": "ତୃତୀୟ ପଦ।",
     })
     _write_json(project / ".apps" / "translationCore" / "alignmentData" / "tit" / "1.json", {
         "1": {"alignments": [], "wordBank": []},
@@ -40,9 +40,9 @@ def _fixture_project(root: Path) -> Path:
     })
     (project / "tit.usfm").write_text(
         "\\id TIT\n\\h Titus\n\\toc1 The Letter to Titus\n\\c 1\n\\p\n"
-        "\\v 1 First verse.\n"
-        "\\v 1 Duplicate verse number.\n"
-        "\\v 3 Third verse, with verse two missing.\n",
+        "\\v 1 ପ୍ରଥମ ପଦ।\n"
+        "\\v 1 ନକଲ ପଦ ସଂଖ୍ୟା।\n"
+        "\\v 3 ତୃତୀୟ ପଦ; ଦ୍ୱିତୀୟ ପଦ ନାହିଁ।\n",
         encoding="utf-8",
     )
     return project

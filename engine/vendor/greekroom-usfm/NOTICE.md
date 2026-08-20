@@ -13,8 +13,19 @@ and the long-term costs/practices agreed before doing so.
 - Path: `greekroom/greekroom/usfm/`
 - Pinned commit: `18ddcf0e6c03fa2774b73b21186115d712e4cba9`
 - Fetched: 2026-08-20
-- Files copied verbatim, unmodified: `usfm_check.py`, `ualign_utilities.py`,
+- Files copied: `usfm_check.py`, `ualign_utilities.py`,
   `Bible_USFM_tag_data.jsonl`, `Bible_USFM_explanations.txt`, `README.md`.
+
+## Bridge compatibility patches
+
+`usfm_check.py` has two narrow, annotated local patches that must be
+reapplied or reassessed during an upstream sync:
+
+- Portable timestamp formatting because Windows does not support the
+  upstream `%-d`/`%-H` `strftime` directives.
+- Explicit `utf-8-sig` text inputs and UTF-8 report/log outputs because a
+  frozen Windows executable otherwise uses `cp1252` and crashes while reading
+  Odia/Tamil/Hebrew USFM or writing language-bearing diagnostics.
 
 ## License
 
