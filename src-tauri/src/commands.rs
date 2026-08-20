@@ -84,6 +84,34 @@ pub async fn chapter_verse_data(sidecar: State<'_, EngineSidecar>, chapter: Stri
 }
 
 #[tauri::command]
+pub async fn checks_start(
+    sidecar: State<'_, EngineSidecar>,
+    scope: String,
+    chapters: Vec<String>,
+    checks: Vec<String>,
+) -> Result<Value, String> {
+    sidecar.send_request(
+        "checks.start",
+        serde_json::json!({ "scope": scope, "chapters": chapters, "checks": checks }),
+    ).await
+}
+
+#[tauri::command]
+pub async fn checks_status(sidecar: State<'_, EngineSidecar>, job_id: String) -> Result<Value, String> {
+    sidecar.send_request("checks.status", serde_json::json!({ "jobId": job_id })).await
+}
+
+#[tauri::command]
+pub async fn checks_cancel(sidecar: State<'_, EngineSidecar>, job_id: String) -> Result<Value, String> {
+    sidecar.send_request("checks.cancel", serde_json::json!({ "jobId": job_id })).await
+}
+
+#[tauri::command]
+pub async fn checks_retry(sidecar: State<'_, EngineSidecar>, job_id: String) -> Result<Value, String> {
+    sidecar.send_request("checks.retry", serde_json::json!({ "jobId": job_id })).await
+}
+
+#[tauri::command]
 pub async fn verse_get(
     sidecar: State<'_, EngineSidecar>,
     chapter: String,

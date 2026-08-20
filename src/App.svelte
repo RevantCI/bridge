@@ -7,6 +7,7 @@
   import ReviewPanel from "./lib/components/ReviewPanel.svelte";
   import SettingsModal from "./lib/components/SettingsModal.svelte";
   import ExportModal from "./lib/components/ExportModal.svelte";
+  import type { CheckJobSnapshot, QaFinding } from "./lib/types/finding";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
@@ -15,8 +16,8 @@
 
   let opened = false;
   let engineStatus: "checking" | "ready" | "error" = "checking";
-  let bookRunning = false;
-  let bookProgressLabel = "";
+  let activeJobId = "";
+  let monitorGeneration = 0;
 
   onMount(async () => {
     try {
@@ -48,6 +49,7 @@
   // of being re-fetched.
   async function switchBook(path: string) {
     if (!$project || path === $project.path) return;
+    await stopActiveJob();
     const siblings = $project.importedProjects;
     const info = await bridge.openProject(path);
     if (siblings) info.importedProjects = siblings;
@@ -56,16 +58,12 @@
     await enterCurrentProject();
   }
 
-  /**
-   * The one place chapter data gets loaded: bulk verse-text fetch, then
-   * per-verse background checks with visible progress. Used on initial
-   * open, on chapter switch, and by "Run whole book" — so there's exactly
-   * one code path for "make sure this chapter's data is loaded," not
-   * three slightly different ones.
-   */
-  async function loadChapter(chapter: string): Promise<void> {
-    if ($loadedChapters[chapter]) return; // already loaded, skip
-
+  async function ensureChapterData(chapter: string): Promise<void> {
+    const knownVerses = $chapterVerseNums[chapter] ?? [];
+    if (
+      knownVerses.length > 0 &&
+      knownVerses.every((verse) => Object.prototype.hasOwnProperty.call($verseTexts, verseKey(chapter, verse)))
+    ) return;
     const { verses } = await bridge.chapterVerseData(chapter);
     const verseIds = Object.keys(verses);
     chapterVerseNums.update((m) => ({ ...m, [chapter]: verseIds }));
@@ -75,31 +73,146 @@
       texts[verseKey(chapter, v)] = data.text;
     }
     verseTexts.update((t) => ({ ...t, ...texts }));
+  }
 
-    checkingProgress.set({ running: true, percent: 0, label: `Checking chapter ${chapter}` });
-    let chapterFailed = false;
-    for (let i = 0; i < verseIds.length; i++) {
-      const v = verseIds[i];
-      const key = verseKey(chapter, v);
-      checkStatusByVerse.update((map) => ({ ...map, [key]: "pending" }));
-      try {
-        const findings = await bridge.runVerseChecks(chapter, v, ["local", "greekroom"]);
-        findingsByVerse.update((map) => ({ ...map, [key]: findings }));
-        checkStatusByVerse.update((map) => ({ ...map, [key]: "succeeded" }));
-      } catch (e) {
-        chapterFailed = true;
-        checkStatusByVerse.update((map) => ({ ...map, [key]: "failed" }));
-        console.error(`check failed for ${chapter}:${v}`, e);
-      }
-      checkingProgress.set({
-        running: i < verseIds.length - 1,
-        percent: Math.round(((i + 1) / verseIds.length) * 100),
-        label: `Checking chapter ${chapter}`,
+  function applyJobSnapshot(snapshot: CheckJobSnapshot): void {
+    chapterVerseNums.update((existing) => ({ ...existing, ...snapshot.chapterVerses }));
+
+    const findingUpdates: Record<string, QaFinding[]> = {};
+    const statusUpdates: Record<string, "succeeded" | "failed"> = {};
+    for (const [key, result] of Object.entries(snapshot.results)) {
+      findingUpdates[key] = result.findings;
+      statusUpdates[key] = result.status;
+    }
+    if (Object.keys(findingUpdates).length > 0) {
+      findingsByVerse.update((existing) => ({ ...existing, ...findingUpdates }));
+      checkStatusByVerse.update((existing) => ({ ...existing, ...statusUpdates }));
+    }
+
+    const terminal = ["succeeded", "failed", "cancelled"].includes(snapshot.state);
+    if (terminal) {
+      checkStatusByVerse.update((existing) => {
+        const next = { ...existing };
+        for (const [chapter, verses] of Object.entries(snapshot.chapterVerses)) {
+          for (const verse of verses) {
+            const key = verseKey(chapter, verse);
+            if (!snapshot.results[key]) next[key] = snapshot.state === "cancelled" ? "cancelled" : "failed";
+          }
+        }
+        return next;
+      });
+      loadedChapters.update((existing) => {
+        const next = { ...existing };
+        for (const [chapter, verses] of Object.entries(snapshot.chapterVerses)) {
+          next[chapter] = verses.length > 0 && verses.every(
+            (verse) => snapshot.results[verseKey(chapter, verse)]?.status === "succeeded",
+          );
+        }
+        return next;
       });
     }
-    // A failed checker is not a clean/approved chapter. Leave it reloadable
-    // so switching back or pressing Run whole book retries the failed work.
-    loadedChapters.update((l) => ({ ...l, [chapter]: !chapterFailed }));
+
+    const reference = snapshot.currentChapter
+      ? ` · ${snapshot.currentChapter}${snapshot.currentVerse ? `:${snapshot.currentVerse}` : ""}`
+      : "";
+    checkingProgress.set({
+      running: !terminal,
+      percent: snapshot.percent,
+      label: `${snapshot.currentStage}${reference}`,
+      jobId: snapshot.jobId,
+      state: snapshot.state,
+      error: snapshot.error ?? "",
+      scope: snapshot.scope,
+    });
+  }
+
+  async function monitorJob(initial: CheckJobSnapshot, generation: number): Promise<void> {
+    let snapshot = initial;
+    try {
+      while (!["succeeded", "failed", "cancelled"].includes(snapshot.state)) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        if (generation !== monitorGeneration) return;
+        snapshot = await bridge.checkStatus(snapshot.jobId);
+        if (generation !== monitorGeneration) return;
+        applyJobSnapshot(snapshot);
+      }
+    } catch (error) {
+      if (generation !== monitorGeneration) return;
+      checkingProgress.set({
+        running: false,
+        percent: snapshot.percent,
+        label: "Checking failed",
+        jobId: snapshot.jobId,
+        state: "failed",
+        error: error instanceof Error ? error.message : String(error),
+        scope: snapshot.scope,
+      });
+    } finally {
+      if (generation === monitorGeneration) activeJobId = "";
+    }
+  }
+
+  function markJobPending(snapshot: CheckJobSnapshot): void {
+    checkStatusByVerse.update((existing) => {
+      const next = { ...existing };
+      for (const [chapter, verses] of Object.entries(snapshot.chapterVerses)) {
+        for (const verse of verses) next[verseKey(chapter, verse)] = "pending";
+      }
+      return next;
+    });
+  }
+
+  async function beginChecks(scope: "chapter" | "book", chapters: string[]): Promise<void> {
+    if (activeJobId) return;
+    const snapshot = await bridge.startChecks(scope, chapters, ["local", "greekroom"]);
+    activeJobId = snapshot.jobId;
+    const generation = ++monitorGeneration;
+    markJobPending(snapshot);
+    applyJobSnapshot(snapshot);
+    void monitorJob(snapshot, generation);
+  }
+
+  async function loadChapter(chapter: string): Promise<void> {
+    await ensureChapterData(chapter);
+    if (!$loadedChapters[chapter] && !activeJobId) {
+      await beginChecks("chapter", [chapter]);
+    }
+  }
+
+  async function cancelChecks(): Promise<void> {
+    if (!activeJobId) return;
+    applyJobSnapshot(await bridge.cancelChecks(activeJobId));
+  }
+
+  async function stopActiveJob(): Promise<void> {
+    const jobId = activeJobId;
+    if (!jobId) return;
+    await bridge.cancelChecks(jobId);
+    let snapshot = await bridge.checkStatus(jobId);
+    while (!["succeeded", "failed", "cancelled"].includes(snapshot.state)) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      snapshot = await bridge.checkStatus(jobId);
+    }
+    monitorGeneration++;
+    activeJobId = "";
+    applyJobSnapshot(snapshot);
+  }
+
+  async function retryChecks(): Promise<void> {
+    const failedJobId = $checkingProgress.jobId;
+    if (!failedJobId || activeJobId) return;
+    const snapshot = await bridge.retryChecks(failedJobId);
+    activeJobId = snapshot.jobId;
+    const generation = ++monitorGeneration;
+    markJobPending(snapshot);
+    applyJobSnapshot(snapshot);
+    void monitorJob(snapshot, generation);
+  }
+
+  function dismissCheckNotice(): void {
+    checkingProgress.set({
+      running: false, percent: 0, label: "", jobId: "", state: "idle", error: "", scope: "chapter",
+    });
   }
 
   async function switchChapter(chapter: string) {
@@ -111,14 +224,7 @@
 
   async function runWholeBook() {
     const chapters = $project?.chapters ?? [];
-    bookRunning = true;
-    for (let i = 0; i < chapters.length; i++) {
-      const ch = chapters[i];
-      bookProgressLabel = `Whole book: chapter ${ch} (${i + 1} of ${chapters.length})`;
-      await loadChapter(ch);
-    }
-    bookRunning = false;
-    bookProgressLabel = "";
+    await beginChecks("book", chapters);
   }
 
   function selectVerse(v: string) {
@@ -155,13 +261,21 @@
     exportEnabled={allApproved}
   />
 
-  {#if $checkingProgress.running || bookRunning}
+  {#if $checkingProgress.running}
     <div class="progress-row">
       <div class="spin" />
-      <span>{bookRunning ? bookProgressLabel : `${$checkingProgress.label} — ${$checkingProgress.percent}%`}</span>
-      {#if !bookRunning}
-        <div class="track"><div class="fill" style="width:{$checkingProgress.percent}%" /></div>
-      {/if}
+      <span>{$checkingProgress.label} — {$checkingProgress.percent}%</span>
+      <div class="track"><div class="fill" style="width:{$checkingProgress.percent}%" /></div>
+      <button class="progress-action" on:click={cancelChecks} disabled={$checkingProgress.state === "cancelling"}>
+        {$checkingProgress.state === "cancelling" ? "Cancelling…" : "Cancel"}
+      </button>
+    </div>
+  {:else if $checkingProgress.state === "failed" || $checkingProgress.state === "cancelled"}
+    <div class="progress-row check-notice">
+      <span>{$checkingProgress.error || ($checkingProgress.state === "cancelled" ? "Checking was cancelled." : "Checking failed.")}</span>
+      <span class="grow" />
+      <button class="progress-action" on:click={retryChecks}>Retry</button>
+      <button class="progress-action" on:click={dismissCheckNotice}>Dismiss</button>
     </div>
   {/if}
 
@@ -169,8 +283,8 @@
     <div class="editor-col">
       <div class="editor-toolbar">
         <span>Chapter {$currentChapter} of {$project?.chapters.length ?? "?"}</span>
-        <button class="whole-book-btn" on:click={runWholeBook} disabled={bookRunning}>
-          {bookRunning ? "Running…" : "Run whole book"}
+        <button class="whole-book-btn" on:click={runWholeBook} disabled={Boolean(activeJobId)}>
+          {$checkingProgress.scope === "book" && $checkingProgress.running ? "Running…" : "Run whole book"}
         </button>
         <span class="grow" />
         <span>{bookSummary.approvedChapters}/{bookSummary.totalChapters} chapters approved</span>
@@ -206,6 +320,9 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .track { width: 160px; height: 6px; background: #EEF0F3; border-radius: 4px; overflow: hidden; }
   .fill { height: 100%; background: var(--accent); transition: width 0.3s; }
+  .progress-action { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+  .progress-action:disabled { opacity: 0.55; cursor: wait; }
+  .check-notice { color: var(--danger); }
   .body { flex: 1; display: flex; overflow: hidden; }
   .editor-col { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .editor-toolbar { height: 34px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: 11px; color: var(--text-2); flex-shrink: 0; }

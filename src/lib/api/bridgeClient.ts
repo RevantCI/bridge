@@ -1,4 +1,4 @@
-import type { ImportMetadata, ImportPreview, ProjectInfo, VerseData, QaFinding, SettingsData } from "../types/finding";
+import type { CheckJobSnapshot, ImportMetadata, ImportPreview, ProjectInfo, VerseData, QaFinding, SettingsData } from "../types/finding";
 
 /**
  * Thin wrapper around Tauri's invoke() calling the real commands defined
@@ -78,6 +78,22 @@ export const bridge = {
     const envelope = await invoke<EngineEnvelope<unknown>>("verse_run_checks", { chapter, verse, checks });
     if (!envelope.success) throw new Error(envelope.error?.message ?? "verse_run_checks failed");
     return envelope.findings ?? [];
+  },
+
+  startChecks(scope: "chapter" | "book", chapters: string[], checks: string[]): Promise<CheckJobSnapshot> {
+    return call("checks_start", { scope, chapters, checks });
+  },
+
+  checkStatus(jobId: string): Promise<CheckJobSnapshot> {
+    return call("checks_status", { jobId });
+  },
+
+  cancelChecks(jobId: string): Promise<CheckJobSnapshot> {
+    return call("checks_cancel", { jobId });
+  },
+
+  retryChecks(jobId: string): Promise<CheckJobSnapshot> {
+    return call("checks_retry", { jobId });
   },
 
   decideVerse(

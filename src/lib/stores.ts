@@ -16,7 +16,7 @@ export const chapterVerseNums = writable<Record<string, string[]>>({});
 // (verse "1" in chapter 1 and verse "1" in chapter 2 are different keys).
 export const verseTexts = writable<Record<string, string>>({});
 export const findingsByVerse = writable<Record<string, QaFinding[]>>({});
-export type CheckStatus = "pending" | "succeeded" | "failed";
+export type CheckStatus = "pending" | "succeeded" | "failed" | "cancelled";
 export const checkStatusByVerse = writable<Record<string, CheckStatus>>({});
 
 // Which chapters have had their verse text + checks loaded already, so
@@ -36,11 +36,21 @@ export function resetBookState(): void {
   checkStatusByVerse.set({});
   loadedChapters.set({});
   selectedVerse.set(null);
-  checkingProgress.set({ running: false, percent: 0, label: "" });
+  checkingProgress.set({ running: false, percent: 0, label: "", jobId: "", state: "idle", error: "", scope: "chapter" });
 }
 
-export const checkingProgress = writable<{ running: boolean; percent: number; label: string }>({
-  running: false, percent: 0, label: "",
+export interface CheckingProgress {
+  running: boolean;
+  percent: number;
+  label: string;
+  jobId: string;
+  state: "idle" | "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
+  error: string;
+  scope: "chapter" | "book";
+}
+
+export const checkingProgress = writable<CheckingProgress>({
+  running: false, percent: 0, label: "", jobId: "", state: "idle", error: "", scope: "chapter",
 });
 
 export const settingsOpen = writable(false);

@@ -125,7 +125,7 @@ Key implementation notes discovered while wiring this up (worth knowing before e
 - Decision persistence already exists and is correct: `record_qa_decision()` / `qa_decisions_for_verse()` write atomic, audited JSON under `companion_dir()/qaDecisions/...`. `BridgeEngine.decide_verse()` calls these directly rather than reinventing an in-memory store.
 - All of this was verified against a **real fixture project** built directly from reading `TranslationCoreProject`'s actual parsing code (see `tests/test_bridge_service.py`), not assumed — including a real transaction-journal backup being created on `verse.edit` and a real QA-decision JSON file landing on disk on `verse.decide`.
 
-Protocol methods implemented so far: `ping`, `engine.info`, `project.open`, `project.scan`, `chapter.verses`, `verse.get`, `verse.runChecks`, `verse.decide`, `verse.edit`, `settings.get`, `settings.set`.
+Protocol methods implemented so far: `ping`, `engine.info`, `project.open`, `project.scan`, `chapter.verses`, `chapter.verseData`, `checks.start`, `checks.status`, `checks.cancel`, `checks.retry`, `verse.get`, `verse.runChecks`, `verse.decide`, `verse.edit`, `settings.get`, `settings.set`, `export.aligned`, `export.nonAligned`.
 
 Not yet wired (real logic exists in `tc_ai_bridge` but no protocol method calls it yet): Paratext/Logos connectors, AI client (`ai_client.py`), Git service, reporting, terminology/Psalms QA. These are Phase-appropriate follow-ups per the table above, not gaps in the design.
 

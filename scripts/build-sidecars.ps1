@@ -1,5 +1,5 @@
 param(
-    [string]$PythonCommand = "python",
+    [string]$PythonCommand = "",
     [string]$TargetTriple = ""
 )
 
@@ -7,6 +7,20 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $engineDir = Join-Path $repoRoot "engine"
 $binaryDir = Join-Path $repoRoot "src-tauri\binaries"
+
+if (-not $PythonCommand) {
+    $venvPython = if ($IsWindows -or $env:OS -eq "Windows_NT") {
+        Join-Path $engineDir ".venv\Scripts\python.exe"
+    } else {
+        Join-Path $engineDir ".venv/bin/python"
+    }
+    $PythonCommand = if (Test-Path -LiteralPath $venvPython) { $venvPython } else { "python" }
+}
+
+& $PythonCommand -c "import PyInstaller, regex"
+if ($LASTEXITCODE -ne 0) {
+    throw "The selected Python environment is missing PyInstaller or regex. Run 'pip install -e .[dev]' in engine/ or pass -PythonCommand explicitly."
+}
 
 if (-not $TargetTriple) {
     $hostLine = & rustc -vV | Select-String '^host:' | Select-Object -First 1

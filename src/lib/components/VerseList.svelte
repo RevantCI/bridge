@@ -18,14 +18,14 @@
       class="verse"
       class:active={$selectedVerse === v}
       class:approved={checkStatus === "succeeded" && openCount === 0}
-      class:check-failed={checkStatus === "failed"}
+      class:check-failed={checkStatus === "failed" || checkStatus === "cancelled"}
       role="button"
       tabindex="0"
       on:click={() => onSelect(v)}
       on:keydown={(e) => (e.key === "Enter" || e.key === " ") && onSelect(v)}
     >
       <div class="vnum">
-        {v}{#if checkStatus === "succeeded" && openCount === 0}&nbsp;✓{:else if checkStatus === "failed"}&nbsp;⚠{/if}
+        {v}{#if checkStatus === "succeeded" && openCount === 0}&nbsp;✓{:else if checkStatus === "failed" || checkStatus === "cancelled"}&nbsp;⚠{/if}
       </div>
       <div class="vtext">
         {#each segments as seg}

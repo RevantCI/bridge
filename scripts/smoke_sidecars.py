@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 
@@ -64,40 +67,81 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="bridge-frozen-smoke-") as temp:
         project = _fixture_project(Path(temp))
-        requests = [
-            {"id": "open", "method": "project.open", "params": {"path": str(project)}},
-            {"id": "structure", "method": "verse.runChecks", "params": {
-                "chapter": "1", "verse": "1", "checks": ["usfm"],
-            }},
-        ]
-        payload = "".join(json.dumps(request) + "\n" for request in requests)
-        completed = subprocess.run(
-            [str(engine)], input=payload, capture_output=True, text=True,
-            encoding="utf-8", timeout=180, check=False,
+        process = subprocess.Popen(
+            [str(engine)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding="utf-8",
         )
-        if completed.returncode != 0:
-            raise SystemExit(f"bridge-engine failed: {completed.stderr}")
+        frames: queue.Queue[dict] = queue.Queue()
 
-        responses = {}
-        for line in completed.stdout.splitlines():
+        def read_stdout() -> None:
+            assert process.stdout is not None
+            for line in process.stdout:
+                try:
+                    frames.put(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+        threading.Thread(target=read_stdout, daemon=True).start()
+
+        def request(request_id: str, method: str, params: dict, timeout: float = 30) -> dict:
+            assert process.stdin is not None
+            process.stdin.write(json.dumps({"id": request_id, "method": method, "params": params}) + "\n")
+            process.stdin.flush()
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                try:
+                    response = frames.get(timeout=max(0.01, deadline - time.monotonic()))
+                except queue.Empty:
+                    break
+                if response.get("id") == request_id:
+                    return response
+            raise SystemExit(f"Request {request_id} timed out")
+
+        try:
+            opened = request("open", "project.open", {"path": str(project)})
+            if not opened.get("success"):
+                raise SystemExit(f"Request open failed: {opened}")
+
+            started = request("start", "checks.start", {
+                "scope": "chapter", "chapters": ["1"], "checks": ["usfm"],
+            })
+            if not started.get("success"):
+                raise SystemExit(f"Request start failed: {started}")
+            job_id = started["result"]["jobId"]
+
+            snapshot = started["result"]
+            deadline = time.monotonic() + 180
+            attempt = 0
+            while snapshot["state"] not in {"succeeded", "failed", "cancelled"}:
+                if time.monotonic() >= deadline:
+                    raise SystemExit(f"Frozen background job timed out: {snapshot}")
+                time.sleep(0.1)
+                attempt += 1
+                status = request(f"status-{attempt}", "checks.status", {"jobId": job_id})
+                if not status.get("success"):
+                    raise SystemExit(f"Request status failed: {status}")
+                snapshot = status["result"]
+
+            if snapshot["state"] != "succeeded":
+                raise SystemExit(f"Frozen background job failed: {snapshot}")
+            check_types = {
+                finding["check_type"]
+                for result in snapshot["results"].values()
+                for finding in result.get("findings", [])
+            }
+            if "usfm.duplicate_verse_number" not in check_types:
+                raise SystemExit(f"Frozen checker missed duplicate verse: {sorted(check_types)}")
+            if not any("missing_verses" in value for value in check_types):
+                raise SystemExit(f"Frozen checker missed absent verse: {sorted(check_types)}")
+        finally:
+            process.terminate()
             try:
-                value = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            responses[value.get("id")] = value
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=5)
 
-        for request_id in ("open", "structure"):
-            response = responses.get(request_id)
-            if not response or not response.get("success"):
-                raise SystemExit(f"Request {request_id} failed: {response or completed.stderr}")
-
-        check_types = {f["check_type"] for f in responses["structure"].get("findings", [])}
-        if "usfm.duplicate_verse_number" not in check_types:
-            raise SystemExit(f"Frozen checker missed duplicate verse: {sorted(check_types)}")
-        if not any("missing_verses" in value for value in check_types):
-            raise SystemExit(f"Frozen checker missed absent verse: {sorted(check_types)}")
-
-    print("Frozen sidecar smoke test passed: real duplicate and missing-verse findings detected.")
+    print("Frozen sidecar smoke test passed: background job returned real duplicate and missing-verse findings.")
     return 0
 
 

@@ -116,6 +116,38 @@ export interface VerseData {
   alignment: VerseAlignment;
 }
 
+export type CheckJobState =
+  | "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
+
+export interface CheckJobVerseResult {
+  chapter: string;
+  verse: string;
+  status: "succeeded" | "failed";
+  findings: QaFinding[];
+  error: string | null;
+}
+
+export interface CheckJobSnapshot {
+  jobId: string;
+  scope: "chapter" | "book";
+  projectPath: string;
+  state: CheckJobState;
+  checks: string[];
+  chapters: string[];
+  chapterVerses: Record<string, string[]>;
+  totalVerses: number;
+  completedVerses: number;
+  failedVerses: number;
+  percent: number;
+  currentChapter: string | null;
+  currentVerse: string | null;
+  currentStage: string;
+  results: Record<string, CheckJobVerseResult>;
+  error: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
 export interface SettingsData {
   provider: string;
   apiBaseUrl: string;

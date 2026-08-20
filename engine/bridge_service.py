@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -32,6 +33,13 @@ from tc_ai_bridge.local_checks import run_local_qa
 from tc_ai_bridge.models import QAIssue
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.resource_materializer import materialize_book_checks
+from check_jobs import (
+    CheckJobConflict,
+    CheckJobError,
+    CheckJobManager,
+    CheckJobNotFound,
+    CheckJobSpec,
+)
 
 BRIDGE_VERSION = "0.8.0-dev"
 
@@ -129,6 +137,11 @@ class Methods:
     CHAPTER_VERSES = "chapter.verses"
     CHAPTER_VERSE_DATA = "chapter.verseData"
 
+    CHECKS_START = "checks.start"
+    CHECKS_STATUS = "checks.status"
+    CHECKS_CANCEL = "checks.cancel"
+    CHECKS_RETRY = "checks.retry"
+
     VERSE_GET = "verse.get"
     VERSE_RUN_CHECKS = "verse.runChecks"
     VERSE_DECIDE = "verse.decide"
@@ -152,6 +165,8 @@ class BridgeEngine:
         # Not invalidated by verse.edit — see _usfm_findings_for_book.
         self._usfm_findings_by_book: dict[str, list[QaFinding]] = {}
         self._usfm_errors_by_book: dict[str, str] = {}
+        self._checker_lock = threading.RLock()
+        self._check_jobs = CheckJobManager()
         # AppSettings() with no path defaults to a real, persistent location
         # (%LOCALAPPDATA%/.translationcore-ai-bridge/settings.json on
         # Windows), and get_api_key() also checks OPENAI_API_KEY. That's
@@ -289,7 +304,9 @@ class BridgeEngine:
             }
         return {"chapter": chapter, "verses": out}
 
-    def _usfm_findings_for_book(self) -> list[QaFinding]:
+    def _usfm_findings_for_book(
+        self, project: Optional[TranslationCoreProject] = None,
+    ) -> list[QaFinding]:
         """Lazily compute + cache whole-book USFM structural findings.
 
         Not invalidated by verse.edit: re-running the real checker (a
@@ -299,7 +316,10 @@ class BridgeEngine:
         unclosed markers). Accepted as a known limitation, not an oversight —
         re-opening the project re-runs it fresh.
         """
-        book_key = str(self.project.path)
+        project = project or self.project
+        if project is None:
+            raise ProjectError("No project open — call project.open first")
+        book_key = str(project.path)
         cached = self._usfm_findings_by_book.get(book_key)
         if cached is not None:
             return cached
@@ -307,7 +327,7 @@ class BridgeEngine:
         if cached_error is not None:
             raise UsfmCheckerError(cached_error)
 
-        usfm_path = self.project.usfm_path()
+        usfm_path = project.usfm_path()
         findings: list[QaFinding] = []
         if usfm_path is not None:
             try:
@@ -317,8 +337,8 @@ class BridgeEngine:
             if usfm_text:
                 try:
                     findings = self.greek_room.check_book_usfm(
-                        project_id=str(self.project.summary.path),
-                        book_id=self.project.book_id,
+                        project_id=str(project.summary.path),
+                        book_id=project.book_id,
                         usfm_text=usfm_text,
                     )
                 except UsfmCheckerError as exc:
@@ -350,15 +370,25 @@ class BridgeEngine:
         reopening a project or re-running checks doesn't reset a verse
         you already reviewed back to "open"."""
         self._require_project()
-        findings: list[QaFinding] = []
-        project_id = str(self.project.summary.path)
-        book = self.project.summary.book_id
+        with self._checker_lock:
+            return self._run_verse_checks_for_project(self.project, chapter, verse, checks)
 
-        target_text = self.project.target_verse_text(chapter, verse)
+    def _run_verse_checks_for_project(
+        self,
+        project: TranslationCoreProject,
+        chapter: str,
+        verse: str,
+        checks: list[str],
+    ) -> list[QaFinding]:
+        findings: list[QaFinding] = []
+        project_id = str(project.summary.path)
+        book = project.summary.book_id
+
+        target_text = project.target_verse_text(chapter, verse)
 
         if "local" in checks or "tN" in checks or "tW" in checks or "alignment" in checks:
-            alignment = self.project.load_verse_alignment(chapter, verse)
-            issues = run_local_qa(self.project, chapter, verse, alignment)
+            alignment = project.load_verse_alignment(chapter, verse)
+            issues = run_local_qa(project, chapter, verse, alignment)
             for issue in issues:
                 findings.append(_qaissue_to_finding(
                     issue, project_id=project_id, book=book,
@@ -370,10 +400,10 @@ class BridgeEngine:
             # no existing verse slot (e.g. "chapter is missing verse 4")
             # surfaces on the chapter's first verse rather than nowhere,
             # since the UI can only request verses that actually exist.
-            book_verses = self.project.verses(chapter) if chapter in self.project.chapters() else []
+            book_verses = project.verses(chapter) if chapter in project.chapters() else []
             existing_verses = {str(value) for value in book_verses}
             first_verse = book_verses[0] if book_verses else None
-            for f in self._usfm_findings_for_book():
+            for f in self._usfm_findings_for_book(project):
                 if str(f.chapter) != str(chapter):
                     continue
                 if str(f.verse) == str(verse):
@@ -386,7 +416,7 @@ class BridgeEngine:
                     findings.append(f)
 
         if "greekroom" in checks or "wildebeest" in checks:
-            target_language = self.project.manifest.get("target_language", {})
+            target_language = project.manifest.get("target_language", {})
             language_id = str(target_language.get("id") or "") if isinstance(target_language, dict) else ""
             gr_findings = self.greek_room.check_verse(
                 project_id=project_id,
@@ -409,7 +439,7 @@ class BridgeEngine:
 
         # Re-apply any prior human decision so re-running checks (or
         # reopening the project) doesn't silently forget review state.
-        prior_decisions = self.project.qa_decisions_for_verse(chapter, verse)
+        prior_decisions = project.qa_decisions_for_verse(chapter, verse)
         for finding in findings:
             record = prior_decisions.get(finding.id)
             if record:
@@ -420,6 +450,80 @@ class BridgeEngine:
                 finding.human_comment = record.get("note") or None
 
         return findings
+
+    # -- background checking jobs -----------------------------------------
+
+    def start_check_job(
+        self,
+        *,
+        scope: str = "chapter",
+        chapters: Optional[list[str]] = None,
+        checks: Optional[list[str]] = None,
+    ) -> dict[str, Any]:
+        self._require_project()
+        project = self.project
+        available = project.chapters()
+        requested = [str(ch) for ch in (chapters or ([] if scope == "book" else available[:1]))]
+        if scope == "book" and not requested:
+            requested = list(available)
+        if scope not in {"chapter", "book"}:
+            raise CheckJobError("Check scope must be 'chapter' or 'book'.")
+        if not requested:
+            raise CheckJobError("At least one chapter is required.")
+        unknown = [ch for ch in requested if ch not in available]
+        if unknown:
+            raise CheckJobError(f"Unknown chapter(s): {', '.join(unknown)}")
+
+        selected_checks = tuple(dict.fromkeys(checks or ["local", "greekroom"]))
+        supported = {"local", "tN", "tW", "alignment", "usfm", "greekroom", "wildebeest"}
+        invalid = [name for name in selected_checks if name not in supported]
+        if invalid:
+            raise CheckJobError(f"Unknown check type(s): {', '.join(invalid)}")
+
+        spec = CheckJobSpec(
+            scope=scope,
+            project_path=str(project.path),
+            chapters=tuple(requested),
+            chapter_verses={ch: list(project.verses(ch)) for ch in requested},
+            checks=selected_checks,
+        )
+        return self._start_check_job_from_spec(spec, project)
+
+    def _start_check_job_from_spec(
+        self, spec: CheckJobSpec, project: TranslationCoreProject,
+    ) -> dict[str, Any]:
+        def run_stage(chapter: str, verse: str, stage_checks: list[str]) -> list[dict[str, Any]]:
+            with self._checker_lock:
+                return [
+                    finding.to_dict()
+                    for finding in self._run_verse_checks_for_project(
+                        project, chapter, verse, stage_checks,
+                    )
+                ]
+
+        preflight = None
+        if any(name in spec.checks for name in ("local", "usfm")):
+            def run_preflight() -> None:
+                with self._checker_lock:
+                    self._usfm_findings_for_book(project)
+            preflight = run_preflight
+
+        return self._check_jobs.start(
+            spec, run_stage=run_stage, preflight=preflight,
+        )
+
+    def check_job_status(self, job_id: str = "") -> dict[str, Any]:
+        return self._check_jobs.status(job_id)
+
+    def cancel_check_job(self, job_id: str = "") -> dict[str, Any]:
+        return self._check_jobs.cancel(job_id)
+
+    def retry_check_job(self, job_id: str) -> dict[str, Any]:
+        self._require_project()
+        spec = self._check_jobs.spec_for_retry(job_id)
+        if str(self.project.path) != spec.project_path:
+            raise CheckJobConflict("The project changed; start a new check job instead.")
+        return self._start_check_job_from_spec(spec, self.project)
 
     def decide_verse(self, chapter: str, verse: str, finding_id: str,
                       status: str, comment: str = "") -> dict[str, Any]:
@@ -566,6 +670,24 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result={"verses": self.chapter_verses(p["chapter"])})
             if m == Methods.CHAPTER_VERSE_DATA:
                 return EngineResponse.ok(request.id, result=self.get_chapter_verse_data(p["chapter"]))
+            if m == Methods.CHECKS_START:
+                return EngineResponse.ok(request.id, result=self.start_check_job(
+                    scope=p.get("scope", "chapter"),
+                    chapters=p.get("chapters"),
+                    checks=p.get("checks"),
+                ))
+            if m == Methods.CHECKS_STATUS:
+                return EngineResponse.ok(
+                    request.id, result=self.check_job_status(p.get("jobId", "")),
+                )
+            if m == Methods.CHECKS_CANCEL:
+                return EngineResponse.ok(
+                    request.id, result=self.cancel_check_job(p.get("jobId", "")),
+                )
+            if m == Methods.CHECKS_RETRY:
+                return EngineResponse.ok(
+                    request.id, result=self.retry_check_job(p["jobId"]),
+                )
             if m == Methods.VERSE_GET:
                 return EngineResponse.ok(request.id, result=self.get_verse(p["chapter"], p["verse"]))
             if m == Methods.VERSE_RUN_CHECKS:
@@ -591,5 +713,11 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "project_error", str(exc))
         except UsfmCheckerError as exc:
             return EngineResponse.fail(request.id, "checker_error", str(exc))
+        except CheckJobNotFound as exc:
+            return EngineResponse.fail(request.id, "job_not_found", str(exc))
+        except CheckJobConflict as exc:
+            return EngineResponse.fail(request.id, "job_conflict", str(exc))
+        except CheckJobError as exc:
+            return EngineResponse.fail(request.id, "job_error", str(exc))
         except Exception as exc:  # noqa: BLE001 - protocol boundary must never crash the sidecar
             return EngineResponse.fail(request.id, "internal_error", str(exc))

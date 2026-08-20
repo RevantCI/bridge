@@ -61,7 +61,10 @@ docs/
 - **Phase 3 — Decision persistence, chapter switching, whole-book, Settings & Export:**
   stable finding ids so decisions survive re-runs, chapter switching, "Run whole book"
   automation, `SettingsModal` (any OpenAI-compatible provider/endpoint/model/key),
-  `ExportModal` (aligned JSON + simplified USFM export).
+  `ExportModal` (aligned JSON + simplified USFM export). Automation now uses
+  sidecar-owned `checks.start/status/cancel/retry` jobs with real per-stage
+  progress; cancellation is cooperative at check boundaries and failed or
+  cancelled jobs remain retryable.
 
 **This import-pipeline work (below) was new ground, not the originally planned Phase 4.**
 The original roadmap after Phase 3 was: Phase 4 = USFM structural checker
@@ -291,14 +294,14 @@ book-level success/failure caching tests in `test_bridge_service.py`.
 `scripts/smoke_sidecars.py` runs the actual frozen `bridge-engine.exe` and
 helper against balanced USFM containing duplicate and missing verses, then
 asserts real `engine="usfm"` findings. Verified on Windows 2026-08-20.
-Base suite: 52 passed, 1 optional-Wildebeest module skipped.
+Base suite: 56 passed, 1 optional-Wildebeest module skipped.
 
 **Packaging**: run `scripts/build-sidecars.ps1`; it builds both committed
 specs and copies both target-suffixed artifacts into `src-tauri/binaries/`.
-Tauri declares both in `bundle.externalBin`. The first check for a book may
-take longer than an ordinary request, so `verse.runChecks` has a 150-second
-transport timeout around the checker's own 120-second hard limit. Moving
-book checking into a cancellable background job remains future work.
+Tauri declares both in `bundle.externalBin`. Chapter/book automation starts a
+sidecar-owned background job and polls lightweight status snapshots, so the
+stdio dispatcher stays responsive while the helper runs. `verse.runChecks`
+retains a 150-second timeout for the separate live per-verse recheck path.
 
 Continue building Bridge's import workflow so users can bring in individual
 USFM/SFM files, whole-Bible folders, Paratext folders, and translationCore

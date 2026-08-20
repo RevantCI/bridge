@@ -48,7 +48,7 @@ pip install -e ".[dev]"
 pytest tests/ greek_room_engine/tests/ -v
 ```
 
-Should show **52 passed, 1 skipped** without the optional real Wildebeest
+Should show **56 passed, 1 skipped** without the optional real Wildebeest
 extra. Try `python demo.py` for a live walkthrough
 against a throwaway fixture project — no real translationCore project
 needed.
@@ -108,9 +108,13 @@ filename examples.
 `npm run tauri dev` starts the frontend development server, compiles the Rust
 shell, launches the sidecar, and opens the Bridge desktop window.
 
-## Current development status: Phase 3 (decision persistence, whole-book, Settings & Export)
+## Current development status: Phase 3 complete (background chapter/book checking)
 
-**New in this phase, all verified (24/24 pytest, clean Svelte build + type-check):**
+**Implemented and verified (56 pytest passed, 1 optional test skipped; clean Svelte and Rust checks):**
+
+- ✅ **Real background check jobs** — `checks.start/status/cancel/retry` keep the sidecar responsive while chapter or whole-book tN, tW, Alignment, USFM, and Greek Room QA execute. The UI displays real stage/verse progress instead of advancing a frontend-owned loop.
+- ✅ **Cancellation and retry** — cancellation is cooperative at safe check boundaries; failed and cancelled jobs remain retryable without treating unfinished verses as clean.
+- ✅ **Secret-safe settings** — API keys remain session-only in memory and DPAPI-protected on Windows; ordinary settings saves cannot serialize private values. Startup also sanitizes plaintext `_session_api_key` values left by older builds.
 - ✅ **Stable finding IDs** — findings previously got a random id every time checks ran, so a saved decision could never be matched back later. Fixed via deterministic ids; proven with a real accept → re-check → still-accepted test.
 - ✅ **Decision persistence** — reopening a project or re-running checks now correctly restores prior Accept/Reject/Ignore state instead of resetting to "open".
 - ✅ **Chapter switching** — the top bar's chapter dropdown actually works now (it didn't before).

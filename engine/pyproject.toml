@@ -38,4 +38,4 @@ build-backend = "setuptools.build_meta"
 include = ["greek_room_engine*", "tc_ai_bridge*"]
 
 [tool.setuptools]
-py-modules = ["bridge_service"]
+py-modules = ["bridge_service", "check_jobs"]

@@ -9,6 +9,8 @@ proving the real modules work behind the new protocol.
 """
 import json
 import shutil
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -56,6 +58,16 @@ def call(engine, method, params=None):
     return engine.handle_request(EngineRequest(id="t", method=method, params=params or {})).to_dict()
 
 
+def wait_for_job(engine, job_id, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        snapshot = call(engine, "checks.status", {"jobId": job_id})["result"]
+        if snapshot["state"] in {"succeeded", "failed", "cancelled"}:
+            return snapshot
+        time.sleep(0.01)
+    raise AssertionError(f"check job {job_id} did not finish")
+
+
 def test_ping_and_info_work_without_a_project():
     engine = BridgeEngine()
     assert call(engine, "ping")["result"] == {"pong": True}
@@ -100,6 +112,78 @@ def test_clean_verse_has_no_findings(fixture_project):
     call(engine, "project.open", {"path": str(fixture_project)})
     result = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local", "greekroom"]})
     assert result["findings"] == []
+
+
+def test_chapter_check_job_reports_real_progress_and_results(fixture_project, monkeypatch):
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    monkeypatch.setattr(engine, "_usfm_findings_for_book", lambda project=None: [])
+
+    started = call(engine, "checks.start", {
+        "scope": "chapter", "chapters": ["1"], "checks": ["local", "greekroom"],
+    })["result"]
+    finished = wait_for_job(engine, started["jobId"])
+
+    assert finished["state"] == "succeeded"
+    assert finished["percent"] == 100
+    assert finished["chapterVerses"] == {"1": ["1"]}
+    assert finished["results"]["1:1"]["status"] == "succeeded"
+    assert isinstance(finished["results"]["1:1"]["findings"], list)
+
+
+def test_check_job_can_cancel_and_retry(fixture_project, monkeypatch):
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_check(project, chapter, verse, checks):
+        entered.set()
+        release.wait(timeout=2)
+        return []
+
+    monkeypatch.setattr(engine, "_run_verse_checks_for_project", slow_check)
+    started = call(engine, "checks.start", {
+        "scope": "chapter", "chapters": ["1"], "checks": ["greekroom"],
+    })["result"]
+    assert entered.wait(timeout=1)
+
+    cancelling = call(engine, "checks.cancel", {"jobId": started["jobId"]})["result"]
+    assert cancelling["state"] == "cancelling"
+    release.set()
+    cancelled = wait_for_job(engine, started["jobId"])
+    assert cancelled["state"] == "cancelled"
+
+    retried = call(engine, "checks.retry", {"jobId": started["jobId"]})["result"]
+    finished = wait_for_job(engine, retried["jobId"])
+    assert finished["state"] == "succeeded"
+    assert finished["jobId"] != started["jobId"]
+
+
+def test_check_job_rejects_a_second_active_job(fixture_project, monkeypatch):
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_check(project, chapter, verse, checks):
+        entered.set()
+        release.wait(timeout=2)
+        return []
+
+    monkeypatch.setattr(engine, "_run_verse_checks_for_project", slow_check)
+    first = call(engine, "checks.start", {
+        "scope": "chapter", "chapters": ["1"], "checks": ["greekroom"],
+    })["result"]
+    assert entered.wait(timeout=1)
+    second = call(engine, "checks.start", {
+        "scope": "chapter", "chapters": ["1"], "checks": ["greekroom"],
+    })
+    assert second["success"] is False
+    assert second["error"]["code"] == "job_conflict"
+    call(engine, "checks.cancel", {"jobId": first["jobId"]})
+    release.set()
+    wait_for_job(engine, first["jobId"])
 
 
 def test_mixed_script_verse_is_flagged_by_greek_room(monkeypatch):
