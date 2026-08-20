@@ -1,4 +1,4 @@
-import type { ProjectInfo, VerseData, QaFinding, SettingsData } from "../types/finding";
+import type { ImportMetadata, ImportPreview, ProjectInfo, VerseData, QaFinding, SettingsData } from "../types/finding";
 
 /**
  * Thin wrapper around Tauri's invoke() calling the real commands defined
@@ -42,12 +42,24 @@ export const bridge = {
     return invoke<string | null>("pick_project_folder");
   },
 
+  async pickImportFile(): Promise<string | null> {
+    return invoke<string | null>("pick_import_file");
+  },
+
   openProject(path: string): Promise<ProjectInfo> {
     return call("project_open", { path });
   },
 
   scanProject(): Promise<{ chapters: string[]; checkTypes: Record<string, number>; indexTools: Record<string, number> }> {
     return call("project_scan");
+  },
+
+  inspectImport(path: string): Promise<ImportPreview> {
+    return call("project_inspect_import", { path });
+  },
+
+  importProject(path: string, metadata: ImportMetadata): Promise<ProjectInfo> {
+    return call("project_import", { path, metadata });
   },
 
   chapterVerses(chapter: string): Promise<{ verses: string[] }> {

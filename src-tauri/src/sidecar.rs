@@ -103,7 +103,11 @@ impl EngineSidecar {
                 .map_err(|e| format!("failed to write to sidecar stdin: {e}"))?;
         }
 
-        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+        // A whole-Bible import can parse and normalize dozens of files. Keep
+        // the normal interactive timeout short, but give that bounded local
+        // operation enough time to finish on slower disks.
+        let timeout_seconds = if method == "project.import" { 300 } else { 30 };
+        match tokio::time::timeout(std::time::Duration::from_secs(timeout_seconds), rx).await {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(_)) => Err("sidecar response channel closed unexpectedly".into()),
             Err(_) => {

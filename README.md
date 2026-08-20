@@ -16,7 +16,29 @@ src-tauri/        Rust shell (spawns + talks to the sidecar)
 docs/             Architecture notes
 ```
 
+## Importing Scripture
+
+The desktop import screen accepts individual USFM/SFM files, multi-book or
+Paratext folders, and translationCore/translationStudio project archives. It
+previews detected books, asks the user to confirm language/Project/Bible details,
+and provides an offline searchable ISO 639-3 language catalog. See
+[`docs/IMPORTS.md`](docs/IMPORTS.md) for the normalized project schema, supported
+alignment import, provenance safeguards, and the separate tN/tW resource-indexing
+stage.
+
 ## Getting started
+
+### Prerequisites
+
+- **Python 3.11 or newer** for the BridgeEngine sidecar.
+- **Node.js 18 or newer** and npm for the Svelte frontend.
+- For the full desktop app, the **Rust toolchain** from
+  [rustup.rs](https://rustup.rs/).
+- On Windows, the **Desktop development with C++** workload from Visual
+  Studio Build Tools. Tauri needs the MSVC compiler and linker.
+
+The Python and Node.js dependencies only need to be installed once (and
+again whenever their dependency files change).
 
 ### 1. Python engine
 
@@ -26,7 +48,7 @@ pip install -e ".[dev]"
 pytest tests/ greek_room_engine/tests/ -v
 ```
 
-Should show **17 passed**. Try `python demo.py` for a live walkthrough
+Should show **32 passed**. Try `python demo.py` for a live walkthrough
 against a throwaway fixture project — no real translationCore project
 needed.
 
@@ -41,11 +63,12 @@ echo '{"id":"1","method":"ping","params":{}}' | python main.py
 ```bash
 npm install
 npm run build     # should be 0 errors
-npm run dev        # browser-viewable dev server at localhost:1420
+npm run dev       # browser-viewable dev server at localhost:1420
 ```
 
-Without Tauri, `bridge.ping()` etc. will fail (no sidecar to talk to) —
-but you'll see the UI shell render.
+This starts only the frontend UI. Without Tauri, `bridge.ping()` and other
+engine-backed features will fail because there is no sidecar process. Use
+this mode for frontend work; use the next section to run the functional app.
 
 ### 3. Full desktop app
 
@@ -53,20 +76,27 @@ Requires the Rust toolchain (rustup.rs) plus, on Windows, the
 **Desktop development with C++** workload via Visual Studio Build Tools
 (Tauri needs the MSVC linker — installing Rust alone isn't enough).
 
-```bash
+From the repository root on 64-bit Windows with the MSVC toolchain:
+
+```powershell
 cd engine
 pyinstaller --onefile --name bridge-engine main.py
-# copy dist/bridge-engine(.exe) into src-tauri/binaries/ with the correct
-# target-triple suffix (check yours with `rustc -vV`, look at `host:`)
-# e.g. bridge-engine-x86_64-pc-windows-msvc.exe
-# see src-tauri/binaries/README.txt
-
 cd ..
+Copy-Item .\engine\dist\bridge-engine.exe `
+  .\src-tauri\binaries\bridge-engine-x86_64-pc-windows-msvc.exe
 npm install
 npm run tauri dev
 ```
 
-## Current status: v0.9.0 — Phase 3 (decision persistence, whole-book, Settings & Export)
+For another platform, check the `host:` value from `rustc -vV`, append that
+target triple to the generated sidecar's filename, and copy it into
+`src-tauri/binaries/` before running `npm run tauri dev`. Omit `.exe` on
+macOS and Linux; see `src-tauri/binaries/README.txt` for filename examples.
+
+`npm run tauri dev` starts the frontend development server, compiles the Rust
+shell, launches the sidecar, and opens the Bridge desktop window.
+
+## Current development status: Phase 3 (decision persistence, whole-book, Settings & Export)
 
 **New in this phase, all verified (24/24 pytest, clean Svelte build + type-check):**
 - ✅ **Stable finding IDs** — findings previously got a random id every time checks ran, so a saved decision could never be matched back later. Fixed via deterministic ids; proven with a real accept → re-check → still-accepted test.

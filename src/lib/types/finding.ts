@@ -65,9 +65,48 @@ export interface ProjectInfo {
   bookId: string;
   bookName: string;
   targetLanguage: string;
+  targetLanguageId?: string;
+  targetLanguageDirection?: string;
+  projectName?: string;
+  bibleName?: string;
   tcVersion: string;
   chapters: string[];
   checkTypes: Record<string, number>;
+  importedProjects?: ImportedProject[];
+}
+
+export interface ImportBook {
+  bookId: string;
+  bookName: string;
+  sourceFile: string;
+  verseCount: number | null;
+  hasAlignments: boolean;
+}
+
+export interface ImportMetadata {
+  languageId: string;
+  languageName: string;
+  languageDirection: "ltr" | "rtl" | "";
+  projectName: string;
+  bibleName: string;
+  resourceId?: string;
+}
+
+export interface ImportPreview {
+  sourcePath: string;
+  kind: "usfm" | "usfmCollection" | "paratext" | "translationCore" | "translationCoreArchive";
+  metadata: ImportMetadata;
+  books: ImportBook[];
+  missingFields: string[];
+  warnings: string[];
+}
+
+export interface ImportedProject {
+  path: string;
+  bookId: string;
+  bookName: string;
+  chapters?: string[];
+  checkIndexStatus?: string;
 }
 
 export interface VerseData {

@@ -34,6 +34,21 @@ pub async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>
     rx.await.map_err(|e| format!("folder picker cancelled unexpectedly: {e}"))
 }
 
+/// Selects one USFM/SFM file or a translationCore/translationStudio archive.
+/// Folder imports (including Paratext and multi-book projects) use the
+/// existing folder picker so users are never forced to select files one by one.
+#[tauri::command]
+pub async fn pick_import_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Bible translation projects", &["usfm", "sfm", "txt", "tcore", "tstudio", "zip"])
+        .pick_file(move |file| {
+            let _ = tx.send(file.map(|f| f.to_string()));
+        });
+    rx.await.map_err(|e| format!("file picker cancelled unexpectedly: {e}"))
+}
+
 #[tauri::command]
 pub async fn project_open(sidecar: State<'_, EngineSidecar>, path: String) -> Result<Value, String> {
     sidecar.send_request("project.open", serde_json::json!({ "path": path })).await
@@ -42,6 +57,20 @@ pub async fn project_open(sidecar: State<'_, EngineSidecar>, path: String) -> Re
 #[tauri::command]
 pub async fn project_scan(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar.send_request("project.scan", serde_json::json!({})).await
+}
+
+#[tauri::command]
+pub async fn project_inspect_import(sidecar: State<'_, EngineSidecar>, path: String) -> Result<Value, String> {
+    sidecar.send_request("project.inspectImport", serde_json::json!({ "path": path })).await
+}
+
+#[tauri::command]
+pub async fn project_import(
+    sidecar: State<'_, EngineSidecar>,
+    path: String,
+    metadata: Value,
+) -> Result<Value, String> {
+    sidecar.send_request("project.import", serde_json::json!({ "path": path, "metadata": metadata })).await
 }
 
 #[tauri::command]

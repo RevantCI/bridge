@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -24,6 +26,7 @@ from greek_room_engine.models.finding import QaFinding, FindingCategory, Severit
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
 from tc_ai_bridge.tc_project import TranslationCoreProject, ProjectError
+from tc_ai_bridge.project_import import import_source, inspect_import
 from tc_ai_bridge.local_checks import run_local_qa
 from tc_ai_bridge.models import QAIssue
 from tc_ai_bridge.secret_store import AppSettings
@@ -96,7 +99,13 @@ def _qaissue_to_finding(issue: QAIssue, *, project_id: str, book: str,
     return QaFinding(
         id=stable_id,
         project_id=project_id,
-        book=book, chapter=int(chapter), verse=int(verse),
+        # USFM permits verse bridges (for example 3-4) and segments (3a).
+        # QaFinding currently stores numeric anchors, while the project/UI
+        # retain the exact string reference. Use the first numeric component
+        # so valid Scripture does not crash the checking pass.
+        book=book,
+        chapter=int(next(iter(re.findall(r"\d+", str(chapter))), "0")),
+        verse=int(next(iter(re.findall(r"\d+", str(verse))), "0")),
         engine=engine_name,
         check_type=issue.check_id or issue.code,
         category=_categorize_qaissue(issue),
@@ -113,6 +122,8 @@ class Methods:
 
     PROJECT_OPEN = "project.open"
     PROJECT_SCAN = "project.scan"
+    PROJECT_INSPECT_IMPORT = "project.inspectImport"
+    PROJECT_IMPORT = "project.import"
     CHAPTER_VERSES = "chapter.verses"
     CHAPTER_VERSE_DATA = "chapter.verseData"
 
@@ -140,6 +151,19 @@ class BridgeEngine:
         # real machine's settings. See tests/test_bridge_service.py.
         self.settings = settings if settings is not None else AppSettings()
 
+        # Keep imported projects in application-owned storage. Older builds
+        # placed settings.json directly under LOCALAPPDATA, so account for
+        # that legacy path instead of creating a generic LOCALAPPDATA/projects.
+        settings_root = self.settings.path.parent
+        local_app_data = os.getenv("LOCALAPPDATA")
+        if local_app_data:
+            try:
+                if settings_root.resolve() == Path(local_app_data).resolve():
+                    settings_root = settings_root / ".translationcore-ai-bridge"
+            except OSError:
+                pass
+        self.project_root = settings_root / "projects"
+
     # -- lifecycle ------------------------------------------------------
 
     def info(self) -> dict[str, Any]:
@@ -151,16 +175,47 @@ class BridgeEngine:
 
     def open_project(self, path: str) -> dict[str, Any]:
         self.project = TranslationCoreProject(path)
+        return self._project_info()
+
+    def _project_info(self) -> dict[str, Any]:
+        self._require_project()
         summary = self.project.summary  # property, not a method
+        target = self.project.manifest.get("target_language", {})
+        resource = self.project.manifest.get("resource", {})
+        bridge_project = self.project.manifest.get("bridge_project", {})
         return {
             "path": str(summary.path),
             "bookId": summary.book_id,
             "bookName": summary.book_name,
             "targetLanguage": summary.target_language,
+            "targetLanguageId": str(target.get("id") or "") if isinstance(target, dict) else "",
+            "targetLanguageDirection": str(target.get("direction") or "") if isinstance(target, dict) else "",
+            "projectName": str(bridge_project.get("name") or summary.book_name) if isinstance(bridge_project, dict) else summary.book_name,
+            "bibleName": str(resource.get("name") or resource.get("id") or "") if isinstance(resource, dict) else "",
             "tcVersion": summary.tc_version,
             "chapters": self.project.chapters(),
             "checkTypes": self.project.check_types(),
         }
+
+    def inspect_project_import(self, path: str) -> dict[str, Any]:
+        """Read-only detection/validation used before the metadata form."""
+        return inspect_import(path)
+
+    def import_project(self, path: str, metadata: dict[str, Any],
+                       destination_root: str = "") -> dict[str, Any]:
+        """Normalize USFM/SFM, Paratext folders, or tC archives, then open it.
+
+        Existing translationCore state is copied intact. Raw Scripture becomes
+        a tC-compatible book project with chapter JSON, preserved source USFM,
+        word-bank/alignment data, provenance, and empty resource-index roots.
+        """
+        root = Path(destination_root).resolve() if destination_root else self.project_root
+        result = import_source(path, root, metadata)
+        self.project = TranslationCoreProject(result["primaryProjectPath"])
+        info = self._project_info()
+        info["import"] = result
+        info["importedProjects"] = result["projects"]
+        return info
 
     def scan_project(self) -> dict[str, Any]:
         if not self.project:
@@ -232,9 +287,11 @@ class BridgeEngine:
                 ))
 
         if "greekroom" in checks or "wildebeest" in checks:
+            target_language = self.project.manifest.get("target_language", {})
+            language_id = str(target_language.get("id") or "") if isinstance(target_language, dict) else ""
             gr_findings = self.greek_room.check_verse(
                 project_id=project_id,
-                lang_code=self.project.summary.target_language,
+                lang_code=language_id,
                 ref=f"{book} {chapter}:{verse}",
                 text=target_text,
                 checks=["wildebeest"],
@@ -404,6 +461,12 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.open_project(p["path"]))
             if m == Methods.PROJECT_SCAN:
                 return EngineResponse.ok(request.id, result=self.scan_project())
+            if m == Methods.PROJECT_INSPECT_IMPORT:
+                return EngineResponse.ok(request.id, result=self.inspect_project_import(p["path"]))
+            if m == Methods.PROJECT_IMPORT:
+                return EngineResponse.ok(request.id, result=self.import_project(
+                    p["path"], p.get("metadata", {}), p.get("destinationRoot", ""),
+                ))
             if m == Methods.CHAPTER_VERSES:
                 return EngineResponse.ok(request.id, result={"verses": self.chapter_verses(p["chapter"])})
             if m == Methods.CHAPTER_VERSE_DATA:
