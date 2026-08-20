@@ -1,0 +1,240 @@
+from __future__ import annotations
+
+import csv
+import re
+import shutil
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from .tc_project import _write_json_atomic
+
+
+_VERSION_RE = re.compile(r'^v?(\d+)(?:\.(\d+))?')
+_REF_RE = re.compile(r'^(\d+):(\d+)')
+
+# Resources materialized here are gateway-language (English) checking helps
+# applied against any target-language translation, mirroring how real
+# translationCore uses tN/tW regardless of the project's own target
+# language — so this is not parameterized by project language.
+RESOURCE_LANGUAGE = 'en'
+
+
+def _version_key(name: str) -> tuple[int, int, int, str]:
+    """Same ordering as TranslationHelpsKnowledgeBase._version_key: prefer
+    higher semantic version, then unfoldingWord as publisher on ties."""
+    match = _VERSION_RE.match(name)
+    major = int(match.group(1)) if match else -1
+    minor = int(match.group(2) or 0) if match else 0
+    provider_score = 2 if name.endswith('_unfoldingWord') else 1 if 'Door43-Catalog' in name else 0
+    return (major, minor, provider_score, name)
+
+
+def bundled_resources_source() -> Path:
+    """Where the committed/packaged English tN/TWL/TW snapshot lives.
+
+    Frozen (PyInstaller) build: the --add-data payload extracted under
+    sys._MEIPASS. Running from source: engine/resources, a sibling of this
+    package. Either way this is read-only reference content, distinct from
+    the app-owned resources root under application storage (see
+    ensure_resources_installed).
+    """
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        return Path(sys._MEIPASS) / 'resources'
+    return Path(__file__).resolve().parent.parent / 'resources'
+
+
+def ensure_resources_installed(app_resources_root: Path) -> None:
+    """Copy the bundled resource snapshot into application-owned storage.
+
+    TranslationHelpsKnowledgeBase resolves resources relative to a project's
+    own path (project.path.parent.parent / 'resources'), i.e. a sibling of
+    the app's projects/ folder in application storage — not the repo/bundle
+    location. This mirrors how project_root itself is a separate app-owned
+    copy rather than something read directly out of the install directory.
+    Idempotent and additive: only copies a resource/version folder that
+    isn't already installed, never overwrites or deletes one that is.
+    """
+    source = bundled_resources_source()
+    if not source.exists():
+        return
+    for resource in ('translationNotes', 'translationWordsLinks', 'translationWords'):
+        src_resource_dir = source / RESOURCE_LANGUAGE / 'translationHelps' / resource
+        if not src_resource_dir.is_dir():
+            continue
+        dst_resource_dir = app_resources_root / RESOURCE_LANGUAGE / 'translationHelps' / resource
+        for version_dir in src_resource_dir.iterdir():
+            if not version_dir.is_dir():
+                continue
+            dst_version_dir = dst_resource_dir / version_dir.name
+            if dst_version_dir.exists():
+                continue
+            shutil.copytree(version_dir, dst_version_dir)
+
+
+def _latest_version_dir(resources_root: Path, resource: str) -> Path | None:
+    resource_dir = resources_root / RESOURCE_LANGUAGE / 'translationHelps' / resource
+    if not resource_dir.is_dir():
+        return None
+    candidates = [p for p in resource_dir.iterdir() if p.is_dir()]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: _version_key(p.name))
+
+
+def _parse_tsv(path: Path) -> list[dict[str, str]]:
+    with path.open('r', encoding='utf-8-sig', newline='') as handle:
+        return list(csv.DictReader(handle, delimiter='\t'))
+
+
+def _split_reference(reference: str) -> tuple[str, str] | None:
+    # TN/TWL also use non-verse references such as "front:intro" or
+    # "1:intro" for book/chapter introductions, which don't correspond to
+    # any real verse this project can key a check to — skip those rather
+    # than guess. Verse bridges (e.g. "3-4") aren't split here; Reference
+    # values for individual TSV rows are always single verses upstream.
+    match = _REF_RE.match((reference or '').strip())
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _term_from_twlink(link: str) -> str:
+    return (link or '').rstrip('/').rsplit('/', 1)[-1]
+
+
+def _group_from_support_reference(support_reference: str) -> str:
+    slug = (support_reference or '').rstrip('/').rsplit('/', 1)[-1]
+    return slug or 'other'
+
+
+def _safe_filename(value: str) -> str:
+    return re.sub(r'[^A-Za-z0-9._-]+', '-', value).strip('-') or 'group'
+
+
+def _write_index_groups(index_dir: Path, groups: dict[str, list[dict[str, Any]]]) -> None:
+    # Fully regenerated on every (re-)materialization. Safe to overwrite:
+    # Bridge's own human review state (Accept/Reject/Ignore, tied to stable
+    # finding ids) lives in the project's separate decisions/ companion
+    # directory and is re-applied onto findings after checks run
+    # (BridgeEngine.run_verse_checks), not stored inside these index files.
+    if index_dir.exists():
+        for existing in index_dir.glob('*.json'):
+            existing.unlink()
+    index_dir.mkdir(parents=True, exist_ok=True)
+    for group_id, entries in groups.items():
+        _write_json_atomic(index_dir / f'{_safe_filename(group_id)}.json', entries)
+
+
+@dataclass(frozen=True)
+class MaterializeResult:
+    tool: str
+    version: str
+    checks: int
+    groups: int
+
+
+def materialize_translation_notes(project_root: Path, book_id: str, resources_root: Path) -> MaterializeResult | None:
+    """Parse the bundled tn_<BOOK>.tsv into real per-verse translationNotes
+    check entries. Returns None if no bundled resource/book TSV exists —
+    the caller must not report tN as ready in that case."""
+    version_dir = _latest_version_dir(resources_root, 'translationNotes')
+    if version_dir is None:
+        return None
+    tsv_path = version_dir / f'tn_{book_id.upper()}.tsv'
+    if not tsv_path.is_file():
+        return None
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in _parse_tsv(tsv_path):
+        parsed = _split_reference(row.get('Reference', ''))
+        if not parsed:
+            continue
+        chapter, verse = parsed
+        group_id = _group_from_support_reference(row.get('SupportReference', ''))
+        entry = {
+            'contextId': {
+                'reference': {'bookId': book_id, 'chapter': chapter, 'verse': verse},
+                'tool': 'translationNotes',
+                'groupId': group_id,
+                'checkId': row.get('ID', ''),
+                'quoteString': row.get('Quote', ''),
+                'occurrence': int(row.get('Occurrence') or 1),
+                'occurrenceNote': row.get('Note', ''),
+            },
+            'selections': False,
+            'nothingToSelect': False,
+            'invalidated': False,
+        }
+        groups.setdefault(group_id, []).append(entry)
+    index_dir = project_root / '.apps' / 'translationCore' / 'index' / 'translationNotes' / book_id
+    _write_index_groups(index_dir, groups)
+    return MaterializeResult('translationNotes', version_dir.name, sum(len(v) for v in groups.values()), len(groups))
+
+
+def materialize_translation_words(project_root: Path, book_id: str, resources_root: Path) -> MaterializeResult | None:
+    """Parse the bundled twl_<BOOK>.tsv (translationWordsLinks) into real
+    per-verse translationWords check entries, one group per key-term slug."""
+    version_dir = _latest_version_dir(resources_root, 'translationWordsLinks')
+    if version_dir is None:
+        return None
+    tsv_path = version_dir / f'twl_{book_id.upper()}.tsv'
+    if not tsv_path.is_file():
+        return None
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in _parse_tsv(tsv_path):
+        parsed = _split_reference(row.get('Reference', ''))
+        if not parsed:
+            continue
+        chapter, verse = parsed
+        group_id = _term_from_twlink(row.get('TWLink', ''))
+        if not group_id:
+            continue
+        entry = {
+            'contextId': {
+                'reference': {'bookId': book_id, 'chapter': chapter, 'verse': verse},
+                'tool': 'translationWords',
+                'groupId': group_id,
+                'checkId': row.get('ID', ''),
+                'quoteString': row.get('OrigWords', ''),
+                'occurrence': int(row.get('Occurrence') or 1),
+                'occurrenceNote': '',
+            },
+            'selections': False,
+            'nothingToSelect': False,
+            'invalidated': False,
+        }
+        groups.setdefault(group_id, []).append(entry)
+    index_dir = project_root / '.apps' / 'translationCore' / 'index' / 'translationWords' / book_id
+    _write_index_groups(index_dir, groups)
+    return MaterializeResult('translationWords', version_dir.name, sum(len(v) for v in groups.values()), len(groups))
+
+
+def materialize_book_checks(project_root: Path, book_id: str, app_resources_root: Path) -> dict[str, Any]:
+    """Materialize real translationNotes/translationWords project indexes
+    for one imported book from the bundled English resource snapshot.
+
+    Installs the bundled snapshot into application storage first (a no-op
+    once already installed). Only covers books the upstream English tN/TWL
+    resource has actually released — some Old Testament books are not
+    currently published (see docs/DEVELOPER_HANDOFF.md); those come back
+    with status "unavailable", the same as any other-language import, never
+    a fabricated empty "ready".
+    """
+    ensure_resources_installed(app_resources_root)
+    tn = materialize_translation_notes(project_root, book_id, app_resources_root)
+    tw = materialize_translation_words(project_root, book_id, app_resources_root)
+    return {
+        'translationNotes': {
+            'status': 'ready' if tn and tn.checks else 'unavailable',
+            'checks': tn.checks if tn else 0,
+            'groups': tn.groups if tn else 0,
+            'version': tn.version if tn else '',
+        },
+        'translationWords': {
+            'status': 'ready' if tw and tw.checks else 'unavailable',
+            'checks': tw.checks if tw else 0,
+            'groups': tw.groups if tw else 0,
+            'version': tw.version if tw else '',
+        },
+    }

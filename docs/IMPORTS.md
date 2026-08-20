@@ -56,12 +56,21 @@ checks. translationCore creates those tool indexes from separately installed,
 versioned checking resources. Bridge follows the same boundary:
 
 - Existing translationCore projects retain their real tN/tW indexes, selections,
-  invalidations, comments, and alignment state.
-- Raw USFM/SFM imports create compatible index roots and record
-  `requires-resource-index`; they do not fabricate empty check records.
-- Resource acquisition/version selection and tN/tW index materialization are the
-  next pipeline stage. Until it runs, local Scripture QA and alignment preparation
-  work, but tN/tW results are not claimed as available.
+  invalidations, comments, and alignment state — Bridge never overwrites them.
+- Raw USFM/SFM/Paratext imports get real tN/tW indexes materialized from a
+  pinned English (unfoldingWord, Door43 tag v90) tN/translationWordsLinks
+  snapshot bundled with the app (`engine/resources/en/translationHelps/`),
+  parsed into `.apps/translationCore/index/{translationNotes|translationWords}/<book>/<group>.json`
+  at import time. tN/tW are gateway-language checking helps applied to any
+  target-language translation, so this runs regardless of the imported
+  project's own target language.
+- A handful of Old Testament books (Numbers, 1-2 Chronicles, Ecclesiastes,
+  Isaiah, Jeremiah, Ezekiel, Daniel, Amos, Zechariah) are not currently
+  released in the upstream English resource; those report capability
+  `unavailable` rather than a fabricated `ready` with zero checks. See
+  `docs/DEVELOPER_HANDOFF.md` for the full list and how to refresh the bundle.
+- Only English is bundled today. A future non-English or refreshed-English
+  resource still needs the online Door43-catalog path, not yet built.
 
 ## Differences from translationCore
 

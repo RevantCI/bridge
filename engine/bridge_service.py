@@ -26,10 +26,11 @@ from greek_room_engine.models.finding import QaFinding, FindingCategory, Severit
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
 from tc_ai_bridge.tc_project import TranslationCoreProject, ProjectError
-from tc_ai_bridge.project_import import import_source, inspect_import
+from tc_ai_bridge.project_import import import_source, inspect_import, apply_resource_materialization
 from tc_ai_bridge.local_checks import run_local_qa
 from tc_ai_bridge.models import QAIssue
 from tc_ai_bridge.secret_store import AppSettings
+from tc_ai_bridge.resource_materializer import materialize_book_checks
 
 BRIDGE_VERSION = "0.8.0-dev"
 
@@ -207,10 +208,27 @@ class BridgeEngine:
 
         Existing translationCore state is copied intact. Raw Scripture becomes
         a tC-compatible book project with chapter JSON, preserved source USFM,
-        word-bank/alignment data, provenance, and empty resource-index roots.
+        word-bank/alignment data, provenance, and real translationNotes/
+        translationWords indexes materialized from the bundled English
+        resource snapshot (see tc_ai_bridge.resource_materializer).
         """
         root = Path(destination_root).resolve() if destination_root else self.project_root
         result = import_source(path, root, metadata)
+
+        # Only raw Scripture imports need materialized tN/tW — an imported
+        # existing translationCore/translationStudio project already has
+        # its own real indexes, which must never be overwritten with the
+        # bundled English snapshot (see docs/IMPORTS.md's tN/tW boundary).
+        if result["kind"] not in {"translationCore", "translationCoreArchive"}:
+            resources_root = root.parent / "resources"
+            for entry in result["projects"]:
+                project_root = Path(entry["path"])
+                materialization = materialize_book_checks(project_root, entry["bookId"], resources_root)
+                apply_resource_materialization(project_root, materialization)
+                statuses = {materialization["translationNotes"]["status"], materialization["translationWords"]["status"]}
+                entry["checkIndexStatus"] = "ready" if statuses == {"ready"} else ("unavailable" if statuses == {"unavailable"} else "partial")
+                entry["resourceMaterialization"] = materialization
+
         self.project = TranslationCoreProject(result["primaryProjectPath"])
         info = self._project_info()
         info["import"] = result

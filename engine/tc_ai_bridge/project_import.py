@@ -571,6 +571,34 @@ def _ensure_tc_project_compatible(project_root: Path, metadata: dict[str, str]) 
     _write_json_atomic(project_root / ".bridge" / "original-manifest.json", original_manifest)
 
 
+def apply_resource_materialization(project_root: Path, materialization: dict[str, Any]) -> None:
+    """Record real tN/tW capability status and pinned resource versions
+    after resource_materializer has (re)built a raw import's check indexes.
+
+    Never called for imported existing translationCore/translationStudio
+    projects — those keep their own real indexes untouched, per the
+    tN/tW design boundary in docs/IMPORTS.md.
+    """
+    manifest_path = project_root / "manifest.json"
+    manifest = _read_json(manifest_path)
+    tn = materialization.get("translationNotes", {}) if isinstance(materialization, dict) else {}
+    tw = materialization.get("translationWords", {}) if isinstance(materialization, dict) else {}
+    if tn.get("version"):
+        manifest["tc_en_check_version_translationNotes"] = tn["version"]
+    if tw.get("version"):
+        manifest["tc_en_check_version_translationWords"] = tw["version"]
+    _write_json_atomic(manifest_path, manifest)
+
+    import_path = project_root / ".bridge" / "import.json"
+    data = _read_json(import_path)
+    capabilities = data.get("capabilities") if isinstance(data.get("capabilities"), dict) else {}
+    capabilities["translationNotes"] = tn.get("status", "requires-resource-index")
+    capabilities["translationWords"] = tw.get("status", "requires-resource-index")
+    data["capabilities"] = capabilities
+    data["resourceMaterialization"] = materialization
+    _write_json_atomic(import_path, data)
+
+
 def import_source(source_path: str | Path, destination_root: str | Path, metadata: dict[str, Any]) -> dict[str, Any]:
     source = Path(source_path).resolve()
     destination = Path(destination_root).resolve()

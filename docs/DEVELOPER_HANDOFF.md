@@ -242,31 +242,107 @@ download/version selection and real index materialization are implemented.
 
 ## Recommended next work
 
-### P0 — Resource acquisition and tN/tW index materialization
+### P0 — Resource acquisition and tN/tW index materialization (done 2026-08-20)
 
-1. Define application-owned resource storage. Existing
-   `TranslationHelpsKnowledgeBase` expects resources relative to the tC root,
-   under `resources/en/translationHelps` and `resources/en/bibles`.
-2. Add resource discovery/download with explicit versions and provenance.
-3. Pin selected resource versions in the project manifest using the existing
-   `tc_*_check_version_*` fields consumed by `knowledge_base.py`.
-4. Materialize translationCore-compatible entries at:
-   `.apps/translationCore/index/{translationNotes|translationWords}/<book>/<group>.json`.
-5. Each entry must include a real `contextId` with `reference`, `tool`,
-   `groupId`, and `checkId`, plus the resource evidence needed by the current
-   `TranslationCoreProject.checks_for_verse()` and knowledge-base paths.
-6. Add import progress and failure recovery. Never report tN/tW as available
-   when resource indexing failed or is incomplete.
-7. Add fixture-based tests using a small real TN/TW resource slice.
+**Approach taken:** bundle a pinned English tN/tW/TWL snapshot in the repo
+(matching real translationCore's own default of shipping English checking
+helps in the installer) rather than fetching on demand — Bridge's own
+premise is field translation teams with unreliable connectivity, so a raw
+import must produce real tN/tW checks with zero network access.
 
-Acceptance criteria:
+What's bundled, under `engine/resources/en/translationHelps/` (~42 MB,
+committed):
+
+- `translationNotes/v90_unfoldingWord/tn_<BOOK>.tsv` — raw Door43
+  `unfoldingWord/en_tn` tag v90, 56 of 66 books.
+- `translationWordsLinks/v90_unfoldingWord/twl_<BOOK>.tsv` — raw
+  `unfoldingWord/en_twl` tag v90, same 56 books.
+- `translationWords/v90_unfoldingWord/bible/{kt,names,other}/*.md` — raw
+  `unfoldingWord/en_tw` tag v90 articles (953 files), plus each resource's
+  own `manifest.yaml`/`LICENSE.md` for provenance and attribution.
+- **10 Old Testament books are not currently in the upstream release**
+  (Numbers, 1-2 Chronicles, Ecclesiastes, Isaiah, Jeremiah, Ezekiel, Daniel,
+  Amos, Zechariah) — verified directly against the live Door43 catalog on
+  2026-08-20, not a gap in this bundling pass. Re-run the same fetch against
+  a newer tag later to pick up whichever of these ship next; nothing else
+  needs to change.
+
+**New code:**
+
+- `engine/tc_ai_bridge/resource_materializer.py` — pure parser/writer.
+  `ensure_resources_installed(app_resources_root)` copies the bundled
+  snapshot into application-owned storage once (mirrors how `project_root`
+  itself is a copy separate from the repo — `TranslationHelpsKnowledgeBase`
+  resolves resources relative to a project's own path, i.e.
+  `settings_root/resources/...`, never the repo). `materialize_book_checks()`
+  parses the bundled TN/TWL TSVs for one book and writes real
+  `.apps/translationCore/index/{translationNotes|translationWords}/<book>/<group>.json`
+  entries with a full `contextId` (`reference`, `tool`, `groupId` — the TA
+  slug for tN, the term slug for tW — `checkId`, `quoteString`,
+  `occurrenceNote`). Always fully regenerates those files: safe, because
+  Bridge's own Accept/Reject/Ignore decisions live in the project's separate
+  `decisions/` companion directory (stable finding ids) and are re-applied
+  onto findings after checks run — never stored inside these index files.
+- `project_import.py` gained `apply_resource_materialization()`, which pins
+  `tc_en_check_version_translationNotes`/`...translationWords` in
+  `manifest.json` and records real `ready`/`unavailable` capability status
+  (never a fabricated `ready` with zero checks) in `.bridge/import.json`.
+- `bridge_service.py`'s `import_project()` calls both, but **only for raw
+  USFM/SFM/Paratext imports** — an imported existing translationCore/
+  translationStudio project keeps its own real indexes untouched, per the
+  tN/tW design boundary in `docs/IMPORTS.md`. tN/tW are gateway-language
+  (English) checking helps applied to any target-language translation, so
+  this doesn't depend on the imported project's target language.
+
+**Verified:** `test_resource_materializer.py` (5 tests, all against the real
+bundled Titus TN/TWL slice, not a synthetic fixture) — parses into the
+correct `contextId` shape, is idempotent, correctly reports `unavailable`
+for an unreleased book (tested with Isaiah), and an end-to-end
+import→`verse.runChecks` call surfaces real `translation_note`/
+`translation_word` findings. Full suite: 37/37 passing.
+
+**Still open / not done in this pass:**
+
+- **`knowledge_base.py`'s own TWL reader is still unfed.** It expects a
+  *different*, pre-materialized layout —
+  `translationWordsLinks/<version>/{kt,names,other}/groups/<book>/<term>.json`
+  — used only by `ai_client.py`'s evidence-gathering (the unwired Phase 7
+  `ai.explain`). This pass bundled the raw TWL TSVs and materializes
+  *project-level* check indexes from them directly; it does not also build
+  that second, resource-level grouped-JSON shape. Needed before Phase 7 can
+  gather TW evidence, not needed for `verse.runChecks`.
+- **`translationAcademy` was not bundled.** Nothing on the `verse.runChecks`
+  path reads it today (`local_checks.py` never imports `knowledge_base.py`);
+  it's only needed for TA article evidence in the same unwired `ai.explain`
+  path. `knowledge_base.py.resolve('translationAcademy')` will raise
+  `KnowledgeBaseError` if something calls it before this exists — currently
+  nothing on any wired protocol method does.
+- **PyInstaller build needs `--add-data` to ship the bundle**, e.g. (from
+  `engine/`, Windows path separator is `;`):
+  `pyinstaller --onefile --name bridge-engine --add-data "resources;resources" main.py`.
+  Without it, a frozen `.exe` has no bundled snapshot and every raw import
+  falls back to `unavailable` on a machine where `ensure_resources_installed`
+  has never run before (dev-mode runs are unaffected since
+  `bundled_resources_source()` reads straight from `engine/resources`). This
+  was not verified against an actual PyInstaller build in this session — no
+  sidecar binary was built (see the multi-book navigation section above for
+  the same constraint). Confirm the frozen `.exe` actually finds the bundle
+  via `sys._MEIPASS` before shipping.
+- **Only English is bundled.** Non-English tN/tW (or a refreshed English
+  version) still needs the online path described in the original P0 below —
+  not built in this pass, since it wasn't required to satisfy the
+  acceptance criteria against real data.
+
+Original acceptance criteria (all met):
 
 - A raw USFM import followed by resource preparation produces non-zero real
-  tN/tW checks for known verses.
+  tN/tW checks for known verses. ✓
 - `verse.runChecks` returns those items as translation-note/translation-word
-  findings.
-- Resource versions and hashes are visible in provenance.
-- Re-running indexing is deterministic and does not erase human decisions.
+  findings. ✓
+- Resource versions and hashes are visible in provenance (pinned
+  `tc_en_check_version_*` fields; `knowledge_base.py`'s existing
+  `provenance_manifest()` hashes each bundled `manifest.yaml`). ✓
+- Re-running indexing is deterministic and does not erase human decisions. ✓
 
 ### P0 — Multi-book collection navigation (done 2026-08-20)
 
