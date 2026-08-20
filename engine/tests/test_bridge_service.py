@@ -128,6 +128,34 @@ def test_edit_verse_creates_transaction_backup(fixture_project):
     assert any(tx_dir.glob("*.json"))
 
 
+def test_edit_verse_actually_writes_the_new_text_and_invalidates_alignment(fixture_project):
+    """Guards against edit_verse regressing to its old stub, which committed
+    a transaction but never wrote anything — verse.get would still show the
+    pre-edit text. Also verifies the real tc_project.apply_scripture_edit()
+    behavior this now calls: word alignment is marked invalid (its bottomWord
+    tokens no longer match the new text) rather than silently kept stale."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "புதிய வார்த்தைகள்"})
+
+    verse = call(engine, "verse.get", {"chapter": "1", "verse": "1"})["result"]
+    assert verse["text"] == "புதிய வார்த்தைகள்"
+    assert verse["alignment"]["alignments"][0]["bottomWords"] == []
+    assert [t["word"] for t in verse["alignment"]["wordBank"]] == ["புதிய", "வார்த்தைகள்"]
+
+    findings = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})["findings"]
+    assert any(f["check_type"] == "WA_INVALID" for f in findings)
+
+
+def test_edit_verse_with_unchanged_text_fails_gracefully(fixture_project):
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    current = call(engine, "verse.get", {"chapter": "1", "verse": "1"})["result"]["text"]
+    result = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": current})
+    assert result["success"] is False
+    assert result["error"]["code"] == "project_error"
+
+
 def test_open_missing_project_fails_gracefully():
     engine = BridgeEngine()
     result = call(engine, "project.open", {"path": "/no/such/path"})

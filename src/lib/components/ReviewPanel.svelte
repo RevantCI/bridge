@@ -48,21 +48,38 @@
 
   let editing = false;
   let editText = "";
+  let editError: string | null = null;
+  let editSaving = false;
 
   function startEdit() {
     if (!$selectedVerse) return;
     editText = $verseTexts[verseKey($currentChapter, $selectedVerse)] ?? "";
+    editError = null;
     editing = true;
   }
 
   async function saveEdit() {
     if (!$selectedVerse) return;
-    await bridge.editVerse($currentChapter, $selectedVerse, editText);
     const key = verseKey($currentChapter, $selectedVerse);
-    verseTexts.update((t) => ({ ...t, [key]: editText }));
-    editing = false;
-    const findings = await bridge.runVerseChecks($currentChapter, $selectedVerse, ["local", "greekroom"]);
-    findingsByVerse.update((map) => ({ ...map, [key]: findings }));
+    if (editText.trim() === ($verseTexts[key] ?? "").trim()) {
+      // No real change — apply_scripture_edit rejects this as a no-op
+      // rather than journaling a spurious edit, so don't call it.
+      editing = false;
+      return;
+    }
+    editError = null;
+    editSaving = true;
+    try {
+      await bridge.editVerse($currentChapter, $selectedVerse, editText);
+      verseTexts.update((t) => ({ ...t, [key]: editText }));
+      editing = false;
+      const findings = await bridge.runVerseChecks($currentChapter, $selectedVerse, ["local", "greekroom"]);
+      findingsByVerse.update((map) => ({ ...map, [key]: findings }));
+    } catch (e) {
+      editError = e instanceof Error ? e.message : String(e);
+    } finally {
+      editSaving = false;
+    }
   }
 
   const severityBadge: Record<string, string> = {
@@ -80,6 +97,20 @@
     </div>
 
     <div class="panel-scroll">
+      {#if editing}
+        <div class="section">
+          <div class="section-title">Edit verse</div>
+          <textarea bind:value={editText} rows="3" />
+          {#if editError}<p class="edit-error">{editError}</p>{/if}
+          <div class="edit-actions">
+            <button class="accept" on:click={saveEdit} disabled={editSaving || editText.trim() === ""}>
+              {editSaving ? "Saving…" : "Save & re-check"}
+            </button>
+            <button class="cancel" on:click={() => (editing = false)} disabled={editSaving}>Cancel</button>
+          </div>
+        </div>
+      {/if}
+
       <div class="section">
         <div class="section-title">
           Greek Room QA
@@ -132,15 +163,6 @@
         {/each}
       </div>
 
-      {#if editing}
-        <div class="section">
-          <div class="section-title">Edit verse</div>
-          <textarea bind:value={editText} rows="3" />
-          <div class="decision-row full">
-            <button class="accept" on:click={saveEdit}>Save & re-check</button>
-          </div>
-        </div>
-      {/if}
     </div>
 
     <div class="footer-actions">
@@ -173,13 +195,18 @@
   .explain { font-size: 12px; color: var(--text-2); line-height: 1.6; margin: 0 0 8px; }
   .evidence { font-size: 11px; color: var(--text-2); padding-left: 16px; margin: 0 0 8px; }
   .decision-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-  .decision-row.full { grid-template-columns: 1fr; }
   .decision-row button { padding: 7px; font-size: 11px; font-weight: 700; border-radius: 6px; border: none; cursor: pointer; }
   .accept { background: var(--success); color: #fff; }
   .reject { background: var(--danger); color: #fff; }
   .ignore { background: #F5EBFC; color: #9333EA; }
   .none { font-size: 11px; color: var(--text-3); }
   textarea { width: 100%; font-size: 14px; padding: 8px; border: 1px solid var(--accent); border-radius: 6px; font-family: inherit; margin-bottom: 8px; }
+  .edit-error { color: var(--danger); font-size: 11px; margin: -4px 0 8px; line-height: 1.4; }
+  .edit-actions { display: flex; gap: 6px; }
+  .edit-actions button { flex: 1; padding: 7px; font-size: 11px; font-weight: 700; border-radius: 6px; cursor: pointer; }
+  .edit-actions .accept { border: none; }
+  .cancel { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
+  .decision-row button:disabled, .edit-actions button:disabled { opacity: .55; cursor: not-allowed; }
   .footer-actions { padding: 12px 16px; border-top: 1px solid var(--border); }
   .edit-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
   .empty-panel { padding: 24px 16px; font-size: 12px; color: var(--text-3); }

@@ -102,9 +102,29 @@ roadmap order still applies.
 
 ### Known gaps still open (from Phases 1-3, verified still true in the current code)
 
-- **USFM edit round-trip is still a stub.** `edit_verse()` in `bridge_service.py`
-  (around line 338) journals the transaction but the actual USFM verse-text replacement
-  is a documented no-op comment, not implemented.
+- ~~USFM edit round-trip is still a stub~~ — **done 2026-08-20.** The real
+  write logic wasn't missing from `tc_ai_bridge` at all — it turned out
+  `TranslationCoreProject.apply_scripture_edit()` in `tc_project.py` was
+  already a complete, working implementation (writes the target chapter
+  JSON, reconciles alignment by word/occurrence signature, marks word
+  alignment invalid, flags touched tN/tW index entries `verseEdits=True`,
+  full journal transaction with rollback). `bridge_service.py`'s
+  `edit_verse()` was just never calling it — it had its own separate no-op
+  stub instead. Now it does: `edit_verse()` is a thin wrapper again, matching
+  every other method in this file. The frontend (`ReviewPanel.svelte`) was
+  already fully built for this (save, update store, re-run checks) and
+  needed no changes beyond two small robustness fixes found while wiring
+  this in: saving unchanged text is now a silent no-op instead of throwing
+  an unhandled rejection (`apply_scripture_edit` correctly rejects a no-op
+  edit; the UI just didn't call it before, so it never surfaced), and a real
+  failure now shows an inline error instead of vanishing silently. Covered
+  by two new tests in `test_bridge_service.py` that verify the edit actually
+  lands (not just "committed": true) and that `WA_INVALID` surfaces on the
+  next `verse.runChecks`. Full suite: 39/39 passing. Not click-tested in a
+  running Tauri window this session (same build constraint as the other
+  frontend work above) — worth a real click-through: edit a verse, confirm
+  the new text persists after switching chapters and reopening the project,
+  and that a stale-alignment finding appears.
 - **`export.nonAligned` is a simplified reconstruction**, not a lossless round trip
   (`\id`/`\c`/`\v` only — footnotes, section headers, poetry markup not preserved).
 - **OWL repeated-word adapter doesn't exist yet** (`adapters/owl_adapter.py`).

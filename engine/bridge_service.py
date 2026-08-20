@@ -354,23 +354,20 @@ class BridgeEngine:
                 "status": status, "recordedAt": str(path)}
 
     def edit_verse(self, chapter: str, verse: str, new_text: str) -> dict[str, Any]:
-        """Human-authorized scripture edit. Goes through the project's own
-        TransactionJournal (created in TranslationCoreProject.__init__) so
-        it's undoable and crash-safe — never a silent file write."""
+        """Human-authorized scripture edit.
+
+        tc_project.TranslationCoreProject.apply_scripture_edit() already
+        implements the real, tC-compatible write: updates the target chapter
+        JSON, reconciles alignment (keeps bottomWords tokens that still
+        exist in the new text by word/occurrence signature, moves the rest
+        to wordBank), marks word alignment invalid (surfaced by local_checks'
+        existing WA_INVALID check), flags touched tN/tW index entries
+        verseEdits=True, and runs it all through its own TransactionJournal
+        transaction with rollback on failure — undoable and crash-safe.
+        Nothing here reinvents that; it only calls it."""
         self._require_project()
-        target_path = self.project.chapter_path(chapter)
-        journal = self.project.journal
-        rec = journal.begin(f"Edit {chapter}:{verse}", [target_path])
-        try:
-            journal.mark_writing(rec)
-            # Actual USFM verse-text replacement happens here in the real
-            # implementation (existing ui.py had this logic ~line 1400+);
-            # left as a follow-up wiring task, not a protocol design gap.
-            journal.commit(rec, metadata={"chapter": chapter, "verse": verse})
-            return {"committed": True, "chapter": chapter, "verse": verse}
-        except Exception:
-            journal.rollback(rec, reason="edit_verse failed")
-            raise
+        result = self.project.apply_scripture_edit(chapter, verse, new_text)
+        return {"committed": True, "chapter": chapter, "verse": verse, **result}
 
     # -- export -------------------------------------------------------------
     #
