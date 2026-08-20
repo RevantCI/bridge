@@ -161,6 +161,50 @@ def test_usfm_checks_run_once_per_book_not_once_per_verse(fixture_project):
     assert any(f["check_type"] == "usfm.fake_issue" for f in result2["findings"])
 
 
+def test_usfm_checker_failure_is_protocol_error_and_cached(fixture_project):
+    """A checker crash must never be indistinguishable from a clean book."""
+    from greek_room_engine.adapters.usfm_adapter import UsfmCheckerError
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    call_count = 0
+
+    def failed_check(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise UsfmCheckerError("helper failed")
+
+    engine.greek_room.check_book_usfm = failed_check
+    first = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+    second = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+
+    assert first["success"] is False
+    assert first["error"]["code"] == "checker_error"
+    assert second["error"]["code"] == "checker_error"
+    assert call_count == 1
+
+
+def test_usfm_finding_for_missing_verse_surfaces_on_first_existing_verse(fixture_project):
+    """The UI cannot request a missing verse, so chapter-level structural
+    findings must be attached to an existing display slot."""
+    from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    engine.greek_room.check_book_usfm = lambda **kwargs: [QaFinding(
+        project_id="p", book="rut", chapter=1, verse=2,
+        engine="usfm", check_type="usfm.chapters_with_missing_verses",
+        category=FindingCategory.STRUCTURE, severity=Severity.HIGH,
+        explanation="Missing verse: 2",
+    )]
+
+    result = call(engine, "verse.runChecks", {
+        "chapter": "1", "verse": "1", "checks": ["usfm"],
+    })
+    assert result["success"] is True
+    assert any("missing_verses" in f["check_type"] for f in result["findings"])
+
+
 def test_edit_verse_creates_transaction_backup(fixture_project):
     engine = BridgeEngine()
     call(engine, "project.open", {"path": str(fixture_project)})

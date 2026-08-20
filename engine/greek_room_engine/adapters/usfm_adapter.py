@@ -23,6 +23,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,54 @@ from ..models.finding import QaFinding, FindingCategory, Severity
 
 VENDOR_ROOT = Path(__file__).resolve().parent.parent.parent / "vendor" / "greekroom-usfm"
 CHECKER_SCRIPT = VENDOR_ROOT / "usfm_check.py"
+CHECKER_OVERRIDE_ENV = "BRIDGE_USFM_CHECKER"
+CHECKER_BINARY_NAME = "bridge-usfm-checker"
+
+
+class UsfmCheckerError(RuntimeError):
+    """The structural checker could not complete reliably.
+
+    A failed checker is deliberately not represented as an empty finding
+    list: empty means the book was checked and found clean.
+    """
+
+
+def _frozen_checker_candidates() -> list[Path]:
+    executable = Path(sys.executable).resolve()
+    extension = ".exe" if os.name == "nt" else ""
+    candidates = [executable.with_name(f"{CHECKER_BINARY_NAME}{extension}")]
+
+    # Tauri's build output strips the target triple, but developers may run
+    # the target-suffixed source artifact in src-tauri/binaries directly.
+    if executable.name.startswith("bridge-engine"):
+        suffix = executable.name[len("bridge-engine"):]
+        candidates.append(executable.with_name(f"{CHECKER_BINARY_NAME}{suffix}"))
+    return list(dict.fromkeys(candidates))
+
+
+def _checker_command() -> list[str] | None:
+    """Resolve the checker command without ever re-invoking bridge-engine."""
+    override = os.getenv(CHECKER_OVERRIDE_ENV, "").strip()
+    if override:
+        path = Path(override).expanduser().resolve()
+        return [str(path)] if path.is_file() else None
+
+    if getattr(sys, "frozen", False):
+        for candidate in _frozen_checker_candidates():
+            if candidate.is_file():
+                return [str(candidate)]
+        return None
+
+    # Source mode uses the active Python interpreter. Ensure the vendored
+    # CLI's only third-party runtime dependency is actually importable.
+    if CHECKER_SCRIPT.is_file() and find_spec("regex") is not None:
+        return [sys.executable, str(CHECKER_SCRIPT)]
+    return None
+
+
+def _bounded_detail(value: str, limit: int = 2000) -> str:
+    cleaned = (value or "").strip()
+    return cleaned[-limit:] if cleaned else "no diagnostic output"
 
 _SEVERITY_MAP = {
     "severe errors": Severity.HIGH,
@@ -125,10 +174,10 @@ class UsfmAdapter(CheckAdapter):
     engine_name = "usfm"
 
     def is_available(self) -> bool:
-        return CHECKER_SCRIPT.is_file()
+        return _checker_command() is not None
 
     def using_real_engine(self) -> bool:
-        return True
+        return self.is_available()
 
     def version(self) -> str:
         return "vendored-18ddcf0"  # pinned commit short SHA, see vendor/greekroom-usfm/NOTICE.md
@@ -143,8 +192,10 @@ class UsfmAdapter(CheckAdapter):
         return []
 
     def check_book(self, *, project_id: str, book_id: str, usfm_text: str) -> list[QaFinding]:
-        if not self.is_available():
-            return []
+        command = _checker_command()
+        if command is None:
+            mode = "frozen helper" if getattr(sys, "frozen", False) else "source checker"
+            raise UsfmCheckerError(f"USFM structural checker unavailable ({mode} not found or incomplete)")
         book_upper = book_id.upper()
         with tempfile.TemporaryDirectory(prefix="bridge-usfm-check-") as tmp:
             tmp_path = Path(tmp)
@@ -155,26 +206,44 @@ class UsfmAdapter(CheckAdapter):
             extract_path = tmp_path / "extract.jsonl"
 
             try:
-                subprocess.run(
-                    [sys.executable, str(CHECKER_SCRIPT), str(source_path),
-                     "-o", str(report_path), "-x", str(html_path), "-e", str(extract_path)],
+                completed = subprocess.run(
+                    [*command, str(source_path), "-o", str(report_path),
+                     "-x", str(html_path), "-e", str(extract_path)],
                     cwd=str(tmp_path),
-                    env={**os.environ, "PYTHONPATH": str(VENDOR_ROOT)},
+                    env={
+                        **os.environ,
+                        # The upstream CLI opens Scripture without an
+                        # explicit encoding. Force UTF-8 so Tamil/Hebrew
+                        # files do not fall through Windows cp1252.
+                        "PYTHONUTF8": "1",
+                        "PYTHONIOENCODING": "utf-8",
+                        "PYTHONPATH": os.pathsep.join(filter(None, [
+                            str(VENDOR_ROOT), os.environ.get("PYTHONPATH", ""),
+                        ])),
+                    },
+                    stdin=subprocess.DEVNULL,
                     capture_output=True, text=True, timeout=120, check=False,
                 )
-            except Exception:
-                # Alpha/vendored tool, no supply-chain track record of its
-                # own yet (see docs/DEVELOPER_HANDOFF.md) — a bad book must
-                # degrade to "no USFM findings", never break the whole
-                # import/check flow around it.
-                return []
+            except subprocess.TimeoutExpired as exc:
+                raise UsfmCheckerError("USFM structural checker timed out after 120 seconds") from exc
+            except OSError as exc:
+                raise UsfmCheckerError(f"USFM structural checker could not start: {exc}") from exc
+
+            if completed.returncode != 0:
+                raise UsfmCheckerError(
+                    f"USFM structural checker exited with code {completed.returncode}: "
+                    f"{_bounded_detail(completed.stderr)}"
+                )
 
             if not report_path.is_file():
-                return []
+                raise UsfmCheckerError(
+                    "USFM structural checker exited successfully but produced no report: "
+                    f"{_bounded_detail(completed.stderr)}"
+                )
             try:
                 report_text = report_path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                return []
+            except OSError as exc:
+                raise UsfmCheckerError(f"USFM structural checker report could not be read: {exc}") from exc
 
         issues = _parse_report(report_text)
         findings: list[QaFinding] = []

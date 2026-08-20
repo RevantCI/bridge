@@ -16,6 +16,8 @@ export const chapterVerseNums = writable<Record<string, string[]>>({});
 // (verse "1" in chapter 1 and verse "1" in chapter 2 are different keys).
 export const verseTexts = writable<Record<string, string>>({});
 export const findingsByVerse = writable<Record<string, QaFinding[]>>({});
+export type CheckStatus = "pending" | "succeeded" | "failed";
+export const checkStatusByVerse = writable<Record<string, CheckStatus>>({});
 
 // Which chapters have had their verse text + checks loaded already, so
 // switching back to a chapter you've already visited doesn't re-fetch.
@@ -31,6 +33,7 @@ export function resetBookState(): void {
   chapterVerseNums.set({});
   verseTexts.set({});
   findingsByVerse.set({});
+  checkStatusByVerse.set({});
   loadedChapters.set({});
   selectedVerse.set(null);
   checkingProgress.set({ running: false, percent: 0, label: "" });
@@ -56,9 +59,10 @@ export const selectedFindings = derived(
 );
 
 export const approvedCount = derived(
-  [findingsByVerse, currentChapter, verseNums],
-  ([$findingsByVerse, $currentChapter, $verseNums]) =>
+  [findingsByVerse, checkStatusByVerse, currentChapter, verseNums],
+  ([$findingsByVerse, $checkStatusByVerse, $currentChapter, $verseNums]) =>
     $verseNums.filter((v) =>
+      $checkStatusByVerse[verseKey($currentChapter, v)] === "succeeded" &&
       ($findingsByVerse[verseKey($currentChapter, v)] ?? []).every((f) => f.status !== "open")
     ).length
 );
@@ -70,6 +74,7 @@ export function bookApprovedSummary(): { approvedChapters: number; totalChapters
   const loaded = get(loadedChapters);
   const cvn = get(chapterVerseNums);
   const fbv = get(findingsByVerse);
+  const statuses = get(checkStatusByVerse);
   if (!proj) return { approvedChapters: 0, totalChapters: 0 };
   const chapters = proj.chapters;
   let approvedChapters = 0;
@@ -78,6 +83,7 @@ export function bookApprovedSummary(): { approvedChapters: number; totalChapters
     const verses = cvn[ch] ?? [];
     if (verses.length === 0) continue;
     const allApproved = verses.every((v) =>
+      statuses[verseKey(ch, v)] === "succeeded" &&
       (fbv[verseKey(ch, v)] ?? []).every((f) => f.status !== "open")
     );
     if (allApproved) approvedChapters++;

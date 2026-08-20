@@ -7,11 +7,13 @@ __pycache__/
 .ruff_cache/
 engine/.venv/
 
-# PyInstaller build artifacts — these are machine/platform-specific
-# outputs, never source. Rebuild locally with `pyinstaller ...`.
+# PyInstaller output directories are machine/platform-specific. The two
+# named specs below are committed source for reproducible sidecar builds.
 engine/build/
 engine/dist/
 engine/*.spec
+!engine/bridge-engine.spec
+!engine/bridge-usfm-checker.spec
 
 # ===== Rust / Tauri (src-tauri/) =====
 src-tauri/target/

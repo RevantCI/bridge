@@ -48,7 +48,8 @@ pip install -e ".[dev]"
 pytest tests/ greek_room_engine/tests/ -v
 ```
 
-Should show **32 passed**. Try `python demo.py` for a live walkthrough
+Should show **52 passed, 1 skipped** without the optional real Wildebeest
+extra. Try `python demo.py` for a live walkthrough
 against a throwaway fixture project — no real translationCore project
 needed.
 
@@ -79,19 +80,30 @@ Requires the Rust toolchain (rustup.rs) plus, on Windows, the
 From the repository root on 64-bit Windows with the MSVC toolchain:
 
 ```powershell
-cd engine
-pyinstaller --onefile --name bridge-engine main.py
-cd ..
-Copy-Item .\engine\dist\bridge-engine.exe `
-  .\src-tauri\binaries\bridge-engine-x86_64-pc-windows-msvc.exe
 npm install
+.\scripts\build-sidecars.ps1
 npm run tauri dev
 ```
 
-For another platform, check the `host:` value from `rustc -vV`, append that
-target triple to the generated sidecar's filename, and copy it into
-`src-tauri/binaries/` before running `npm run tauri dev`. Omit `.exe` on
-macOS and Linux; see `src-tauri/binaries/README.txt` for filename examples.
+The build script creates and copies **two** target-suffixed executables:
+the long-lived JSON-RPC `bridge-engine` and the isolated
+`bridge-usfm-checker`. Both are required; the frozen engine deliberately
+does not try to execute a Python script through itself.
+
+Verify the frozen process boundary directly:
+
+```powershell
+python scripts\smoke_sidecars.py `
+  engine\dist\bridge-engine.exe
+```
+
+The smoke fixture has balanced markers but duplicate and missing verses,
+so only the real whole-book checker can make it pass.
+
+For another platform, the build script reads the `host:` value from
+`rustc -vV` and applies the target triple to both generated filenames.
+Omit `.exe` on macOS and Linux; see `src-tauri/binaries/README.txt` for
+filename examples.
 
 `npm run tauri dev` starts the frontend development server, compiles the Rust
 shell, launches the sidecar, and opens the Bridge desktop window.

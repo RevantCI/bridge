@@ -33,7 +33,8 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/bridge-engine"
+      "binaries/bridge-engine",
+      "binaries/bridge-usfm-checker"
     ]
   }
 }

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from greek_room_engine.engine import GreekRoomEngine
+from greek_room_engine.adapters.usfm_adapter import UsfmCheckerError
 from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity, FindingStatus
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
@@ -150,6 +151,7 @@ class BridgeEngine:
         # by project path so switching books/projects naturally invalidates.
         # Not invalidated by verse.edit — see _usfm_findings_for_book.
         self._usfm_findings_by_book: dict[str, list[QaFinding]] = {}
+        self._usfm_errors_by_book: dict[str, str] = {}
         # AppSettings() with no path defaults to a real, persistent location
         # (%LOCALAPPDATA%/.translationcore-ai-bridge/settings.json on
         # Windows), and get_api_key() also checks OPENAI_API_KEY. That's
@@ -181,6 +183,8 @@ class BridgeEngine:
         }
 
     def open_project(self, path: str) -> dict[str, Any]:
+        self._usfm_findings_by_book.clear()
+        self._usfm_errors_by_book.clear()
         self.project = TranslationCoreProject(path)
         return self._project_info()
 
@@ -236,6 +240,8 @@ class BridgeEngine:
                 entry["resourceMaterialization"] = materialization
 
         self.project = TranslationCoreProject(result["primaryProjectPath"])
+        self._usfm_findings_by_book.clear()
+        self._usfm_errors_by_book.clear()
         info = self._project_info()
         info["import"] = result
         info["importedProjects"] = result["projects"]
@@ -297,6 +303,9 @@ class BridgeEngine:
         cached = self._usfm_findings_by_book.get(book_key)
         if cached is not None:
             return cached
+        cached_error = self._usfm_errors_by_book.get(book_key)
+        if cached_error is not None:
+            raise UsfmCheckerError(cached_error)
 
         usfm_path = self.project.usfm_path()
         findings: list[QaFinding] = []
@@ -306,11 +315,15 @@ class BridgeEngine:
             except OSError:
                 usfm_text = ""
             if usfm_text:
-                findings = self.greek_room.check_book_usfm(
-                    project_id=str(self.project.summary.path),
-                    book_id=self.project.book_id,
-                    usfm_text=usfm_text,
-                )
+                try:
+                    findings = self.greek_room.check_book_usfm(
+                        project_id=str(self.project.summary.path),
+                        book_id=self.project.book_id,
+                        usfm_text=usfm_text,
+                    )
+                except UsfmCheckerError as exc:
+                    self._usfm_errors_by_book[book_key] = str(exc)
+                    raise
                 for f in findings:
                     # Same stabilization as Greek Room findings (see
                     # run_verse_checks below) — otherwise a fresh subprocess
@@ -354,17 +367,22 @@ class BridgeEngine:
 
         if "local" in checks or "usfm" in checks:
             # Whole-book findings that fall on this chapter; a finding with
-            # no specific verse (e.g. "chapter is missing verse 4") surfaces
-            # on the chapter's first verse rather than nowhere, since the UI
-            # has no chapter-level display slot.
+            # no existing verse slot (e.g. "chapter is missing verse 4")
+            # surfaces on the chapter's first verse rather than nowhere,
+            # since the UI can only request verses that actually exist.
             book_verses = self.project.verses(chapter) if chapter in self.project.chapters() else []
+            existing_verses = {str(value) for value in book_verses}
             first_verse = book_verses[0] if book_verses else None
             for f in self._usfm_findings_for_book():
                 if str(f.chapter) != str(chapter):
                     continue
                 if str(f.verse) == str(verse):
                     findings.append(f)
-                elif f.verse == 0 and first_verse is not None and str(verse) == str(first_verse):
+                elif (
+                    first_verse is not None
+                    and str(verse) == str(first_verse)
+                    and (f.verse == 0 or str(f.verse) not in existing_verses)
+                ):
                     findings.append(f)
 
         if "greekroom" in checks or "wildebeest" in checks:
@@ -572,5 +590,7 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "unknown_method", f"No handler for '{m}'")
         except ProjectError as exc:
             return EngineResponse.fail(request.id, "project_error", str(exc))
+        except UsfmCheckerError as exc:
+            return EngineResponse.fail(request.id, "checker_error", str(exc))
         except Exception as exc:  # noqa: BLE001 - protocol boundary must never crash the sidecar
             return EngineResponse.fail(request.id, "internal_error", str(exc))

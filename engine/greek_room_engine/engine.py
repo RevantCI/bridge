@@ -10,7 +10,7 @@ from typing import Any
 
 from .adapters.base import CheckAdapter
 from .adapters.wildebeest_adapter import WildebeestAdapter
-from .adapters.usfm_adapter import UsfmAdapter
+from .adapters.usfm_adapter import UsfmAdapter, UsfmCheckerError
 from .models.finding import QaFinding
 from .protocol import EngineRequest, EngineResponse, Methods
 
@@ -77,8 +77,8 @@ class GreekRoomEngine:
         caches the result rather than re-running this per verse.runChecks
         call — see UsfmAdapter's own docstring for why)."""
         adapter = self._adapters.get("usfm")
-        if adapter is None or not adapter.is_available():
-            return []
+        if adapter is None:
+            raise UsfmCheckerError("USFM structural checker adapter is not registered")
         findings = adapter.check_book(project_id=project_id, book_id=book_id, usfm_text=usfm_text)
         run_id = str(uuid.uuid4())
         for f in findings:

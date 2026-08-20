@@ -222,14 +222,17 @@ attribution, and an explicit "don't edit these files in place" policy —
 is in `NOTICE.md` in that directory. **Read `NOTICE.md` before re-syncing
 against upstream or making any change here.**
 
-**How it's invoked**: as a subprocess (`UsfmAdapter.check_book()`), not an
-import — `usfm_check.py` is a 4,000-line CLI/HTML-report tool, not a
-library, and its `import ualign_utilities` is a bare top-level import that
-only resolves with the vendor directory explicitly on `PYTHONPATH`
-(exactly the "path-sensitive internal import" the original Phase 4 plan
-warned about). Writes the book's USFM to a temp file, runs the script with
-`PYTHONPATH` pointed at the vendor root, parses its plain-text report
-(`-o`/`--out`) for findings.
+**How it's invoked**: as an isolated subprocess (`UsfmAdapter.check_book()`),
+not an import. In source mode the adapter uses the active Python interpreter
+and the vendored script. In a frozen build it resolves the sibling
+`bridge-usfm-checker[.exe]`, a separate PyInstaller artifact with a
+Bridge-owned entrypoint (`engine/usfm_checker_main.py`). This matters:
+`bridge-engine.exe` always starts the JSON-RPC loop and cannot be used as
+`python.exe usfm_check.py`. The helper bundles the pinned vendor directory,
+`regex`, both checker data files, and the license/notice. The adapter passes
+stdin as `DEVNULL`, validates the exit code and report, and returns an
+explicit `checker_error` for a timeout/crash/missing report instead of
+silently treating failure as a clean book.
 
 **Its own `-j/--json` output flag is dead code** — accepted by its
 argparse setup but never referenced anywhere else in the 4,000 lines.
@@ -283,22 +286,19 @@ across sessions.
 **Verified**: `test_usfm_adapter.py` (parser unit tests against real
 captured report text, not synthetic guesses; real end-to-end subprocess
 tests against real broken and clean USFM; a subprocess-failure test
-confirming graceful degradation) plus a book-level caching test in
-`test_bridge_service.py` confirming the subprocess runs once per book, not
-once per verse. Full suite: 51/51 passing.
+confirming explicit failure rather than false-clean degradation) plus
+book-level success/failure caching tests in `test_bridge_service.py`.
+`scripts/smoke_sidecars.py` runs the actual frozen `bridge-engine.exe` and
+helper against balanced USFM containing duplicate and missing verses, then
+asserts real `engine="usfm"` findings. Verified on Windows 2026-08-20.
+Base suite: 52 passed, 1 optional-Wildebeest module skipped.
 
-**Known gap, not yet resolved — read before doing a PyInstaller build with
-this included**: `UsfmAdapter` invokes the subprocess via
-`[sys.executable, str(CHECKER_SCRIPT), ...]`. In dev mode `sys.executable`
-is a real `python.exe`, so this works. In a **frozen PyInstaller build,
-`sys.executable` is `bridge-engine.exe` itself** — a onefile executable
-does not behave like `python.exe <script>.py` when given a script path
-argument. This was not resolved in this session (it needs either bundling
-a standalone Python interpreter alongside the frozen exe, or a different
-invocation strategy — a real design decision, not something to guess at).
-Until it is, expect USFM checks to silently produce no findings (via the
-same graceful-degradation path already tested) in a frozen build, while
-working normally via `npm run tauri dev` against a dev-mode sidecar.
+**Packaging**: run `scripts/build-sidecars.ps1`; it builds both committed
+specs and copies both target-suffixed artifacts into `src-tauri/binaries/`.
+Tauri declares both in `bundle.externalBin`. The first check for a book may
+take longer than an ordinary request, so `verse.runChecks` has a 150-second
+transport timeout around the checker's own 120-second hard limit. Moving
+book checking into a cancellable background job remains future work.
 
 Continue building Bridge's import workflow so users can bring in individual
 USFM/SFM files, whole-Bible folders, Paratext folders, and translationCore

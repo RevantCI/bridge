@@ -2,7 +2,7 @@
   import { bridge } from "../api/bridgeClient";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
-    verseTexts, verseKey,
+    verseTexts, checkStatusByVerse, verseKey,
   } from "../stores";
   import type { FindingStatus } from "../types/finding";
 
@@ -73,9 +73,12 @@
       await bridge.editVerse($currentChapter, $selectedVerse, editText);
       verseTexts.update((t) => ({ ...t, [key]: editText }));
       editing = false;
+      checkStatusByVerse.update((map) => ({ ...map, [key]: "pending" }));
       const findings = await bridge.runVerseChecks($currentChapter, $selectedVerse, ["local", "greekroom"]);
       findingsByVerse.update((map) => ({ ...map, [key]: findings }));
+      checkStatusByVerse.update((map) => ({ ...map, [key]: "succeeded" }));
     } catch (e) {
+      checkStatusByVerse.update((map) => ({ ...map, [key]: "failed" }));
       editError = e instanceof Error ? e.message : String(e);
     } finally {
       editSaving = false;

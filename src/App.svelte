@@ -9,7 +9,7 @@
   import ExportModal from "./lib/components/ExportModal.svelte";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
-    loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
+    checkStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
     verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState,
   } from "./lib/stores";
 
@@ -77,12 +77,18 @@
     verseTexts.update((t) => ({ ...t, ...texts }));
 
     checkingProgress.set({ running: true, percent: 0, label: `Checking chapter ${chapter}` });
+    let chapterFailed = false;
     for (let i = 0; i < verseIds.length; i++) {
       const v = verseIds[i];
+      const key = verseKey(chapter, v);
+      checkStatusByVerse.update((map) => ({ ...map, [key]: "pending" }));
       try {
         const findings = await bridge.runVerseChecks(chapter, v, ["local", "greekroom"]);
-        findingsByVerse.update((map) => ({ ...map, [verseKey(chapter, v)]: findings }));
+        findingsByVerse.update((map) => ({ ...map, [key]: findings }));
+        checkStatusByVerse.update((map) => ({ ...map, [key]: "succeeded" }));
       } catch (e) {
+        chapterFailed = true;
+        checkStatusByVerse.update((map) => ({ ...map, [key]: "failed" }));
         console.error(`check failed for ${chapter}:${v}`, e);
       }
       checkingProgress.set({
@@ -91,7 +97,9 @@
         label: `Checking chapter ${chapter}`,
       });
     }
-    loadedChapters.update((l) => ({ ...l, [chapter]: true }));
+    // A failed checker is not a clean/approved chapter. Leave it reloadable
+    // so switching back or pressing Run whole book retries the failed work.
+    loadedChapters.update((l) => ({ ...l, [chapter]: !chapterFailed }));
   }
 
   async function switchChapter(chapter: string) {
@@ -130,7 +138,7 @@
     bookSummary.approvedChapters === bookSummary.totalChapters;
 
   // recompute bookSummary reactively when findings/loadedChapters change
-  $: void $findingsByVerse, void $loadedChapters, (bookSummary = bookApprovedSummary());
+  $: void $findingsByVerse, void $checkStatusByVerse, void $loadedChapters, (bookSummary = bookApprovedSummary());
 </script>
 
 <div class="frame">

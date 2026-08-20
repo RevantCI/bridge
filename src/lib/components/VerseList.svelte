@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { verseNums, verseTexts, findingsByVerse, selectedVerse, currentChapter, showSource, verseKey } from "../stores";
+  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, selectedVerse, currentChapter, showSource, verseKey } from "../stores";
   import { buildSegments } from "../utils/highlight";
 
   export let onSelect: (verse: string) => void;
@@ -11,18 +11,22 @@
   {#each $verseNums as v}
     {@const key = verseKey($currentChapter, v)}
     {@const findings = $findingsByVerse[key] ?? []}
+    {@const checkStatus = $checkStatusByVerse[key]}
     {@const openCount = findings.filter((f) => f.status === "open").length}
     {@const segments = buildSegments($verseTexts[key] ?? "", findings)}
     <div
       class="verse"
       class:active={$selectedVerse === v}
-      class:approved={findings.length > 0 && openCount === 0}
+      class:approved={checkStatus === "succeeded" && openCount === 0}
+      class:check-failed={checkStatus === "failed"}
       role="button"
       tabindex="0"
       on:click={() => onSelect(v)}
       on:keydown={(e) => (e.key === "Enter" || e.key === " ") && onSelect(v)}
     >
-      <div class="vnum">{v}{#if findings.length > 0 && openCount === 0}&nbsp;✓{/if}</div>
+      <div class="vnum">
+        {v}{#if checkStatus === "succeeded" && openCount === 0}&nbsp;✓{:else if checkStatus === "failed"}&nbsp;⚠{/if}
+      </div>
       <div class="vtext">
         {#each segments as seg}
           {#if seg.className}
@@ -48,6 +52,7 @@
   .verse.active { background: var(--accent-bg); border-color: #C7D9FB; }
   .vnum { font-size: 11px; font-weight: 700; color: var(--text-3); width: 26px; flex-shrink: 0; padding-top: 2px; }
   .verse.approved .vnum { color: var(--success); }
+  .verse.check-failed .vnum { color: var(--danger, #ef4444); }
   .vtext { font-size: 16px; line-height: 1.85; color: var(--text); }
   .empty { color: var(--text-3); font-size: 13px; }
 </style>

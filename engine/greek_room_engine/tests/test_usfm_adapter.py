@@ -13,9 +13,16 @@ Split into two kinds of coverage:
     present, though it's committed to the repo so this should never
     actually skip in a normal checkout.
 """
+import subprocess
+
 import pytest
 
-from greek_room_engine.adapters.usfm_adapter import UsfmAdapter, _parse_report
+from greek_room_engine.adapters.usfm_adapter import (
+    UsfmAdapter,
+    UsfmCheckerError,
+    _checker_command,
+    _parse_report,
+)
 from greek_room_engine.engine import GreekRoomEngine
 from greek_room_engine.models.finding import Severity
 
@@ -115,15 +122,67 @@ def test_real_subprocess_finds_nothing_in_clean_usfm():
     assert findings == []
 
 
-@pytest.mark.skipif(not _real_checker_available(), reason="vendored usfm_check.py not present")
-def test_broken_subprocess_degrades_to_no_findings_not_a_crash(monkeypatch):
+@pytest.mark.skipif(not _real_checker_available(), reason="vendored USFM checker dependencies not available")
+def test_broken_subprocess_is_an_explicit_failure_not_a_clean_book(monkeypatch):
     from greek_room_engine.adapters import usfm_adapter
 
     def broken_run(*args, **kwargs):
-        raise RuntimeError("simulated subprocess failure")
+        raise OSError("simulated subprocess failure")
 
     monkeypatch.setattr(usfm_adapter.subprocess, "run", broken_run)
 
     engine = GreekRoomEngine()
-    findings = engine.check_book_usfm(project_id="p", book_id="tit", usfm_text="\\id TIT\n\\c 1\n\\v 1 Text.\n")
-    assert findings == []
+    with pytest.raises(UsfmCheckerError, match="could not start"):
+        engine.check_book_usfm(project_id="p", book_id="tit", usfm_text="\\id TIT\n\\c 1\n\\v 1 Text.\n")
+
+
+def test_success_without_report_is_an_explicit_failure(monkeypatch):
+    from greek_room_engine.adapters import usfm_adapter
+
+    monkeypatch.setattr(usfm_adapter, "_checker_command", lambda: ["fake-checker"])
+    monkeypatch.setattr(
+        usfm_adapter.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", "worker diagnostic"),
+    )
+
+    with pytest.raises(UsfmCheckerError, match="produced no report"):
+        UsfmAdapter().check_book(project_id="p", book_id="tit", usfm_text="\\id TIT\n")
+
+
+def test_nonzero_exit_is_an_explicit_failure(monkeypatch):
+    from greek_room_engine.adapters import usfm_adapter
+
+    monkeypatch.setattr(usfm_adapter, "_checker_command", lambda: ["fake-checker"])
+    monkeypatch.setattr(
+        usfm_adapter.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 7, "", "checker exploded"),
+    )
+
+    with pytest.raises(UsfmCheckerError, match="code 7.*checker exploded"):
+        UsfmAdapter().check_book(project_id="p", book_id="tit", usfm_text="\\id TIT\n")
+
+
+def test_frozen_mode_resolves_sibling_helper_not_bridge_engine(tmp_path, monkeypatch):
+    from greek_room_engine.adapters import usfm_adapter
+
+    engine = tmp_path / "bridge-engine.exe"
+    helper = tmp_path / "bridge-usfm-checker.exe"
+    engine.write_bytes(b"engine")
+    helper.write_bytes(b"helper")
+    monkeypatch.setattr(usfm_adapter.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(usfm_adapter.sys, "executable", str(engine))
+    monkeypatch.delenv(usfm_adapter.CHECKER_OVERRIDE_ENV, raising=False)
+
+    assert _checker_command() == [str(helper.resolve())]
+
+
+def test_checker_override_is_explicit_path(tmp_path, monkeypatch):
+    from greek_room_engine.adapters import usfm_adapter
+
+    helper = tmp_path / "custom checker.exe"
+    helper.write_bytes(b"helper")
+    monkeypatch.setenv(usfm_adapter.CHECKER_OVERRIDE_ENV, str(helper))
+
+    assert _checker_command() == [str(helper.resolve())]
