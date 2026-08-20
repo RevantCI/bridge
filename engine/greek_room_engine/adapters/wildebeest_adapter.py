@@ -14,18 +14,45 @@ built and tested independently.
 """
 from __future__ import annotations
 
+import io
+import json
+import logging
 import re
+import sys
 from typing import Any
 
 from .base import CheckAdapter
 from ..models.finding import QaFinding, FindingCategory, Severity, EvidenceItem
 
+log = logging.getLogger(__name__)
+
 try:
+    import wildebeest  # type: ignore
     import wildebeest.wb_analysis as wb_ana  # type: ignore
     _WILDEBEEST_AVAILABLE = True
-except ImportError:
+    # stdout is reserved strictly for the JSON-RPC protocol stream
+    # (stdio_transport.py) — stderr is where the Rust side's sidecar.rs
+    # prints everything, prefixed "[bridge-engine]", visible live in
+    # whichever terminal `npm run tauri dev` is running in. Without this
+    # line, whether the real engine loaded or silently fell back to the
+    # mock was completely invisible short of manually calling engine.info.
+    print(f"[wildebeest] real engine active, version {getattr(wildebeest, '__version__', 'unknown')}",
+          file=sys.stderr, flush=True)
+except Exception as exc:
+    # Deliberately broad, not just ImportError: an installed-but-broken
+    # wildebeest must degrade to the mock, never crash the whole sidecar at
+    # startup. Confirmed necessary, not defensive-programming paranoia —
+    # wildebeest-nlp 0.9.2 (the only release on PyPI, and the same on
+    # upstream's GitHub HEAD as of 2026-08) fails with UnicodeEncodeError,
+    # not ImportError, when compiled under Python 3.13: one of its
+    # docstrings contains a literal lone-surrogate escape (\uDC80-\uDCFF,
+    # used as prose describing surrogateescape handling), which Python 3.13
+    # newly rejects in docstrings (see CPython issue #142411). See
+    # docs/DEVELOPER_HANDOFF.md for the full investigation and options.
     wb_ana = None
     _WILDEBEEST_AVAILABLE = False
+    print(f"[wildebeest] real engine unavailable ({exc!r}), using mock fallback",
+          file=sys.stderr, flush=True)
 
 
 # Very small illustrative script-mixing check used only when the real
@@ -67,41 +94,112 @@ class WildebeestAdapter(CheckAdapter):
     def _check_with_wildebeest(self, project_id: str, lang_code: str,
                                 ref: str, text: str) -> list[QaFinding]:
         """
-        Adapts wildebeest's BibleTranslationCheck response into QaFindings.
+        Adapts real Wildebeest analysis into QaFindings.
 
-        NOTE: exact call shape depends on the installed wildebeest version;
-        adjust field access here if upstream's response schema changes.
-        This isolation is the whole point of the adapter boundary (doc §3).
+        wb_analysis has no `check()`/issue-list function — it's built as a
+        bulk file-analysis tool. The actual programmatic entry point is
+        `wb_analysis.process(string=..., lang_code=..., json_output=<IO>)`,
+        which writes an aggregate report grouped by category, not a flat
+        per-position issue list (verified directly against wildebeest-nlp
+        0.9.2, since its own docs don't describe this — see
+        docs/DEVELOPER_HANDOFF.md for the investigation).
+
+        Only a subset of that report's top-level keys represent an actual
+        problem for a single short verse; most of the rest (letter-script
+        counts, the full per-character `block` inventory, digit/number
+        breakdowns) are corpus-level descriptive tallies — e.g. `block`
+        lists ordinary Tamil letters just because they occurred, not
+        because anything is wrong with them. Treating every key as a
+        finding would flood a verse with "findings" for its own ordinary
+        text. Wired up so far, each verified against real flagged input:
+          - `notable-token`: tokens containing characters from more than
+            one script (mixed-script tokens — the case the old mock
+            approximated with one regex).
+          - `non-canonical`: characters not in Unicode Normalization Form C
+            (e.g. NFD-decomposed instead of NFC-composed).
+          - zero-width/invisible characters, read from `block.ZERO_WIDTH`
+            (bidi/formatting characters that are invisible but real).
+        Not yet wired: `char-conflict` and `pattern` — real categories in
+        the schema, but no input was found in this session that populated
+        them, so their exact shape is still unverified. Don't guess it;
+        that's exactly the mistake that made this function wrong the first
+        time. Verify against real triggering input before adding them.
         """
         findings: list[QaFinding] = []
-        check_request = {"lang_code": lang_code, "ref": ref, "text": text}
-        check_response = wb_ana.check(check_request)  # type: ignore[attr-defined]
+        book = ref.split()[0] if " " in ref else ""
+        buf = io.StringIO()
+        try:
+            wb_ana.process(string=text, lang_code=lang_code, json_output=buf)  # type: ignore[union-attr]
+            data = json.loads(buf.getvalue())
+        except Exception:
+            # Wildebeest is explicitly Alpha (doc §31) — a bad verse must
+            # degrade to "no wildebeest findings for this verse", never take
+            # down the whole verse.runChecks call alongside local/tN/tW
+            # findings that have nothing to do with it.
+            log.exception("Real Wildebeest analysis failed for %s; skipping wildebeest findings for this verse.", ref)
+            return findings
 
-        for item in getattr(check_response, "issues", []) or []:
-            findings.append(QaFinding(
-                project_id=project_id,
-                book=ref.split()[0] if " " in ref else "",
-                original_text=text[getattr(item, "start", 0):getattr(item, "end", 0)],
-                start_offset=getattr(item, "start", None),
-                end_offset=getattr(item, "end", None),
-                engine=self.engine_name,
-                check_type=f"wildebeest.{getattr(item, 'check_id', 'unknown')}",
-                category=FindingCategory.UNICODE,
-                severity=self._map_severity(getattr(item, "severity", 0.5)),
-                confidence=float(getattr(item, "severity", 0.5)),
-                suggested_replacement=getattr(item, "suggestion", None),
-                explanation=getattr(item, "description", "Wildebeest flagged this span."),
-                engine_version=self.version(),
+        for category_name, tokens in (data.get("notable-token") or {}).items():
+            if not isinstance(tokens, dict):
+                continue
+            for token_text in tokens:
+                findings.append(self._make_finding(
+                    project_id=project_id, book=book, text=text, flagged=token_text,
+                    check_type="wildebeest.notable_token",
+                    severity=Severity.HIGH, confidence=0.85,
+                    explanation=f"{category_name.capitalize()}.",
+                    evidence=[EvidenceItem(label="Category", value=category_name)],
+                ))
+
+        for orig, details in (data.get("non-canonical") or {}).items():
+            if not isinstance(details, dict):
+                continue
+            norm = str(details.get("norm") or "") or None
+            orig_form = str(details.get("orig-form") or "").strip().rstrip(",").strip()
+            norm_form = str(details.get("norm-form") or "").strip().rstrip(",").strip()
+            findings.append(self._make_finding(
+                project_id=project_id, book=book, text=text, flagged=orig,
+                check_type="wildebeest.non_canonical",
+                severity=Severity.MEDIUM, confidence=0.75,
+                explanation=f"Not in Unicode Normalization Form C ({orig_form} instead of {norm_form}).",
+                suggested_replacement=norm,
             ))
+
+        zero_width = ((data.get("block") or {}).get("ZERO_WIDTH")) or {}
+        for char, details in zero_width.items():
+            if not isinstance(details, dict):
+                continue
+            name = str(details.get("name") or "unknown character")
+            findings.append(self._make_finding(
+                project_id=project_id, book=book, text=text, flagged=char,
+                check_type="wildebeest.zero_width",
+                severity=Severity.MEDIUM, confidence=0.8,
+                explanation=f"Contains a zero-width/invisible character: {name}.",
+            ))
+
         return findings
 
-    @staticmethod
-    def _map_severity(score: float) -> Severity:
-        if score >= 0.8:
-            return Severity.HIGH
-        if score >= 0.5:
-            return Severity.MEDIUM
-        return Severity.LOW
+    def _make_finding(self, *, project_id: str, book: str, text: str, flagged: str,
+                       check_type: str, severity: Severity, confidence: float,
+                       explanation: str, suggested_replacement: str | None = None,
+                       evidence: list[EvidenceItem] | None = None) -> QaFinding:
+        start = text.find(flagged) if flagged else -1
+        return QaFinding(
+            project_id=project_id,
+            book=book,
+            original_text=flagged,
+            start_offset=start if start >= 0 else None,
+            end_offset=(start + len(flagged)) if start >= 0 else None,
+            engine=self.engine_name,
+            check_type=check_type,
+            category=FindingCategory.UNICODE,
+            severity=severity,
+            confidence=confidence,
+            suggested_replacement=suggested_replacement,
+            explanation=explanation,
+            evidence=evidence or [],
+            engine_version=self.version(),
+        )
 
     # -- fallback mock ------------------------------------------------------
 

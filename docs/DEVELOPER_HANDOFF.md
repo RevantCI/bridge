@@ -128,9 +128,72 @@ roadmap order still applies.
 - **`export.nonAligned` is a simplified reconstruction**, not a lossless round trip
   (`\id`/`\c`/`\v` only — footnotes, section headers, poetry markup not preserved).
 - **OWL repeated-word adapter doesn't exist yet** (`adapters/owl_adapter.py`).
-- **Real Wildebeest package is still untested** — the adapter has a mock fallback
-  (`_WILDEBEEST_AVAILABLE = False` branch) and real integration (`pip install greekroom`)
-  hasn't been exercised.
+- ~~Real Wildebeest package is still untested~~ — **done 2026-08-20, real
+  engine wired up and passing tests. Requires Python 3.12, not 3.13.**
+
+  **Root cause of the original blocker**: `pip install wildebeest` installs
+  the wrong package (a same-named, unrelated ShopRunner image-processing
+  library — never use it). The real one, from Ulf Hermjakob/USC-ISI, is on
+  PyPI as **`wildebeest-nlp`** (only release: 0.9.2). Installing that under
+  Python 3.13 fails to *compile* with `UnicodeEncodeError: ...surrogates not
+  allowed` — one of its docstrings contains a literal `\uDC80`-`\uDCFF`
+  escape as prose (describing surrogateescape handling, ironically), and
+  **Python 3.13 newly disallows lone-surrogate escapes in docstrings at
+  compile time** ([CPython issue #142411](https://github.com/python/cpython/issues/142411)
+  confirms this is an intentional 3.13 change). Confirmed the same broken
+  docstring is still on upstream's GitHub `master`, so installing from
+  GitHub wouldn't have helped either. **Python 3.12.10 does not hit this
+  restriction — confirmed working.** The machine this was developed on has
+  since been switched from 3.13 to 3.12 entirely.
+
+  **Engine now has a dedicated venv**: `engine/.venv` (gitignored), built
+  with `py -3.12 -m venv .venv`, populated via
+  `.venv\Scripts\python.exe -m pip install -e ".[dev,wildebeest]"`. The
+  `wildebeest` extra in `pyproject.toml` pins `wildebeest-nlp==0.9.2` and is
+  optional, not a hard dependency — `WildebeestAdapter` degrades to its mock
+  whether it's installed or not, so a plain `pip install -e ".[dev]"` on any
+  supported Python still works. Run tests via
+  `engine\.venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -q`
+  (45 passed, includes 6 new real-engine tests, auto-skipped when the extra
+  isn't installed).
+
+  **Found and fixed a real related bug while investigating**: the adapter's
+  `try: import wildebeest.wb_analysis ... except ImportError` only caught
+  `ImportError`. Since the real failure mode is `UnicodeEncodeError`, simply
+  having `wildebeest-nlp` installed (even with zero other code changes)
+  would have crashed the entire sidecar at startup instead of degrading to
+  the mock. Widened to `except Exception` — done and safe regardless of
+  which Python version anyone else builds with.
+
+  **What `_check_with_wildebeest()` now actually does** (previous version
+  called a `wb_ana.check()` function that doesn't exist in the real
+  package — that whole implementation was speculative and never once run
+  against the real dependency). The real entry point is
+  `wb_analysis.process(string=, lang_code=, json_output=<IO>)`, which
+  returns an aggregate analysis report grouped by category — not a flat
+  per-position issue list. Verified directly against 0.9.2 with real inputs
+  (not documented anywhere upstream). Only three of its categories are
+  wired into findings, each checked against real triggering input:
+  `notable-token` (mixed-script tokens), `non-canonical` (NFD vs NFC form,
+  with a real suggested-replacement), and zero-width/invisible characters
+  from `block.ZERO_WIDTH`. Deliberately **not** treating every top-level key
+  as a finding — most of the rest (`letter-script`, `block`'s ordinary
+  per-character tallies) are corpus-level descriptive counts, not defects;
+  verified a clean real Tamil verse produces zero findings from the real
+  engine. `char-conflict` and `pattern` are real categories in the schema
+  that no test input in this session happened to trigger — their shape is
+  unverified, so they're not wired up. Don't guess it; verify against real
+  triggering input first, the same way the rest of this was done.
+
+  **Not yet done**: PyInstaller packaging for the real engine wasn't
+  attempted this session. `wildebeest-nlp` ships a `data/` directory
+  alongside its code — untested whether `wb_analysis.process()` reads
+  anything from it at runtime (none of the three wired categories needed it
+  in testing, but that doesn't rule out other paths). If building a frozen
+  `.exe` with the real engine included, add
+  `--collect-data wildebeest` to the PyInstaller command below as a
+  defensive measure and verify carefully — this is unverified insurance,
+  not a confirmed-necessary step.
 - **Drag-and-drop import is still not wired** — no `onDragDropEvent` listener from
   `@tauri-apps/api` exists in `src/`; `ImportScreen` still requires the file picker.
 
@@ -337,17 +400,23 @@ import→`verse.runChecks` call surfaces real `translation_note`/
   path. `knowledge_base.py.resolve('translationAcademy')` will raise
   `KnowledgeBaseError` if something calls it before this exists — currently
   nothing on any wired protocol method does.
-- **PyInstaller build needs `--add-data` to ship the bundle**, e.g. (from
-  `engine/`, Windows path separator is `;`):
-  `pyinstaller --onefile --name bridge-engine --add-data "resources;resources" main.py`.
-  Without it, a frozen `.exe` has no bundled snapshot and every raw import
-  falls back to `unavailable` on a machine where `ensure_resources_installed`
-  has never run before (dev-mode runs are unaffected since
-  `bundled_resources_source()` reads straight from `engine/resources`). This
-  was not verified against an actual PyInstaller build in this session — no
-  sidecar binary was built (see the multi-book navigation section above for
-  the same constraint). Confirm the frozen `.exe` actually finds the bundle
-  via `sys._MEIPASS` before shipping.
+- **PyInstaller build needs `--add-data` to ship the bundle**, and should
+  now be run from the `engine/.venv` Python 3.12 environment (see the real
+  Wildebeest section above), e.g. (from `engine/`, Windows path separator
+  is `;`):
+  `.venv\Scripts\python.exe -m PyInstaller --onefile --name bridge-engine --add-data "resources;resources" main.py`.
+  Without `--add-data`, a frozen `.exe` has no bundled tN/tW snapshot and
+  every raw import falls back to `unavailable` on a machine where
+  `ensure_resources_installed` has never run before (dev-mode runs are
+  unaffected since `bundled_resources_source()` reads straight from
+  `engine/resources`). If the real Wildebeest engine (`wildebeest-nlp`,
+  installed via the `wildebeest` extra) should be in the build, also add
+  `--collect-data wildebeest` — unverified insurance for its `data/`
+  directory, see the real Wildebeest section above. This was not verified
+  against an actual PyInstaller build in this session — no sidecar binary
+  was built. Confirm the frozen `.exe` actually finds the resource bundle
+  via `sys._MEIPASS`, and that Greek Room findings still say
+  `usingRealEngine: true` in `engine.info`, before shipping.
 - **Only English is bundled.** Non-English tN/tW (or a refreshed English
   version) still needs the online path described in the original P0 below —
   not built in this pass, since it wasn't required to satisfy the

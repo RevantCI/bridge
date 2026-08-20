@@ -16,7 +16,15 @@ def test_engine_info_lists_wildebeest_adapter():
     assert "wildebeest" in resp.result["adapters"]
 
 
-def test_verse_check_mixed_script_flagged_by_mock_adapter():
+def test_verse_check_mixed_script_flagged_by_mock_adapter(monkeypatch):
+    # Force the mock path regardless of whether the optional real
+    # wildebeest-nlp package happens to be installed in this environment —
+    # this test is specifically about the fallback mock's own behavior
+    # (see test_wildebeest_real.py for the real-engine equivalent, skipped
+    # automatically when the real package isn't installed).
+    from greek_room_engine.adapters import wildebeest_adapter
+    monkeypatch.setattr(wildebeest_adapter, "_WILDEBEEST_AVAILABLE", False)
+
     engine = GreekRoomEngine()
     req = EngineRequest(
         id="3",

@@ -4,8 +4,8 @@ version = "0.8.0.dev0"
 description = "Bridge sidecar: tc_ai_bridge business logic + Greek Room QA, one protocol"
 requires-python = ">=3.11"
 dependencies = [
-    # Pin an exact upstream commit once vendored, per doc §31 (Greek Room is Alpha).
-    # "wildebeest",
+    # "greekroom" left commented — OWL/USFM/versification/UAlign not wired
+    # up yet (see docs/DEVELOPER_HANDOFF.md's Phase 4-6 status).
     # "greekroom",
 ]
 
@@ -13,6 +13,19 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pyinstaller>=6.0",
+]
+# Optional, not a hard dependency: the real PyPI package name is
+# "wildebeest-nlp" (NOT "wildebeest" — that name belongs to an unrelated
+# ShopRunner image-processing package). Pinned to the only release that
+# exists (0.9.2). It cannot currently be installed under Python 3.13 — one
+# of its docstrings contains a literal lone-surrogate escape that 3.13
+# newly rejects at compile time (CPython issue #142411); confirmed still
+# broken on upstream's GitHub HEAD too, not just this PyPI release. Works
+# under 3.12. See docs/DEVELOPER_HANDOFF.md for the full investigation.
+# WildebeestAdapter degrades to its mock automatically whether this extra
+# is installed or not, so leaving it uninstalled is always safe.
+wildebeest = [
+    "wildebeest-nlp==0.9.2",
 ]
 
 [build-system]

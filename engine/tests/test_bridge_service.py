@@ -97,7 +97,12 @@ def test_clean_verse_has_no_findings(fixture_project):
     assert result["findings"] == []
 
 
-def test_mixed_script_verse_is_flagged_by_greek_room():
+def test_mixed_script_verse_is_flagged_by_greek_room(monkeypatch):
+    # Force the mock adapter path — see test_wildebeest_real.py for
+    # coverage of the real engine, skipped when it isn't installed.
+    from greek_room_engine.adapters import wildebeest_adapter
+    monkeypatch.setattr(wildebeest_adapter, "_WILDEBEEST_AVAILABLE", False)
+
     engine = BridgeEngine()
     findings = engine.greek_room.check_verse(
         project_id="p", lang_code="tam", ref="RUT 1:1", text="தேவன்aஆதி", checks=["wildebeest"],
