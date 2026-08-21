@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from greek_room_engine.engine import GreekRoomEngine
-from greek_room_engine.adapters.usfm_adapter import UsfmCheckerError
+from greek_room_engine.adapters.usfm_adapter import UsfmCheckerCancelled, UsfmCheckerError
 from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity, FindingStatus
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
@@ -306,6 +306,7 @@ class BridgeEngine:
 
     def _usfm_findings_for_book(
         self, project: Optional[TranslationCoreProject] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> list[QaFinding]:
         """Lazily compute + cache whole-book USFM structural findings.
 
@@ -340,7 +341,10 @@ class BridgeEngine:
                         project_id=str(project.summary.path),
                         book_id=project.book_id,
                         usfm_text=usfm_text,
+                        cancel_event=cancel_event,
                     )
+                except UsfmCheckerCancelled:
+                    raise
                 except UsfmCheckerError as exc:
                     self._usfm_errors_by_book[book_key] = str(exc)
                     raise
@@ -503,9 +507,9 @@ class BridgeEngine:
 
         preflight = None
         if any(name in spec.checks for name in ("local", "usfm")):
-            def run_preflight() -> None:
+            def run_preflight(cancel_event: threading.Event) -> None:
                 with self._checker_lock:
-                    self._usfm_findings_for_book(project)
+                    self._usfm_findings_for_book(project, cancel_event=cancel_event)
             preflight = run_preflight
 
         return self._check_jobs.start(
@@ -556,42 +560,131 @@ class BridgeEngine:
 
     # -- export -------------------------------------------------------------
     #
-    # NOTE on scope: there is no existing USFM writer anywhere in
-    # tc_ai_bridge — only a reader (usfm.py has strip_usfm/marker_balance_
-    # issues, not a serializer). target_chapter() JSON only stores
-    # per-verse plain text, not the original book's full USFM structure
-    # (headers, footnotes, poetry markers) — that lives only in the
-    # original .usfm file, keyed by nothing we can round-trip verse-by-
-    # verse. So "non-aligned export" here is a real, working, but
-    # SIMPLIFIED USFM reconstruction (\id, \c, \v markers only) — not a
-    # full-fidelity round-trip of the original file. Documented, not
-    # silently pretended otherwise.
+    # Raw imports preserve their original USFM alongside the normalized tC
+    # project. Use that file as a structural template so headings, poetry,
+    # footnotes, custom/ESFM markers, and verse bridges survive export. The
+    # normalized target chapter JSON supplies each current verse payload,
+    # which also removes imported USFM 3 alignment milestones. Older tC
+    # projects without a source USFM still receive an explicit simplified
+    # reconstruction rather than failing export altogether.
+
+    def _source_preserving_usfm(self) -> str | None:
+        source_path = self.project.usfm_path()
+        if source_path is None:
+            return None
+        try:
+            raw_source = source_path.read_bytes()
+        except OSError:
+            return None
+        source = ""
+        for encoding in ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
+            try:
+                candidate = raw_source.decode(encoding)
+            except UnicodeError:
+                continue
+            if "\\c" in candidate and "\\v" in candidate:
+                source = candidate
+                break
+        if not source:
+            return None
+        # Avoid mixed or doubled CRLF when the rendered string is written
+        # through Python's platform-aware text layer on Windows.
+        source = source.replace("\r\n", "\n").replace("\r", "\n")
+
+        chapter_pattern = re.compile(
+            r"(?im)^[ \t]*\\c\s+(?P<number>\S+)(?:[ \t].*)?(?:\r?\n|$)"
+        )
+        verse_pattern = re.compile(
+            r"(?im)^[ \t]*\\v\s+(?P<number>\S+)(?P<separator>[ \t]*)"
+        )
+        chapters = list(chapter_pattern.finditer(source))
+        verses = list(verse_pattern.finditer(source))
+        if not chapters or not verses:
+            return None
+
+        replacements: list[tuple[int, int, str]] = []
+        chapter_index = -1
+        available_chapters = set(self.project.chapters())
+        verse_cache: dict[str, set[str]] = {}
+        for verse_index, verse_match in enumerate(verses):
+            while (
+                chapter_index + 1 < len(chapters)
+                and chapters[chapter_index + 1].start() < verse_match.start()
+            ):
+                chapter_index += 1
+            if chapter_index < 0:
+                continue
+            chapter = chapters[chapter_index].group("number")
+            verse = verse_match.group("number")
+            if chapter not in available_chapters:
+                continue
+            chapter_verses = verse_cache.setdefault(chapter, set(self.project.verses(chapter)))
+            if verse not in chapter_verses:
+                continue
+
+            next_verse = (
+                verses[verse_index + 1].start()
+                if verse_index + 1 < len(verses)
+                else len(source)
+            )
+            next_chapter = (
+                chapters[chapter_index + 1].start()
+                if chapter_index + 1 < len(chapters)
+                else len(source)
+            )
+            content_end = min(next_verse, next_chapter)
+            current_text = self.project.target_verse_text(chapter, verse).strip()
+            if current_text and not verse_match.group("separator"):
+                current_text = " " + current_text
+            replacements.append(
+                (verse_match.end(), content_end, current_text.rstrip() + "\n")
+            )
+
+        if not replacements:
+            return None
+        pieces: list[str] = []
+        cursor = 0
+        for start, end, replacement in replacements:
+            pieces.extend((source[cursor:start], replacement))
+            cursor = end
+        pieces.append(source[cursor:])
+        rendered = "".join(pieces)
+        return rendered if rendered.endswith("\n") else rendered + "\n"
 
     def export_non_aligned(self, output_path: str) -> dict[str, Any]:
-        """Writes simplified USFM (id/chapter/verse markers only, no
-        footnotes/poetry/section markup) for every chapter to output_path."""
+        """Write current verse text as non-aligned, re-importable USFM."""
         self._require_project()
         summary = self.project.summary
-        lines = [f"\\id {summary.book_id.upper()}"]
-        for chapter in self.project.chapters():
-            lines.append(f"\\c {chapter}")
-            for verse in self.project.verses(chapter):
-                text = self.project.target_verse_text(chapter, verse)
-                if verse.isdigit():
+        content = self._source_preserving_usfm()
+        fidelity = "source-preserving"
+        if content is None:
+            fidelity = "simplified"
+            lines = [f"\\id {summary.book_id.upper()}"]
+            for chapter in self.project.chapters():
+                lines.append(f"\\c {chapter}")
+                for verse in self.project.verses(chapter):
+                    if verse == "front":
+                        continue
+                    text = self.project.target_verse_text(chapter, verse)
                     lines.append(f"\\v {verse} {text}")
-        content = "\n".join(lines) + "\n"
+            content = "\n".join(lines) + "\n"
         Path(output_path).write_text(content, encoding="utf-8")
         return {
             "written": True, "path": output_path,
             "bookId": summary.book_id, "chapters": len(self.project.chapters()),
-            "note": "Simplified USFM (id/chapter/verse markers only) — see docstring for scope.",
+            "fidelity": fidelity,
+            "note": (
+                "Original USFM structure preserved with current verse text."
+                if fidelity == "source-preserving"
+                else "No source USFM was available; generated id/chapter/verse markers only."
+            ),
         }
 
     def export_aligned(self, output_path: str) -> dict[str, Any]:
         """Writes a structured JSON export: per chapter/verse, target text
         + full alignment groups + any recorded human QA decisions. This is
         genuinely complete (alignment data IS already the project's native
-        format, nothing simplified here) — unlike the USFM export above."""
+        format, nothing simplified here)."""
         self._require_project()
         summary = self.project.summary
         book = summary.book_id

@@ -117,7 +117,10 @@ def test_clean_verse_has_no_findings(fixture_project):
 def test_chapter_check_job_reports_real_progress_and_results(fixture_project, monkeypatch):
     engine = BridgeEngine()
     call(engine, "project.open", {"path": str(fixture_project)})
-    monkeypatch.setattr(engine, "_usfm_findings_for_book", lambda project=None: [])
+    monkeypatch.setattr(
+        engine, "_usfm_findings_for_book",
+        lambda project=None, cancel_event=None: [],
+    )
 
     started = call(engine, "checks.start", {
         "scope": "chapter", "chapters": ["1"], "checks": ["local", "greekroom"],
@@ -129,6 +132,30 @@ def test_chapter_check_job_reports_real_progress_and_results(fixture_project, mo
     assert finished["chapterVerses"] == {"1": ["1"]}
     assert finished["results"]["1:1"]["status"] == "succeeded"
     assert isinstance(finished["results"]["1:1"]["findings"], list)
+
+
+def test_whole_book_job_checks_every_chapter_once(fixture_project):
+    (fixture_project / "rut" / "2.json").write_text(json.dumps({
+        "1": "இரண்டாம் அதிகாரம்.",
+    }, ensure_ascii=False), encoding="utf-8")
+    alignment_dir = fixture_project / ".apps" / "translationCore" / "alignmentData" / "rut"
+    (alignment_dir / "2.json").write_text(json.dumps({
+        "1": {"alignments": [], "wordBank": [{
+            "word": "இரண்டாம்", "occurrence": 1, "occurrences": 1,
+        }]},
+    }, ensure_ascii=False), encoding="utf-8")
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    started = call(engine, "checks.start", {
+        "scope": "book", "checks": ["greekroom"],
+    })["result"]
+    finished = wait_for_job(engine, started["jobId"])
+
+    assert finished["state"] == "succeeded"
+    assert finished["chapterVerses"] == {"1": ["1"], "2": ["1"]}
+    assert set(finished["results"]) == {"1:1", "2:1"}
+    assert all(result["status"] == "succeeded" for result in finished["results"].values())
 
 
 def test_check_job_can_cancel_and_retry(fixture_project, monkeypatch):
@@ -158,6 +185,31 @@ def test_check_job_can_cancel_and_retry(fixture_project, monkeypatch):
     finished = wait_for_job(engine, retried["jobId"])
     assert finished["state"] == "succeeded"
     assert finished["jobId"] != started["jobId"]
+
+
+def test_check_job_cancels_during_usfm_preflight(fixture_project, monkeypatch):
+    from greek_room_engine.adapters.usfm_adapter import UsfmCheckerCancelled
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    entered = threading.Event()
+
+    def slow_preflight(project=None, cancel_event=None):
+        entered.set()
+        assert cancel_event is not None
+        cancel_event.wait(timeout=2)
+        raise UsfmCheckerCancelled("cancelled by test")
+
+    monkeypatch.setattr(engine, "_usfm_findings_for_book", slow_preflight)
+    started = call(engine, "checks.start", {
+        "scope": "chapter", "chapters": ["1"], "checks": ["local"],
+    })["result"]
+    assert entered.wait(timeout=1)
+    call(engine, "checks.cancel", {"jobId": started["jobId"]})
+
+    cancelled = wait_for_job(engine, started["jobId"])
+    assert cancelled["state"] == "cancelled"
+    assert cancelled["finishedAt"] is not None
 
 
 def test_check_job_rejects_a_second_active_job(fixture_project, monkeypatch):
@@ -224,7 +276,7 @@ def test_usfm_checks_run_once_per_book_not_once_per_verse(fixture_project):
 
     call_count = 0
 
-    def fake_check_book_usfm(*, project_id, book_id, usfm_text):
+    def fake_check_book_usfm(*, project_id, book_id, usfm_text, cancel_event=None):
         nonlocal call_count
         call_count += 1
         from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity
@@ -459,6 +511,15 @@ def test_decision_persists_across_repeated_check_runs(fixture_project):
     assert second_run[0]["status"] == "accepted"
     assert second_run[0]["human_comment"] == "reviewed"
 
+    restarted = BridgeEngine()
+    call(restarted, "project.open", {"path": str(fixture_project)})
+    after_restart = call(restarted, "verse.runChecks", {
+        "chapter": "1", "verse": "1", "checks": ["greekroom"],
+    })["findings"]
+    assert after_restart[0]["id"] == finding_id
+    assert after_restart[0]["status"] == "accepted"
+    assert after_restart[0]["human_comment"] == "reviewed"
+
 
 def test_settings_supports_any_provider_not_just_openai(tmp_path, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -484,11 +545,72 @@ def test_export_non_aligned_writes_real_usfm_file(fixture_project, tmp_path):
     out_path = tmp_path / "export.usfm"
     result = call(engine, "export.nonAligned", {"outputPath": str(out_path)})["result"]
     assert result["written"] is True
+    assert result["fidelity"] == "source-preserving"
     content = out_path.read_text(encoding="utf-8")
     assert "\\id RUT" in content
     assert "\\c 1" in content
     assert "\\v 1" in content
     assert "தேவன்" in content
+    from tc_ai_bridge.project_import import inspect_import
+    preview = inspect_import(out_path)
+    assert preview["books"][0]["bookId"] == "rut"
+    assert preview["books"][0]["verseCount"] == 1
+
+
+@pytest.mark.parametrize("source_encoding", ["utf-8", "utf-16"])
+def test_non_aligned_export_preserves_usfm_esfm_structure(tmp_path, source_encoding):
+    source = tmp_path / "TIT.usfm"
+    source.write_text(
+        "\\id TIT\n"
+        "\\usfm 3.0\n"
+        "\\h Titus\n"
+        "\\toc1 The Letter to Titus\n"
+        "\\c 1\n"
+        "\\s1 Greeting\n"
+        "\\p\n"
+        "\\v 1 Paul spoke. \\f + \\ft A footnote.\\f*\n"
+        "\\q1 A poetry continuation.\n"
+        "\\v 3-4 Bridged text. \\zbridge custom\\zbridge*\n",
+        encoding=source_encoding,
+    )
+    engine = BridgeEngine()
+    imported = call(engine, "project.import", {
+        "path": str(source),
+        "destinationRoot": str(tmp_path / "projects"),
+        "metadata": {
+            "languageId": "eng",
+            "languageName": "English",
+            "languageDirection": "ltr",
+            "projectName": "Titus",
+            "bibleName": "Test Bible",
+        },
+    })
+    assert imported["success"] is True
+
+    out_path = tmp_path / "exported.usfm"
+    exported = call(engine, "export.nonAligned", {"outputPath": str(out_path)})["result"]
+    content = out_path.read_text(encoding="utf-8")
+
+    assert exported["fidelity"] == "source-preserving"
+    for marker in ("\\usfm 3.0", "\\h Titus", "\\toc1", "\\s1 Greeting", "\\p",
+                   "\\f +", "\\ft A footnote.", "\\q1", "\\v 3-4", "\\zbridge"):
+        assert marker in content
+    from tc_ai_bridge.project_import import inspect_import
+    preview = inspect_import(out_path)
+    assert preview["books"][0]["verseCount"] == 2
+
+
+def test_non_aligned_export_has_explicit_fallback_without_source(fixture_project, tmp_path):
+    (fixture_project / "rut.usfm").unlink()
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    out_path = tmp_path / "fallback.usfm"
+
+    result = call(engine, "export.nonAligned", {"outputPath": str(out_path)})["result"]
+
+    assert result["fidelity"] == "simplified"
+    assert "No source USFM was available" in result["note"]
+    assert "\\v 1 " in out_path.read_text(encoding="utf-8")
 
 
 def test_export_aligned_writes_real_json_with_alignment_and_decisions(fixture_project, tmp_path):

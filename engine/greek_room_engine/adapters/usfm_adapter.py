@@ -23,6 +23,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
@@ -42,6 +44,10 @@ class UsfmCheckerError(RuntimeError):
     A failed checker is deliberately not represented as an empty finding
     list: empty means the book was checked and found clean.
     """
+
+
+class UsfmCheckerCancelled(UsfmCheckerError):
+    """The caller cancelled a running structural-check subprocess."""
 
 
 def _frozen_checker_candidates() -> list[Path]:
@@ -77,9 +83,16 @@ def _checker_command() -> list[str] | None:
     return None
 
 
-def _bounded_detail(value: str, limit: int = 2000) -> str:
-    cleaned = (value or "").strip()
-    return cleaned[-limit:] if cleaned else "no diagnostic output"
+def _bounded_detail(value: str, limit: int = 600) -> str:
+    """Return the useful final diagnostic, not an entire Python traceback."""
+    lines = [line.strip() for line in (value or "").splitlines() if line.strip()]
+    if not lines:
+        return "no diagnostic output"
+    useful = next(
+        (line for line in reversed(lines) if not line.startswith(("Traceback ", "File "))),
+        lines[-1],
+    )
+    return useful[-limit:]
 
 _SEVERITY_MAP = {
     "severe errors": Severity.HIGH,
@@ -191,7 +204,10 @@ class UsfmAdapter(CheckAdapter):
         # loop, since it isn't registered as "usfm" in that loop's checks).
         return []
 
-    def check_book(self, *, project_id: str, book_id: str, usfm_text: str) -> list[QaFinding]:
+    def check_book(
+        self, *, project_id: str, book_id: str, usfm_text: str,
+        cancel_event: threading.Event | None = None,
+    ) -> list[QaFinding]:
         command = _checker_command()
         if command is None:
             mode = "frozen helper" if getattr(sys, "frozen", False) else "source checker"
@@ -205,27 +221,20 @@ class UsfmAdapter(CheckAdapter):
             html_path = tmp_path / "report.html"
             extract_path = tmp_path / "extract.jsonl"
 
+            args = [*command, str(source_path), "-o", str(report_path),
+                    "-x", str(html_path), "-e", str(extract_path)]
+            env = {
+                **os.environ,
+                "PYTHONUTF8": "1",
+                "PYTHONIOENCODING": "utf-8",
+                "PYTHONPATH": os.pathsep.join(filter(None, [
+                    str(VENDOR_ROOT), os.environ.get("PYTHONPATH", ""),
+                ])),
+            }
             try:
-                completed = subprocess.run(
-                    [*command, str(source_path), "-o", str(report_path),
-                     "-x", str(html_path), "-e", str(extract_path)],
-                    cwd=str(tmp_path),
-                    env={
-                        **os.environ,
-                        # The upstream CLI opens Scripture without an
-                        # explicit encoding. Force UTF-8 so Tamil/Hebrew
-                        # files do not fall through Windows cp1252.
-                        "PYTHONUTF8": "1",
-                        "PYTHONIOENCODING": "utf-8",
-                        "PYTHONPATH": os.pathsep.join(filter(None, [
-                            str(VENDOR_ROOT), os.environ.get("PYTHONPATH", ""),
-                        ])),
-                    },
-                    stdin=subprocess.DEVNULL,
-                    capture_output=True, text=True, timeout=120, check=False,
+                completed = self._run_checker(
+                    args, cwd=tmp_path, env=env, cancel_event=cancel_event,
                 )
-            except subprocess.TimeoutExpired as exc:
-                raise UsfmCheckerError("USFM structural checker timed out after 120 seconds") from exc
             except OSError as exc:
                 raise UsfmCheckerError(f"USFM structural checker could not start: {exc}") from exc
 
@@ -273,3 +282,45 @@ class UsfmAdapter(CheckAdapter):
                 engine_version=self.version(),
             ))
         return findings
+
+    @staticmethod
+    def _run_checker(
+        args: list[str], *, cwd: Path, env: dict[str, str],
+        cancel_event: threading.Event | None,
+    ) -> subprocess.CompletedProcess[str]:
+        if cancel_event is None:
+            try:
+                return subprocess.run(
+                    args, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=120, check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise UsfmCheckerError("USFM structural checker timed out after 120 seconds") from exc
+
+        process = subprocess.Popen(
+            args, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+        )
+        deadline = time.monotonic() + 120
+        while process.poll() is None:
+            if cancel_event.wait(timeout=0.05):
+                process.terminate()
+                try:
+                    process.communicate(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate(timeout=3)
+                raise UsfmCheckerCancelled("USFM structural checker was cancelled")
+            if time.monotonic() >= deadline:
+                process.terminate()
+                try:
+                    process.communicate(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate(timeout=3)
+                raise UsfmCheckerError("USFM structural checker timed out after 120 seconds")
+
+        stdout, stderr = process.communicate()
+        return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)

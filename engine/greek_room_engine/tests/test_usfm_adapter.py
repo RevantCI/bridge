@@ -14,15 +14,29 @@ Split into two kinds of coverage:
     actually skip in a normal checkout.
 """
 import subprocess
+import sys
+import threading
+import time
 
 import pytest
 
 from greek_room_engine.adapters.usfm_adapter import (
     UsfmAdapter,
+    UsfmCheckerCancelled,
     UsfmCheckerError,
+    _bounded_detail,
     _checker_command,
     _parse_report,
 )
+
+
+def test_checker_diagnostic_hides_traceback_noise():
+    diagnostic = """No configuration filename provided
+Traceback (most recent call last):
+  File \"worker.py\", line 4, in main
+UnicodeDecodeError: invalid start byte
+"""
+    assert _bounded_detail(diagnostic) == "UnicodeDecodeError: invalid start byte"
 from greek_room_engine.engine import GreekRoomEngine
 from greek_room_engine.models.finding import Severity
 
@@ -162,6 +176,28 @@ def test_nonzero_exit_is_an_explicit_failure(monkeypatch):
 
     with pytest.raises(UsfmCheckerError, match="code 7.*checker exploded"):
         UsfmAdapter().check_book(project_id="p", book_id="tit", usfm_text="\\id TIT\n")
+
+
+def test_running_checker_can_be_cancelled_without_waiting_for_timeout(tmp_path, monkeypatch):
+    from greek_room_engine.adapters import usfm_adapter
+
+    worker = tmp_path / "slow_checker.py"
+    worker.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+    monkeypatch.setattr(usfm_adapter, "_checker_command", lambda: [sys.executable, str(worker)])
+    cancel_event = threading.Event()
+    timer = threading.Timer(0.15, cancel_event.set)
+    timer.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(UsfmCheckerCancelled, match="cancelled"):
+            UsfmAdapter().check_book(
+                project_id="p", book_id="tit", usfm_text="\\id TIT\n",
+                cancel_event=cancel_event,
+            )
+    finally:
+        timer.cancel()
+
+    assert time.monotonic() - started < 5
 
 
 def test_frozen_mode_resolves_sibling_helper_not_bridge_engine(tmp_path, monkeypatch):

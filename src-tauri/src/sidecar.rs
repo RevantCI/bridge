@@ -7,6 +7,7 @@
 
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::AppHandle;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -16,15 +17,21 @@ use tokio::sync::{oneshot, Mutex};
 type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
 
 pub struct EngineSidecar {
-    child: Mutex<Option<CommandChild>>,
+    child: Arc<Mutex<Option<CommandChild>>>,
     pending: PendingMap,
+    app: Mutex<Option<AppHandle>>,
+    start_lock: Mutex<()>,
+    generation: Arc<AtomicU64>,
 }
 
 impl EngineSidecar {
     pub fn new() -> Self {
         Self {
-            child: Mutex::new(None),
+            child: Arc::new(Mutex::new(None)),
             pending: Arc::new(Mutex::new(HashMap::new())),
+            app: Mutex::new(None),
+            start_lock: Mutex::new(()),
+            generation: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -32,6 +39,12 @@ impl EngineSidecar {
     /// demultiplexes stdout lines back to whichever `send_request` call is
     /// waiting on that response `id`.
     pub async fn start(&self, app: &AppHandle) -> Result<(), String> {
+        *self.app.lock().await = Some(app.clone());
+        let _start_guard = self.start_lock.lock().await;
+        if self.child.lock().await.is_some() {
+            return Ok(());
+        }
+
         let sidecar_command = app
             .shell()
             .sidecar("bridge-engine")
@@ -42,8 +55,11 @@ impl EngineSidecar {
             .map_err(|e| format!("failed to spawn sidecar: {e}"))?;
 
         *self.child.lock().await = Some(child);
+        let process_generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
 
         let pending = self.pending.clone();
+        let child_slot = self.child.clone();
+        let generation = self.generation.clone();
         tauri::async_runtime::spawn(async move {
             while let Some(event) = rx.recv().await {
                 match event {
@@ -64,10 +80,7 @@ impl EngineSidecar {
                         }
                     }
                     CommandEvent::Stderr(line_bytes) => {
-                        eprintln!(
-                            "[bridge-engine] {}",
-                            String::from_utf8_lossy(&line_bytes)
-                        );
+                        eprintln!("[bridge-engine] {}", String::from_utf8_lossy(&line_bytes));
                     }
                     CommandEvent::Terminated(payload) => {
                         eprintln!("[bridge-engine] terminated: {:?}", payload);
@@ -75,6 +88,17 @@ impl EngineSidecar {
                     }
                     _ => {}
                 }
+            }
+
+            // Only the reader belonging to the currently registered process
+            // may clear it. This prevents a late termination event from an
+            // older process from erasing a newly restarted child.
+            if generation.load(Ordering::SeqCst) == process_generation {
+                *child_slot.lock().await = None;
+                // Dropping every sender wakes in-flight calls immediately
+                // with a closed-channel error instead of making them wait for
+                // the full request timeout.
+                pending.lock().await.clear();
             }
         });
 
@@ -85,6 +109,16 @@ impl EngineSidecar {
     /// matching response by `id`. Timeout protects the UI from hanging
     /// forever if the sidecar crashes mid-request.
     pub async fn send_request(&self, method: &str, params: Value) -> Result<Value, String> {
+        if self.child.lock().await.is_none() {
+            let app = self
+                .app
+                .lock()
+                .await
+                .clone()
+                .ok_or_else(|| "sidecar has not been initialized".to_string())?;
+            self.start(&app).await?;
+        }
+
         let id = uuid::Uuid::new_v4().to_string();
         let request = serde_json::json!({ "id": id, "method": method, "params": params });
 
@@ -93,14 +127,27 @@ impl EngineSidecar {
 
         {
             let mut child_guard = self.child.lock().await;
-            let child = child_guard
-                .as_mut()
-                .ok_or_else(|| "sidecar not started".to_string())?;
+            let child = match child_guard.as_mut() {
+                Some(child) => child,
+                None => {
+                    self.pending.lock().await.remove(&id);
+                    return Err(
+                        "sidecar stopped before the request was sent; retry to restart it".into(),
+                    );
+                }
+            };
             let mut line = request.to_string();
             line.push('\n');
-            child
-                .write(line.as_bytes())
-                .map_err(|e| format!("failed to write to sidecar stdin: {e}"))?;
+            if let Err(error) = child.write(line.as_bytes()) {
+                // The process may have died before its termination event was
+                // delivered. Clear the stale handle so the next request can
+                // start a fresh sidecar instead of repeatedly writing to it.
+                *child_guard = None;
+                self.pending.lock().await.remove(&id);
+                return Err(format!(
+                    "failed to write to sidecar stdin: {error}; retry to restart it"
+                ));
+            }
         }
 
         // A whole-Bible import can parse and normalize dozens of files. Keep

@@ -272,7 +272,7 @@
     </div>
   {:else if $checkingProgress.state === "failed" || $checkingProgress.state === "cancelled"}
     <div class="progress-row check-notice">
-      <span>{$checkingProgress.error || ($checkingProgress.state === "cancelled" ? "Checking was cancelled." : "Checking failed.")}</span>
+      <span class="check-message" title={$checkingProgress.error}>{$checkingProgress.error || ($checkingProgress.state === "cancelled" ? "Checking was cancelled." : "Checking failed.")}</span>
       <span class="grow" />
       <button class="progress-action" on:click={retryChecks}>Retry</button>
       <button class="progress-action" on:click={dismissCheckNotice}>Dismiss</button>
@@ -322,7 +322,8 @@
   .fill { height: 100%; background: var(--accent); transition: width 0.3s; }
   .progress-action { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
   .progress-action:disabled { opacity: 0.55; cursor: wait; }
-  .check-notice { color: var(--danger); }
+  .check-notice { color: var(--danger); height: auto; min-height: 32px; max-height: 96px; align-items: flex-start; padding-top: 7px; padding-bottom: 7px; }
+  .check-message { flex: 1; min-width: 0; max-height: 78px; overflow: auto; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
   .body { flex: 1; display: flex; overflow: hidden; }
   .editor-col { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .editor-toolbar { height: 34px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: 11px; color: var(--text-2); flex-shrink: 0; }

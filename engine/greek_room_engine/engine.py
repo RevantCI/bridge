@@ -69,7 +69,9 @@ class GreekRoomEngine:
 
         return findings
 
-    def check_book_usfm(self, *, project_id: str, book_id: str, usfm_text: str) -> list[QaFinding]:
+    def check_book_usfm(
+        self, *, project_id: str, book_id: str, usfm_text: str, cancel_event=None,
+    ) -> list[QaFinding]:
         """USFM structural checks (duplicate/missing verses, unclosed
         markers, ...) operate on a whole book, not one verse — unlike
         check_verse, this is not part of the per-verse checks list and must
@@ -79,7 +81,10 @@ class GreekRoomEngine:
         adapter = self._adapters.get("usfm")
         if adapter is None:
             raise UsfmCheckerError("USFM structural checker adapter is not registered")
-        findings = adapter.check_book(project_id=project_id, book_id=book_id, usfm_text=usfm_text)
+        findings = adapter.check_book(
+            project_id=project_id, book_id=book_id, usfm_text=usfm_text,
+            cancel_event=cancel_event,
+        )
         run_id = str(uuid.uuid4())
         for f in findings:
             f.run_id = run_id

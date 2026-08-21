@@ -2,12 +2,15 @@
   import { bridge } from "../api/bridgeClient";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
-    verseTexts, checkStatusByVerse, verseKey,
+    verseTexts, checkStatusByVerse, checkingProgress, verseKey,
   } from "../stores";
   import type { FindingStatus } from "../types/finding";
 
   let greekRoomChecking = false;
   let lastCheckedKey = "";
+  let liveCheckSequence = 0;
+  let displayedLiveCheck = 0;
+  const latestLiveCheckByVerse = new Map<string, number>();
 
   // Re-run Greek Room live whenever the selected verse changes — per the
   // approved design, Greek Room is the one engine that re-checks live on
@@ -21,10 +24,14 @@
   }
 
   async function runLiveGreekRoomCheck(chapter: string, verse: string) {
+    const key = verseKey(chapter, verse);
+    const requestToken = ++liveCheckSequence;
+    latestLiveCheckByVerse.set(key, requestToken);
+    displayedLiveCheck = requestToken;
     greekRoomChecking = true;
     try {
       const findings = await bridge.runVerseChecks(chapter, verse, ["greekroom"]);
-      const key = verseKey(chapter, verse);
+      if (latestLiveCheckByVerse.get(key) !== requestToken) return;
       findingsByVerse.update((map) => {
         const existing = (map[key] ?? []).filter((f) => f.engine !== "wildebeest");
         return { ...map, [key]: [...existing, ...findings] };
@@ -32,14 +39,16 @@
     } catch (e) {
       console.error("Greek Room live check failed", e);
     } finally {
-      greekRoomChecking = false;
+      if (displayedLiveCheck === requestToken) greekRoomChecking = false;
     }
   }
 
   async function decide(findingId: string, status: FindingStatus) {
     if (!$selectedVerse) return;
-    await bridge.decideVerse($currentChapter, $selectedVerse, findingId, status);
-    const key = verseKey($currentChapter, $selectedVerse);
+    const chapter = $currentChapter;
+    const verse = $selectedVerse;
+    const key = verseKey(chapter, verse);
+    await bridge.decideVerse(chapter, verse, findingId, status);
     findingsByVerse.update((map) => {
       const list = (map[key] ?? []).map((f) => (f.id === findingId ? { ...f, status } : f));
       return { ...map, [key]: list };
@@ -50,17 +59,31 @@
   let editText = "";
   let editError: string | null = null;
   let editSaving = false;
+  let editChapter = "";
+  let editVerse = "";
+
+  $: if (
+    editing && !editSaving && $selectedVerse &&
+    verseKey($currentChapter, $selectedVerse) !== verseKey(editChapter, editVerse)
+  ) {
+    editing = false;
+    editError = null;
+  }
 
   function startEdit() {
-    if (!$selectedVerse) return;
-    editText = $verseTexts[verseKey($currentChapter, $selectedVerse)] ?? "";
+    if (!$selectedVerse || $checkingProgress.running) return;
+    editChapter = $currentChapter;
+    editVerse = $selectedVerse;
+    editText = $verseTexts[verseKey(editChapter, editVerse)] ?? "";
     editError = null;
     editing = true;
   }
 
   async function saveEdit() {
-    if (!$selectedVerse) return;
-    const key = verseKey($currentChapter, $selectedVerse);
+    if (!editChapter || !editVerse) return;
+    const chapter = editChapter;
+    const verse = editVerse;
+    const key = verseKey(chapter, verse);
     if (editText.trim() === ($verseTexts[key] ?? "").trim()) {
       // No real change — apply_scripture_edit rejects this as a no-op
       // rather than journaling a spurious edit, so don't call it.
@@ -70,11 +93,12 @@
     editError = null;
     editSaving = true;
     try {
-      await bridge.editVerse($currentChapter, $selectedVerse, editText);
+      await bridge.editVerse(chapter, verse, editText);
       verseTexts.update((t) => ({ ...t, [key]: editText }));
       editing = false;
       checkStatusByVerse.update((map) => ({ ...map, [key]: "pending" }));
-      const findings = await bridge.runVerseChecks($currentChapter, $selectedVerse, ["local", "greekroom"]);
+      latestLiveCheckByVerse.set(key, ++liveCheckSequence);
+      const findings = await bridge.runVerseChecks(chapter, verse, ["local", "greekroom"]);
       findingsByVerse.update((map) => ({ ...map, [key]: findings }));
       checkStatusByVerse.update((map) => ({ ...map, [key]: "succeeded" }));
     } catch (e) {
@@ -169,7 +193,12 @@
     </div>
 
     <div class="footer-actions">
-      <button class="edit-btn" on:click={startEdit}>✎ Edit verse</button>
+      <button
+        class="edit-btn"
+        on:click={startEdit}
+        disabled={$checkingProgress.running || editing}
+        title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
+      >✎ Edit verse</button>
     </div>
   {:else}
     <div class="empty-panel">Select a verse to review its findings.</div>
@@ -212,5 +241,6 @@
   .decision-row button:disabled, .edit-actions button:disabled { opacity: .55; cursor: not-allowed; }
   .footer-actions { padding: 12px 16px; border-top: 1px solid var(--border); }
   .edit-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
+  .edit-btn:disabled { opacity: .55; cursor: not-allowed; }
   .empty-panel { padding: 24px 16px; font-size: 12px; color: var(--text-3); }
 </style>

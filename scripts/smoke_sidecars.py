@@ -98,6 +98,21 @@ def main() -> int:
             raise SystemExit(f"Request {request_id} timed out")
 
         try:
+            info = request("info", "engine.info", {})
+            if not info.get("success"):
+                raise SystemExit(f"Request info failed: {info}")
+            wildebeest = (
+                info.get("result", {})
+                .get("greekRoom", {})
+                .get("adapters", {})
+                .get("wildebeest", {})
+            )
+            if not wildebeest.get("usingRealEngine"):
+                raise SystemExit(
+                    "Frozen engine is using the Wildebeest mock fallback: "
+                    f"{wildebeest}"
+                )
+
             opened = request("open", "project.open", {"path": str(project)})
             if not opened.get("success"):
                 raise SystemExit(f"Request open failed: {opened}")
@@ -141,7 +156,10 @@ def main() -> int:
                 process.kill()
                 process.communicate(timeout=5)
 
-    print("Frozen sidecar smoke test passed: background job returned real duplicate and missing-verse findings.")
+    print(
+        "Frozen sidecar smoke test passed: real Wildebeest loaded and the "
+        "background job returned duplicate and missing-verse findings."
+    )
     return 0
 
 

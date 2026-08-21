@@ -95,7 +95,7 @@ class _CheckJob:
 
 
 RunStage = Callable[[str, str, list[str]], list[dict[str, Any]]]
-Preflight = Callable[[], None]
+Preflight = Callable[[threading.Event], None]
 
 
 class CheckJobManager:
@@ -184,7 +184,7 @@ class CheckJobManager:
                     return
                 with job.lock:
                     job.current_stage = "USFM structure"
-                preflight()
+                preflight(job.cancel_event)
                 with job.lock:
                     job.completed_steps += 1
 
@@ -231,6 +231,8 @@ class CheckJobManager:
                 job.current_verse = None
                 job.finished_at = _now()
         except Exception as exc:
+            if self._cancelled(job):
+                return
             with job.lock:
                 job.state = "failed"
                 job.error = str(exc)

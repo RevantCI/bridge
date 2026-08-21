@@ -122,7 +122,8 @@ def test_basic_usfm3_alignment_is_preserved(tmp_path):
     assert [word.word for word in alignment.word_bank] == ["came"]
 
 
-def test_tc_archive_import_preserves_check_indexes(tmp_path):
+@pytest.mark.parametrize("extension", [".tcore", ".tstudio", ".zip"])
+def test_tc_archive_import_preserves_check_indexes(tmp_path, extension):
     source_project = tmp_path / "source-project"
     alignment = source_project / ".apps" / "translationCore" / "alignmentData" / "tit"
     index = source_project / ".apps" / "translationCore" / "index" / "translationNotes" / "tit"
@@ -139,7 +140,7 @@ def test_tc_archive_import_preserves_check_indexes(tmp_path):
     (target / "1.json").write_text('{"1":"Text"}', encoding="utf-8")
     (index / "grammar.json").write_text('[{"contextId":{"tool":"translationNotes"}}]', encoding="utf-8")
 
-    archive_path = tmp_path / "project.tcore"
+    archive_path = tmp_path / f"project{extension}"
     with zipfile.ZipFile(archive_path, "w") as archive:
         for path in source_project.rglob("*"):
             if path.is_file():
@@ -187,3 +188,75 @@ def test_verse_bridge_import_and_check_does_not_crash(tmp_path):
 
     checked = _call(engine, "verse.runChecks", {"chapter": "1", "verse": "3-4", "checks": ["local"]})
     assert checked["success"] is True
+
+
+def test_paratext_settings_are_detected_without_modifying_source(tmp_path):
+    source = tmp_path / "ParatextProject"
+    source.mkdir()
+    scripture = source / "57TIT.SFM"
+    scripture.write_text(SIMPLE_USFM, encoding="utf-8")
+    settings = source / "Settings.xml"
+    settings.write_text(
+        "<ScriptureText><Name>Community NT</Name><FullName>Community Bible</FullName>"
+        "<LanguageIsoCode>ory</LanguageIsoCode><LeftToRight>true</LeftToRight></ScriptureText>",
+        encoding="utf-8",
+    )
+    before = {path.name: path.read_bytes() for path in source.iterdir()}
+
+    preview = inspect_import(source)
+
+    assert preview["kind"] == "paratext"
+    assert preview["metadata"]["languageId"] == "ory"
+    assert preview["metadata"]["projectName"] == "Community NT"
+    assert preview["metadata"]["bibleName"] == "Community Bible"
+    assert "languageName" in preview["missingFields"]
+    assert {path.name: path.read_bytes() for path in source.iterdir()} == before
+
+
+def test_utf8_bom_non_latin_txt_import_preserves_text(tmp_path):
+    source = tmp_path / "REV.txt"
+    source.write_text("\\id REV\n\\h ପ୍ରକାଶିତ\n\\c 1\n\\v 1 ପ୍ରଥମ ପଦ।\n", encoding="utf-8-sig")
+
+    result = import_source(source, tmp_path / "projects", _metadata(
+        languageId="ory", languageName="Odia", projectName="Odia Revelation",
+    ))
+    project = TranslationCoreProject(result["primaryProjectPath"])
+
+    assert project.target_verse_text("1", "1") == "ପ୍ରଥମ ପଦ।"
+    assert (Path(result["primaryProjectPath"]) / "rev.usfm").read_bytes() == source.read_bytes()
+
+
+def test_import_rejects_incomplete_metadata(tmp_path):
+    source = tmp_path / "TIT.usfm"
+    source.write_text(SIMPLE_USFM, encoding="utf-8")
+
+    with pytest.raises(ProjectError, match="languageId.*languageName"):
+        import_source(source, tmp_path / "projects", {"projectName": "Titus", "bibleName": "Bible"})
+
+
+def test_import_rejects_duplicate_verse_numbers(tmp_path):
+    source = tmp_path / "TIT.usfm"
+    source.write_text("\\id TIT\n\\c 1\n\\v 1 First.\n\\v 1 Duplicate.\n", encoding="utf-8")
+
+    with pytest.raises(ProjectError, match="Duplicate verse 1:1"):
+        inspect_import(source)
+
+
+def test_translationcore_folder_import_preserves_project_files(tmp_path):
+    source = tmp_path / "existing-tc"
+    (source / "tit").mkdir(parents=True)
+    (source / "manifest.json").write_text(json.dumps({
+        "project": {"id": "tit", "name": "Titus"},
+        "target_language": {"id": "eng", "name": "English", "direction": "ltr"},
+        "resource": {"id": "ult", "name": "Existing Bible"},
+    }), encoding="utf-8")
+    (source / "tit" / "1.json").write_text('{"1":"Existing text"}', encoding="utf-8")
+    (source / "reviewer-notes.txt").write_text("preserve me", encoding="utf-8")
+
+    result = import_source(source, tmp_path / "projects", _metadata())
+    imported = Path(result["primaryProjectPath"])
+    project = TranslationCoreProject(imported)
+
+    assert project.target_verse_text("1", "1") == "Existing text"
+    assert project.load_verse_alignment("1", "1").word_bank
+    assert (imported / "reviewer-notes.txt").read_text(encoding="utf-8") == "preserve me"

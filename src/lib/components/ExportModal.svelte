@@ -42,8 +42,8 @@
     </button>
 
     <button class="export-opt" on:click={() => doExport("nonAligned")} disabled={exporting}>
-      <div class="t">Non-aligned data (simplified USFM)</div>
-      <div class="d">Verse text only, with basic \id / \c / \v markers. Note: this is a simplified reconstruction — footnotes, section headers, and poetry markup from the original file are not preserved.</div>
+      <div class="t">Non-aligned USFM</div>
+      <div class="d">Current verse text without alignment data. When the imported source is available, headings, poetry, footnotes, verse bridges, and custom/ESFM markers are preserved. Older projects without source files use basic \id / \c / \v markers.</div>
     </button>
 
     {#if exporting}<p class="status">Writing…</p>{/if}
