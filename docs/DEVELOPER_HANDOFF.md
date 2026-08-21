@@ -362,8 +362,10 @@ Important behavior:
   translationCore `topWords`/`bottomWords` groups.
 - Unsupported or malformed nested alignment structures are not guessed; target
   words remain in `wordBank` for review.
-- Multi-book folders produce one compatible project per book. The import result
-  returns every path in `importedProjects` and opens the first project.
+- Multi-book folders produce one compatible project entry per book. All source
+  files are copied immediately, the first book is normalized and opened, and
+  remaining books carry `.bridge/lazy-import.json` until first open. Every
+  sibling has `.bridge/collection.json`, so the full selector survives restart.
 - ZIP entries are validated against path traversal before extraction.
 - Imports use private staging and collision suffixes instead of deleting or
   overwriting existing projects.
@@ -392,8 +394,10 @@ The Tauri layer adds:
 
 - Native import-file picker with USFM/SFM/TXT/TCORE/TSTUDIO/ZIP filters.
 - Thin commands for inspection and import.
-- A five-minute sidecar timeout only for whole-Bible import; ordinary calls
-  retain the 30-second timeout.
+- A five-minute sidecar safety timeout remains for import, but whole-Bible raw
+  import no longer relies on it: the real 66-book OV Tamil source measured
+  5.17 seconds from source and 6.21 seconds through the frozen packaged sidecar
+  after lazy book normalization was introduced.
 
 `src/lib/components/ImportScreen.svelte` now provides:
 
@@ -419,13 +423,12 @@ Current behavior:
 - Imported existing translationCore projects immediately expose any real tN/tW
   indexes they already contain.
 - Raw imports record `requires-resource-index` for translationNotes and
-  translationWords.
+  translationWords until the first background-check preflight for that book.
 - Compatible index directories are created, but no fake/empty check entries are
   generated.
 - Local Scripture QA, Greek Room, and word-alignment preparation work now.
-
-The next developer should not mark raw-import tN/tW as complete until resource
-download/version selection and real index materialization are implemented.
+- Bundled-resource acquisition and real per-book tN/tW materialization are
+  implemented; online resource/version selection is still future work.
 
 ## Recommended next work
 
@@ -474,19 +477,21 @@ committed):
   `tc_en_check_version_translationNotes`/`...translationWords` in
   `manifest.json` and records real `ready`/`unavailable` capability status
   (never a fabricated `ready` with zero checks) in `.bridge/import.json`.
-- `bridge_service.py`'s `import_project()` calls both, but **only for raw
-  USFM/SFM/Paratext imports** — an imported existing translationCore/
+- `bridge_service.py` prepares these indexes in the background checking
+  preflight, and **only for raw USFM/SFM/Paratext imports**. Import no longer
+  blocks on every book's tN/tW data. An imported existing translationCore/
   translationStudio project keeps its own real indexes untouched, per the
   tN/tW design boundary in `docs/IMPORTS.md`. tN/tW are gateway-language
-  (English) checking helps applied to any target-language translation, so
-  this doesn't depend on the imported project's target language.
+  (English) checking helps applied to any target-language translation, so this
+  doesn't depend on the imported project's target language.
 
 **Verified:** `test_resource_materializer.py` (5 tests, all against the real
 bundled Titus TN/TWL slice, not a synthetic fixture) — parses into the
 correct `contextId` shape, is idempotent, correctly reports `unavailable`
 for an unreleased book (tested with Isaiah), and an end-to-end
 import→`verse.runChecks` call surfaces real `translation_note`/
-`translation_word` findings. Full suite: 37/37 passing.
+`translation_word` findings. Full suite after lazy whole-Bible import: 79/79
+passing (2026-08-21).
 
 **Still open / not done in this pass:**
 

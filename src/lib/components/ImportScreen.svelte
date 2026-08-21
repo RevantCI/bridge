@@ -152,7 +152,7 @@
             {/each}
           </div>
           {#each preview.warnings as warning}<p class="warning">{warning}</p>{/each}
-          <p class="note">Scripture and alignment data are prepared now. TranslationNotes and translationWords indexes use installed resources and are prepared separately.</p>
+          <p class="note">Every source book is copied into Bridge now. The first book opens immediately; other books are prepared when you open them. TranslationNotes and translationWords are prepared by background checking.</p>
         </section>
 
         <section class="form">
@@ -196,7 +196,7 @@
           <label><span>Bible / translation name</span><input bind:value={metadata.bibleName} placeholder="e.g. Unlocked Literal Text" /></label>
 
           <button class="import-button" on:click={runImport} disabled={loading || !canImport}>
-            {loading ? "Preparing project…" : `Import ${preview.books.length === 1 ? "book" : `${preview.books.length} books`}`}
+            {loading ? `Importing ${preview.books.length === 1 ? "book" : `${preview.books.length} books`}…` : `Import ${preview.books.length === 1 ? "book" : `${preview.books.length} books`}`}
           </button>
           {#if !canImport}<p class="required">Select a language and complete both project names.</p>{/if}
         </section>

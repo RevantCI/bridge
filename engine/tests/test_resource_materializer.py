@@ -101,7 +101,7 @@ def test_materialize_book_checks_reports_unavailable_for_unreleased_book(tmp_pat
     assert result["translationNotes"]["checks"] == 0
 
 
-def test_raw_import_materializes_real_tn_tw_and_verse_run_checks_surfaces_them(tmp_path):
+def test_raw_import_defers_real_tn_tw_until_checks_and_then_surfaces_them(tmp_path):
     isolated = AppSettings(path=tmp_path / "settings.json")
     engine = BridgeEngine(settings=isolated)
 
@@ -112,14 +112,16 @@ def test_raw_import_materializes_real_tn_tw_and_verse_run_checks_surfaces_them(t
     project_path = Path(result["path"])
 
     capabilities = json.loads((project_path / ".bridge" / "import.json").read_text(encoding="utf-8"))["capabilities"]
-    assert capabilities["translationNotes"] == "ready"
-    assert capabilities["translationWords"] == "ready"
-
-    manifest = json.loads((project_path / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["tc_en_check_version_translationNotes"]
-    assert manifest["tc_en_check_version_translationWords"]
+    assert capabilities["translationNotes"] == "requires-resource-index"
+    assert capabilities["translationWords"] == "requires-resource-index"
 
     response = _call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
     assert response["success"] is True
+    capabilities = json.loads((project_path / ".bridge" / "import.json").read_text(encoding="utf-8"))["capabilities"]
+    assert capabilities["translationNotes"] == "ready"
+    assert capabilities["translationWords"] == "ready"
+    manifest = json.loads((project_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["tc_en_check_version_translationNotes"]
+    assert manifest["tc_en_check_version_translationWords"]
     categories = {f["category"] for f in response["findings"]}
     assert "translation_note" in categories or "translation_word" in categories

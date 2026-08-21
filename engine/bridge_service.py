@@ -28,7 +28,13 @@ from greek_room_engine.models.finding import QaFinding, FindingCategory, Severit
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
 from tc_ai_bridge.tc_project import TranslationCoreProject, ProjectError
-from tc_ai_bridge.project_import import import_source, inspect_import, apply_resource_materialization
+from tc_ai_bridge.project_import import (
+    apply_resource_materialization,
+    collection_projects,
+    import_source,
+    inspect_import,
+    materialize_lazy_project,
+)
 from tc_ai_bridge.local_checks import run_local_qa
 from tc_ai_bridge.models import QAIssue
 from tc_ai_bridge.secret_store import AppSettings
@@ -200,8 +206,13 @@ class BridgeEngine:
     def open_project(self, path: str) -> dict[str, Any]:
         self._usfm_findings_by_book.clear()
         self._usfm_errors_by_book.clear()
+        materialize_lazy_project(path)
         self.project = TranslationCoreProject(path)
-        return self._project_info()
+        info = self._project_info()
+        siblings = collection_projects(path)
+        if siblings:
+            info["importedProjects"] = siblings
+        return info
 
     def _project_info(self) -> dict[str, Any]:
         self._require_project()
@@ -232,27 +243,13 @@ class BridgeEngine:
         """Normalize USFM/SFM, Paratext folders, or tC archives, then open it.
 
         Existing translationCore state is copied intact. Raw Scripture becomes
-        a tC-compatible book project with chapter JSON, preserved source USFM,
-        word-bank/alignment data, provenance, and real translationNotes/
-        translationWords indexes materialized from the bundled English
-        resource snapshot (see tc_ai_bridge.resource_materializer).
+        a tC-compatible primary book immediately; other books in a collection
+        are copied into application storage and normalized when first opened.
+        TranslationNotes/translationWords indexes are prepared by the checking
+        job instead of blocking navigation into the editor.
         """
         root = Path(destination_root).resolve() if destination_root else self.project_root
         result = import_source(path, root, metadata)
-
-        # Only raw Scripture imports need materialized tN/tW — an imported
-        # existing translationCore/translationStudio project already has
-        # its own real indexes, which must never be overwritten with the
-        # bundled English snapshot (see docs/IMPORTS.md's tN/tW boundary).
-        if result["kind"] not in {"translationCore", "translationCoreArchive"}:
-            resources_root = root.parent / "resources"
-            for entry in result["projects"]:
-                project_root = Path(entry["path"])
-                materialization = materialize_book_checks(project_root, entry["bookId"], resources_root)
-                apply_resource_materialization(project_root, materialization)
-                statuses = {materialization["translationNotes"]["status"], materialization["translationWords"]["status"]}
-                entry["checkIndexStatus"] = "ready" if statuses == {"ready"} else ("unavailable" if statuses == {"unavailable"} else "partial")
-                entry["resourceMaterialization"] = materialization
 
         self.project = TranslationCoreProject(result["primaryProjectPath"])
         self._usfm_findings_by_book.clear()
@@ -261,6 +258,25 @@ class BridgeEngine:
         info["import"] = result
         info["importedProjects"] = result["projects"]
         return info
+
+    def _ensure_resource_indexes(self, project: TranslationCoreProject) -> None:
+        """Prepare raw-import tN/tW indexes on demand, once per book."""
+        import_path = project.path / ".bridge" / "import.json"
+        if not import_path.is_file():
+            return
+        try:
+            import_data = json.loads(import_path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            return
+        capabilities = import_data.get("capabilities")
+        if not isinstance(capabilities, dict) or not any(
+            capabilities.get(tool) == "requires-resource-index"
+            for tool in ("translationNotes", "translationWords")
+        ):
+            return
+        resources_root = project.path.parent.parent / "resources"
+        materialization = materialize_book_checks(project.path, project.book_id, resources_root)
+        apply_resource_materialization(project.path, materialization)
 
     def scan_project(self) -> dict[str, Any]:
         if not self.project:
@@ -375,6 +391,8 @@ class BridgeEngine:
         you already reviewed back to "open"."""
         self._require_project()
         with self._checker_lock:
+            if any(name in checks for name in ("local", "tN", "tW")):
+                self._ensure_resource_indexes(self.project)
             return self._run_verse_checks_for_project(self.project, chapter, verse, checks)
 
     def _run_verse_checks_for_project(
@@ -506,10 +524,15 @@ class BridgeEngine:
                 ]
 
         preflight = None
-        if any(name in spec.checks for name in ("local", "usfm")):
+        if any(name in spec.checks for name in ("local", "tN", "tW", "usfm")):
             def run_preflight(cancel_event: threading.Event) -> None:
                 with self._checker_lock:
-                    self._usfm_findings_for_book(project, cancel_event=cancel_event)
+                    if any(name in spec.checks for name in ("local", "tN", "tW")):
+                        self._ensure_resource_indexes(project)
+                    if cancel_event.is_set():
+                        return
+                    if any(name in spec.checks for name in ("local", "usfm")):
+                        self._usfm_findings_for_book(project, cancel_event=cancel_event)
             preflight = run_preflight
 
         return self._check_jobs.start(

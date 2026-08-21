@@ -107,6 +107,7 @@ export interface ImportedProject {
   bookName: string;
   chapters?: string[];
   checkIndexStatus?: string;
+  lazy?: boolean;
 }
 
 export interface VerseData {

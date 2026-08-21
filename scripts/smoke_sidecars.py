@@ -51,6 +51,8 @@ def _fixture_project(root: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("engine", type=Path, help="Path to frozen bridge-engine executable")
+    parser.add_argument("--import-source", type=Path, help="Optional real USFM/Paratext folder to benchmark")
+    parser.add_argument("--max-import-seconds", type=float, default=10.0)
     args = parser.parse_args()
     engine = args.engine.resolve()
     extension = engine.suffix if sys.platform == "win32" else ""
@@ -112,6 +114,31 @@ def main() -> int:
                     "Frozen engine is using the Wildebeest mock fallback: "
                     f"{wildebeest}"
                 )
+
+            if args.import_source:
+                started_at = time.perf_counter()
+                imported = request("import", "project.import", {
+                    "path": str(args.import_source.resolve()),
+                    "destinationRoot": str(Path(temp) / "imported"),
+                    "metadata": {
+                        "languageId": "tam",
+                        "languageName": "Tamil",
+                        "languageDirection": "ltr",
+                        "projectName": "Frozen import benchmark",
+                        "bibleName": "Tamil Bible",
+                    },
+                }, timeout=max(30.0, args.max_import_seconds + 10.0))
+                elapsed = time.perf_counter() - started_at
+                if not imported.get("success"):
+                    raise SystemExit(f"Frozen import failed: {imported}")
+                projects = imported.get("result", {}).get("importedProjects", [])
+                if len(projects) != 66:
+                    raise SystemExit(f"Frozen import returned {len(projects)} projects, expected 66")
+                if elapsed >= args.max_import_seconds:
+                    raise SystemExit(
+                        f"Frozen import took {elapsed:.2f}s, limit is {args.max_import_seconds:.2f}s"
+                    )
+                print(f"Frozen 66-book import passed in {elapsed:.2f}s.")
 
             opened = request("open", "project.open", {"path": str(project)})
             if not opened.get("success"):

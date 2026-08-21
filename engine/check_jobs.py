@@ -183,7 +183,7 @@ class CheckJobManager:
                 if self._cancelled(job):
                     return
                 with job.lock:
-                    job.current_stage = "USFM structure"
+                    job.current_stage = "Preparing checks"
                 preflight(job.cancel_event)
                 with job.lock:
                     job.completed_steps += 1

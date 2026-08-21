@@ -18,6 +18,8 @@
   let engineStatus: "checking" | "ready" | "error" = "checking";
   let activeJobId = "";
   let monitorGeneration = 0;
+  let openingBook = "";
+  let bookOpenError = "";
 
   onMount(async () => {
     try {
@@ -48,14 +50,23 @@
   // does), so the sibling list is carried forward on the frontend instead
   // of being re-fetched.
   async function switchBook(path: string) {
-    if (!$project || path === $project.path) return;
-    await stopActiveJob();
+    if (!$project || path === $project.path || openingBook) return;
     const siblings = $project.importedProjects;
-    const info = await bridge.openProject(path);
-    if (siblings) info.importedProjects = siblings;
-    resetBookState();
-    project.set(info);
-    await enterCurrentProject();
+    const destination = siblings?.find((book) => book.path === path);
+    openingBook = destination?.bookName ?? "book";
+    bookOpenError = "";
+    try {
+      await stopActiveJob();
+      const info = await bridge.openProject(path);
+      if (!info.importedProjects && siblings) info.importedProjects = siblings;
+      resetBookState();
+      project.set(info);
+      await enterCurrentProject();
+    } catch (error) {
+      bookOpenError = error instanceof Error ? error.message : String(error);
+    } finally {
+      openingBook = "";
+    }
   }
 
   async function ensureChapterData(chapter: string): Promise<void> {
@@ -259,9 +270,23 @@
     onChapterChange={switchChapter}
     onBookChange={switchBook}
     exportEnabled={$project !== null}
+    bookSwitching={Boolean(openingBook)}
   />
 
-  {#if $checkingProgress.running}
+  {#if openingBook}
+    <div class="progress-row checking-row">
+      <div class="spin" />
+      <span class="progress-label">Opening {openingBook}…</span>
+      <div class="track"><div class="fill indeterminate" /></div>
+      <span />
+    </div>
+  {:else if bookOpenError}
+    <div class="progress-row check-notice">
+      <span class="check-message">Could not open book: {bookOpenError}</span>
+      <span class="grow" />
+      <button class="progress-action" on:click={() => (bookOpenError = "")}>Dismiss</button>
+    </div>
+  {:else if $checkingProgress.running}
     <div class="progress-row checking-row">
       <div class="spin" />
       <span class="progress-label" title={$checkingProgress.label}>
@@ -324,6 +349,8 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .track { width: 100%; height: 6px; background: #EEF0F3; border-radius: 4px; overflow: hidden; }
   .fill { height: 100%; background: var(--accent); transition: width 0.3s; }
+  .indeterminate { width: 35%; animation: slide 1.1s ease-in-out infinite; }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
   .progress-action { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
   .cancel-action { width: 84px; }
   .progress-action:disabled { opacity: 0.55; cursor: wait; }

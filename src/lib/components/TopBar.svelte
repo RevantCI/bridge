@@ -7,6 +7,7 @@
   export let onChapterChange: (chapter: string) => void;
   export let onBookChange: (path: string) => void;
   export let exportEnabled: boolean;
+  export let bookSwitching = false;
 
   let gotoValue = "";
 
@@ -37,7 +38,7 @@
 
   {#if $project}
     {#if $project.importedProjects && $project.importedProjects.length > 1}
-      <select class="select" value={$project.path} on:change={handleBookSelect}>
+      <select class="select" value={$project.path} on:change={handleBookSelect} disabled={bookSwitching}>
         {#each $project.importedProjects as book}
           <option value={book.path}>{book.bookName}</option>
         {/each}

@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
+import tc_ai_bridge.project_import as project_import
 from bridge_service import BridgeEngine
 from greek_room_engine.protocol import EngineRequest
-from tc_ai_bridge.project_import import import_source, inspect_import
+from tc_ai_bridge.project_import import import_source, inspect_import, materialize_lazy_project
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.tc_project import ProjectError, TranslationCoreProject
 
@@ -98,8 +99,68 @@ def test_import_collection_creates_one_book_project_per_usfm(tmp_path):
 
     result = import_source(source, tmp_path / "projects", _metadata(projectName="Whole NT"))
     assert {project["bookId"] for project in result["projects"]} == {"tit", "phm"}
-    for item in result["projects"]:
-        assert TranslationCoreProject(item["path"]).chapters() == ["1"] or item["bookId"] == "tit"
+    primary = result["projects"][0]
+    deferred = result["projects"][1]
+    assert primary["lazy"] is False
+    assert TranslationCoreProject(primary["path"]).chapters() == ["1", "2"]
+    assert deferred["lazy"] is True
+    assert (Path(deferred["path"]) / ".bridge" / "lazy-import.json").is_file()
+
+    # A collection must remain usable after the original Paratext/USFM
+    # folder is removed; every deferred source was copied into app storage.
+    for path in source.iterdir():
+        path.unlink()
+    source.rmdir()
+    assert materialize_lazy_project(deferred["path"]) is True
+    assert TranslationCoreProject(deferred["path"]).chapters() == ["1"]
+    assert materialize_lazy_project(deferred["path"]) is False
+
+
+def test_open_deferred_book_restores_collection_after_restart(tmp_path):
+    source = tmp_path / "Bible"
+    source.mkdir()
+    (source / "57TIT.SFM").write_text(SIMPLE_USFM, encoding="utf-8")
+    (source / "58PHM.SFM").write_text(
+        "\\id PHM\n\\h Philemon\n\\c 1\n\\v 1 Grace to you.\n",
+        encoding="utf-8",
+    )
+    settings = AppSettings(path=tmp_path / "settings.json")
+    first_engine = BridgeEngine(settings=settings)
+    imported = first_engine.import_project(str(source), _metadata(projectName="Whole NT"))
+    deferred = imported["importedProjects"][1]
+
+    restarted = BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
+    opened = restarted.open_project(deferred["path"])
+
+    assert opened["bookId"] == "phm"
+    assert opened["chapters"] == ["1"]
+    assert len(opened["importedProjects"]) == 2
+    assert opened["importedProjects"][1]["lazy"] is False
+
+
+def test_full_bible_import_only_normalizes_primary_book_eagerly(tmp_path, monkeypatch):
+    source = tmp_path / "Bible"
+    source.mkdir()
+    book_ids = list(project_import.BOOK_NAMES)
+    for index, book_id in enumerate(book_ids):
+        (source / f"{index + 1:02d}-{book_id.upper()}.usfm").write_text(
+            f"\\id {book_id.upper()}\n\\c 1\n\\v 1 Text for {book_id}.\n",
+            encoding="utf-8",
+        )
+
+    real_write = project_import._write_imported_book
+    normalized: list[str] = []
+
+    def record_write(project_root, book, metadata):
+        normalized.append(book.book_id)
+        return real_write(project_root, book, metadata)
+
+    monkeypatch.setattr(project_import, "_write_imported_book", record_write)
+    result = project_import.import_source(source, tmp_path / "projects", _metadata(projectName="Bible"))
+
+    assert len(result["projects"]) == 66
+    assert normalized == [book_ids[0]]
+    assert sum(bool(project["lazy"]) for project in result["projects"]) == 65
 
 
 def test_basic_usfm3_alignment_is_preserved(tmp_path):

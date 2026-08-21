@@ -21,7 +21,8 @@ one.
 
 ## Normalized project data
 
-For each book, Bridge creates or preserves:
+For a single-book import and the first book of a collection, Bridge creates or
+preserves immediately:
 
 ```text
 <project>/
@@ -37,6 +38,13 @@ For each book, Bridge creates or preserves:
     checkData/...
   .bridge/import.json                 provenance and capability status
 ```
+
+For a multi-book collection, every remaining source file is copied immediately
+into its own lightweight project directory with `.bridge/lazy-import.json`.
+That book is normalized into the structure above the first time the user opens
+it. `.bridge/collection.json` in every sibling restores the complete book list
+after an app restart. This keeps the approved source self-contained while
+avoiding tens of thousands of synchronous JSON writes before the editor opens.
 
 Every target token begins in `wordBank` unless a supported USFM 3 alignment
 milestone assigns it to a `bottomWords` group. Source milestone attributes are
@@ -61,9 +69,10 @@ versioned checking resources. Bridge follows the same boundary:
   pinned English (unfoldingWord, Door43 tag v90) tN/translationWordsLinks
   snapshot bundled with the app (`engine/resources/en/translationHelps/`),
   parsed into `.apps/translationCore/index/{translationNotes|translationWords}/<book>/<group>.json`
-  at import time. tN/tW are gateway-language checking helps applied to any
-  target-language translation, so this runs regardless of the imported
-  project's own target language.
+  when background checking begins for that book. tN/tW are gateway-language
+  checking helps applied to any target-language translation, so this runs
+  regardless of the imported project's own target language and does not block
+  entry into the editor.
 - A handful of Old Testament books (Numbers, 1-2 Chronicles, Ecclesiastes,
   Isaiah, Jeremiah, Ezekiel, Daniel, Amos, Zechariah) are not currently
   released in the upstream English resource; those report capability
@@ -79,6 +88,10 @@ collect missing metadata, migrate, and open—but improves the import experience
 
 - Multi-book folders are accepted and become a collection of compatible
   book-wise projects; translationCore's validator rejects multi-book projects.
+- Whole-Bible imports copy all approved sources but eagerly normalize only the
+  first book; other books are normalized on first open. A real 66-book,
+  12.6 MB project measured 5.17 seconds from source and 6.21 seconds through
+  the frozen packaged sidecar on the 2026-08-21 Windows test machine.
 - The source is previewed before writes and the metadata is reviewed in one form.
 - The language picker uses the complete offline ISO 639-3 catalog instead of
   requiring users to type both language code and name correctly.

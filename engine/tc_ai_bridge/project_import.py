@@ -599,6 +599,69 @@ def apply_resource_materialization(project_root: Path, materialization: dict[str
     _write_json_atomic(import_path, data)
 
 
+_LAZY_IMPORT_PATH = Path(".bridge") / "lazy-import.json"
+_COLLECTION_PATH = Path(".bridge") / "collection.json"
+
+
+def _collection_projects(project_root: Path) -> list[dict[str, Any]]:
+    """Return a persisted multi-book collection, correcting lazy state from disk."""
+    data = _read_json(project_root / _COLLECTION_PATH)
+    projects = data.get("projects") if isinstance(data.get("projects"), list) else []
+    result: list[dict[str, Any]] = []
+    for value in projects:
+        if not isinstance(value, dict) or not value.get("path"):
+            continue
+        entry = copy.deepcopy(value)
+        lazy = (Path(str(entry["path"])) / _LAZY_IMPORT_PATH).is_file()
+        entry["lazy"] = lazy
+        if not lazy and entry.get("checkIndexStatus") == "deferred":
+            entry["checkIndexStatus"] = "requires-resource-index"
+        result.append(entry)
+    return result
+
+
+def collection_projects(project_root: str | Path) -> list[dict[str, Any]]:
+    """Public reader used by project.open to restore a collection after restart."""
+    return _collection_projects(Path(project_root).resolve())
+
+
+def materialize_lazy_project(project_root: str | Path) -> bool:
+    """Normalize a lightweight imported book the first time it is opened.
+
+    Collection import copies every source file into application storage up
+    front, so this never depends on the original Paratext/USFM folder still
+    existing. The descriptor is removed only after a complete successful
+    conversion; an interrupted conversion is therefore safe to retry.
+    """
+    root = Path(project_root).resolve()
+    descriptor_path = root / _LAZY_IMPORT_PATH
+    if not descriptor_path.is_file():
+        return False
+    descriptor = _read_json(descriptor_path)
+    source_copy = str(descriptor.get("sourceCopy") or "")
+    if not source_copy:
+        raise ProjectError(f"Deferred import descriptor is invalid: {descriptor_path}")
+    source = (root / source_copy).resolve()
+    try:
+        source.relative_to(root)
+    except ValueError as exc:
+        raise ProjectError("Deferred import source points outside its project.") from exc
+    if not source.is_file():
+        raise ProjectError(f"Deferred Scripture source is missing: {source}")
+    metadata = descriptor.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ProjectError(f"Deferred import metadata is invalid: {descriptor_path}")
+    book = parse_scripture_file(source)
+    expected = str(descriptor.get("bookId") or "").lower()
+    if expected and book.book_id != expected:
+        raise ProjectError(
+            f"Deferred Scripture source identifies {book.book_id.upper()}, expected {expected.upper()}."
+        )
+    _write_imported_book(root, book, {str(key): str(value) for key, value in metadata.items()})
+    descriptor_path.unlink()
+    return True
+
+
 def import_source(source_path: str | Path, destination_root: str | Path, metadata: dict[str, Any]) -> dict[str, Any]:
     source = Path(source_path).resolve()
     destination = Path(destination_root).resolve()
@@ -638,22 +701,60 @@ def import_source(source_path: str | Path, destination_root: str | Path, metadat
             project = TranslationCoreProject(final)
             imported.append({"path": str(final), "bookId": project.book_id, "bookName": project.summary.book_name})
         else:
-            books = [parse_scripture_file(path) for path in _scripture_files(source)]
+            # inspect_import already parsed and validated every source. A
+            # whole Bible used to be parsed again and then expanded into
+            # tens of thousands of small tC JSON files synchronously here,
+            # which took minutes. Fully materialize only the primary book;
+            # copy the remaining source files into lightweight, self-contained
+            # project placeholders and normalize each one when it is opened.
+            preview_books = preview["books"]
             resource_id = _slug(combined.get("resourceId") or combined["bibleName"], "bible")[:24]
-            for book in books:
-                name = _slug(f"{combined['languageId']}_{resource_id}_{book.book_id}", book.book_id)
-                work = staging / name
+            planned: list[dict[str, Any]] = []
+            for index, book_info in enumerate(preview_books):
+                book_id = str(book_info["bookId"]).lower()
+                name = _slug(f"{combined['languageId']}_{resource_id}_{book_id}", book_id)
+                final = _available_destination(destination, name)
+                planned.append({
+                    "path": str(final), "bookId": book_id,
+                    "bookName": str(book_info["bookName"]), "chapters": [],
+                    "checkIndexStatus": "deferred" if index else "requires-resource-index",
+                    "lazy": index > 0,
+                })
+
+            collection = {
+                "schemaVersion": 1,
+                "sourcePath": str(source),
+                "projectName": combined["projectName"],
+                "bibleName": combined["bibleName"],
+                "projects": planned,
+            }
+            for index, (book_info, entry) in enumerate(zip(preview_books, planned)):
+                work = staging / f"book-{index:03d}-{entry['bookId']}"
                 work.mkdir(parents=True)
                 book_metadata = dict(combined)
                 book_metadata["resourceId"] = resource_id
-                _write_imported_book(work, book, book_metadata)
-                final = _available_destination(destination, name)
+                source_file = Path(str(book_info["sourceFile"]))
+                if index == 0:
+                    book = parse_scripture_file(source_file)
+                    _write_imported_book(work, book, book_metadata)
+                    entry["chapters"] = list(book.chapters)
+                else:
+                    suffix = source_file.suffix.lower() or ".usfm"
+                    source_copy = Path(".bridge") / f"source{suffix}"
+                    (work / source_copy).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source_file, work / source_copy)
+                    _write_json_atomic(work / _LAZY_IMPORT_PATH, {
+                        "schemaVersion": 1,
+                        "sourceCopy": source_copy.as_posix(),
+                        "originalSourceFile": str(source_file),
+                        "bookId": entry["bookId"],
+                        "bookName": entry["bookName"],
+                        "metadata": book_metadata,
+                    })
+                _write_json_atomic(work / _COLLECTION_PATH, collection)
+                final = Path(entry["path"])
                 os.replace(work, final)
-                project = TranslationCoreProject(final)
-                imported.append({
-                    "path": str(final), "bookId": project.book_id, "bookName": project.summary.book_name,
-                    "chapters": project.chapters(), "checkIndexStatus": "requires-resource-index",
-                })
+                imported.append(entry)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
