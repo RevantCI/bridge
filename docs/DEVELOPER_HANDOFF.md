@@ -25,6 +25,72 @@ gate is `docs/QA_TEST_MATRIX.md`.
 - Explicitly deferred: AI alignment proposals, UAlign statistics, original-source
   resource downloads, and live Paratext/Logos synchronization.
 
+## Phase roadmap status — read this first before picking up new work
+
+The original plan (from the Claude Code sessions that did Phases 1-3, see
+below) laid out 7 phases. Actual status as of 2026-08-21:
+
+- **Phases 1-3**: done.
+- **Phase 4 (USFM Checker + Versification): half done.** The USFM structural
+  checker is complete — vendored, wired up, verified against both source and
+  a frozen packaged build (see the USFM section further down). **Versification
+  (detection, org-normalization, back-versification map) has not been
+  started.** This is the next planned piece of work.
+- **Phase 5 (Names & Transliteration, Uroman + Smart Edit Distance)**: not started.
+- **Phase 6 (Alignment Intelligence, UAlign corpus stats)**: the statistics
+  engine itself is not started. But the manual word-alignment editor added in
+  `feat(alignment)` (see `docs/ALIGNMENT.md`) wasn't in the original plan at
+  all — it's a prerequisite Phase 6 actually needs, since you can't compute
+  corpus statistics over "human-approved alignments" if there was previously
+  no way to create or approve one inside Bridge. That gap is now closed;
+  Phase 6's actual statistics work still needs to be built on top of it.
+- **Phase 7 (Paratext/Logos connectors, AI explain, drag-and-drop)**: not
+  started. `ai_client.py`'s endpoint has been configurable since Phase 3 but
+  is still not called by any protocol method.
+
+Between Phase 3 and now, real unplanned work also landed that mattered more
+than staying on the numbered track: a 66-book import that took 4-6 minutes
+and hit a hard timeout is now ~5-6 seconds (lazy per-book normalization), a
+real security fix (plaintext API keys could persist to disk), and a
+cancellable/retryable background job system replacing a blocking frontend
+loop. None of that was in the original 7 phases either — it was necessary,
+so it got done. Don't assume the next piece of work has to be the next
+numbered phase in sequence; check what's actually broken or blocking first.
+
+**A hard-won practice from this project so far, worth continuing**: every
+external integration attempted (Wildebeest, the USFM checker) turned out to
+have a real, non-obvious problem that only surfaced by actually running the
+code — wrong PyPI package name, a Python 3.13 compatibility break, an
+unpublished dependency, a Windows-only `strftime` crash, a version-skew bug
+between upstream's own GitHub and PyPI releases. Don't trust a doc's
+description of what a new integration will do — install it, run it against
+real input, and read what actually happens before writing an adapter around
+it. This is equally true of *this* documentation: verify claims made here
+against the actual code before relying on them for follow-up work, the same
+way you'd verify any third-party dependency's claims about itself.
+
+### What's already known about versification (next task), so it doesn't need rediscovering
+
+The Greek Room USFM checker vendored into `engine/vendor/greekroom-usfm/`
+(see that directory's `NOTICE.md`) came from the same upstream repo,
+`BibleNLP/greek-room`, at pinned commit `18ddcf0e6c03fa2774b73b21186115d712e4cba9`.
+That same repo, at that same commit, also has a sibling directory:
+`greekroom/greekroom/versification/` — containing `versification.py`,
+`verse_inspection.py`, `extract_vref_txt_from_usfm_extract_jsonl.py`,
+`versification_diff_html.py`, `versification_diff_txt.py`, and a `data/`
+folder. This was located but **not read, not vendored, and not verified** —
+only its existence and location were confirmed while investigating the USFM
+checker. Like `usfm`, it is **not published in the `greekroom` PyPI package**
+(only `owl` and `gr_utilities` are — confirmed by inspecting the actual
+installed wheel contents, not just the repo's file listing) — so the same
+vendoring decision, license review (BSD 3-Clause, same as `usfm` — repo-root
+`LICENSE`, not the PyPI package's conflicting Apache-2.0 metadata), and
+"verify against real input before building an adapter" discipline documented
+in the USFM section below almost certainly applies here too. Confirm this
+freshly rather than assuming it's identical — the API shape, data file
+dependencies, and Windows-compatibility of `versification.py` specifically
+have not been checked.
+
 ## Project context (carried over from the Claude Code sessions that did Phases 1-3)
 
 This section summarizes what the earlier Claude Code work (`docs/CLAUDE_CODE_HANDOVER.md`,
