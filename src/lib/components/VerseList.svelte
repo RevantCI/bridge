@@ -1,11 +1,33 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, selectedVerse, currentChapter, showSource, verseKey } from "../stores";
   import { buildSegments } from "../utils/highlight";
 
   export let onSelect: (verse: string) => void;
+
+  let scrollContainer: HTMLDivElement;
+  let lastScrolledKey = "";
+
+  async function scrollSelectedToTop(key: string): Promise<void> {
+    await tick();
+    const target = scrollContainer?.querySelector<HTMLElement>(`[data-verse-key="${key}"]`);
+    if (!target) return;
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    scrollContainer.scrollTo({
+      top: Math.max(0, scrollContainer.scrollTop + targetRect.top - containerRect.top - 8),
+      behavior: "smooth",
+    });
+    lastScrolledKey = key;
+  }
+
+  $: {
+    const key = $selectedVerse ? verseKey($currentChapter, $selectedVerse) : "";
+    if (key && scrollContainer && key !== lastScrolledKey) void scrollSelectedToTop(key);
+  }
 </script>
 
-<div class="editor-scroll" class:show-source={$showSource}>
+<div class="editor-scroll" class:show-source={$showSource} bind:this={scrollContainer}>
   <div class="chapter-label">Chapter {$currentChapter}</div>
 
   {#each $verseNums as v}
@@ -16,6 +38,7 @@
     {@const segments = buildSegments($verseTexts[key] ?? "", findings)}
     <div
       class="verse"
+      data-verse-key={key}
       class:active={$selectedVerse === v}
       class:approved={checkStatus === "succeeded" && openCount === 0}
       class:check-failed={checkStatus === "failed" || checkStatus === "cancelled"}

@@ -11,6 +11,9 @@
   let liveCheckSequence = 0;
   let displayedLiveCheck = 0;
   const latestLiveCheckByVerse = new Map<string, number>();
+  type DecisionSaveState = "saving" | "saved" | "error";
+  let decisionSaveState: Record<string, DecisionSaveState> = {};
+  let decisionSaveError: Record<string, string> = {};
 
   // Re-run Greek Room live whenever the selected verse changes — per the
   // approved design, Greek Room is the one engine that re-checks live on
@@ -44,15 +47,32 @@
   }
 
   async function decide(findingId: string, status: FindingStatus) {
-    if (!$selectedVerse) return;
+    if (!$selectedVerse || decisionSaveState[findingId] === "saving") return;
     const chapter = $currentChapter;
     const verse = $selectedVerse;
     const key = verseKey(chapter, verse);
-    await bridge.decideVerse(chapter, verse, findingId, status);
-    findingsByVerse.update((map) => {
-      const list = (map[key] ?? []).map((f) => (f.id === findingId ? { ...f, status } : f));
-      return { ...map, [key]: list };
-    });
+    decisionSaveState = { ...decisionSaveState, [findingId]: "saving" };
+    decisionSaveError = { ...decisionSaveError, [findingId]: "" };
+    try {
+      await bridge.decideVerse(chapter, verse, findingId, status);
+      findingsByVerse.update((map) => {
+        const list = (map[key] ?? []).map((f) => (f.id === findingId ? { ...f, status } : f));
+        return { ...map, [key]: list };
+      });
+      decisionSaveState = { ...decisionSaveState, [findingId]: "saved" };
+      window.setTimeout(() => {
+        if (decisionSaveState[findingId] !== "saved") return;
+        const next = { ...decisionSaveState };
+        delete next[findingId];
+        decisionSaveState = next;
+      }, 2500);
+    } catch (error) {
+      decisionSaveState = { ...decisionSaveState, [findingId]: "error" };
+      decisionSaveError = {
+        ...decisionSaveError,
+        [findingId]: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   let editing = false;
@@ -61,6 +81,9 @@
   let editSaving = false;
   let editChapter = "";
   let editVerse = "";
+  let recheckingKey = "";
+  let recheckedKey = "";
+  let editErrorKey = "";
 
   $: if (
     editing && !editSaving && $selectedVerse &&
@@ -71,11 +94,12 @@
   }
 
   function startEdit() {
-    if (!$selectedVerse || $checkingProgress.running) return;
+    if (!$selectedVerse || $checkingProgress.running || editSaving || recheckingKey) return;
     editChapter = $currentChapter;
     editVerse = $selectedVerse;
     editText = $verseTexts[verseKey(editChapter, editVerse)] ?? "";
     editError = null;
+    editErrorKey = "";
     editing = true;
   }
 
@@ -96,14 +120,23 @@
       await bridge.editVerse(chapter, verse, editText);
       verseTexts.update((t) => ({ ...t, [key]: editText }));
       editing = false;
+      recheckingKey = key;
+      recheckedKey = "";
       checkStatusByVerse.update((map) => ({ ...map, [key]: "pending" }));
       latestLiveCheckByVerse.set(key, ++liveCheckSequence);
       const findings = await bridge.runVerseChecks(chapter, verse, ["local", "greekroom"]);
       findingsByVerse.update((map) => ({ ...map, [key]: findings }));
       checkStatusByVerse.update((map) => ({ ...map, [key]: "succeeded" }));
+      recheckingKey = "";
+      recheckedKey = key;
+      window.setTimeout(() => {
+        if (recheckedKey === key) recheckedKey = "";
+      }, 3500);
     } catch (e) {
+      recheckingKey = "";
       checkStatusByVerse.update((map) => ({ ...map, [key]: "failed" }));
       editError = e instanceof Error ? e.message : String(e);
+      editErrorKey = key;
     } finally {
       editSaving = false;
     }
@@ -124,6 +157,14 @@
     </div>
 
     <div class="panel-scroll">
+      {#if recheckingKey === verseKey($currentChapter, $selectedVerse)}
+        <div class="operation-status checking"><span class="spin" /> Verse saved. Re-checking local and Greek Room QA…</div>
+      {:else if recheckedKey === verseKey($currentChapter, $selectedVerse)}
+        <div class="operation-status saved">✓ Verse saved and re-check completed.</div>
+      {:else if editError && editErrorKey === verseKey($currentChapter, $selectedVerse) && !editing}
+        <div class="operation-status failed">The verse was not fully rechecked: {editError}</div>
+      {/if}
+
       {#if editing}
         <div class="section">
           <div class="section-title">Edit verse</div>
@@ -151,6 +192,13 @@
               <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
               <span class="check-id">{f.check_type}</span>
               {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
+              {#if decisionSaveState[f.id] === "saving"}
+                <span class="save-state">Saving…</span>
+              {:else if decisionSaveState[f.id] === "saved"}
+                <span class="save-state saved">✓ Saved</span>
+              {:else if decisionSaveState[f.id] === "error"}
+                <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
+              {/if}
             </div>
             <p class="explain">{f.explanation}</p>
             {#if f.evidence.length > 0}
@@ -159,9 +207,9 @@
               </ul>
             {/if}
             <div class="decision-row">
-              <button class="accept" on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
-              <button class="reject" on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
-              <button class="ignore" on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
+              <button class="accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
+              <button class="reject" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
+              <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
             </div>
           </div>
         {:else}
@@ -177,12 +225,19 @@
               <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
               <span class="check-id">{f.category}</span>
               {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
+              {#if decisionSaveState[f.id] === "saving"}
+                <span class="save-state">Saving…</span>
+              {:else if decisionSaveState[f.id] === "saved"}
+                <span class="save-state saved">✓ Saved</span>
+              {:else if decisionSaveState[f.id] === "error"}
+                <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
+              {/if}
             </div>
             <p class="explain">{f.explanation}</p>
             <div class="decision-row">
-              <button class="accept" on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
-              <button class="reject" on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
-              <button class="ignore" on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
+              <button class="accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
+              <button class="reject" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
+              <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
             </div>
           </div>
         {:else}
@@ -196,7 +251,7 @@
       <button
         class="edit-btn"
         on:click={startEdit}
-        disabled={$checkingProgress.running || editing}
+        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey)}
         title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
       >✎ Edit verse</button>
     </div>
@@ -211,6 +266,10 @@
   .ref { font-size: 13px; font-weight: 700; color: var(--text); }
   .sub { font-size: 11px; color: var(--text-2); margin-top: 2px; }
   .panel-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; }
+  .operation-status { display: flex; align-items: center; gap: 7px; border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; font-size: 11px; line-height: 1.4; }
+  .operation-status.checking { color: var(--accent); background: var(--accent-bg); }
+  .operation-status.saved { color: var(--success); background: var(--success-bg); }
+  .operation-status.failed { color: var(--danger); background: var(--danger-bg); }
   .section { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
   .section-title { font-size: 11px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .live { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; color: var(--gr); }
@@ -224,6 +283,9 @@
   .badge-review { background: var(--warning-bg); color: var(--warning); }
   .badge-decided { background: var(--success-bg); color: var(--success); text-transform: capitalize; }
   .check-id { font-size: 11px; color: var(--text-3); }
+  .save-state { margin-left: auto; font-size: 10px; color: var(--text-3); white-space: nowrap; }
+  .save-state.saved { color: var(--success); }
+  .save-state.failed { color: var(--danger); }
   .explain { font-size: 12px; color: var(--text-2); line-height: 1.6; margin: 0 0 8px; }
   .evidence { font-size: 11px; color: var(--text-2); padding-left: 16px; margin: 0 0 8px; }
   .decision-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }

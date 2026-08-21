@@ -3,6 +3,7 @@
   import { project } from "../stores";
 
   export let onClose: () => void;
+  export let reviewComplete = false;
 
   let exporting = false;
   let resultMessage = "";
@@ -35,6 +36,9 @@
   <div class="modal">
     <h2>Export project</h2>
     <p class="sub">Choose what to export. You'll be asked where to save it.</p>
+    {#if !reviewComplete}
+      <p class="review-warning">Review is not complete. You can still export safely; the file will contain the project’s current text, alignments, and saved decisions.</p>
+    {/if}
 
     <button class="export-opt" on:click={() => doExport("aligned")} disabled={exporting}>
       <div class="t">Aligned data</div>
@@ -61,6 +65,7 @@
   .modal { width: 460px; background: var(--surface); border-radius: 14px; padding: 22px; }
   h2 { font-size: 15px; margin: 0 0 6px; color: var(--text); }
   .sub { font-size: 12px; color: var(--text-2); margin: 0 0 18px; }
+  .review-warning { font-size: 11px; line-height: 1.5; color: var(--warning); background: var(--warning-bg); border-radius: 8px; padding: 9px 11px; margin: -6px 0 14px; }
   .export-opt { width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: var(--surface); cursor: pointer; display: block; }
   .export-opt:hover { border-color: var(--accent); }
   .export-opt:disabled { opacity: 0.6; cursor: not-allowed; }

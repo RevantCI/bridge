@@ -258,15 +258,17 @@
     onGotoVerse={gotoVerse}
     onChapterChange={switchChapter}
     onBookChange={switchBook}
-    exportEnabled={allApproved}
+    exportEnabled={$project !== null}
   />
 
   {#if $checkingProgress.running}
-    <div class="progress-row">
+    <div class="progress-row checking-row">
       <div class="spin" />
-      <span>{$checkingProgress.label} — {$checkingProgress.percent}%</span>
+      <span class="progress-label" title={$checkingProgress.label}>
+        {$checkingProgress.label} — {$checkingProgress.percent}%
+      </span>
       <div class="track"><div class="fill" style="width:{$checkingProgress.percent}%" /></div>
-      <button class="progress-action" on:click={cancelChecks} disabled={$checkingProgress.state === "cancelling"}>
+      <button class="progress-action cancel-action" on:click={cancelChecks} disabled={$checkingProgress.state === "cancelling"}>
         {$checkingProgress.state === "cancelling" ? "Cancelling…" : "Cancel"}
       </button>
     </div>
@@ -309,18 +311,21 @@
   {/if}
 
   {#if $exportOpen}
-    <ExportModal onClose={() => exportOpen.set(false)} />
+    <ExportModal reviewComplete={allApproved} onClose={() => exportOpen.set(false)} />
   {/if}
 </div>
 
 <style>
   .frame { width: 100vw; height: 100vh; background: var(--bg); display: flex; flex-direction: column; position: relative; overflow: hidden; }
   .progress-row { height: 32px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: 11px; color: var(--text-2); flex-shrink: 0; }
+  .checking-row { display: grid; grid-template-columns: 12px minmax(220px, 320px) minmax(120px, 1fr) 84px; }
+  .progress-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent-bg); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex-shrink: 0; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .track { width: 160px; height: 6px; background: #EEF0F3; border-radius: 4px; overflow: hidden; }
+  .track { width: 100%; height: 6px; background: #EEF0F3; border-radius: 4px; overflow: hidden; }
   .fill { height: 100%; background: var(--accent); transition: width 0.3s; }
   .progress-action { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+  .cancel-action { width: 84px; }
   .progress-action:disabled { opacity: 0.55; cursor: wait; }
   .check-notice { color: var(--danger); height: auto; min-height: 32px; max-height: 96px; align-items: flex-start; padding-top: 7px; padding-bottom: 7px; }
   .check-message { flex: 1; min-width: 0; max-height: 78px; overflow: auto; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }

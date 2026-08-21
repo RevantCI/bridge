@@ -38,7 +38,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Scenario | Expected result | Status |
 |---|---|---|---|
-| D01 | Open/import then select first verse | Editor appears before checking completes | NOT RUN |
+| D01 | Open/import then select first verse | Editor appears before checking completes | PASS — installed 66-book acceptance test |
 | D02 | Chapter background pass | Real stage/verse progress and findings | PASS — source and frozen process |
 | D03 | Whole-book pass | Every chapter checked once; results remain navigable | PASS — backend job coverage |
 | D04 | Cancel and retry | Unfinished verses are not approved; retry succeeds | PASS — includes cancellation during USFM subprocess |
@@ -79,6 +79,16 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
   and lightweight status calls remain responsive while the job runs.
 - Windows: release executable launches both WebView2 and `bridge-engine`; the NSIS installer
   is produced with both verified worker binaries.
+
+## Windows acceptance test — 2026-08-21
+
+- Installer launched successfully.
+- A real 66-book Bible imported successfully in approximately four minutes.
+- Real check progress, Cancel, Retry, Dismiss, verse navigation, decisions, and verse editing
+  were exercised successfully.
+- Acceptance feedback led to a fixed-width progress layout, selected-verse scroll-to-top,
+  explicit decision-save confirmation, visible post-edit rechecking, and export access before
+  review completion. These five UI refinements require one short installed-build retest.
 
 ## Release rule
 
