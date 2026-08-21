@@ -313,6 +313,68 @@ def test_clean_verse_has_no_findings(fixture_project):
     assert result["findings"] == []
 
 
+def test_versification_detect_and_org_ref_work_against_the_real_fixture(fixture_project):
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    detection = call(engine, "versification.detect")["result"]
+    assert detection["available"] is True
+    assert set(detection["costBySchema"]) == {"org", "eng", "rsc", "rso", "vul", "lxx"}
+
+    # Ruth is fully canonical across traditions — chapter:verse identity is
+    # the correct, real result here, not a stub/placeholder value.
+    ref = call(engine, "versification.orgRef", {"chapter": "1", "verse": "1"})["result"]
+    assert ref["orgRef"] == "RUT 1:1"
+    assert ref["mapping"] == "same"
+
+    back_map = call(engine, "versification.backVersificationMap")["result"]
+    assert back_map["schema"] in {"org", "eng", "rsc", "rso", "vul", "lxx"}
+    assert all(ref.startswith("RUT ") for ref in back_map["map"])
+
+
+@pytest.fixture
+def psalms_fixture_project(tmp_path):
+    """A minimal PSA project covering Psalm 3, whose Hebrew ('org') text
+    numbers its descriptive title as verse 1 — a real, well-known
+    cross-tradition numbering shift most English Bibles don't reproduce.
+    Used to prove the versification protocol methods surface that real
+    shift end to end, not just identity mappings like the Ruth fixture."""
+    root = tmp_path / "psa"
+    align_dir = root / ".apps" / "translationCore" / "alignmentData" / "psa"
+    align_dir.mkdir(parents=True)
+    (root / "psa").mkdir(parents=True)
+
+    (root / "manifest.json").write_text(json.dumps({
+        "project": {"id": "psa", "name": "Psalms"},
+        "target_language": {"id": "en", "name": "English"},
+        "tc_version": "8", "tc_edit_version": "3.7.0",
+    }), encoding="utf-8")
+
+    (align_dir / "3.json").write_text(json.dumps({
+        "1": {"alignments": [], "wordBank": []},
+        "2": {"alignments": [], "wordBank": []},
+    }), encoding="utf-8")
+
+    (root / "psa" / "3.json").write_text(json.dumps({
+        "1": "LORD, how are they increased that trouble me!",
+        "2": "Many there be which say of my soul,",
+    }), encoding="utf-8")
+
+    return root
+
+
+def test_versification_org_ref_surfaces_the_real_psalm_3_shift(psalms_fixture_project):
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(psalms_fixture_project)})
+
+    ref = call(engine, "versification.orgRef", {"chapter": "3", "verse": "1", "schema": "eng"})["result"]
+    assert ref["orgRef"] == "PSA 3:2"
+    assert ref["mapping"] == "mapped"
+
+    back_map = call(engine, "versification.backVersificationMap", {"schema": "eng"})["result"]
+    assert back_map["map"]["PSA 3:2"] == "PSA 3:1"
+
+
 def test_chapter_check_job_reports_real_progress_and_results(fixture_project, monkeypatch):
     engine = BridgeEngine()
     call(engine, "project.open", {"path": str(fixture_project)})

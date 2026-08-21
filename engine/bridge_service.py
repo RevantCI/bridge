@@ -44,6 +44,7 @@ from tc_ai_bridge.models import QAIssue, TokenRef, VerseAlignment
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.resource_materializer import materialize_book_checks
 from tc_ai_bridge.usfm import whitespace_tokens
+from tc_ai_bridge import versification as versification_tool
 from check_jobs import (
     CheckJobConflict,
     CheckJobError,
@@ -174,6 +175,10 @@ class Methods:
     EXPORT_ALIGNED = "export.aligned"
     EXPORT_NON_ALIGNED = "export.nonAligned"
 
+    VERSIFICATION_DETECT = "versification.detect"
+    VERSIFICATION_ORG_REF = "versification.orgRef"
+    VERSIFICATION_BACK_MAP = "versification.backVersificationMap"
+
 
 class BridgeEngine:
     def __init__(self, settings: Optional[AppSettings] = None) -> None:
@@ -186,6 +191,11 @@ class BridgeEngine:
         # Not invalidated by verse.edit — see _usfm_findings_for_book.
         self._usfm_findings_by_book: dict[str, list[QaFinding]] = {}
         self._usfm_errors_by_book: dict[str, str] = {}
+        # Versification detection is cheap (in-memory dict scans against
+        # already-loaded schema data, not a subprocess) but still whole-book
+        # work, so it's cached per project path the same way USFM findings
+        # are, computed lazily on first request rather than on every open.
+        self._versification_by_book: dict[str, dict[str, Any]] = {}
         self._checker_lock = threading.RLock()
         self._check_jobs = CheckJobManager()
         # AppSettings() with no path defaults to a real, persistent location
@@ -221,6 +231,7 @@ class BridgeEngine:
     def open_project(self, path: str) -> dict[str, Any]:
         self._usfm_findings_by_book.clear()
         self._usfm_errors_by_book.clear()
+        self._versification_by_book.clear()
         materialize_lazy_project(path)
         self.project = TranslationCoreProject(path)
         info = self._project_info()
@@ -269,6 +280,7 @@ class BridgeEngine:
         self.project = TranslationCoreProject(result["primaryProjectPath"])
         self._usfm_findings_by_book.clear()
         self._usfm_errors_by_book.clear()
+        self._versification_by_book.clear()
         info = self._project_info()
         info["import"] = result
         info["importedProjects"] = result["projects"]
@@ -1057,6 +1069,57 @@ class BridgeEngine:
         return {"written": True, "path": output_path, "bookId": book,
                 "chapters": len(self.project.chapters()), "format": "alignment-json"}
 
+    # -- versification ------------------------------------------------------
+
+    def _book_verse_text_map(self, project: TranslationCoreProject) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for chapter in project.chapters():
+            for verse in project.verses(chapter):
+                text = project.target_verse_text(chapter, verse)
+                if text:
+                    result[f"{chapter}:{verse}"] = text
+        return result
+
+    def detect_versification(self) -> dict[str, Any]:
+        """Sniff which of the six standard schemas this book's verse
+        numbering best matches, e.g. distinguishing an 'eng'-numbered Psalter
+        from an 'org' one. Cached per project path — cheap (in-memory dict
+        scans, not a subprocess) but still whole-book work, so this is
+        computed once on first request rather than on every project.open."""
+        self._require_project()
+        book_key = str(self.project.path)
+        cached = self._versification_by_book.get(book_key)
+        if cached is not None:
+            return cached
+        if not versification_tool.is_available():
+            result = {"available": False}
+        else:
+            verses = self._book_verse_text_map(self.project)
+            result = versification_tool.detect_schema(self.project.book_id, verses)
+            result["available"] = True
+        self._versification_by_book[book_key] = result
+        return result
+
+    def versification_org_ref(self, chapter: str, verse: str, schema: str = "") -> dict[str, Any]:
+        """Normalize one chapter:verse into its 'org' (Hebrew/Greek) ref.
+        Defaults to the project's own detected schema when none is given."""
+        self._require_project()
+        effective_schema = schema or self.detect_versification().get("bestSchema") or "eng"
+        return versification_tool.to_org_ref(
+            self.project.book_id, chapter, verse, effective_schema,
+        )
+
+    def versification_back_map(self, schema: str = "") -> dict[str, Any]:
+        """org ref -> project-schema ref for every org verse in this book,
+        so callers can display/export references the way the project
+        actually numbers them."""
+        self._require_project()
+        effective_schema = schema or self.detect_versification().get("bestSchema") or "eng"
+        return {
+            "schema": effective_schema,
+            "map": versification_tool.back_versification_map(self.project.book_id, effective_schema),
+        }
+
     # -- settings ---------------------------------------------------------
 
     def get_settings(self) -> dict[str, Any]:
@@ -1184,6 +1247,16 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.export_aligned(p["outputPath"]))
             if m == Methods.EXPORT_NON_ALIGNED:
                 return EngineResponse.ok(request.id, result=self.export_non_aligned(p["outputPath"]))
+            if m == Methods.VERSIFICATION_DETECT:
+                return EngineResponse.ok(request.id, result=self.detect_versification())
+            if m == Methods.VERSIFICATION_ORG_REF:
+                return EngineResponse.ok(request.id, result=self.versification_org_ref(
+                    p["chapter"], p["verse"], p.get("schema", ""),
+                ))
+            if m == Methods.VERSIFICATION_BACK_MAP:
+                return EngineResponse.ok(
+                    request.id, result=self.versification_back_map(p.get("schema", "")),
+                )
 
             return EngineResponse.fail(request.id, "unknown_method", f"No handler for '{m}'")
         except ProjectError as exc:
@@ -1192,6 +1265,8 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "alignment_error", str(exc))
         except UsfmCheckerError as exc:
             return EngineResponse.fail(request.id, "checker_error", str(exc))
+        except versification_tool.VersificationUnavailable as exc:
+            return EngineResponse.fail(request.id, "versification_unavailable", str(exc))
         except CheckJobNotFound as exc:
             return EngineResponse.fail(request.id, "job_not_found", str(exc))
         except CheckJobConflict as exc:

@@ -10,7 +10,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 96 passed with real Wildebeest 0.9.2 |
+| A01 | Backend | Complete Python suite | Source | PASS — 122 passed with real Wildebeest 0.9.2 |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile |
@@ -19,6 +19,10 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A07 | Protocol | Sidecar remains responsive during a background job | Frozen | PASS — status polled until completion |
 | A08 | Security | Settings never serialize plaintext secrets | Source | PASS — regression suite |
 | A09 | Alignment | Manual protocol, conflicts, history, restart and USFM round trip | Source | PASS |
+| A10 | Versification | Detect/orgRef/backVersificationMap against real schema data | Source | PASS — includes real Psalm 3 descriptive-title shift |
+| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — verified against a real PyInstaller build this session |
+| A12 | Versification | Edge cases: merges, splits, unknown books, verse bridges/segments | Source | PASS — 11 tests against real vendored data |
+| A13 | Versification | Concurrent callers: correctness and a GIL-contention performance regression guard | Source | PASS — fixed a real ~90x slowdown found under 16-thread concurrency |
 
 ## Import workflows
 
@@ -89,8 +93,10 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 ## Automated evidence
 
-- Python: 96 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
-  RTL metadata, and nested aligned-USFM round trips.
+- Python: 122 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+  RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
+  back-versification against the real vendored schema data (including merge/split edge cases),
+  and a concurrency regression guard for a real GIL-contention slowdown found this session.
 - Frontend: `svelte-check` reports 0 errors and 0 warnings; production Vite build succeeds.
 - Frozen workers: real Wildebeest loads, the USFM helper reports duplicate and missing verses,
   manual many-to-many alignment/export/undo succeeds, and lightweight status calls

@@ -51,8 +51,15 @@ on the next sync.
 
 ## Not vendored (out of scope for now)
 
-`greekroom/greekroom/versification/` and `greekroom/greekroom/wildebeest/`
-also exist only in the source tree, not on PyPI. Only `usfm` was vendored
-here, matching the specific decision made for this pass — versification
-support is a separate future decision, not assumed to follow automatically
-from this one.
+`greekroom/greekroom/wildebeest/` also exists only in the source tree, not on
+PyPI (Bridge uses the real `wildebeest-nlp` PyPI package instead — see
+`docs/DEVELOPER_HANDOFF.md`'s Wildebeest section).
+
+`greekroom/greekroom/versification/` **was** out of scope when this note was
+originally written; it has since been vendored separately at
+`engine/vendor/greekroom-versification/` (see that directory's own
+`NOTICE.md`) — a real, independently investigated decision, not an automatic
+extension of this one. The two vendor directories are integrated
+differently: this one runs as an isolated subprocess/helper executable,
+while versification is imported directly as a library, since (unlike this
+4,000-line CLI script) `versification.py` is genuinely reusable code.

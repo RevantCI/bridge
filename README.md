@@ -1,7 +1,7 @@
 # Bridge
 
 Local-first translation QA workbench. Greek Room (Wildebeest, OWL, USFM,
-Uroman, alignment statistics) and the existing translationCore business
+versification, Uroman, alignment statistics) and the existing translationCore business
 logic (project reading, alignment, Paratext/Logos connectors, transaction
 safety) both run inside one Python sidecar (`BridgeEngine`); the desktop
 shell is Tauri + Svelte. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)

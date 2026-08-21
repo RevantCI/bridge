@@ -12,8 +12,21 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('resources', 'resources'), *wildebeest_datas],
-    hiddenimports=[],
+    # Unlike the USFM checker (a separate helper exe), tc_ai_bridge.versification
+    # imports the vendored versification.py directly into this process at
+    # runtime via sys.path + import, after bridge-engine.spec extracts it
+    # here under sys._MEIPASS (see tc_ai_bridge/versification.py's
+    # _vendor_root()). PyInstaller's static analysis cannot see that dynamic
+    # import, so 'regex' (versification.py's one third-party dependency,
+    # via the vendored ualign_utilities/general_util helpers) must be listed
+    # explicitly below or a frozen build crashes with ModuleNotFoundError
+    # the first time versification detection actually runs.
+    datas=[
+        ('resources', 'resources'),
+        ('vendor/greekroom-versification', 'vendor/greekroom-versification'),
+        *wildebeest_datas,
+    ],
+    hiddenimports=['regex'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

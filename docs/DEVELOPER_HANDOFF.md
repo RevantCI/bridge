@@ -20,8 +20,10 @@ gate is `docs/QA_TEST_MATRIX.md`.
 - Export/import: nested many-to-many `zaln`/`w` milestones are parsed into tC
   groups and aligned export writes re-importable USFM 3 over the retained source
   template.
-- Automated source gate: 96 Python tests; Svelte, Rust, frozen-sidecar and NSIS
-  results are recorded in the QA matrix, not assumed here.
+- Automated source gate: 122 Python tests (96 at this release's alignment
+  milestone, +26 added for Phase 4's versification work, including edge
+  cases and concurrency regression tests); Svelte, Rust, frozen-sidecar and
+  NSIS results are recorded in the QA matrix, not assumed here.
 - Explicitly deferred: AI alignment proposals, UAlign statistics, original-source
   resource downloads, and live Paratext/Logos synchronization.
 
@@ -31,11 +33,16 @@ The original plan (from the Claude Code sessions that did Phases 1-3, see
 below) laid out 7 phases. Actual status as of 2026-08-21:
 
 - **Phases 1-3**: done.
-- **Phase 4 (USFM Checker + Versification): half done.** The USFM structural
-  checker is complete — vendored, wired up, verified against both source and
-  a frozen packaged build (see the USFM section further down). **Versification
-  (detection, org-normalization, back-versification map) has not been
-  started.** This is the next planned piece of work.
+- **Phase 4 (USFM Checker + Versification): done (2026-08-21).** The USFM
+  structural checker was completed first (vendored, wired up, verified
+  against both source and a frozen packaged build — see that section
+  further down). **Versification (detection, org-normalization, and a
+  back-versification map) is now also done** — vendored separately, wired
+  into the protocol as `versification.detect`/`orgRef`/`backVersificationMap`,
+  and verified against both source and a real frozen build (see the
+  Versification section further down). Nothing in Phase 4 has UI beyond
+  what already existed — both halves are backend/protocol-only this pass,
+  matching how the USFM checker itself shipped without a dedicated panel.
 - **Phase 5 (Names & Transliteration, Uroman + Smart Edit Distance)**: not started.
 - **Phase 6 (Alignment Intelligence, UAlign corpus stats)**: the statistics
   engine itself is not started. But the manual word-alignment editor added in
@@ -58,38 +65,35 @@ so it got done. Don't assume the next piece of work has to be the next
 numbered phase in sequence; check what's actually broken or blocking first.
 
 **A hard-won practice from this project so far, worth continuing**: every
-external integration attempted (Wildebeest, the USFM checker) turned out to
-have a real, non-obvious problem that only surfaced by actually running the
-code — wrong PyPI package name, a Python 3.13 compatibility break, an
-unpublished dependency, a Windows-only `strftime` crash, a version-skew bug
-between upstream's own GitHub and PyPI releases. Don't trust a doc's
+external integration attempted (Wildebeest, the USFM checker, versification)
+turned out to have a real, non-obvious problem that only surfaced by actually
+running the code — wrong PyPI package name, a Python 3.13 compatibility
+break, an unpublished dependency, a Windows-only `strftime` crash, a
+version-skew bug between upstream's own GitHub and PyPI releases, a
+class-level-state crash on a second call in the same process, a silently
+different data license hiding inside an otherwise BSD-licensed vendor tree.
+Don't trust a doc's
 description of what a new integration will do — install it, run it against
 real input, and read what actually happens before writing an adapter around
 it. This is equally true of *this* documentation: verify claims made here
 against the actual code before relying on them for follow-up work, the same
 way you'd verify any third-party dependency's claims about itself.
 
-### What's already known about versification (next task), so it doesn't need rediscovering
+### Versification — now done, see the dedicated section further down
 
-The Greek Room USFM checker vendored into `engine/vendor/greekroom-usfm/`
-(see that directory's `NOTICE.md`) came from the same upstream repo,
-`BibleNLP/greek-room`, at pinned commit `18ddcf0e6c03fa2774b73b21186115d712e4cba9`.
-That same repo, at that same commit, also has a sibling directory:
-`greekroom/greekroom/versification/` — containing `versification.py`,
-`verse_inspection.py`, `extract_vref_txt_from_usfm_extract_jsonl.py`,
-`versification_diff_html.py`, `versification_diff_txt.py`, and a `data/`
-folder. This was located but **not read, not vendored, and not verified** —
-only its existence and location were confirmed while investigating the USFM
-checker. Like `usfm`, it is **not published in the `greekroom` PyPI package**
-(only `owl` and `gr_utilities` are — confirmed by inspecting the actual
-installed wheel contents, not just the repo's file listing) — so the same
-vendoring decision, license review (BSD 3-Clause, same as `usfm` — repo-root
-`LICENSE`, not the PyPI package's conflicting Apache-2.0 metadata), and
-"verify against real input before building an adapter" discipline documented
-in the USFM section below almost certainly applies here too. Confirm this
-freshly rather than assuming it's identical — the API shape, data file
-dependencies, and Windows-compatibility of `versification.py` specifically
-have not been checked.
+This section originally recorded a research breadcrumb ("versification.py
+was located in the same upstream repo, but not read, not vendored, and not
+verified — do that next"). That work is now done (2026-08-21); see
+"Versification — Phase 4 complete" further down in this document, and
+`engine/vendor/greekroom-versification/NOTICE.md` for full provenance. Two
+things from that breadcrumb turned out to matter and weren't visible until
+the code was actually read and run: `versification.py` is a genuine
+importable library (unlike the USFM checker's monolithic CLI script), so
+it's wired in as a direct import, not a subprocess/helper executable; and
+its `data/standard_mappings/*.json` files carry a **different license (CC
+BY-SA 4.0) than the BSD-3-Clause code around them** — see the dedicated
+section for why that's a real distinction, not a rubber-stamp of the USFM
+checker's licensing precedent.
 
 ## Project context (carried over from the Claude Code sessions that did Phases 1-3)
 
@@ -392,6 +396,167 @@ Tauri declares both in `bundle.externalBin`. Chapter/book automation starts a
 sidecar-owned background job and polls lightweight status snapshots, so the
 stdio dispatcher stays responsive while the helper runs. `verse.runChecks`
 retains a 150-second timeout for the separate live per-verse recheck path.
+
+### Versification — Phase 4 complete (2026-08-21)
+
+New module, `engine/tc_ai_bridge/versification.py`, wrapping the vendored
+Greek Room versification tool at `engine/vendor/greekroom-versification/`
+(see that directory's `NOTICE.md` for full provenance, license, and the real
+bugs found while integrating it — summarized below). Adds three sidecar
+protocol methods: `versification.detect`, `versification.orgRef`,
+`versification.backVersificationMap`.
+
+**Different books/traditions number chapters and verses differently** — the
+concrete motivating example: Psalm 3's Hebrew ('org') text opens with a
+descriptive title ("A Psalm of David, when he fled from Absalom his son")
+counted as verse 1, which most English ('eng') Bibles don't number as its
+own verse. So eng verse 1 ("LORD, how are they increased that trouble me!")
+is org verse 2, and the whole rest of the chapter is shifted by one. Six
+standard schemas are supported: `org` (original Hebrew/Greek), `eng`
+(English/Protestant), `rsc`/`rso` (Russian Synodal canonical/Orthodox),
+`vul` (Vulgate/Catholic), `lxx` (Septuagint/Orthodox) — the same six
+`versification.py` itself defines, sourced from real Paratext/Copenhagen
+Alliance mapping tables, not invented by Bridge.
+
+**This is vendored, unpublished third-party code, like the USFM checker —
+but integrated differently, not by copying that precedent blindly.**
+Confirmed freshly this session (not assumed from the USFM checker's
+already-established facts): still not on PyPI; still BSD-3-Clause code from
+the same pinned commit `18ddcf0e6c03fa2774b73b21186115d712e4cba9`. But two
+things turned out to be genuinely different, found only by reading the
+source and running it against real data:
+
+1. **`versification.py` is a real library, not a CLI script.**
+   `BibleStructure`, `Versification`, `VersifiedCorpus`,
+   `VersificationMatch`, and `BackVersification` are classes with methods
+   that operate on in-memory dicts — unlike `usfm_check.py`'s 4,000 lines
+   with no reusable functions. So this is **imported directly into the
+   long-lived `bridge-engine` process**, not run as a subprocess/helper
+   executable. `tc_ai_bridge/versification.py` builds `VersifiedCorpus`
+   objects straight from Bridge's own already-parsed chapter/verse text
+   (`TranslationCoreProject.verses()`/`target_verse_text()`) — it never
+   calls the vendored tool's file-based `load_corpus`/`write_corpus`/`main()`
+   entry points at all.
+2. **The mapping data carries a different license than the code around
+   it.** `data/standard_mappings/*.json` originates from the Copenhagen
+   Alliance Versification Working Group, not greek-room itself, and that
+   project's own `LICENSE.md` splits code (Apache 2.0) from **data (CC
+   BY-SA 4.0 — attribution + share-alike)**. Bridge's own root license is
+   GPLv3 (already copyleft), which makes bundling attributed, unmodified CC
+   BY-SA 4.0 reference data low-risk — but this was a real, separate
+   decision, not a rubber-stamp of the USFM checker's BSD-3-Clause-only
+   precedent. See `engine/vendor/greekroom-versification/NOTICE.md` for the
+   full reasoning; re-review if these JSON files are ever modified before
+   redistribution.
+
+**Two real bugs found by actually running the vendored code against real
+data** (documented in full in that directory's `NOTICE.md`, including how
+each was reproduced):
+
+- `Versification.load_versifications()` keeps **class-level** state
+  (`Versification.versification_d`, `Versification.org`) that is never
+  reset. A second real call in the same process — exactly what a naive
+  per-project-open call from a long-lived `bridge-engine.exe` would do —
+  hits a duplicate-schema branch, logs an error, and returns a
+  half-constructed object with no `verse_id_list`; the very next line then
+  crashes with `AttributeError`. Reproduced directly by calling it twice,
+  not assumed from the USFM checker's own gotchas. Fixed in Bridge's
+  wrapper by loading exactly once per process (lock + flag guard) —
+  nothing outside `tc_ai_bridge/versification.py` should import the
+  vendored `versification` module or call `load_versifications()` directly.
+- `VersifiedCorpus.load_corpus()`/`write_corpus()` (and `main()`'s other
+  file opens) use bare `open()` with no explicit encoding, which reproduces
+  the exact same Windows `cp1252` `UnicodeDecodeError` already found and
+  patched in `usfm_check.py`, confirmed here with a real Tamil string. **Not
+  patched**, unlike the USFM checker's two `# BRIDGE PATCH` markers — Bridge's
+  usage never calls those file-based methods (point 1 above), so this bug is
+  architecturally avoided rather than fixed. If anything ever calls
+  `load_corpus`/`write_corpus`/`main()` directly, patch it the same way.
+- `vref.txt` (390 KB) and `psalm-descriptive-titles.txt` were deliberately
+  **not** vendored: verified by reading the source that neither is read by
+  any of the five classes Bridge actually calls, only by the CLI `main()`
+  Bridge never invokes.
+
+**Protocol methods** (all whole-book-scoped, cached per project path like
+the USFM findings, computed lazily on first request rather than on every
+`project.open`):
+
+- `versification.detect` — sniffs the best-fitting schema for the open
+  project's book against all six standard schemas and returns every
+  schema's match cost, not just a bare label, so a caller can show how
+  confident the detection is.
+- `versification.orgRef` — normalizes one chapter:verse into its `org`
+  equivalent (defaulting to the project's own detected schema). Returns a
+  `mapping` field — `same` / `mapped` / `merge` / `split` — because
+  cross-tradition shifts aren't always 1:1; callers should branch on that
+  field rather than parsing `orgRef` as free text.
+- `versification.backVersificationMap` — the inverse: every `org` verse in
+  the book mapped back to the project's own numbering, for display/export
+  use without hand-rolling the mapping direction.
+
+**Verified**: `engine/tests/test_versification.py` (22 tests against the
+real vendored data — including the Psalm 3 shift and its back-versification
+round trip, real merge/split mappings, unknown books, USFM verse
+bridges/segments passed straight through, and a direct real-bug-reproduction
+test that calls the module's public functions twice in a row to confirm the
+class-level-state crash found above stays fixed) plus protocol-level
+coverage in `test_bridge_service.py` (a Ruth fixture proving identity
+mapping for a fully-canonical book, and a dedicated Psalms fixture proving
+the real cross-tradition shift flows end-to-end through `handle_request`).
+Full source suite: 122 passed.
+
+**Concurrency — a second real bug found, this time by writing concurrency
+edge case tests rather than by reading the source.** `detect_schema()`'s
+scan over a schema's full verse list is pure Python and ~0.5s
+single-threaded — but running several of those scans on different threads
+*at once* doesn't scale proportionally under CPython's GIL, it degrades
+catastrophically: measured directly at 16 concurrent callers taking **~47
+seconds each** (not the ~8s naive linear scaling predicts — over 90x worse
+than sequential). Reproduced with a genuinely fresh subprocess and
+fine-grained per-thread timing, not assumed from general GIL folklore.
+Since `bridge_service.py` calls this once per book on first request and
+caches the result, the realistic trigger is a burst of near-simultaneous
+`versification.detect` calls before any of those caches are warm — which
+would look exactly like the sidecar hanging. Fixed by serializing the scan
+with the same lock `_ensure_loaded()` already uses; the identical 16-thread
+scenario then completes in ~8s total. `to_org_ref`/`back_versification_map`
+do plain dict lookups (not this scan) and were separately measured safe
+unlocked under the same concurrency — this isn't a "lock everything"
+fix, and don't assume it's free insurance for code added to this module
+later without re-measuring. Guarded by `test_versification_concurrency.py`,
+including a wall-clock regression bound tight enough that the unfixed
+behavior blows through it by 5-10x. Full details in
+`engine/vendor/greekroom-versification/NOTICE.md`'s finding 4.
+
+**Packaging — a real gap found and fixed, not assumed to be handled by
+precedent**: because this is imported directly into `bridge-engine.exe`
+rather than run as a separate helper (unlike the USFM checker), the
+vendored `versification.py` + `data/` tree and its one third-party
+dependency (`regex`) are invisible to PyInstaller's static import analysis
+— `main.py` never imports them directly; `tc_ai_bridge/versification.py`
+only reaches them via a runtime `sys.path.insert` + `import`. Left alone,
+a frozen build would have shipped with `versification.detect` crashing on
+first use. Fixed in `bridge-engine.spec`: `datas` now includes
+`vendor/greekroom-versification`, extracted under `sys._MEIPASS` in a
+frozen build (`tc_ai_bridge/versification.py`'s `_vendor_root()` resolves
+the same way `resource_materializer.bundled_resources_source()` already
+does), and `hiddenimports` now includes `regex`. **Verified against a real
+PyInstaller build this session**, not left as an assumption: built
+`bridge-engine.exe` from the updated spec, ran it as a real subprocess over
+its stdio JSON-RPC protocol, and confirmed `versification.detect`/`orgRef`/
+`backVersificationMap` all return correct real results (including the
+Psalm 3 shift) from inside the genuinely frozen executable. The existing
+`scripts/smoke_sidecars.py` frozen-sidecar smoke test also still passes
+against the rebuilt executable.
+
+**Not done in this pass**: no UI surfaces any of this yet (no schema
+indicator, no dual-reference display, no export-time renumbering) — matching
+how the USFM checker itself shipped as backend/protocol-only. `versification
+.detect`'s result isn't wired into the findings feed as an informational
+notice; it's exposed as project metadata a future UI can call on demand,
+not injected automatically. Per-book detection results are cached only for
+the lifetime of the process/current project (same lifetime as the USFM
+findings cache), not persisted to disk.
 
 Continue building Bridge's import workflow so users can bring in individual
 USFM/SFM files, whole-Bible folders, Paratext folders, and translationCore
