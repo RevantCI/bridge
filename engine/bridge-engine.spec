@@ -1,11 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_data_files
+
+
+# Wildebeest is optional in development but its package data must accompany
+# it whenever the real engine is installed in the release environment.
+wildebeest_datas = collect_data_files('wildebeest')
+
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('resources', 'resources')],
+    datas=[('resources', 'resources'), *wildebeest_datas],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
