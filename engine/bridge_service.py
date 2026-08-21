@@ -25,6 +25,7 @@ from typing import Any, Callable, Optional
 
 from greek_room_engine.engine import GreekRoomEngine
 from greek_room_engine.adapters.usfm_adapter import UsfmCheckerCancelled, UsfmCheckerError
+from greek_room_engine.adapters.names_adapter import NamesCheckError
 from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity, FindingStatus
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
@@ -196,6 +197,12 @@ class BridgeEngine:
         # work, so it's cached per project path the same way USFM findings
         # are, computed lazily on first request rather than on every open.
         self._versification_by_book: dict[str, dict[str, Any]] = {}
+        # Names/transliteration spelling-consistency is also inherently
+        # whole-book (there's nothing to compare a single verse's spelling
+        # against), so it's cached the same way as USFM findings — not
+        # invalidated by verse.edit either, see _names_findings_for_book.
+        self._names_findings_by_book: dict[str, list[QaFinding]] = {}
+        self._names_errors_by_book: dict[str, str] = {}
         self._checker_lock = threading.RLock()
         self._check_jobs = CheckJobManager()
         # AppSettings() with no path defaults to a real, persistent location
@@ -232,6 +239,8 @@ class BridgeEngine:
         self._usfm_findings_by_book.clear()
         self._usfm_errors_by_book.clear()
         self._versification_by_book.clear()
+        self._names_findings_by_book.clear()
+        self._names_errors_by_book.clear()
         materialize_lazy_project(path)
         self.project = TranslationCoreProject(path)
         info = self._project_info()
@@ -281,6 +290,8 @@ class BridgeEngine:
         self._usfm_findings_by_book.clear()
         self._usfm_errors_by_book.clear()
         self._versification_by_book.clear()
+        self._names_findings_by_book.clear()
+        self._names_errors_by_book.clear()
         info = self._project_info()
         info["import"] = result
         info["importedProjects"] = result["projects"]
@@ -663,6 +674,63 @@ class BridgeEngine:
         self._usfm_findings_by_book[book_key] = findings
         return findings
 
+    def _names_findings_for_book(
+        self, project: Optional[TranslationCoreProject] = None,
+    ) -> list[QaFinding]:
+        """Lazily compute + cache whole-book names/transliteration spelling
+        findings (Uroman romanization + vendored Smart Edit Distance — see
+        NamesAdapter's own docstring). Same reason and shape as
+        _usfm_findings_for_book: consistency is inherently a corpus-level
+        question, so this is computed once per book and not invalidated by
+        verse.edit — a single verse edit changing one word's spelling could
+        in principle change the answer, but re-running a full whole-book
+        vocabulary scan after every keystroke-level edit would be far too
+        slow; re-opening the project re-runs it fresh, same tradeoff as USFM.
+        """
+        project = project or self.project
+        if project is None:
+            raise ProjectError("No project open — call project.open first")
+        book_key = str(project.path)
+        cached = self._names_findings_by_book.get(book_key)
+        if cached is not None:
+            return cached
+        cached_error = self._names_errors_by_book.get(book_key)
+        if cached_error is not None:
+            raise NamesCheckError(cached_error)
+
+        token_occurrences: dict[str, list[tuple[str, str]]] = {}
+        for ref, text in self._book_verse_text_map(project).items():
+            chapter, _, verse = ref.partition(":")
+            for token in whitespace_tokens(text):
+                token_occurrences.setdefault(token, []).append((chapter, verse))
+
+        target = project.manifest.get("target_language", {})
+        lang_code = str(target.get("id") or "") if isinstance(target, dict) else ""
+
+        try:
+            findings = self.greek_room.check_book_names(
+                project_id=str(project.summary.path),
+                book_id=project.book_id,
+                lang_code=lang_code,
+                token_occurrences=token_occurrences,
+            )
+        except NamesCheckError as exc:
+            self._names_errors_by_book[book_key] = str(exc)
+            raise
+        for f in findings:
+            # Same stabilization reason as USFM findings above: a stable id
+            # keyed on the two spellings being compared (sorted, so it
+            # doesn't matter which one this run happened to treat as
+            # "majority") so a repeat run's random pairing order can't
+            # orphan a prior human decision.
+            disambiguator = "::".join(sorted([f.original_text, f.suggested_replacement or ""]))
+            f.id = _stable_finding_id(
+                chapter=str(f.chapter), verse=str(f.verse), engine=f.engine,
+                check_type=f.check_type, disambiguator=disambiguator,
+            )
+        self._names_findings_by_book[book_key] = findings
+        return findings
+
     def run_verse_checks(self, chapter: str, verse: str,
                           checks: list[str]) -> list[QaFinding]:
         """The unified check entrypoint: local QA (tN/tW/alignment) +
@@ -720,6 +788,16 @@ class BridgeEngine:
                     and str(verse) == str(first_verse)
                     and (f.verse == 0 or str(f.verse) not in existing_verses)
                 ):
+                    findings.append(f)
+
+        if "local" in checks or "names" in checks:
+            # Unlike USFM findings, every names/spelling finding is anchored
+            # at a real occurrence's own verse (the minority spelling's
+            # first location — see NamesAdapter._build_finding), never a
+            # placeholder chapter-level slot, so no first-verse fallback is
+            # needed here.
+            for f in self._names_findings_for_book(project):
+                if str(f.chapter) == str(chapter) and str(f.verse) == str(verse):
                     findings.append(f)
 
         if "greekroom" in checks or "wildebeest" in checks:
@@ -809,7 +887,7 @@ class BridgeEngine:
                 ]
 
         preflight = None
-        if any(name in spec.checks for name in ("local", "tN", "tW", "usfm")):
+        if any(name in spec.checks for name in ("local", "tN", "tW", "usfm", "names")):
             def run_preflight(cancel_event: threading.Event) -> None:
                 with self._checker_lock:
                     if any(name in spec.checks for name in ("local", "tN", "tW")):
@@ -818,6 +896,18 @@ class BridgeEngine:
                         return
                     if any(name in spec.checks for name in ("local", "usfm")):
                         self._usfm_findings_for_book(project, cancel_event=cancel_event)
+                    if cancel_event.is_set():
+                        return
+                    if any(name in spec.checks for name in ("local", "names")):
+                        # Unlike USFM's subprocess, this is in-process pure
+                        # Python with no mid-flight cancellation support yet
+                        # — it either hasn't started (skipped by the check
+                        # above) or runs to completion. Acceptable for now;
+                        # revisit if real book-sized timing (see
+                        # docs/DEVELOPER_HANDOFF.md's Phase 5 section) shows
+                        # this needs the same cooperative-cancel treatment
+                        # USFM's subprocess has.
+                        self._names_findings_for_book(project)
             preflight = run_preflight
 
         return self._check_jobs.start(

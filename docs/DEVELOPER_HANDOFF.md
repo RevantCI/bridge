@@ -43,7 +43,12 @@ below) laid out 7 phases. Actual status as of 2026-08-21:
   Versification section further down). Nothing in Phase 4 has UI beyond
   what already existed — both halves are backend/protocol-only this pass,
   matching how the USFM checker itself shipped without a dedicated panel.
-- **Phase 5 (Names & Transliteration, Uroman + Smart Edit Distance)**: not started.
+- **Phase 5 (Names & Transliteration, Uroman + Smart Edit Distance): done
+  (2026-08-21).** A whole-book spelling-consistency check (Uroman +
+  vendored Smart Edit Distance) is wired into `verse.runChecks` behind the
+  existing `"local"` checks list — no frontend change needed, same as the
+  USFM checker. See "Names & Transliteration — Phase 5 complete" further
+  down.
 - **Phase 6 (Alignment Intelligence, UAlign corpus stats)**: the statistics
   engine itself is not started. But the manual word-alignment editor added in
   `feat(alignment)` (see `docs/ALIGNMENT.md`) wasn't in the original plan at
@@ -557,6 +562,287 @@ notice; it's exposed as project metadata a future UI can call on demand,
 not injected automatically. Per-book detection results are cached only for
 the lifetime of the process/current project (same lifetime as the USFM
 findings cache), not persisted to disk.
+
+### Names & Transliteration — Phase 5 complete (2026-08-21)
+
+This section originally recorded a research breadcrumb (nothing wired up,
+just an investigation of whether Uroman and Smart Edit Distance were even
+real, installable dependencies). That work is now done — a whole-book
+names/spelling-consistency check is wired into the protocol, tested against
+both source and a real frozen build. The original research findings below
+are kept as-is (still accurate, still worth reading for *why* things are
+built the way they are); the "What was actually built" subsection further
+down covers the implementation, the two real bugs found while building it,
+and what's verified. **Verify all of this again before relying on it** —
+same standing instruction as everywhere else in this doc.
+
+**Uroman is a real, currently installable PyPI dependency — it does not
+follow the Wildebeest name-trap pattern.** `pip install uroman` installs
+the genuine package by Ulf Hermjakob, USC/ISI (same research group as
+Wildebeest and the vendored `greek-room` tools), current release
+`1.3.1.1`, `Requires-Python: >=3.10`, one real dependency
+(`regex>=2024.5.15`, compatible with the `regex>=2023.10.3` floor already
+in `engine/pyproject.toml` for the USFM checker). Confirmed by actually
+installing it and reading the wheel's own METADATA — not assumed from the
+package name alone, per this project's standing rule.
+
+- **API, verified by direct use, not docs**: `uroman.Uroman()` is the
+  entry point. Construction loads the full romanization table set — real
+  measured cost on this machine was **1.8-2.1 seconds** — after which
+  `romanize_string(s, lcode=...)` calls measured effectively instant
+  (0.0000s) on repeat calls, confirmed by timing both a first and second
+  call. This is a real, substantial cost that validates
+  `docs/ARCHITECTURE.md`'s "loaded once, not per call, per Uroman's own
+  documented recommendation" line — that line was written before anyone
+  had actually read Uroman's docs or run the code; it's now confirmed true
+  for a concrete, non-hypothetical reason (a multi-second table load), not
+  rubber-stamped.
+- **Data**: ships ~4.2 MB of real resource files inside the wheel itself
+  (`UnicodeData.txt` at 1.9 MB, `romanization-auto-table.txt` at ~1 MB,
+  `Chinese_to_Pinyin.txt`, `Scripts.txt`, etc. — 13 files total), resolved
+  at runtime via `Path(__file__).parent / "data"` (confirmed by reading
+  `Uroman.default_data_dir()`'s source directly). This is the same shape
+  of packaging risk already flagged as unverified insurance for
+  `wildebeest-nlp`'s own `data/` directory in the Real Wildebeest section
+  above, and the same shape of problem versification's vendor tree solved
+  with `bridge-engine.spec`'s `datas` entry — **not yet tested against a
+  frozen PyInstaller build this session**; treat as a real open item, not
+  a formality, before shipping.
+- **Verified against real cross-script Biblical name data on Windows**,
+  not synthetic strings: Hindi/Urdu/English "Nepal" (नेपाल → `nepaal`,
+  نیپال → `nipal`, matching Uroman's own paper example exactly), Greek
+  Ἰωάννης → `Ioannes`, Tamil யோவான் → `yoovaan`, Arabic محمد → `mhmd`,
+  Hebrew יוֹחָנָן → `yochanan`. No network access was used or required —
+  entirely offline, matching Bridge's own connectivity requirement.
+- **License — real, confirmed drift, same shape of bug as the
+  `greekroom` package's Apache/BSD classifier mismatch already recorded
+  above, not a new problem shape.** Both the published wheel's METADATA
+  *and* upstream's own `pyproject.toml` on GitHub classify the license as
+  `"License :: OSI Approved :: Apache Software License"`. The actual
+  bundled `LICENSE.txt` (confirmed identical between the PyPI wheel and
+  upstream's GitHub `LICENSE.txt`, so this is an upstream authoring
+  mistake, not a wheel-build artifact) is **not Apache 2.0 text at all** —
+  it's a custom MIT-style permissive license with a mandatory attribution
+  clause: *"Any publication of projects using uroman shall acknowledge its
+  use: 'This project uses the universal romanizer software "uroman"
+  written by Ulf Hermjakob, USC Information Sciences Institute
+  (2015-2020)'."* This confirms `docs/ARCHITECTURE.md`'s previously
+  unverified "Uroman has its own attribution requirement" note was right,
+  but for a more specific reason than assumed — it isn't an extra clause
+  layered on top of Apache 2.0, the Apache classifier itself is simply
+  wrong. Bridge will need to surface that exact acknowledgment string
+  somewhere real (an about screen, a NOTICE.md, export metadata), not just
+  bundle a copy of the license file.
+
+**Smart Edit Distance (SED) is not a separately published tool and not
+part of a different repo — it lives in the same pinned `BibleNLP/greek-room`
+commit (`18ddcf0e6c03fa2774b73b21186115d712e4cba9`) already vendored for
+the USFM checker and versification**, at
+`smart_edit_distance/src/smart_edit_distance.py` plus
+`smart_edit_distance/data/string-distance-cost-rules.txt` (general rules)
+and a second Devanagari-specific cost file. Confirmed not on PyPI under
+`smart-edit-distance`, `smart_edit_distance`, or inside the published
+`greekroom` PyPI package (`0.0.20`, which — per the USFM checker's own
+established precedent — only ships `owl`/`gr_utilities`, not this). Same
+integration shape as the USFM checker and versification: unpublished,
+vendor it from the pinned commit, don't wait on upstream packaging.
+
+- **Shape: closer to versification.py than to usfm_check.py.** It's a
+  single ~430-line file, pure Python standard library only (`argparse`,
+  `logging`, `re`, `sys`, `typing` — zero third-party imports, and no
+  import of Uroman itself despite the module's own docstring describing
+  the two as complementary). A `SmartEditDistance` class holds
+  per-instance state (`self.ht`, `self.max1`/`self.max2`, etc.) — no
+  class-level shared state like the real bug found in
+  `Versification.load_versifications()`, so the same second-call crash
+  class of bug doesn't reproduce here (checked directly by instantiating
+  it twice). This argues for a direct import into the long-lived
+  `bridge-engine` process, the same way `versification.py` was integrated,
+  not a subprocess/helper executable like the USFM checker.
+- **License: plain BSD-3-Clause, same as the repo root — no hidden
+  second license this time.** Checked directly because versification's
+  CC BY-SA data-license surprise means this can no longer be assumed;
+  this time there wasn't one. The cost-rule `.txt` data files carry no
+  separate license notice of their own.
+- **Real bug found by actually running it against the real data file —
+  the third confirmed instance of the exact same bug class this project
+  keeps finding in every one of these vendored/adjacent tools.**
+  `SmartEditDistance.load_smart_edit_distance_data()` calls bare
+  `open(raw_cost_file)` with no explicit encoding when given a string
+  path. The real `string-distance-cost-rules.txt` contains 117 non-ASCII
+  bytes (confirmed by reading it as raw bytes, not assumed from the
+  filename). Loading it under this machine's default Windows locale
+  (`cp1252`) throws `UnicodeDecodeError: 'charmap' codec can't decode byte
+  0x90 in position 3802: character maps to <undefined>` — reproduced live,
+  not inferred. Needs the same explicit `encoding="utf-8"` fix already
+  applied to `usfm_check.py` (2 call sites) and identified-but-architecturally-
+  avoided in `versification.py`'s file-based methods.
+- **Functional verification, combined with real Uroman output, not
+  hypothetical pairs**: loaded the real cost-rules file (417 entries / 834
+  compiled rules) and ran `string_distance_cost()` on name pairs. Results
+  matched the module's own docstring examples exactly: `"Josef Schumann"`
+  vs `"Joseph Schuman"` scored **0.03** (plain Levenshtein: 3),
+  `"Muhammad"` vs `"Mohamed"` scored **0.22** (plain Levenshtein: 3),
+  `"Jim"` vs `"Kim"` correctly stayed at the default substitution cost of
+  **1.0** (matching the docstring's own claim that these should read as
+  more different than the phonetic-variant pairs above). A live
+  cross-script test combining both tools — Tamil யோவான் (uroman:
+  `yoovaan`) vs English `"John"` — scored **1.52**, correctly landing
+  between "same word, different spelling convention" and "unrelated
+  strings." This is the first time in this session anything actually
+  chained Uroman's output into SED's cost function, not just tested each
+  tool in isolation.
+
+The above was investigation only when first written — nothing was built
+yet, deliberately, until the real shape of both dependencies was confirmed.
+Everything below this point was added afterward, once the user confirmed
+the check's actual design.
+
+#### What was actually built
+
+**Design decision, made explicitly with the user before writing any code**:
+of three options presented (a general whole-book phonetic spelling check; a
+translationWords-names-anchored consistency check requiring a new,
+unproven candidate-extraction heuristic; or infrastructure-only with no
+check at all), the user chose the general whole-book check. It compares
+every pair of distinct target-language word types used in the open book
+and flags pairs whose *romanized* forms are suspiciously close (low Smart
+Edit Distance cost) but not identical. It never claims two spellings are
+the same name or that either is wrong — only that they're objectively
+close — keeping it on the "Greek Room says: this is objectively
+suspicious" side of the architecture doc's three-way design boundary. The
+names-anchored alternative was explicitly rejected as riskier: it would
+have required guessing which target word renders a given name from
+translationWords occurrence data alone (no word alignment exists for most
+verses), a real semantic claim Greek Room has no reliable way to verify.
+
+**Vendored**: `engine/vendor/greekroom-smart-edit-distance/` — pinned to
+the exact same `BibleNLP/greek-room` commit already used for the USFM
+checker and versification (`18ddcf0e6c03fa2774b73b21186115d712e4cba9`).
+Confirmed via the GitHub API tree listing that `smart_edit_distance.py`
+plus two cost-rule data files are the *entire* contents of that directory
+at this commit. See that directory's `NOTICE.md` for full provenance.
+`uroman>=1.3.1.1` was added as a real, hard dependency in
+`engine/pyproject.toml` (not optional/mock-fallback like Wildebeest — it
+has no known installability problem on any currently supported Python
+version). `regex`'s floor was raised from `>=2023.10.3` to `>=2024.5.15`
+to satisfy uroman's own requirement — same package, no real conflict.
+
+**New code**: `engine/greek_room_engine/adapters/names_adapter.py`
+(`NamesAdapter`, registered in `GreekRoomEngine`), a new
+`GreekRoomEngine.check_book_names()` method mirroring
+`check_book_usfm()`'s shape, and `BridgeEngine._names_findings_for_book()`
+in `bridge_service.py` mirroring `_usfm_findings_for_book()` — same
+whole-book caching-per-project-path pattern, same cache-clearing on
+`project.open`/`project.import`, same stable-id treatment (here keyed on
+the two spellings being compared, sorted, so decisions survive repeat
+runs regardless of which spelling a given run happens to treat as
+"majority"). Wired into `run_verse_checks` behind `"local" in checks or
+"names" in checks` — the exact same gating shape as the USFM checker —
+which is why **no frontend change was needed**: `App.svelte` and
+`ReviewPanel.svelte` already always send `checks: ["local", "greekroom"]`.
+
+**Two real bugs found by actually running this against real data, not by
+reading the source**, on top of the encoding bug already found and
+documented (architecturally avoided, not patched) during the research
+phase and recorded in the vendor directory's `NOTICE.md`:
+
+1. **A real false-positive class**: testing against plain English
+   "church"/"churches" — an ordinary, correctly-spelled singular/plural
+   pair, not a spelling inconsistency — scored **0.70** under the general
+   cost-rules file, because rules tuned for name-like variation (dropped
+   vowels, consonant doubling) also happen to cover common inflectional
+   endings. The vendored module's own docstring frames its "Jim"/"Kim"
+   example (cost 1.0) as meaningfully different, which suggested a
+   threshold just under 1.0 — but 1.0 alone isn't a safe ceiling. The
+   threshold (`_MAX_COST` in `names_adapter.py`) was tuned down to **0.4**,
+   the highest value that still keeps every real phonetic-variant pair
+   found this session (Josef Schumann/Joseph Schuman = 0.03, Muhammad/
+   Mohamed = 0.22, a synthetic Titus/Tituss typo = 0.02, Yohaan/Yohan =
+   0.02) while excluding the church/churches false positive. This is an
+   inherent limitation of an edit-distance-family metric applied to
+   morphologically rich languages, not something a threshold alone fully
+   solves — expect some inflectional false positives to still surface near
+   this ceiling; the human reviewer is the actual filter, per this
+   adapter's own design-boundary docstring.
+2. **A real, serious performance bug**: the first working version pruned
+   comparison candidates by length-bucket only (only compare romanized
+   forms within a couple of characters of each other in length). Measured
+   directly against a synthetic ~3000-distinct-word-type vocabulary (a
+   plausible single-book size): **133 seconds**. Length-bucket pruning
+   alone still leaves well over a million length-compatible pairs, and
+   each `string_distance_cost` call is a non-trivial DP. Fixed with
+   character-bigram "blocking" (`NamesAdapter._candidate_pairs`), a
+   standard approximate record-linkage technique: a real near-duplicate
+   pair (1-2 edits) shares almost all of its bigrams, so requiring most
+   bigrams to overlap before ever calling the expensive comparison throws
+   away the overwhelming majority of unrelated pairs cheaply first.
+   Measured result on the same 3000-token benchmark: **5.5 seconds** (a
+   ~24x improvement). An 8000-token benchmark (worse than most single
+   books) took 27.9s — still tolerable for a backgrounded preflight job
+   (the same job shape already tolerates the USFM checker's 120s subprocess
+   timeout), but scaling is worse than linear with the current blocking
+   parameters (`_MAX_BIGRAM_MISMATCH`, `_MAX_BIGRAM_BUCKET` in
+   `names_adapter.py`) — a real area for future tuning if a genuinely huge
+   single-book vocabulary turns out to need it, not claimed as fully solved.
+   Both benchmarks used adversarial uniformly-random letter strings (worst
+   case for bigram blocking, since real language text has far more skewed
+   bigram frequency); real target-language vocabulary should perform at
+   least as well.
+
+**Known, deliberately unaddressed limitations** (documented rather than
+silently absent, matching this project's own established practice):
+whole-book in-process comparison has no mid-flight cancellation support
+(unlike the USFM checker's subprocess, which the check-job preflight can
+terminate) — acceptable given the measured timings above, revisit if real
+usage shows otherwise. The Devanagari-specific supplementary cost-rules
+file is vendored but not loaded (see the vendor directory's `NOTICE.md`).
+No UI surfaces this beyond the existing findings list — same as how the
+USFM checker and versification both shipped backend/protocol-only.
+
+**Verified**:
+- `engine/greek_room_engine/tests/test_names_adapter.py` (9 tests) — real
+  uroman + real vendored SED, no mocks: a planted typo gets flagged and
+  anchored at its own occurrence; the real Muhammad/Mohamed cost (0.22) is
+  asserted exactly, not just "some finding exists"; the church/churches
+  false-positive class and the vendored module's own Jim/Kim example are
+  both asserted to NOT be flagged; a bigram-blocking performance regression
+  guard.
+- `engine/tests/test_names_check.py` (6 tests) — protocol-level, through
+  `BridgeEngine.handle_request`: a real finding surfaces via
+  `verse.runChecks` with `checks: ["names"]`, is correctly absent when
+  "names" isn't requested, has a stable id across a fresh `BridgeEngine`
+  instance (simulating an app restart), is listed as `usingRealEngine` in
+  `engine.info`, doesn't leak across a `project.open` switch to a different
+  project, and — importantly, since every other test above this one only
+  exercised English, where Uroman's romanization step is close to a no-op
+  — a real Tamil case through full verse sentences (not isolated words):
+  an inconsistently included/omitted long-a vowel sign on the same name
+  ("யோவான்" vs "யோவன்") is correctly flagged, exercising
+  `whitespace_tokens`' real combining-mark/punctuation handling on actual
+  target-language text, not bypassing it with synthetic tokens. Bridge's
+  real target languages are mostly non-Latin, so this was worth confirming
+  before treating the check as done, not just a nice-to-have extra test.
+- Full source suite: **137 passed** (122 before this phase + 15 new).
+  `npm run check` still reports 0 errors/0 warnings (no frontend files
+  touched).
+- **Frozen build, verified this session** (not left as an open item like
+  Wildebeest's packaging was): built both sidecars via
+  `scripts/build-sidecars.ps1` against the updated
+  `engine/bridge-engine.spec` (now also bundling
+  `vendor/greekroom-smart-edit-distance` and uroman's data files via
+  `collect_data_files('uroman')`, the same `sys._MEIPASS` extraction
+  pattern versification's vendor tree already uses). Ran the real frozen
+  `bridge-engine.exe` as an actual subprocess over its stdio JSON-RPC
+  protocol with a real planted "Tituss"/"Titus" typo: `engine.info`
+  reports `usingRealEngine: true` for the `names` adapter, and
+  `verse.runChecks` returned the correct real finding
+  (`original_text: "Tituss"`, `suggested_replacement: "Titus"`, cost
+  `0.02`) — confirming uroman's ~4.2MB bundled data directory and the
+  vendored SED tree both actually resolve correctly under `sys._MEIPASS`
+  in a genuinely frozen executable, not just in source mode. This had been
+  explicitly flagged as unverified in the original research breadcrumb;
+  it no longer is.
 
 Continue building Bridge's import workflow so users can bring in individual
 USFM/SFM files, whole-Bible folders, Paratext folders, and translationCore

@@ -11,6 +11,7 @@ from typing import Any
 from .adapters.base import CheckAdapter
 from .adapters.wildebeest_adapter import WildebeestAdapter
 from .adapters.usfm_adapter import UsfmAdapter, UsfmCheckerError
+from .adapters.names_adapter import NamesAdapter, NamesCheckError
 from .models.finding import QaFinding
 from .protocol import EngineRequest, EngineResponse, Methods
 
@@ -25,8 +26,9 @@ class GreekRoomEngine:
     def _register_default_adapters(self) -> None:
         self.register_adapter(WildebeestAdapter())
         self.register_adapter(UsfmAdapter())
-        # OWL, Versification, Uroman/SED, UAlign adapters are added in later
-        # roadmap stages per doc §35-41 — register here when ready.
+        self.register_adapter(NamesAdapter())
+        # OWL and UAlign adapters are added in later roadmap stages per doc
+        # §35-41 — register here when ready.
 
     def register_adapter(self, adapter: CheckAdapter) -> None:
         self._adapters[adapter.engine_name] = adapter
@@ -84,6 +86,28 @@ class GreekRoomEngine:
         findings = adapter.check_book(
             project_id=project_id, book_id=book_id, usfm_text=usfm_text,
             cancel_event=cancel_event,
+        )
+        run_id = str(uuid.uuid4())
+        for f in findings:
+            f.run_id = run_id
+        return findings
+
+    def check_book_names(
+        self, *, project_id: str, book_id: str, lang_code: str,
+        token_occurrences: dict[str, list[tuple[str, str]]],
+    ) -> list[QaFinding]:
+        """Names/transliteration spelling-consistency check — like
+        check_book_usfm, this is whole-book, not part of the per-verse
+        checks list, and must be called explicitly by the caller
+        (bridge_service caches the result per book — see NamesAdapter's own
+        docstring for why: consistency is inherently a corpus-level
+        question, not a per-verse one)."""
+        adapter = self._adapters.get("names")
+        if adapter is None:
+            raise NamesCheckError("Names/transliteration adapter is not registered")
+        findings = adapter.check_book(
+            project_id=project_id, book_id=book_id, lang_code=lang_code,
+            token_occurrences=token_occurrences,
         )
         run_id = str(uuid.uuid4())
         for f in findings:

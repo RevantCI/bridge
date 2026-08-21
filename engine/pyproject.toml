@@ -4,10 +4,26 @@ version = "0.8.0b1"
 description = "Bridge sidecar: tc_ai_bridge business logic + Greek Room QA, one protocol"
 requires-python = ">=3.11"
 dependencies = [
-    # Required by the vendored Greek Room USFM structural checker.
-    "regex>=2023.10.3",
-    # "greekroom" left commented — OWL/USFM/versification/UAlign not wired
-    # up yet (see docs/DEVELOPER_HANDOFF.md's Phase 4-6 status).
+    # Required by the vendored Greek Room USFM structural checker and by
+    # versification.py's vendored dependency. Floor raised to satisfy
+    # uroman's own >=2024.5.15 requirement too (see below) — same package,
+    # no version conflict, just the higher of the two floors.
+    "regex>=2024.5.15",
+    # Real PyPI package (unlike Wildebeest, "uroman" is not a name trap —
+    # confirmed by installing it). By Ulf Hermjakob, USC/ISI, the same
+    # author as Wildebeest and the vendored greek-room tools. No known
+    # installability problem on any currently-supported Python version
+    # (unlike wildebeest-nlp's Python 3.13 compile break), so this is a
+    # hard dependency, not an optional extra with a mock fallback. See
+    # docs/DEVELOPER_HANDOFF.md's Phase 5 section for the full
+    # investigation, including a real license-classifier drift (PyPI/
+    # upstream both say "Apache", the actual bundled LICENSE.txt is a
+    # custom MIT-style license with its own mandatory attribution clause).
+    "uroman>=1.3.1.1",
+    # "greekroom" left commented — OWL/UAlign not wired up yet (see
+    # docs/DEVELOPER_HANDOFF.md's Phase 4-6 status). USFM, versification,
+    # and Smart Edit Distance are all vendored separately instead — none
+    # of the three is part of the published "greekroom" PyPI package.
     # "greekroom",
 ]
 

@@ -43,7 +43,11 @@ bridge-engine                    (PyInstaller-bundled Python sidecar)
 
 The sidecar starts once and stays alive for the whole session — NLP
 resources (Wildebeest corpus properties, Uroman tables, etc.) are loaded
-once, not per call, per Uroman's own documented recommendation.
+once, not per call. **Verified 2026-08-21** (see `docs/DEVELOPER_HANDOFF.md`'s
+Phase 5 research breadcrumb): `uroman.Uroman()` construction takes ~1.8-2.1s
+on real hardware to load its full romanization table set, after which
+`romanize_string()` calls measured effectively instant — this recommendation
+was real and worth following, not just an assumed best practice.
 
 **Never integrated directly**: Greek Room's `ephesus/` web API (Docker,
 database, its own web UI). We only use the underlying check modules.
@@ -106,7 +110,7 @@ which mode is actually active.
 | **v0.7.5** | `GreekRoomEngine` sidecar, stable JSON protocol, `QaFinding` model, Wildebeest (mock fallback). | ✅ Built |
 | **v0.8.0-beta.1** | Real sidecar/UI core loop, fast multi-book import, background QA jobs, persistent decisions and edits, standalone USFM checker, manual word-alignment editor, aligned/non-aligned USFM export. | Release candidate |
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
-| v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | Planned |
+| v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
 | v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | Planned |
 | v1.0.x | Paratext/Logos live navigation and optional AI + Greek Room synthesis. | Planned |
 
@@ -149,7 +153,13 @@ Not yet wired (real logic exists in `tc_ai_bridge` but no protocol method calls 
 - Exact upstream Greek Room commit to pin (`third_party/greek-room/UPSTREAM_COMMIT.txt`)
 - License inventory before distribution (Greek Room is BSD-3-Clause at the
   repo root but the `greekroom` package classifier says Apache — reconcile
-  before shipping; Uroman has its own attribution requirement)
+  before shipping; Uroman has its own attribution requirement — **verified
+  2026-08-21**: both the PyPI wheel and upstream's own `pyproject.toml`
+  classify it "Apache Software License", but the actual bundled
+  `LICENSE.txt` is not Apache 2.0 text — it's a custom MIT-style permissive
+  license requiring a specific acknowledgment sentence in any publication
+  using it. Same classifier-drift pattern as `greekroom`, not a new problem
+  shape. See `docs/DEVELOPER_HANDOFF.md`'s Phase 5 breadcrumb.)
 - Real `wildebeest`/`greekroom` pip packages need to be added to
   `engine/pyproject.toml` and the mock fallback in `WildebeestAdapter`
   replaced/validated against real output

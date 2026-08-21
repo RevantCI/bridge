@@ -21,9 +21,21 @@ a = Analysis(
     # via the vendored ualign_utilities/general_util helpers) must be listed
     # explicitly below or a frozen build crashes with ModuleNotFoundError
     # the first time versification detection actually runs.
+    #
+    # names_adapter.py (Phase 5) is the same shape: the vendored Smart Edit
+    # Distance module is imported dynamically via sys.path + import (see
+    # its own _vendor_root()), and Uroman ships its own ~4.2MB data/
+    # directory resolved relative to its installed package location
+    # (Path(__file__).parent / "data") — invisible to PyInstaller's static
+    # analysis either way, so both must be listed explicitly. Verified
+    # against a real PyInstaller build (see docs/DEVELOPER_HANDOFF.md's
+    # Phase 5 section): the frozen bridge-engine.exe correctly resolves
+    # both under sys._MEIPASS and produces real names.* findings.
     datas=[
         ('resources', 'resources'),
         ('vendor/greekroom-versification', 'vendor/greekroom-versification'),
+        ('vendor/greekroom-smart-edit-distance', 'vendor/greekroom-smart-edit-distance'),
+        *collect_data_files('uroman'),
         *wildebeest_datas,
     ],
     hiddenimports=['regex'],

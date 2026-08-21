@@ -10,7 +10,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 122 passed with real Wildebeest 0.9.2 |
+| A01 | Backend | Complete Python suite | Source | PASS — 137 passed with real Wildebeest 0.9.2, real uroman, and vendored Smart Edit Distance |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile |
@@ -23,6 +23,8 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — verified against a real PyInstaller build this session |
 | A12 | Versification | Edge cases: merges, splits, unknown books, verse bridges/segments | Source | PASS — 11 tests against real vendored data |
 | A13 | Versification | Concurrent callers: correctness and a GIL-contention performance regression guard | Source | PASS — fixed a real ~90x slowdown found under 16-thread concurrency |
+| A14 | Names/Transliteration | Whole-book spelling-consistency check against real uroman + vendored Smart Edit Distance | Source | PASS — 15 tests; real Muhammad/Mohamed and Titus/Tituss cases, a real Tamil vowel-sign inconsistency through full verse sentences, a false-positive exclusion (church/churches), and a bigram-blocking performance regression guard |
+| A15 | Names/Transliteration | Same check from a real frozen bridge-engine.exe | Frozen | PASS — verified uroman's ~4.2MB data dir and vendored SED both resolve under sys._MEIPASS; a real planted typo was correctly flagged end to end |
 
 ## Import workflows
 
@@ -93,10 +95,13 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 ## Automated evidence
 
-- Python: 122 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 137 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
-  and a concurrency regression guard for a real GIL-contention slowdown found this session.
+  a concurrency regression guard for a real GIL-contention slowdown, and a whole-book
+  names/spelling-consistency check against real uroman + vendored Smart Edit Distance
+  (including a bigram-blocking performance regression guard for a real ~24x slowdown found
+  this session).
 - Frontend: `svelte-check` reports 0 errors and 0 warnings; production Vite build succeeds.
 - Frozen workers: real Wildebeest loads, the USFM helper reports duplicate and missing verses,
   manual many-to-many alignment/export/undo succeeds, and lightweight status calls
