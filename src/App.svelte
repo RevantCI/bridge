@@ -7,10 +7,10 @@
   import ReviewPanel from "./lib/components/ReviewPanel.svelte";
   import SettingsModal from "./lib/components/SettingsModal.svelte";
   import ExportModal from "./lib/components/ExportModal.svelte";
-  import type { CheckJobSnapshot, QaFinding } from "./lib/types/finding";
+  import type { AlignmentWorkStatus, CheckJobSnapshot, QaFinding } from "./lib/types/finding";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
-    checkStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
+    checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
     verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState,
   } from "./lib/stores";
 
@@ -80,10 +80,13 @@
     chapterVerseNums.update((m) => ({ ...m, [chapter]: verseIds }));
 
     const texts: Record<string, string> = {};
+    const alignmentStatuses: Record<string, AlignmentWorkStatus> = {};
     for (const [v, data] of Object.entries(verses)) {
       texts[verseKey(chapter, v)] = data.text;
+      alignmentStatuses[verseKey(chapter, v)] = data.alignmentStatus;
     }
     verseTexts.update((t) => ({ ...t, ...texts }));
+    alignmentStatusByVerse.update((existing) => ({ ...existing, ...alignmentStatuses }));
   }
 
   function applyJobSnapshot(snapshot: CheckJobSnapshot): void {
@@ -256,6 +259,14 @@
 
   // recompute bookSummary reactively when findings/loadedChapters change
   $: void $findingsByVerse, void $checkStatusByVerse, void $loadedChapters, (bookSummary = bookApprovedSummary());
+  $: alignmentChapterSummary = ($chapterVerseNums[$currentChapter] ?? []).reduce(
+    (counts, verse) => {
+      const status = $alignmentStatusByVerse[verseKey($currentChapter, verse)] ?? "untouched";
+      counts[status] += 1;
+      return counts;
+    },
+    { complete: 0, partial: 0, untouched: 0, invalid: 0 },
+  );
 </script>
 
 <div class="frame">
@@ -314,6 +325,10 @@
           {$checkingProgress.scope === "book" && $checkingProgress.running ? "Running…" : "Run whole book"}
         </button>
         <span class="grow" />
+        <span title="Word-alignment status for this chapter">
+          Alignment: {alignmentChapterSummary.complete} complete · {alignmentChapterSummary.partial} partial
+          {#if alignmentChapterSummary.invalid} · {alignmentChapterSummary.invalid} invalid{/if}
+        </span>
         <span>{bookSummary.approvedChapters}/{bookSummary.totalChapters} chapters approved</span>
       </div>
       <VerseList onSelect={selectVerse} />

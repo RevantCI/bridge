@@ -63,21 +63,35 @@ def realign(verse: VerseAlignment, selected_top: list[TokenRef], selected_bottom
     bottom_sigs = {x.signature for x in selected_bottom}
     result = copy.deepcopy(verse)
     new_groups: list[AlignmentGroup] = []
+    insertion_index: int | None = None
+    bank = {x.signature: x for x in result.word_bank if x.signature not in bottom_sigs}
 
     # Detach selected tokens. Preserve every nonselected token. Groups that lose one side
     # remain valid because tC itself uses empty bottomWords for unaligned source tokens.
-    detached_bottom: list[TokenRef] = []
     for group in result.alignments:
+        affected = any(x.signature in top_sigs for x in group.top_words) or any(
+            x.signature in bottom_sigs for x in group.bottom_words
+        )
+        if affected and insertion_index is None:
+            insertion_index = len(new_groups)
         keep_top = [x for x in group.top_words if x.signature not in top_sigs]
         keep_bottom = [x for x in group.bottom_words if x.signature not in bottom_sigs]
-        detached_bottom.extend(x for x in group.bottom_words if x.signature in bottom_sigs)
-        if keep_top or keep_bottom:
+        if keep_top:
             new_groups.append(AlignmentGroup(keep_top, keep_bottom))
+        else:
+            # A target-only alignment group is not a legal semantic link.
+            # When every source token is moved away, return its remaining
+            # target tokens to the word bank instead of leaving an orphan.
+            for token in keep_bottom:
+                bank[token.signature] = token
 
     # Remove selected target tokens from wordBank; selected aligned target tokens have
     # already been detached above.
-    result.word_bank = [x for x in result.word_bank if x.signature not in bottom_sigs]
-    new_groups.append(AlignmentGroup(list(selected_top), list(selected_bottom)))
+    result.word_bank = list(bank.values())
+    new_groups.insert(
+        insertion_index if insertion_index is not None else len(new_groups),
+        AlignmentGroup(list(selected_top), list(selected_bottom)),
+    )
     result.alignments = new_groups
     normalize_verse(result)
     return result

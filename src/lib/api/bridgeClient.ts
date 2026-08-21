@@ -1,4 +1,7 @@
-import type { CheckJobSnapshot, ImportMetadata, ImportPreview, ProjectInfo, VerseData, QaFinding, SettingsData } from "../types/finding";
+import type {
+  AlignmentContext, AlignmentStatusResponse, CheckJobSnapshot, ImportMetadata,
+  ImportPreview, ProjectInfo, VerseAlignment, VerseData, QaFinding, SettingsData,
+} from "../types/finding";
 
 /**
  * Thin wrapper around Tauri's invoke() calling the real commands defined
@@ -66,7 +69,7 @@ export const bridge = {
     return call("chapter_verses", { chapter });
   },
 
-  chapterVerseData(chapter: string): Promise<{ chapter: string; verses: Record<string, { text: string; alignment: unknown }> }> {
+  chapterVerseData(chapter: string): Promise<{ chapter: string; verses: Record<string, VerseData> }> {
     return call("chapter_verse_data", { chapter });
   },
 
@@ -105,6 +108,53 @@ export const bridge = {
 
   editVerse(chapter: string, verse: string, newText: string): Promise<{ committed: boolean }> {
     return call("verse_edit", { chapter, verse, newText });
+  },
+
+  getAlignment(chapter: string, verse: string): Promise<AlignmentContext> {
+    return call("alignment_get", { chapter, verse });
+  },
+
+  alignmentStatus(chapter?: string): Promise<AlignmentStatusResponse> {
+    return call("alignment_status", chapter ? { chapter } : {});
+  },
+
+  realignWords(
+    chapter: string, verse: string, topIds: string[], bottomIds: string[],
+    expectedOriginal: VerseAlignment,
+  ): Promise<AlignmentContext> {
+    return call("alignment_realign", { chapter, verse, topIds, bottomIds, expectedOriginal });
+  },
+
+  unalignWords(
+    chapter: string, verse: string, bottomIds: string[], expectedOriginal: VerseAlignment,
+  ): Promise<AlignmentContext> {
+    return call("alignment_unalign", { chapter, verse, bottomIds, expectedOriginal });
+  },
+
+  saveAlignment(
+    chapter: string, verse: string, alignment: VerseAlignment, expectedOriginal: VerseAlignment,
+  ): Promise<AlignmentContext> {
+    return call("alignment_save", { chapter, verse, alignment, expectedOriginal });
+  },
+
+  completeAlignment(chapter: string, verse: string): Promise<AlignmentContext> {
+    return call("alignment_complete", { chapter, verse });
+  },
+
+  undoAlignment(
+    chapter: string, verse: string, expectedOriginal: VerseAlignment,
+  ): Promise<AlignmentContext> {
+    return call("alignment_undo", { chapter, verse, expectedOriginal });
+  },
+
+  alignmentBackups(chapter: string, verse: string): Promise<{ history: AlignmentContext["history"] }> {
+    return call("alignment_backups", { chapter, verse });
+  },
+
+  restoreAlignment(
+    chapter: string, verse: string, historyId: string, expectedOriginal: VerseAlignment,
+  ): Promise<AlignmentContext> {
+    return call("alignment_restore", { chapter, verse, historyId, expectedOriginal });
   },
 
   getSettings(): Promise<SettingsData> {

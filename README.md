@@ -48,8 +48,8 @@ pip install -e ".[dev]"
 pytest tests/ greek_room_engine/tests/ -v
 ```
 
-Should show **56 passed, 1 skipped** without the optional real Wildebeest
-extra. Try `python demo.py` for a live walkthrough
+Should show **96 passed** in the maintained Python 3.12 development
+environment. Try `python demo.py` for a live walkthrough
 against a throwaway fixture project — no real translationCore project
 needed.
 
@@ -97,8 +97,9 @@ python scripts\smoke_sidecars.py `
   engine\dist\bridge-engine.exe
 ```
 
-The smoke fixture has balanced markers but duplicate and missing verses,
-so only the real whole-book checker can make it pass.
+The smoke fixture exercises the frozen manual-alignment protocol, aligned
+USFM export and undo, then checks balanced-marker Scripture containing duplicate
+and missing verses so only the real whole-book checker can make it pass.
 
 For another platform, the build script reads the `host:` value from
 `rustc -vV` and applies the target triple to both generated filenames.
@@ -108,9 +109,14 @@ filename examples.
 `npm run tauri dev` starts the frontend development server, compiles the Rust
 shell, launches the sidecar, and opens the Bridge desktop window.
 
-## Current development status: Phase 3 complete (background chapter/book checking)
+## Current development status: v0.8.0-beta.1 release candidate
 
-**Implemented and verified (56 pytest passed, 1 optional test skipped; clean Svelte and Rust checks):**
+The import → check → review → manual-align → export loop is implemented. See
+[`docs/ALIGNMENT.md`](docs/ALIGNMENT.md) for the alignment protocol, persistence
+and USFM format, and [`docs/QA_TEST_MATRIX.md`](docs/QA_TEST_MATRIX.md) for the
+release gate.
+
+**Implemented and verified:**
 
 - ✅ **Real background check jobs** — `checks.start/status/cancel/retry` keep the sidecar responsive while chapter or whole-book tN, tW, Alignment, USFM, and Greek Room QA execute. The UI displays real stage/verse progress instead of advancing a frontend-owned loop.
 - ✅ **Cancellation and retry** — cancellation is cooperative at safe check boundaries; failed and cancelled jobs remain retryable without treating unfinished verses as clean.
@@ -120,10 +126,21 @@ shell, launches the sidecar, and opens the Bridge desktop window.
 - ✅ **Chapter switching** — the top bar's chapter dropdown actually works now (it didn't before).
 - ✅ **"Run whole book"** — wired to actually load and check every chapter, with per-chapter progress. Store keys are now `chapter:verse` composite (`verseKey()` in `stores.ts`) so multiple chapters' data can coexist without collisions.
 - ✅ **Settings modal, for real** — AI provider pane supports **any OpenAI-Responses-API-compatible endpoint**, not just OpenAI: Provider / Base URL / Model / API key are all freely editable and persist via `settings.get`/`settings.set`. Also made `ai_client.py`'s endpoint configurable (was hardcoded to `api.openai.com`) — though note `ai_client.py` still isn't called by any protocol method yet (that's Phase 7); this is groundwork, not a live AI connection.
-- ✅ **Export modal, for real** — two working exporters: `export.aligned` (full JSON: text + alignment + decisions per verse, nothing simplified) and `export.nonAligned` (simplified USFM reconstruction — `\id`/`\c`/`\v` markers only). Export is enabled only once every chapter in the whole book is loaded and approved.
+- ✅ **Manual word alignment** — the verse editor supports 1:1, 1:many,
+  many:1 and many:many group changes, unalign, completion gating, durable
+  per-verse undo/history, conflict protection, restart persistence and
+  immediate local/Greek Room rechecks.
+- ✅ **USFM exports** — `export.aligned` writes USFM 3 using the
+  unfoldingWord `zaln`/`w` convention; `export.nonAligned` writes current verse
+  text into the preserved source template. A simplified `id/chapter/verse`
+  fallback is explicit when the original source is unavailable.
 
 **Known, deliberate scope limits (not bugs):**
-- `export.nonAligned`'s USFM is a real reconstruction from `target_chapter()` data, but does **not** preserve the original file's footnotes, section headers, or poetry markup — that structure isn't tracked per-verse anywhere in the current data model. Documented in the exporter's own docstring.
+- Manual alignment needs original-language `topWords` from an imported
+  translationCore project or aligned USFM. This release explains that condition;
+  it does not download source resources or invent source tokens.
+- AI alignment proposals, UAlign-derived statistics, resource downloads, and
+  live Paratext/Logos synchronization remain later releases.
 - "Any API" in Settings means any endpoint speaking the OpenAI Responses API shape — not literally any provider's native request format (e.g. raw Anthropic API has a different schema).
 
 ## Troubleshooting (real issues hit getting this running on Windows)

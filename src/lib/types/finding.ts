@@ -60,6 +60,56 @@ export interface VerseAlignment {
   wordBank: TokenRef[];
 }
 
+export type AlignmentWorkStatus = "complete" | "partial" | "untouched" | "invalid";
+
+export interface AlignmentToken extends TokenRef {
+  id: string;
+}
+
+export interface AlignmentGroupView {
+  id: string;
+  topIds: string[];
+  bottomIds: string[];
+}
+
+export interface AlignmentHistoryEntry {
+  id: string;
+  operation: string;
+  timestamp: string;
+}
+
+export interface AlignmentCounts {
+  complete: number;
+  partial: number;
+  untouched: number;
+  invalid: number;
+}
+
+export interface AlignmentContext {
+  chapter: string;
+  verse: string;
+  alignment: VerseAlignment;
+  topTokens: AlignmentToken[];
+  bottomTokens: AlignmentToken[];
+  groups: AlignmentGroupView[];
+  status: AlignmentWorkStatus;
+  completionState: "pending" | "completed" | "invalid";
+  sourceAvailable: boolean;
+  sourceMessage: string;
+  sourceDirection: "ltr" | "rtl";
+  targetDirection: "ltr" | "rtl";
+  issues: string[];
+  canComplete: boolean;
+  history: AlignmentHistoryEntry[];
+  chapterStatus: AlignmentCounts;
+}
+
+export interface AlignmentStatusResponse {
+  chapter: string;
+  counts: AlignmentCounts;
+  verses: Record<string, AlignmentWorkStatus>;
+}
+
 export interface ProjectInfo {
   path: string;
   bookId: string;
@@ -115,6 +165,7 @@ export interface VerseData {
   verse: string;
   text: string;
   alignment: VerseAlignment;
+  alignmentStatus: AlignmentWorkStatus;
 }
 
 export type CheckJobState =

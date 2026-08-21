@@ -35,8 +35,46 @@ def _fixture_project(root: Path) -> Path:
         "3": "ତୃତୀୟ ପଦ।",
     })
     _write_json(project / ".apps" / "translationCore" / "alignmentData" / "tit" / "1.json", {
-        "1": {"alignments": [], "wordBank": []},
-        "3": {"alignments": [], "wordBank": []},
+        "1": {
+            "alignments": [
+                {
+                    "topWords": [
+                        {
+                            "word": "Παῦλος", "strong": "G39720", "lemma": "Παῦλος",
+                            "morph": "Gr,N,,,,,NMS,", "occurrence": 1, "occurrences": 1,
+                        },
+                    ],
+                    "bottomWords": [
+                        {"word": "ପ୍ରଥମ", "occurrence": 1, "occurrences": 1, "type": "bottomWord"},
+                    ],
+                },
+                {
+                    "topWords": [
+                        {
+                            "word": "δοῦλος", "strong": "G14010", "lemma": "δοῦλος",
+                            "morph": "Gr,N,,,,,NMS,", "occurrence": 1, "occurrences": 1,
+                        },
+                    ],
+                    "bottomWords": [],
+                },
+            ],
+            "wordBank": [
+                {"word": "ପଦ", "occurrence": 1, "occurrences": 1, "type": "bottomWord"},
+            ],
+        },
+        "3": {
+            "alignments": [{
+                "topWords": [{
+                    "word": "λόγος", "strong": "G30560", "lemma": "λόγος",
+                    "morph": "Gr,N,,,,,NMS,", "occurrence": 1, "occurrences": 1,
+                }],
+                "bottomWords": [
+                    {"word": "ତୃତୀୟ", "occurrence": 1, "occurrences": 1, "type": "bottomWord"},
+                    {"word": "ପଦ", "occurrence": 1, "occurrences": 1, "type": "bottomWord"},
+                ],
+            }],
+            "wordBank": [],
+        },
     })
     (project / "tit.usfm").write_text(
         "\\id TIT\n\\h Titus\n\\toc1 The Letter to Titus\n\\c 1\n\\p\n"
@@ -103,6 +141,8 @@ def main() -> int:
             info = request("info", "engine.info", {})
             if not info.get("success"):
                 raise SystemExit(f"Request info failed: {info}")
+            if info.get("result", {}).get("bridgeVersion") != "0.8.0-beta.1":
+                raise SystemExit(f"Frozen engine version is stale or inconsistent: {info}")
             wildebeest = (
                 info.get("result", {})
                 .get("greekRoom", {})
@@ -143,6 +183,36 @@ def main() -> int:
             opened = request("open", "project.open", {"path": str(project)})
             if not opened.get("success"):
                 raise SystemExit(f"Request open failed: {opened}")
+
+            alignment = request("alignment-get", "alignment.get", {"chapter": "1", "verse": "1"})
+            if not alignment.get("success") or not alignment["result"].get("sourceAvailable"):
+                raise SystemExit(f"Frozen alignment source was unavailable: {alignment}")
+            context = alignment["result"]
+            realigned = request("alignment-realign", "alignment.realign", {
+                "chapter": "1", "verse": "1",
+                "topIds": [token["id"] for token in context["topTokens"]],
+                "bottomIds": [token["id"] for token in context["bottomTokens"]],
+                "expectedOriginal": context["alignment"],
+            })
+            if not realigned.get("success") or not realigned["result"].get("canComplete"):
+                raise SystemExit(f"Frozen many-to-many alignment failed: {realigned}")
+            completed = request(
+                "alignment-complete", "alignment.complete", {"chapter": "1", "verse": "1"},
+            )
+            if not completed.get("success") or completed["result"].get("completionState") != "completed":
+                raise SystemExit(f"Frozen alignment completion failed: {completed}")
+            aligned_path = Path(temp) / "tit-aligned.usfm"
+            exported = request(
+                "alignment-export", "export.aligned", {"outputPath": str(aligned_path)},
+            )
+            if not exported.get("success") or "\\zaln-s" not in aligned_path.read_text(encoding="utf-8"):
+                raise SystemExit(f"Frozen aligned-USFM export failed: {exported}")
+            undone = request("alignment-undo", "alignment.undo", {
+                "chapter": "1", "verse": "1",
+                "expectedOriginal": completed["result"]["alignment"],
+            })
+            if not undone.get("success") or undone["result"].get("status") != "partial":
+                raise SystemExit(f"Frozen alignment undo failed: {undone}")
 
             started = request("start", "checks.start", {
                 "scope": "chapter", "chapters": ["1"], "checks": ["usfm"],
@@ -185,7 +255,7 @@ def main() -> int:
 
     print(
         "Frozen sidecar smoke test passed: real Wildebeest loaded and the "
-        "background job returned duplicate and missing-verse findings."
+        "alignment workflow/export/undo and duplicate/missing-verse checks succeeded."
     )
     return 0
 

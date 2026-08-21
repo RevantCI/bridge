@@ -48,9 +48,10 @@ avoiding tens of thousands of synchronous JSON writes before the editor opens.
 
 Every target token begins in `wordBank` unless a supported USFM 3 alignment
 milestone assigns it to a `bottomWords` group. Source milestone attributes are
-mapped to translationCore `topWords` fields. Nested or malformed milestones are
-preserved in the original file but deliberately left unaligned for human review
-rather than guessed.
+mapped to translationCore `topWords` fields. Nested `zaln`/`w` milestones are
+combined into 1:1, 1:many, many:1 or many:many translationCore groups by their
+shared target tokens. Malformed milestones are preserved in the original source
+and left for human review rather than guessed.
 
 `manifest.json` records the confirmed ISO 639-3 language, language name, text
 direction, Bible/resource identity, book identity, and import provenance. That
@@ -80,6 +81,20 @@ versioned checking resources. Bridge follows the same boundary:
   `docs/DEVELOPER_HANDOFF.md` for the full list and how to refresh the bundle.
 - Only English is bundled today. A future non-English or refreshed-English
   resource still needs the online Door43-catalog path, not yet built.
+
+## Export behavior
+
+- Aligned export writes USFM 3 with occurrence-aware `\zaln-s … \zaln-e\*`
+  and `\w … \w*` milestones. It preserves the imported source file's headings,
+  poetry, footnotes, cross-references, and custom markers as the structural
+  template while replacing verse payloads with the current project text.
+- Non-aligned export uses the same source-preserving template without alignment
+  milestones.
+- If a legacy project has no retained source USFM, both exporters say that they
+  used the simplified `\id`/`\c`/`\v` fallback.
+- An aligned verse must contain the exact current target-token inventory.
+  Duplicate, missing, target-only, or non-contiguous target groups fail clearly
+  instead of producing ambiguous alignment markup.
 
 ## Differences from translationCore
 

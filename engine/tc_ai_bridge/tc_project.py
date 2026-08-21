@@ -321,6 +321,9 @@ class TranslationCoreProject:
             return 'partial'
         return 'complete'
 
+    def alignment_work_state(self, chapter: str | int, verse: str | int) -> str:
+        return self._alignment_work_state(self.load_verse_alignment(chapter, verse))
+
     def verse_work_state(self, chapter: str | int, verse: str | int) -> str:
         states = self.check_state_for_verse(chapter, verse)
         indexed = self.checks_for_verse(chapter, verse)
@@ -640,18 +643,30 @@ class TranslationCoreProject:
         shutil.copy2(src, dst)
         return dst
 
-    def save_verse_alignment(self, chapter: str | int, verse: str | int, value: VerseAlignment, expected_original: dict[str, Any] | None = None) -> Path:
+    def save_verse_alignment(
+        self,
+        chapter: str | int,
+        verse: str | int,
+        value: VerseAlignment,
+        expected_original: dict[str, Any] | None = None,
+        operation: str = 'save',
+    ) -> Path:
         chapter_path = self.chapter_path(chapter)
         chapter_data = self.load_alignment_chapter(chapter)
+        current = copy.deepcopy(chapter_data.get(str(verse)))
         if expected_original is not None:
-            current = chapter_data.get(str(verse))
             if current != expected_original:
                 raise ProjectError('The alignment file changed on disk after it was loaded. Reload before saving to avoid overwriting another edit.')
         # Validate model serialization before touching disk.
         raw = value.to_dict()
         self._validate_verse_raw(raw)
         backup = self.backup_chapter(chapter)
-        tx = self.journal.begin('saveApprovedAlignment', [chapter_path])
+        iso, safe = self._timestamp()
+        history_path = (
+            self.companion_dir() / 'alignmentHistory' / self.book_id
+            / str(chapter) / str(verse) / f'{safe}_{operation}.json'
+        )
+        tx = self.journal.begin('saveApprovedAlignment', [chapter_path, history_path])
         self.journal.mark_writing(tx)
         try:
             chapter_data[str(verse)] = raw
@@ -659,10 +674,104 @@ class TranslationCoreProject:
             # Re-read and validate after write.
             written = self.load_alignment_chapter(chapter).get(str(verse))
             self._validate_verse_raw(written)
+            self._record_alignment_history(
+                chapter, verse, operation, backup, current, raw,
+                path=history_path, timestamp=iso,
+            )
             self.journal.commit(tx, {'operation':'saveApprovedAlignment','chapter':str(chapter),'verse':str(verse)})
         except Exception as e:
             self.journal.rollback(tx, str(e)); raise
         return backup
+
+    def _record_alignment_history(
+        self,
+        chapter: str | int,
+        verse: str | int,
+        operation: str,
+        backup: Path,
+        before: Any,
+        after: Any,
+        *,
+        path: Path | None = None,
+        timestamp: str = '',
+    ) -> Path:
+        iso = timestamp
+        if not iso:
+            iso, safe = self._timestamp()
+            path = (
+                self.companion_dir() / 'alignmentHistory' / self.book_id
+                / str(chapter) / str(verse) / f'{safe}_{operation}.json'
+            )
+        if path is None:
+            raise ProjectError('Alignment history destination was not created.')
+        _write_json_atomic(path, {
+            'id': path.name,
+            'bookId': self.book_id,
+            'chapter': str(chapter),
+            'verse': str(verse),
+            'operation': operation,
+            'timestamp': iso,
+            'backupPath': str(backup),
+            'beforeFingerprint': hashlib.sha256(
+                json.dumps(before, sort_keys=True, ensure_ascii=False).encode('utf-8')
+            ).hexdigest(),
+            'afterFingerprint': hashlib.sha256(
+                json.dumps(after, sort_keys=True, ensure_ascii=False).encode('utf-8')
+            ).hexdigest(),
+        })
+        return path
+
+    def alignment_history(self, chapter: str | int, verse: str | int) -> list[dict[str, Any]]:
+        root = self.companion_dir() / 'alignmentHistory' / self.book_id / str(chapter) / str(verse)
+        result: list[dict[str, Any]] = []
+        if root.is_dir():
+            for path in sorted(root.glob('*.json'), reverse=True):
+                try:
+                    value = _read_json(path)
+                except Exception:
+                    continue
+                if isinstance(value, dict) and value.get('backupPath'):
+                    result.append({
+                        'id': path.name,
+                        'operation': str(value.get('operation') or 'save'),
+                        'timestamp': str(value.get('timestamp') or ''),
+                    })
+        return result
+
+    def restore_verse_alignment_history(
+        self,
+        chapter: str | int,
+        verse: str | int,
+        history_id: str = '',
+        expected_original: dict[str, Any] | None = None,
+    ) -> Path:
+        root = self.companion_dir() / 'alignmentHistory' / self.book_id / str(chapter) / str(verse)
+        candidates = sorted(root.glob('*.json'), reverse=True) if root.is_dir() else []
+        if history_id:
+            candidates = [path for path in candidates if path.name == history_id]
+        if not candidates:
+            raise ProjectError('No saved alignment change is available to restore for this verse.')
+        entry = _read_json(candidates[0])
+        if not isinstance(entry, dict) or not entry.get('backupPath'):
+            raise ProjectError('Alignment history entry is invalid.')
+        backup = Path(str(entry['backupPath'])).resolve()
+        allowed_root = (self.companion_dir() / 'backups').resolve()
+        try:
+            backup.relative_to(allowed_root)
+        except ValueError as exc:
+            raise ProjectError('Alignment history points outside the project backup directory.') from exc
+        if not backup.is_file() or backup.name != f'{chapter}.json':
+            raise ProjectError('The saved alignment backup is missing or belongs to another chapter.')
+        backup_chapter = _read_json(backup)
+        restored = backup_chapter.get(str(verse)) if isinstance(backup_chapter, dict) else None
+        self._validate_verse_raw(restored)
+        return self.save_verse_alignment(
+            chapter,
+            verse,
+            VerseAlignment.from_dict(restored),
+            expected_original=expected_original,
+            operation='restore',
+        )
 
     @staticmethod
     def _validate_verse_raw(raw: Any) -> None:
@@ -1042,6 +1151,22 @@ class TranslationCoreProject:
         except Exception as e:
             self.journal.rollback(tx,str(e)); raise
         return invalid
+
+    def mark_word_alignment_pending(self, chapter: str | int, verse: str | int) -> None:
+        """Clear completed/invalid markers after an intentional alignment edit."""
+        completed = self.tc_dir / 'tools' / 'wordAlignment' / 'completed' / str(chapter) / f'{verse}.json'
+        invalid = self.tc_dir / 'tools' / 'wordAlignment' / 'invalid' / str(chapter) / f'{verse}.json'
+        self._backup_paths([completed, invalid], 'wordAlignmentState')
+        tx = self.journal.begin('wordAlignmentPending', [completed, invalid])
+        self.journal.mark_writing(tx)
+        try:
+            if completed.exists(): completed.unlink()
+            if invalid.exists(): invalid.unlink()
+            self.journal.commit(tx, {
+                'operation': 'wordAlignmentPending', 'chapter': str(chapter), 'verse': str(verse),
+            })
+        except Exception as exc:
+            self.journal.rollback(tx, str(exc)); raise
 
     @staticmethod
     def _target_tokens(text: str) -> list[dict[str, Any]]:

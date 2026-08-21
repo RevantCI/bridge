@@ -14,7 +14,7 @@ from .adapters.usfm_adapter import UsfmAdapter, UsfmCheckerError
 from .models.finding import QaFinding
 from .protocol import EngineRequest, EngineResponse, Methods
 
-ENGINE_VERSION = "0.7.5-dev"
+ENGINE_VERSION = "0.8.0-beta.1"
 
 
 class GreekRoomEngine:

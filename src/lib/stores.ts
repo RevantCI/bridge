@@ -1,5 +1,5 @@
 import { writable, derived, get } from "svelte/store";
-import type { ProjectInfo, QaFinding } from "./types/finding";
+import type { AlignmentWorkStatus, ProjectInfo, QaFinding } from "./types/finding";
 
 export function verseKey(chapter: string, verse: string): string {
   return `${chapter}:${verse}`;
@@ -18,6 +18,7 @@ export const verseTexts = writable<Record<string, string>>({});
 export const findingsByVerse = writable<Record<string, QaFinding[]>>({});
 export type CheckStatus = "pending" | "succeeded" | "failed" | "cancelled";
 export const checkStatusByVerse = writable<Record<string, CheckStatus>>({});
+export const alignmentStatusByVerse = writable<Record<string, AlignmentWorkStatus>>({});
 
 // Which chapters have had their verse text + checks loaded already, so
 // switching back to a chapter you've already visited doesn't re-fetch.
@@ -34,6 +35,7 @@ export function resetBookState(): void {
   verseTexts.set({});
   findingsByVerse.set({});
   checkStatusByVerse.set({});
+  alignmentStatusByVerse.set({});
   loadedChapters.set({});
   selectedVerse.set(null);
   checkingProgress.set({ running: false, percent: 0, label: "", jobId: "", state: "idle", error: "", scope: "chapter" });

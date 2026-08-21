@@ -31,14 +31,14 @@ rejected / ignored / fixed / needs_discussion).
 ## Process boundary
 
 ```
-translationCore-ai-bridge.exe   (Tauri/Rust shell + React frontend)
+Bridge.exe                      (Tauri/Rust shell + Svelte frontend)
         │
         │ spawns once at startup, JSON-lines over stdin/stdout
         ▼
-greek-room-engine.exe            (PyInstaller-bundled Python sidecar)
+bridge-engine                    (PyInstaller-bundled Python sidecar)
         │
         ▼
-   Wildebeest / OWL / USFM / Versification / Uroman+SED / UAlign
+   Wildebeest / standalone USFM checker / translationCore project logic
 ```
 
 The sidecar starts once and stays alive for the whole session — NLP
@@ -104,12 +104,11 @@ which mode is actually active.
 | Version | Scope | Status |
 |---|---|---|
 | **v0.7.5** | `GreekRoomEngine` sidecar, stable JSON protocol, `QaFinding` model, Wildebeest (mock fallback). | ✅ Built |
-| **v0.8.0** | `BridgeEngine` — composes `GreekRoomEngine` with real `tc_ai_bridge` logic (project reading, local QA, alignment, settings, transaction journal, decisions) behind one protocol. Verified against a real fixture project, not mocks. | ✅ Built (this phase) |
-| v0.8.1 | Svelte frontend wired to the real sidecar (single-window UI, as approved in the wireframe) | Next |
-| v0.8.2 | USFM Checker, Versification detector, org-normalization | — |
-| v0.9.0 | Uroman + Smart Edit Distance, name consistency | — |
-| v0.9.x | Alignment Intelligence — UAlign-derived statistics from human-approved alignments | — |
-| v1.0.x | Paratext/Logos live navigation wired in, AI + Greek Room synthesis | — |
+| **v0.8.0-beta.1** | Real sidecar/UI core loop, fast multi-book import, background QA jobs, persistent decisions and edits, standalone USFM checker, manual word-alignment editor, aligned/non-aligned USFM export. | Release candidate |
+| v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
+| v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | Planned |
+| v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | Planned |
+| v1.0.x | Paratext/Logos live navigation and optional AI + Greek Room synthesis. | Planned |
 
 ## Phase 1 outcome: BridgeEngine
 
@@ -125,7 +124,11 @@ Key implementation notes discovered while wiring this up (worth knowing before e
 - Decision persistence already exists and is correct: `record_qa_decision()` / `qa_decisions_for_verse()` write atomic, audited JSON under `companion_dir()/qaDecisions/...`. `BridgeEngine.decide_verse()` calls these directly rather than reinventing an in-memory store.
 - All of this was verified against a **real fixture project** built directly from reading `TranslationCoreProject`'s actual parsing code (see `tests/test_bridge_service.py`), not assumed — including a real transaction-journal backup being created on `verse.edit` and a real QA-decision JSON file landing on disk on `verse.decide`.
 
-Protocol methods implemented so far: `ping`, `engine.info`, `project.open`, `project.scan`, `chapter.verses`, `chapter.verseData`, `checks.start`, `checks.status`, `checks.cancel`, `checks.retry`, `verse.get`, `verse.runChecks`, `verse.decide`, `verse.edit`, `settings.get`, `settings.set`, `export.aligned`, `export.nonAligned`.
+Protocol methods implemented so far: `ping`, `engine.info`, `project.open`,
+`project.scan`, `project.inspectImport`, `project.import`, `chapter.verses`,
+`chapter.verseData`, `checks.start/status/cancel/retry`, `verse.get/runChecks/decide/edit`,
+`alignment.get/status/realign/unalign/save/complete/undo/backups/restore`,
+`settings.get/set`, `export.aligned`, and `export.nonAligned`.
 
 Not yet wired (real logic exists in `tc_ai_bridge` but no protocol method calls it yet): Paratext/Logos connectors, AI client (`ai_client.py`), Git service, reporting, terminology/Psalms QA. These are Phase-appropriate follow-ups per the table above, not gaps in the design.
 

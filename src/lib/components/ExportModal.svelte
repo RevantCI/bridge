@@ -15,7 +15,7 @@
     errorMessage = "";
     try {
       const bookId = $project?.bookId ?? "export";
-      const defaultName = kind === "aligned" ? `${bookId}-aligned.json` : `${bookId}.usfm`;
+      const defaultName = kind === "aligned" ? `${bookId}-aligned.usfm` : `${bookId}.usfm`;
       const path = await bridge.pickSavePath(defaultName);
       if (!path) {
         exporting = false;
@@ -41,8 +41,8 @@
     {/if}
 
     <button class="export-opt" on:click={() => doExport("aligned")} disabled={exporting}>
-      <div class="t">Aligned data</div>
-      <div class="d">Full JSON export: verse text, word-alignment groups, and recorded QA decisions for every chapter. Nothing simplified — this is the project's native alignment data.</div>
+      <div class="t">Aligned USFM 3</div>
+      <div class="d">Interoperable USFM with current verse text, source alignment milestones, target word attributes, and preserved headings, poetry, footnotes, verse bridges, and custom markers.</div>
     </button>
 
     <button class="export-opt" on:click={() => doExport("nonAligned")} disabled={exporting}>

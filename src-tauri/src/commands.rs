@@ -19,7 +19,9 @@ pub async fn engine_ping(sidecar: State<'_, EngineSidecar>) -> Result<Value, Str
 
 #[tauri::command]
 pub async fn engine_info(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
-    sidecar.send_request("engine.info", serde_json::json!({})).await
+    sidecar
+        .send_request("engine.info", serde_json::json!({}))
+        .await
 }
 
 /// Opens the native OS folder picker and returns the chosen path, or null
@@ -31,7 +33,8 @@ pub async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>
     app.dialog().file().pick_folder(move |folder| {
         let _ = tx.send(folder.map(|f| f.to_string()));
     });
-    rx.await.map_err(|e| format!("folder picker cancelled unexpectedly: {e}"))
+    rx.await
+        .map_err(|e| format!("folder picker cancelled unexpectedly: {e}"))
 }
 
 /// Selects one USFM/SFM file or a translationCore/translationStudio archive.
@@ -42,26 +45,42 @@ pub async fn pick_import_file(app: tauri::AppHandle) -> Result<Option<String>, S
     let (tx, rx) = tokio::sync::oneshot::channel();
     app.dialog()
         .file()
-        .add_filter("Bible translation projects", &["usfm", "sfm", "txt", "tcore", "tstudio", "zip"])
+        .add_filter(
+            "Bible translation projects",
+            &["usfm", "sfm", "txt", "tcore", "tstudio", "zip"],
+        )
         .pick_file(move |file| {
             let _ = tx.send(file.map(|f| f.to_string()));
         });
-    rx.await.map_err(|e| format!("file picker cancelled unexpectedly: {e}"))
+    rx.await
+        .map_err(|e| format!("file picker cancelled unexpectedly: {e}"))
 }
 
 #[tauri::command]
-pub async fn project_open(sidecar: State<'_, EngineSidecar>, path: String) -> Result<Value, String> {
-    sidecar.send_request("project.open", serde_json::json!({ "path": path })).await
+pub async fn project_open(
+    sidecar: State<'_, EngineSidecar>,
+    path: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("project.open", serde_json::json!({ "path": path }))
+        .await
 }
 
 #[tauri::command]
 pub async fn project_scan(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
-    sidecar.send_request("project.scan", serde_json::json!({})).await
+    sidecar
+        .send_request("project.scan", serde_json::json!({}))
+        .await
 }
 
 #[tauri::command]
-pub async fn project_inspect_import(sidecar: State<'_, EngineSidecar>, path: String) -> Result<Value, String> {
-    sidecar.send_request("project.inspectImport", serde_json::json!({ "path": path })).await
+pub async fn project_inspect_import(
+    sidecar: State<'_, EngineSidecar>,
+    path: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("project.inspectImport", serde_json::json!({ "path": path }))
+        .await
 }
 
 #[tauri::command]
@@ -70,17 +89,35 @@ pub async fn project_import(
     path: String,
     metadata: Value,
 ) -> Result<Value, String> {
-    sidecar.send_request("project.import", serde_json::json!({ "path": path, "metadata": metadata })).await
+    sidecar
+        .send_request(
+            "project.import",
+            serde_json::json!({ "path": path, "metadata": metadata }),
+        )
+        .await
 }
 
 #[tauri::command]
-pub async fn chapter_verses(sidecar: State<'_, EngineSidecar>, chapter: String) -> Result<Value, String> {
-    sidecar.send_request("chapter.verses", serde_json::json!({ "chapter": chapter })).await
+pub async fn chapter_verses(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("chapter.verses", serde_json::json!({ "chapter": chapter }))
+        .await
 }
 
 #[tauri::command]
-pub async fn chapter_verse_data(sidecar: State<'_, EngineSidecar>, chapter: String) -> Result<Value, String> {
-    sidecar.send_request("chapter.verseData", serde_json::json!({ "chapter": chapter })).await
+pub async fn chapter_verse_data(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "chapter.verseData",
+            serde_json::json!({ "chapter": chapter }),
+        )
+        .await
 }
 
 #[tauri::command]
@@ -90,25 +127,42 @@ pub async fn checks_start(
     chapters: Vec<String>,
     checks: Vec<String>,
 ) -> Result<Value, String> {
-    sidecar.send_request(
-        "checks.start",
-        serde_json::json!({ "scope": scope, "chapters": chapters, "checks": checks }),
-    ).await
+    sidecar
+        .send_request(
+            "checks.start",
+            serde_json::json!({ "scope": scope, "chapters": chapters, "checks": checks }),
+        )
+        .await
 }
 
 #[tauri::command]
-pub async fn checks_status(sidecar: State<'_, EngineSidecar>, job_id: String) -> Result<Value, String> {
-    sidecar.send_request("checks.status", serde_json::json!({ "jobId": job_id })).await
+pub async fn checks_status(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("checks.status", serde_json::json!({ "jobId": job_id }))
+        .await
 }
 
 #[tauri::command]
-pub async fn checks_cancel(sidecar: State<'_, EngineSidecar>, job_id: String) -> Result<Value, String> {
-    sidecar.send_request("checks.cancel", serde_json::json!({ "jobId": job_id })).await
+pub async fn checks_cancel(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("checks.cancel", serde_json::json!({ "jobId": job_id }))
+        .await
 }
 
 #[tauri::command]
-pub async fn checks_retry(sidecar: State<'_, EngineSidecar>, job_id: String) -> Result<Value, String> {
-    sidecar.send_request("checks.retry", serde_json::json!({ "jobId": job_id })).await
+pub async fn checks_retry(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("checks.retry", serde_json::json!({ "jobId": job_id }))
+        .await
 }
 
 #[tauri::command]
@@ -118,7 +172,10 @@ pub async fn verse_get(
     verse: String,
 ) -> Result<Value, String> {
     sidecar
-        .send_request("verse.get", serde_json::json!({ "chapter": chapter, "verse": verse }))
+        .send_request(
+            "verse.get",
+            serde_json::json!({ "chapter": chapter, "verse": verse }),
+        )
         .await
 }
 
@@ -162,12 +219,166 @@ pub async fn verse_edit(
 }
 
 #[tauri::command]
-pub async fn settings_get(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
-    sidecar.send_request("settings.get", serde_json::json!({})).await
+pub async fn alignment_get(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.get",
+            serde_json::json!({ "chapter": chapter, "verse": verse }),
+        )
+        .await
 }
 
 #[tauri::command]
-pub async fn settings_set(sidecar: State<'_, EngineSidecar>, params: Value) -> Result<Value, String> {
+pub async fn alignment_status(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.status",
+            serde_json::json!({ "chapter": chapter.unwrap_or_default() }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn alignment_realign(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    top_ids: Vec<String>,
+    bottom_ids: Vec<String>,
+    expected_original: Value,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.realign",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "topIds": top_ids,
+                "bottomIds": bottom_ids, "expectedOriginal": expected_original,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn alignment_unalign(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    bottom_ids: Vec<String>,
+    expected_original: Value,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.unalign",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "bottomIds": bottom_ids,
+                "expectedOriginal": expected_original,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn alignment_save(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    alignment: Value,
+    expected_original: Value,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.save",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "alignment": alignment,
+                "expectedOriginal": expected_original,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn alignment_complete(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.complete",
+            serde_json::json!({ "chapter": chapter, "verse": verse }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn alignment_undo(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    expected_original: Value,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.undo",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "expectedOriginal": expected_original,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn alignment_backups(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.backups",
+            serde_json::json!({ "chapter": chapter, "verse": verse }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn alignment_restore(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    history_id: String,
+    expected_original: Value,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.restore",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "historyId": history_id,
+                "expectedOriginal": expected_original,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn settings_get(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+    sidecar
+        .send_request("settings.get", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn settings_set(
+    sidecar: State<'_, EngineSidecar>,
+    params: Value,
+) -> Result<Value, String> {
     sidecar.send_request("settings.set", params).await
 }
 
@@ -176,20 +387,43 @@ pub async fn settings_set(sidecar: State<'_, EngineSidecar>, params: Value) -> R
 /// export_non_aligned — the sidecar writes directly to whatever path this
 /// returns.
 #[tauri::command]
-pub async fn pick_save_path(app: tauri::AppHandle, default_name: String) -> Result<Option<String>, String> {
+pub async fn pick_save_path(
+    app: tauri::AppHandle,
+    default_name: String,
+) -> Result<Option<String>, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app.dialog().file().set_file_name(&default_name).save_file(move |path| {
-        let _ = tx.send(path.map(|p| p.to_string()));
-    });
-    rx.await.map_err(|e| format!("save dialog cancelled unexpectedly: {e}"))
+    app.dialog()
+        .file()
+        .set_file_name(&default_name)
+        .save_file(move |path| {
+            let _ = tx.send(path.map(|p| p.to_string()));
+        });
+    rx.await
+        .map_err(|e| format!("save dialog cancelled unexpectedly: {e}"))
 }
 
 #[tauri::command]
-pub async fn export_aligned(sidecar: State<'_, EngineSidecar>, output_path: String) -> Result<Value, String> {
-    sidecar.send_request("export.aligned", serde_json::json!({ "outputPath": output_path })).await
+pub async fn export_aligned(
+    sidecar: State<'_, EngineSidecar>,
+    output_path: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "export.aligned",
+            serde_json::json!({ "outputPath": output_path }),
+        )
+        .await
 }
 
 #[tauri::command]
-pub async fn export_non_aligned(sidecar: State<'_, EngineSidecar>, output_path: String) -> Result<Value, String> {
-    sidecar.send_request("export.nonAligned", serde_json::json!({ "outputPath": output_path })).await
+pub async fn export_non_aligned(
+    sidecar: State<'_, EngineSidecar>,
+    output_path: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "export.nonAligned",
+            serde_json::json!({ "outputPath": output_path }),
+        )
+        .await
 }

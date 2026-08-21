@@ -1,6 +1,29 @@
-# Developer handoff: Scripture import pipeline
+# Developer handoff: Bridge v0.8.0-beta.1
 
-Date: 2026-08-20
+Updated: 2026-08-21
+
+## Current release state
+
+The current working release adds the complete manual word-alignment loop. The
+authoritative design and limitations are in `docs/ALIGNMENT.md`; the release
+gate is `docs/QA_TEST_MATRIX.md`.
+
+- Protocol: `alignment.get/status/realign/unalign/save/complete/undo/backups/restore`.
+- UI: per-verse alignment modal with occurrence-aware source/target token
+  selection, all four group cardinalities, word bank, issues, status, completion,
+  undo and selected-history restore. RTL/LTR direction is applied independently.
+- Persistence: optimistic conflict comparison, exact token-identity validation,
+  transaction-journal rollback, per-verse durable history, restart persistence,
+  and tC word-alignment completed/invalid/pending markers.
+- Rechecking: each alignment mutation immediately reruns local and Greek Room
+  verse checks and refreshes editor state.
+- Export/import: nested many-to-many `zaln`/`w` milestones are parsed into tC
+  groups and aligned export writes re-importable USFM 3 over the retained source
+  template.
+- Automated source gate: 96 Python tests; Svelte, Rust, frozen-sidecar and NSIS
+  results are recorded in the QA matrix, not assumed here.
+- Explicitly deferred: AI alignment proposals, UAlign statistics, original-source
+  resource downloads, and live Paratext/Logos synchronization.
 
 ## Project context (carried over from the Claude Code sessions that did Phases 1-3)
 
@@ -126,8 +149,9 @@ started.
   frontend work above) — worth a real click-through: edit a verse, confirm
   the new text persists after switching chapters and reopening the project,
   and that a stale-alignment finding appears.
-- **`export.nonAligned` is a simplified reconstruction**, not a lossless round trip
-  (`\id`/`\c`/`\v` only — footnotes, section headers, poetry markup not preserved).
+- ~~`export.nonAligned` was a simplified reconstruction~~ — **superseded.** Both
+  USFM exporters now use the retained source as a structural template and
+  report the simplified fallback only for projects with no source USFM.
 - **OWL repeated-word adapter doesn't exist yet** (`adapters/owl_adapter.py`).
 - ~~Real Wildebeest package is still untested~~ — **done 2026-08-20, real
   engine wired up and passing tests. Requires Python 3.12, not 3.13.**
@@ -294,7 +318,7 @@ book-level success/failure caching tests in `test_bridge_service.py`.
 `scripts/smoke_sidecars.py` runs the actual frozen `bridge-engine.exe` and
 helper against balanced USFM containing duplicate and missing verses, then
 asserts real `engine="usfm"` findings. Verified on Windows 2026-08-20.
-Base suite: 56 passed, 1 optional-Wildebeest module skipped.
+Historical result at that milestone: 56 passed, 1 optional-Wildebeest module skipped.
 
 **Packaging**: run `scripts/build-sidecars.ps1`; it builds both committed
 specs and copies both target-suffixed artifacts into `src-tauri/binaries/`.
@@ -358,10 +382,10 @@ Important behavior:
   unaligned target word banks so `TranslationCoreProject` can open them.
 - Each unaligned target token is represented once in `wordBank`, with correct
   `occurrence` and `occurrences` values.
-- Basic, non-nested USFM 3 `zaln`/`w` alignment milestones are converted into
-  translationCore `topWords`/`bottomWords` groups.
-- Unsupported or malformed nested alignment structures are not guessed; target
-  words remain in `wordBank` for review.
+- Nested USFM 3 `zaln`/`w` alignment milestones are converted into occurrence-aware
+  translationCore 1:1, 1:many, many:1, and many:many groups.
+- Malformed alignment structures are not guessed; target words remain in
+  `wordBank` for review.
 - Multi-book folders produce one compatible project entry per book. All source
   files are copied immediately, the first book is normalized and opened, and
   remaining books carry `.bridge/lazy-import.json` until first open. Every
@@ -490,7 +514,7 @@ bundled Titus TN/TWL slice, not a synthetic fixture) — parses into the
 correct `contextId` shape, is idempotent, correctly reports `unavailable`
 for an unreleased book (tested with Isaiah), and an end-to-end
 import→`verse.runChecks` call surfaces real `translation_note`/
-`translation_word` findings. Full suite after lazy whole-Bible import: 79/79
+`translation_word` findings. Historical suite after lazy whole-Bible import: 79/79
 passing (2026-08-21).
 
 **Still open / not done in this pass:**
@@ -576,15 +600,14 @@ Implementation notes for whoever touches this next:
   confirm chapter/verse state doesn't bleed across books) before treating
   this as fully verified.
 
-### P1 — Full USFM parser and lossless editing/export
+### P1 — Maintained full USFM parser
 
 The current parser is conservative and the original source is always preserved,
-but normalized extraction uses regular expressions. Replace or augment it with
-a maintained USFM parser for full marker placement, verse bridges/segments,
-nested milestones, tables, peripheral material, and project validation.
-
-Do not remove source preservation. The existing `export.nonAligned` remains a
-simplified reconstruction and is not a lossless USFM round trip.
+but normalized extraction still uses regular expressions. Replace or augment it
+with a maintained USFM parser for full marker placement, verse bridges/segments,
+tables, peripheral material, and project validation. Nested alignment milestones
+are supported by the current targeted parser and source-template export; retain
+both behaviors during that migration.
 
 ### P1 — Direct Paratext import
 

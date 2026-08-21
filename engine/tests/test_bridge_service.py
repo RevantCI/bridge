@@ -107,6 +107,205 @@ def test_chapter_verse_data_returns_all_verses_in_one_call(fixture_project):
     assert result["verses"]["1"]["alignment"]["alignments"][0]["bottomWords"][0]["word"] == "தேவன்"
 
 
+def _write_alignment_work_fixture(fixture_project):
+    path = fixture_project / ".apps" / "translationCore" / "alignmentData" / "rut" / "1.json"
+    path.write_text(json.dumps({
+        "1": {
+            "alignments": [
+                {
+                    "topWords": [{
+                        "word": "אֱלֹהִ֑ים", "strong": "H430", "lemma": "אֱלֹהִים",
+                        "morph": "He,Ncmsa", "occurrence": 1, "occurrences": 1,
+                    }],
+                    "bottomWords": [{
+                        "word": "தேவன்", "occurrence": 1, "occurrences": 1,
+                        "type": "bottomWord",
+                    }],
+                },
+                {
+                    "topWords": [{
+                        "word": "בָּרָא", "strong": "H1254", "lemma": "בָּרָא",
+                        "morph": "He,Vqp3ms", "occurrence": 1, "occurrences": 1,
+                    }],
+                    "bottomWords": [],
+                },
+            ],
+            "wordBank": [
+                {"word": "ஆதியிலே", "occurrence": 1, "occurrences": 1, "type": "bottomWord"},
+                {"word": "வானத்தையும்", "occurrence": 1, "occurrences": 1, "type": "bottomWord"},
+                {"word": "பூமியையும்", "occurrence": 1, "occurrences": 1, "type": "bottomWord"},
+                {"word": "படைத்தார்", "occurrence": 1, "occurrences": 1, "type": "bottomWord"},
+            ],
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def test_alignment_protocol_realigns_many_to_many_and_undo_survives_restart(fixture_project):
+    _write_alignment_work_fixture(fixture_project)
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    original = call(engine, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
+
+    assert original["sourceAvailable"] is True
+    assert original["sourceDirection"] == "rtl"
+    assert original["status"] == "partial"
+    top_ids = [token["id"] for token in original["topTokens"]]
+    bottom_ids = [token["id"] for token in original["bottomTokens"][:2]]
+    changed = call(engine, "alignment.realign", {
+        "chapter": "1", "verse": "1", "topIds": top_ids, "bottomIds": bottom_ids,
+        "expectedOriginal": original["alignment"],
+    })
+
+    assert changed["success"] is True
+    changed_context = changed["result"]
+    assert any(
+        len(group["topIds"]) == 2 and len(group["bottomIds"]) == 2
+        for group in changed_context["groups"]
+    )
+    assert changed_context["history"][0]["operation"] == "realign"
+
+    restarted = BridgeEngine()
+    call(restarted, "project.open", {"path": str(fixture_project)})
+    persisted = call(restarted, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
+    undone = call(restarted, "alignment.undo", {
+        "chapter": "1", "verse": "1", "expectedOriginal": persisted["alignment"],
+    })
+    assert undone["success"] is True
+    assert undone["result"]["alignment"] == original["alignment"]
+
+
+def test_alignment_save_rejects_stale_editor_and_completion_requires_full_coverage(fixture_project):
+    _write_alignment_work_fixture(fixture_project)
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    original = call(engine, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
+    all_top = [token["id"] for token in original["topTokens"]]
+    all_bottom = [token["id"] for token in original["bottomTokens"]]
+    changed = call(engine, "alignment.realign", {
+        "chapter": "1", "verse": "1", "topIds": all_top, "bottomIds": all_bottom,
+        "expectedOriginal": original["alignment"],
+    })["result"]
+
+    stale = call(engine, "alignment.save", {
+        "chapter": "1", "verse": "1", "alignment": original["alignment"],
+        "expectedOriginal": original["alignment"],
+    })
+    assert stale["success"] is False
+    assert stale["error"]["code"] == "project_error"
+
+    completed = call(engine, "alignment.complete", {"chapter": "1", "verse": "1"})
+    assert completed["success"] is True
+    assert completed["result"]["status"] == "complete"
+    assert completed["result"]["completionState"] == "completed"
+    assert changed["canComplete"] is True
+    restarted = BridgeEngine()
+    call(restarted, "project.open", {"path": str(fixture_project)})
+    persisted = call(restarted, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
+    assert persisted["completionState"] == "completed"
+    status = call(restarted, "alignment.status", {"chapter": "1"})["result"]
+    assert status["counts"]["complete"] == 1
+
+
+def test_alignment_unalign_and_restore_selected_history_entry(fixture_project):
+    _write_alignment_work_fixture(fixture_project)
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    original = call(engine, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
+    aligned_target = next(
+        token["id"] for token in original["bottomTokens"] if token["word"] == "தேவன்"
+    )
+
+    changed = call(engine, "alignment.unalign", {
+        "chapter": "1", "verse": "1", "bottomIds": [aligned_target],
+        "expectedOriginal": original["alignment"],
+    })["result"]
+
+    assert any(token["word"] == "தேவன்" for token in changed["alignment"]["wordBank"])
+    history_id = changed["history"][0]["id"]
+    restored = call(engine, "alignment.restore", {
+        "chapter": "1", "verse": "1", "historyId": history_id,
+        "expectedOriginal": changed["alignment"],
+    })
+    assert restored["success"] is True
+    assert restored["result"]["alignment"] == original["alignment"]
+
+
+def test_alignment_history_failure_rolls_back_chapter_write(fixture_project, monkeypatch):
+    _write_alignment_work_fixture(fixture_project)
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    original = call(engine, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
+
+    def fail_history(*_args, **_kwargs):
+        raise OSError("simulated history write failure")
+
+    monkeypatch.setattr(engine.project, "_record_alignment_history", fail_history)
+    failed = call(engine, "alignment.realign", {
+        "chapter": "1", "verse": "1",
+        "topIds": [token["id"] for token in original["topTokens"]],
+        "bottomIds": [token["id"] for token in original["bottomTokens"]],
+        "expectedOriginal": original["alignment"],
+    })
+
+    assert failed["success"] is False
+    assert engine.project.load_verse_alignment("1", "1").to_dict() == original["alignment"]
+    assert engine.project.pending_transactions() == []
+
+
+def test_alignment_reports_missing_original_language_source(fixture_project):
+    path = fixture_project / ".apps" / "translationCore" / "alignmentData" / "rut" / "1.json"
+    path.write_text(json.dumps({
+        "1": {
+            "alignments": [],
+            "wordBank": [
+                {"word": word, "occurrence": 1, "occurrences": 1, "type": "bottomWord"}
+                for word in ["ஆதியிலே", "தேவன்", "வானத்தையும்", "பூமியையும்", "படைத்தார்"]
+            ],
+        },
+    }, ensure_ascii=False), encoding="utf-8")
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    context = call(engine, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
+    assert context["sourceAvailable"] is False
+    assert "original-language source tokens" in context["sourceMessage"]
+    completed = call(engine, "alignment.complete", {"chapter": "1", "verse": "1"})
+    assert completed["success"] is False
+    assert completed["error"]["code"] == "alignment_error"
+
+
+def test_alignment_context_respects_rtl_target_metadata(fixture_project):
+    _write_alignment_work_fixture(fixture_project)
+    manifest_path = fixture_project / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["target_language"]["direction"] = "rtl"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    context = call(engine, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
+
+    assert context["sourceDirection"] == "rtl"
+    assert context["targetDirection"] == "rtl"
+
+
+def test_alignment_flags_non_adjacent_target_group_before_completion(fixture_project):
+    _write_alignment_work_fixture(fixture_project)
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    original = call(engine, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
+
+    changed = call(engine, "alignment.realign", {
+        "chapter": "1", "verse": "1",
+        "topIds": [original["topTokens"][0]["id"]],
+        "bottomIds": [original["bottomTokens"][0]["id"], original["bottomTokens"][2]["id"]],
+        "expectedOriginal": original["alignment"],
+    })["result"]
+
+    assert changed["canComplete"] is False
+    assert any("non-adjacent target words" in issue for issue in changed["issues"])
+
+
 def test_clean_verse_has_no_findings(fixture_project):
     engine = BridgeEngine()
     call(engine, "project.open", {"path": str(fixture_project)})
@@ -629,3 +828,41 @@ def test_export_aligned_writes_real_json_with_alignment_and_decisions(fixture_pr
     verse1 = data["chapters"]["1"]["1"]
     assert verse1["alignment"]["alignments"][0]["bottomWords"][0]["word"] == "தேவன்"
     assert "some-finding" in verse1["decisions"]
+
+
+def test_export_aligned_usfm_round_trips_nested_many_to_many_alignment(fixture_project, tmp_path):
+    _write_alignment_work_fixture(fixture_project)
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    context = call(engine, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
+    context = call(engine, "alignment.realign", {
+        "chapter": "1", "verse": "1",
+        "topIds": [token["id"] for token in context["topTokens"]],
+        "bottomIds": [token["id"] for token in context["bottomTokens"]],
+        "expectedOriginal": context["alignment"],
+    })["result"]
+    assert call(engine, "alignment.complete", {"chapter": "1", "verse": "1"})["success"] is True
+
+    output = tmp_path / "rut-aligned.usfm"
+    exported = call(engine, "export.aligned", {"outputPath": str(output)})
+
+    assert exported["success"] is True
+    assert exported["result"]["format"] == "usfm3-aligned"
+    content = output.read_text(encoding="utf-8")
+    assert "\\usfm 3.0" in content
+    assert content.count("\\zaln-s") == 2
+    assert content.count("\\zaln-e\\*") == 2
+    assert "\\w தேவன்|x-occurrence=\"1\" x-occurrences=\"1\"\\w*" in content
+
+    from tc_ai_bridge.project_import import import_source
+    from tc_ai_bridge.tc_project import TranslationCoreProject
+    reimported = import_source(output, tmp_path / "reimported", {
+        "languageId": "tam", "languageName": "Tamil", "languageDirection": "ltr",
+        "projectName": "Round trip", "bibleName": "Round trip Bible",
+    })
+    project = TranslationCoreProject(reimported["primaryProjectPath"])
+    round_trip = project.load_verse_alignment("1", "1")
+    assert len(round_trip.alignments) == 1
+    assert len(round_trip.alignments[0].top_words) == 2
+    assert len(round_trip.alignments[0].bottom_words) == 5
+    assert round_trip.word_bank == []

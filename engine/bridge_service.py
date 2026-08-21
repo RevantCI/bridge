@@ -19,8 +19,9 @@ import json
 import os
 import re
 import threading
+from collections import Counter
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from greek_room_engine.engine import GreekRoomEngine
 from greek_room_engine.adapters.usfm_adapter import UsfmCheckerCancelled, UsfmCheckerError
@@ -36,9 +37,13 @@ from tc_ai_bridge.project_import import (
     materialize_lazy_project,
 )
 from tc_ai_bridge.local_checks import run_local_qa
-from tc_ai_bridge.models import QAIssue
+from tc_ai_bridge.alignment_engine import AlignmentError, make_inventory, realign, unalign_bottom
+from tc_ai_bridge.aligned_usfm import AlignedUsfmError, render_aligned_verse
+from tc_ai_bridge.alignment_reliability import structural_issues
+from tc_ai_bridge.models import QAIssue, TokenRef, VerseAlignment
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.resource_materializer import materialize_book_checks
+from tc_ai_bridge.usfm import whitespace_tokens
 from check_jobs import (
     CheckJobConflict,
     CheckJobError,
@@ -47,7 +52,7 @@ from check_jobs import (
     CheckJobSpec,
 )
 
-BRIDGE_VERSION = "0.8.0-dev"
+BRIDGE_VERSION = "0.8.0-beta.1"
 
 # tc_ai_bridge's QAIssue.severity strings -> our shared Severity enum
 _SEVERITY_MAP = {
@@ -152,6 +157,16 @@ class Methods:
     VERSE_RUN_CHECKS = "verse.runChecks"
     VERSE_DECIDE = "verse.decide"
     VERSE_EDIT = "verse.edit"
+
+    ALIGNMENT_GET = "alignment.get"
+    ALIGNMENT_STATUS = "alignment.status"
+    ALIGNMENT_REALIGN = "alignment.realign"
+    ALIGNMENT_UNALIGN = "alignment.unalign"
+    ALIGNMENT_SAVE = "alignment.save"
+    ALIGNMENT_COMPLETE = "alignment.complete"
+    ALIGNMENT_UNDO = "alignment.undo"
+    ALIGNMENT_BACKUPS = "alignment.backups"
+    ALIGNMENT_RESTORE = "alignment.restore"
 
     SETTINGS_GET = "settings.get"
     SETTINGS_SET = "settings.set"
@@ -301,6 +316,7 @@ class BridgeEngine:
             "chapter": chapter, "verse": verse,
             "text": text,
             "alignment": alignment.to_dict(),
+            "alignmentStatus": self._alignment_verse_status(self.project, chapter, verse),
         }
 
     def get_chapter_verse_data(self, chapter: str) -> dict[str, Any]:
@@ -317,8 +333,265 @@ class BridgeEngine:
             out[v] = {
                 "text": self.project.target_verse_text(chapter, v),
                 "alignment": self.project.load_verse_alignment(chapter, v).to_dict(),
+                "alignmentStatus": self._alignment_verse_status(self.project, chapter, v),
             }
         return {"chapter": chapter, "verses": out}
+
+    # -- word alignment ---------------------------------------------------
+
+    @staticmethod
+    def _target_token_inventory(text: str) -> list[TokenRef]:
+        words = whitespace_tokens(text)
+        totals = Counter(words)
+        seen: Counter[str] = Counter()
+        result: list[TokenRef] = []
+        for word in words:
+            seen[word] += 1
+            result.append(TokenRef(word, seen[word], totals[word], type="bottomWord"))
+        return result
+
+    @staticmethod
+    def _alignment_verse_status(
+        project: TranslationCoreProject, chapter: str, verse: str,
+    ) -> str:
+        if project.word_alignment_state(chapter, verse) == "invalid":
+            return "invalid"
+        return project.alignment_work_state(chapter, verse)
+
+    def alignment_status(self, chapter: str = "") -> dict[str, Any]:
+        self._require_project()
+        project_chapters = self.project.chapters()
+        chapters = [str(chapter)] if chapter else project_chapters
+        counts = {"complete": 0, "partial": 0, "untouched": 0, "invalid": 0}
+        verses: dict[str, str] = {}
+        for ch in chapters:
+            if ch not in project_chapters:
+                raise ProjectError(f"Chapter {ch} does not exist in this project.")
+            for verse in self.project.verses(ch):
+                if verse == "front":
+                    continue
+                status = self._alignment_verse_status(self.project, ch, verse)
+                counts[status] += 1
+                verses[f"{ch}:{verse}"] = status
+        return {"chapter": str(chapter), "counts": counts, "verses": verses}
+
+    def _alignment_context(self, chapter: str, verse: str) -> dict[str, Any]:
+        self._require_project()
+        alignment = self.project.load_verse_alignment(chapter, verse)
+        inventory = make_inventory(alignment)
+        expected_bottom = self._target_token_inventory(
+            self.project.target_verse_text(chapter, verse)
+        )
+        expected_signatures = [token.signature for token in expected_bottom]
+        actual_bottom = alignment.all_bottom()
+        actual_signatures = [token.signature for token in actual_bottom]
+        issues = list(structural_issues(alignment))
+        missing = [signature for signature in expected_signatures if signature not in actual_signatures]
+        extra = [signature for signature in actual_signatures if signature not in expected_signatures]
+        duplicate_top = [
+            key for key, count in Counter(t.signature for t in alignment.all_top()).items()
+            if count > 1
+        ]
+        duplicate_bottom = [key for key, count in Counter(actual_signatures).items() if count > 1]
+        if missing:
+            issues.append(f"{len(missing)} target token(s) are missing from alignment data.")
+        if extra:
+            issues.append(f"{len(extra)} alignment token(s) are absent from current target text.")
+        if duplicate_top:
+            issues.append(f"{len(duplicate_top)} source token(s) occur in more than one alignment group.")
+        if duplicate_bottom:
+            issues.append(f"{len(duplicate_bottom)} target token(s) occur more than once in alignment data.")
+        target_positions = {
+            token.signature: position for position, token in enumerate(expected_bottom)
+        }
+        discontinuous_groups = 0
+        for group in alignment.alignments:
+            positions = sorted(
+                target_positions[token.signature]
+                for token in group.bottom_words
+                if token.signature in target_positions
+            )
+            if len(positions) > 1 and positions[-1] - positions[0] + 1 != len(positions):
+                discontinuous_groups += 1
+        if discontinuous_groups:
+            issues.append(
+                f"{discontinuous_groups} alignment group(s) contain non-adjacent target words; "
+                "aligned USFM requires each target span to be contiguous."
+            )
+
+        top_tokens = [
+            {"id": token_id, **token.to_dict()}
+            for token_id, token in inventory.top_ids.items()
+        ]
+        # Present target words in verse order, independent of group order.
+        bottom_tokens: list[dict[str, Any]] = []
+        seen_bottom_ids: set[str] = set()
+        for token in expected_bottom:
+            token_id = inventory.bottom_sig_to_id.get(token.signature)
+            if token_id:
+                bottom_tokens.append({
+                    "id": token_id,
+                    **inventory.bottom_ids[token_id].to_dict(bottom=True),
+                })
+                seen_bottom_ids.add(token_id)
+        for token_id, token in inventory.bottom_ids.items():
+            if token_id not in seen_bottom_ids:
+                bottom_tokens.append({"id": token_id, **token.to_dict(bottom=True)})
+
+        groups = []
+        for index, group in enumerate(alignment.alignments):
+            groups.append({
+                "id": f"G{index + 1:03d}",
+                "topIds": [
+                    inventory.top_sig_to_id[token.signature]
+                    for token in group.top_words
+                    if token.signature in inventory.top_sig_to_id
+                ],
+                "bottomIds": [
+                    inventory.bottom_sig_to_id[token.signature]
+                    for token in group.bottom_words
+                    if token.signature in inventory.bottom_sig_to_id
+                ],
+            })
+        source_direction = "rtl" if any(
+            token.strong.upper().startswith("H") or token.morph.startswith("He,")
+            for token in alignment.all_top()
+        ) else "ltr"
+        target = self.project.manifest.get("target_language", {})
+        target_direction = str(target.get("direction") or "ltr") if isinstance(target, dict) else "ltr"
+        source_available = bool(top_tokens)
+        work_state = self._alignment_verse_status(self.project, chapter, verse)
+        can_complete = (
+            source_available
+            and not issues
+            and not alignment.word_bank
+            and bool(alignment.alignments)
+            and all(group.top_words and group.bottom_words for group in alignment.alignments)
+        )
+        return {
+            "chapter": str(chapter), "verse": str(verse),
+            "alignment": alignment.to_dict(),
+            "topTokens": top_tokens, "bottomTokens": bottom_tokens, "groups": groups,
+            "status": work_state,
+            "completionState": self.project.word_alignment_state(chapter, verse),
+            "sourceAvailable": source_available,
+            "sourceMessage": "" if source_available else (
+                "This verse has no original-language source tokens. Import a translationCore project "
+                "or aligned USFM 3 containing source alignment milestones before creating alignments."
+            ),
+            "sourceDirection": source_direction, "targetDirection": target_direction,
+            "issues": issues, "canComplete": can_complete,
+            "history": self.project.alignment_history(chapter, verse)[:20],
+            "chapterStatus": self.alignment_status(chapter)["counts"],
+        }
+
+    def get_alignment(self, chapter: str, verse: str) -> dict[str, Any]:
+        return self._alignment_context(chapter, verse)
+
+    @staticmethod
+    def _tokens_for_ids(
+        inventory, top_ids: list[str], bottom_ids: list[str],
+    ) -> tuple[list[TokenRef], list[TokenRef]]:
+        unknown_top = [token_id for token_id in top_ids if token_id not in inventory.top_ids]
+        unknown_bottom = [token_id for token_id in bottom_ids if token_id not in inventory.bottom_ids]
+        if unknown_top or unknown_bottom:
+            raise AlignmentError(
+                "The alignment changed or contains unknown token IDs. Reload before saving."
+            )
+        return (
+            [inventory.top_ids[token_id] for token_id in dict.fromkeys(top_ids)],
+            [inventory.bottom_ids[token_id] for token_id in dict.fromkeys(bottom_ids)],
+        )
+
+    @staticmethod
+    def _validate_alignment_identity(current: VerseAlignment, proposed: VerseAlignment) -> None:
+        if Counter(t.signature for t in current.all_top()) != Counter(t.signature for t in proposed.all_top()):
+            raise AlignmentError("A save may regroup source tokens but may not add, remove, or duplicate them.")
+        if Counter(t.signature for t in current.all_bottom()) != Counter(t.signature for t in proposed.all_bottom()):
+            raise AlignmentError("A save may regroup target tokens but may not add, remove, or duplicate them.")
+
+    def _save_alignment(
+        self,
+        chapter: str,
+        verse: str,
+        proposed: VerseAlignment,
+        expected_original: dict[str, Any],
+        operation: str,
+    ) -> dict[str, Any]:
+        current = self.project.load_verse_alignment(chapter, verse)
+        self._validate_alignment_identity(current, proposed)
+        self.project.save_verse_alignment(
+            chapter, verse, proposed,
+            expected_original=expected_original,
+            operation=operation,
+        )
+        self.project.mark_word_alignment_pending(chapter, verse)
+        return self._alignment_context(chapter, verse)
+
+    def realign_words(
+        self,
+        chapter: str,
+        verse: str,
+        top_ids: list[str],
+        bottom_ids: list[str],
+        expected_original: dict[str, Any],
+    ) -> dict[str, Any]:
+        current = self.project.load_verse_alignment(chapter, verse)
+        inventory = make_inventory(current)
+        selected_top, selected_bottom = self._tokens_for_ids(inventory, top_ids, bottom_ids)
+        proposed = realign(current, selected_top, selected_bottom)
+        return self._save_alignment(chapter, verse, proposed, expected_original, "realign")
+
+    def unalign_words(
+        self,
+        chapter: str,
+        verse: str,
+        bottom_ids: list[str],
+        expected_original: dict[str, Any],
+    ) -> dict[str, Any]:
+        current = self.project.load_verse_alignment(chapter, verse)
+        inventory = make_inventory(current)
+        _, selected_bottom = self._tokens_for_ids(inventory, [], bottom_ids)
+        proposed = unalign_bottom(current, selected_bottom)
+        return self._save_alignment(chapter, verse, proposed, expected_original, "unalign")
+
+    def save_alignment(
+        self,
+        chapter: str,
+        verse: str,
+        value: dict[str, Any],
+        expected_original: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise AlignmentError("Alignment must be an object.")
+        return self._save_alignment(
+            chapter, verse, VerseAlignment.from_dict(value), expected_original, "save",
+        )
+
+    def complete_alignment(self, chapter: str, verse: str) -> dict[str, Any]:
+        context = self._alignment_context(chapter, verse)
+        if not context["sourceAvailable"]:
+            raise AlignmentError(context["sourceMessage"])
+        if not context["canComplete"]:
+            detail = "; ".join(context["issues"]) or "unaligned source or target words remain"
+            raise AlignmentError(f"Alignment cannot be completed: {detail}.")
+        self.project.mark_word_alignment_completed(
+            chapter, verse, username=self.settings.reviewer_name or "Bridge Reviewer",
+        )
+        return self._alignment_context(chapter, verse)
+
+    def undo_alignment(
+        self,
+        chapter: str,
+        verse: str,
+        expected_original: dict[str, Any],
+        history_id: str = "",
+    ) -> dict[str, Any]:
+        self.project.restore_verse_alignment_history(
+            chapter, verse, history_id=history_id, expected_original=expected_original,
+        )
+        self.project.mark_word_alignment_pending(chapter, verse)
+        return self._alignment_context(chapter, verse)
 
     def _usfm_findings_for_book(
         self, project: Optional[TranslationCoreProject] = None,
@@ -591,7 +864,9 @@ class BridgeEngine:
     # projects without a source USFM still receive an explicit simplified
     # reconstruction rather than failing export altogether.
 
-    def _source_preserving_usfm(self) -> str | None:
+    def _source_preserving_usfm(
+        self, verse_renderer: Optional[Callable[[str, str], str]] = None,
+    ) -> str | None:
         source_path = self.project.usfm_path()
         if source_path is None:
             return None
@@ -656,7 +931,11 @@ class BridgeEngine:
                 else len(source)
             )
             content_end = min(next_verse, next_chapter)
-            current_text = self.project.target_verse_text(chapter, verse).strip()
+            current_text = (
+                verse_renderer(chapter, verse)
+                if verse_renderer is not None
+                else self.project.target_verse_text(chapter, verse)
+            ).strip()
             if current_text and not verse_match.group("separator"):
                 current_text = " " + current_text
             replacements.append(
@@ -704,11 +983,57 @@ class BridgeEngine:
         }
 
     def export_aligned(self, output_path: str) -> dict[str, Any]:
-        """Writes a structured JSON export: per chapter/verse, target text
-        + full alignment groups + any recorded human QA decisions. This is
-        genuinely complete (alignment data IS already the project's native
-        format, nothing simplified here)."""
+        """Write interoperable aligned USFM 3.
+
+        A `.json` destination remains supported for backward compatibility
+        with the earlier diagnostic export, but the desktop now defaults to
+        `.usfm` and emits unfoldingWord-compatible `zaln`/`w` markers.
+        """
         self._require_project()
+        if Path(output_path).suffix.lower() == ".json":
+            return self._export_alignment_json(output_path)
+        summary = self.project.summary
+        book = summary.book_id
+
+        def render(chapter: str, verse: str) -> str:
+            try:
+                return render_aligned_verse(
+                    self.project.target_verse_text(chapter, verse),
+                    self.project.load_verse_alignment(chapter, verse),
+                )
+            except AlignedUsfmError as exc:
+                raise ProjectError(
+                    f"Cannot export aligned USFM at {book.upper()} {chapter}:{verse}: {exc}"
+                ) from exc
+
+        content = self._source_preserving_usfm(render)
+        fidelity = "source-preserving"
+        if content is None:
+            fidelity = "simplified"
+            lines = [f"\\id {book.upper()}", "\\usfm 3.0"]
+            for chapter in self.project.chapters():
+                lines.append(f"\\c {chapter}")
+                for verse in self.project.verses(chapter):
+                    if verse == "front":
+                        continue
+                    lines.append(f"\\v {verse} {render(chapter, verse)}")
+            content = "\n".join(lines) + "\n"
+        version_pattern = re.compile(r"(?im)^[ \t]*\\usfm\s+\S+[^\r\n]*$")
+        if version_pattern.search(content):
+            content = version_pattern.sub(r"\\usfm 3.0", content, count=1)
+        else:
+            id_line = re.search(r"(?im)^[ \t]*\\id\s+[^\r\n]*(?:\r?\n|$)", content)
+            insert_at = id_line.end() if id_line else 0
+            content = content[:insert_at] + "\\usfm 3.0\n" + content[insert_at:]
+        Path(output_path).write_text(content, encoding="utf-8")
+        status = self.alignment_status()
+        return {
+            "written": True, "path": output_path, "bookId": book,
+            "chapters": len(self.project.chapters()), "format": "usfm3-aligned",
+            "fidelity": fidelity, "alignmentStatus": status["counts"],
+        }
+
+    def _export_alignment_json(self, output_path: str) -> dict[str, Any]:
         summary = self.project.summary
         book = summary.book_id
         out: dict[str, Any] = {
@@ -730,7 +1055,7 @@ class BridgeEngine:
             json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         return {"written": True, "path": output_path, "bookId": book,
-                "chapters": len(self.project.chapters())}
+                "chapters": len(self.project.chapters()), "format": "alignment-json"}
 
     # -- settings ---------------------------------------------------------
 
@@ -815,6 +1140,42 @@ class BridgeEngine:
             if m == Methods.VERSE_EDIT:
                 result = self.edit_verse(p["chapter"], p["verse"], p["newText"])
                 return EngineResponse.ok(request.id, result=result)
+            if m == Methods.ALIGNMENT_GET:
+                return EngineResponse.ok(
+                    request.id, result=self.get_alignment(p["chapter"], p["verse"]),
+                )
+            if m == Methods.ALIGNMENT_STATUS:
+                return EngineResponse.ok(
+                    request.id, result=self.alignment_status(p.get("chapter", "")),
+                )
+            if m == Methods.ALIGNMENT_REALIGN:
+                return EngineResponse.ok(request.id, result=self.realign_words(
+                    p["chapter"], p["verse"], p.get("topIds", []), p.get("bottomIds", []),
+                    p["expectedOriginal"],
+                ))
+            if m == Methods.ALIGNMENT_UNALIGN:
+                return EngineResponse.ok(request.id, result=self.unalign_words(
+                    p["chapter"], p["verse"], p.get("bottomIds", []), p["expectedOriginal"],
+                ))
+            if m == Methods.ALIGNMENT_SAVE:
+                return EngineResponse.ok(request.id, result=self.save_alignment(
+                    p["chapter"], p["verse"], p["alignment"], p["expectedOriginal"],
+                ))
+            if m == Methods.ALIGNMENT_COMPLETE:
+                return EngineResponse.ok(
+                    request.id, result=self.complete_alignment(p["chapter"], p["verse"]),
+                )
+            if m == Methods.ALIGNMENT_UNDO:
+                return EngineResponse.ok(request.id, result=self.undo_alignment(
+                    p["chapter"], p["verse"], p["expectedOriginal"],
+                ))
+            if m == Methods.ALIGNMENT_BACKUPS:
+                context = self.get_alignment(p["chapter"], p["verse"])
+                return EngineResponse.ok(request.id, result={"history": context["history"]})
+            if m == Methods.ALIGNMENT_RESTORE:
+                return EngineResponse.ok(request.id, result=self.undo_alignment(
+                    p["chapter"], p["verse"], p["expectedOriginal"], p["historyId"],
+                ))
             if m == Methods.SETTINGS_GET:
                 return EngineResponse.ok(request.id, result=self.get_settings())
             if m == Methods.SETTINGS_SET:
@@ -827,6 +1188,8 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "unknown_method", f"No handler for '{m}'")
         except ProjectError as exc:
             return EngineResponse.fail(request.id, "project_error", str(exc))
+        except AlignmentError as exc:
+            return EngineResponse.fail(request.id, "alignment_error", str(exc))
         except UsfmCheckerError as exc:
             return EngineResponse.fail(request.id, "checker_error", str(exc))
         except CheckJobNotFound as exc:

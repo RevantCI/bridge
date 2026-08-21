@@ -1,8 +1,9 @@
 <script lang="ts">
   import { bridge } from "../api/bridgeClient";
+  import AlignmentModal from "./AlignmentModal.svelte";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
-    verseTexts, checkStatusByVerse, checkingProgress, verseKey,
+    verseTexts, checkStatusByVerse, alignmentStatusByVerse, checkingProgress, verseKey,
   } from "../stores";
   import type { FindingStatus } from "../types/finding";
 
@@ -84,6 +85,8 @@
   let recheckingKey = "";
   let recheckedKey = "";
   let editErrorKey = "";
+  let alignmentOpen = false;
+  let alignmentKey = "";
 
   $: if (
     editing && !editSaving && $selectedVerse &&
@@ -91,6 +94,19 @@
   ) {
     editing = false;
     editError = null;
+  }
+
+  $: if (
+    alignmentOpen && $selectedVerse &&
+    verseKey($currentChapter, $selectedVerse) !== alignmentKey
+  ) {
+    alignmentOpen = false;
+  }
+
+  function openAlignment() {
+    if (!$selectedVerse || $checkingProgress.running || editSaving || recheckingKey) return;
+    alignmentKey = verseKey($currentChapter, $selectedVerse);
+    alignmentOpen = true;
   }
 
   function startEdit() {
@@ -119,6 +135,7 @@
     try {
       await bridge.editVerse(chapter, verse, editText);
       verseTexts.update((t) => ({ ...t, [key]: editText }));
+      alignmentStatusByVerse.update((values) => ({ ...values, [key]: "invalid" }));
       editing = false;
       recheckingKey = key;
       recheckedKey = "";
@@ -249,6 +266,12 @@
 
     <div class="footer-actions">
       <button
+        class="align-btn"
+        on:click={openAlignment}
+        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey)}
+        title={$checkingProgress.running ? "Wait for background checking to finish before aligning" : "Review word alignment"}
+      >⇄ Align words</button>
+      <button
         class="edit-btn"
         on:click={startEdit}
         disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey)}
@@ -259,6 +282,10 @@
     <div class="empty-panel">Select a verse to review its findings.</div>
   {/if}
 </div>
+
+{#if alignmentOpen && $selectedVerse}
+  <AlignmentModal chapter={$currentChapter} verse={$selectedVerse} onClose={() => (alignmentOpen = false)} />
+{/if}
 
 <style>
   .panel { width: 400px; flex-shrink: 0; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); }
@@ -301,8 +328,9 @@
   .edit-actions .accept { border: none; }
   .cancel { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
   .decision-row button:disabled, .edit-actions button:disabled { opacity: .55; cursor: not-allowed; }
-  .footer-actions { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .footer-actions { padding: 12px 16px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .edit-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
-  .edit-btn:disabled { opacity: .55; cursor: not-allowed; }
+  .align-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+  .edit-btn:disabled, .align-btn:disabled { opacity: .55; cursor: not-allowed; }
   .empty-panel { padding: 24px 16px; font-size: 12px; color: var(--text-3); }
 </style>

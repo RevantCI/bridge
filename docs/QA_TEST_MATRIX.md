@@ -10,7 +10,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 77 passed with real Wildebeest 0.9.2 |
+| A01 | Backend | Complete Python suite | Source | PASS — 96 passed with real Wildebeest 0.9.2 |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile |
@@ -18,6 +18,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | PASS — real standalone checker findings |
 | A07 | Protocol | Sidecar remains responsive during a background job | Frozen | PASS — status polled until completion |
 | A08 | Security | Settings never serialize plaintext secrets | Source | PASS — regression suite |
+| A09 | Alignment | Manual protocol, conflicts, history, restart and USFM round trip | Source | PASS |
 
 ## Import workflows
 
@@ -53,12 +54,27 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Scenario | Expected result | Status |
 |---|---|---|---|
-| E01 | Aligned export | Text, alignments and decisions are complete | PASS |
+| E01 | Aligned export | Re-importable USFM 3 with occurrence-aware `zaln`/`w` groups | PASS — source round trip |
 | E02 | Non-aligned export | Valid USFM is generated and re-importable | PASS |
 | E03 | Footnotes/headings/poetry/milestones | No silent structural loss | PASS — source-template export; explicit fallback without source |
 | E04 | ESFM content | Supported markers preserved or limitation made explicit | PASS — custom markers retained by source-template export |
 | E05 | Windows bundle | Both helper executables are present and runnable | PASS — hashes match staged artifacts; packaged app launched |
 | E06 | macOS/Linux bundles | Build, permissions and runtime behavior verified | BLOCKED |
+
+## Manual word alignment
+
+| ID | Scenario | Expected result | Status |
+|---|---|---|---|
+| L01 | 1:1, 1:many, many:1 and many:many | Exact source/target identities are regrouped without loss | PASS — source tests |
+| L02 | Repeated target word | Occurrence and total-occurrence attributes round-trip | PASS — source tests |
+| L03 | Unalign then undo/selected restore | Word bank and selected verse return to the saved state | PASS — source tests |
+| L04 | Concurrent/stale editor save | Save is rejected and no other edit is overwritten | PASS — source tests |
+| L05 | Edit target Scripture | Existing alignment is reconciled and marked invalid | PASS — source tests |
+| L06 | Complete verse | Blocked until source and every target token have valid groups | PASS — source tests |
+| L07 | Missing original source | Readable import guidance; no invented/downloaded tokens | PASS — source and UI |
+| L08 | RTL source/target | Direction metadata is respected by token panes | PASS — source/UI diagnostics; manual RTL layout NOT RUN |
+| L09 | Restart persistence | Alignment, completion and history survive a new engine instance | PASS — source tests |
+| L10 | Frozen protocol/export/undo | Packaged sidecars perform the real workflow | PASS — release-staged workers |
 
 ## Manual desktop and usability checks
 
@@ -73,12 +89,14 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 ## Automated evidence
 
-- Python: 77 tests, including a two-process import/check/decision/restart/edit/export flow.
+- Python: 96 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+  RTL metadata, and nested aligned-USFM round trips.
 - Frontend: `svelte-check` reports 0 errors and 0 warnings; production Vite build succeeds.
 - Frozen workers: real Wildebeest loads, the USFM helper reports duplicate and missing verses,
-  and lightweight status calls remain responsive while the job runs.
+  manual many-to-many alignment/export/undo succeeds, and lightweight status calls
+  remain responsive while the job runs.
 - Windows: release executable launches both WebView2 and `bridge-engine`; the NSIS installer
-  is produced with both verified worker binaries.
+  `Bridge_0.8.0-beta.1_x64-setup.exe` is produced with both verified worker binaries.
 
 ## Windows acceptance test — 2026-08-21
 

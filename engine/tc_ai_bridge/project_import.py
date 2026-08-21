@@ -55,6 +55,12 @@ _MILESTONE_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _WORD_RE = re.compile(r"\\w\s+(?P<word>[^|\\]+?)(?:\|(?P<attrs>.*?))?\\w\*", re.IGNORECASE | re.DOTALL)
+_ALIGNMENT_EVENT_RE = re.compile(
+    r"(?P<start>\\zaln-s\s*\|(?P<start_attrs>.*?)\\\*)"
+    r"|(?P<end>\\zaln-e\\\*)"
+    r"|(?P<word_event>\\w\s+(?P<event_word>[^|\\]+?)(?:\|(?P<word_attrs>.*?))?\\w\*)",
+    re.IGNORECASE | re.DOTALL,
+)
 _ATTR_RE = re.compile(r"(?P<name>[A-Za-z0-9_-]+)\s*=\s*\"(?P<value>[^\"]*)\"")
 
 
@@ -147,22 +153,72 @@ def _verse_alignment(raw_verse: str) -> tuple[str, dict[str, Any], bool]:
 
     starts = len(re.findall(r"\\zaln-s\b", raw_verse, re.IGNORECASE))
     ends = len(re.findall(r"\\zaln-e\\\*", raw_verse, re.IGNORECASE))
-    milestones = list(_MILESTONE_RE.finditer(raw_verse))
-    reliable = starts == ends == len(milestones)
+    reliable = starts == ends
+    stack: list[dict[str, Any]] = []
+    top_order: list[tuple[str, int, int]] = []
+    top_by_signature: dict[tuple[str, int, int], dict[str, Any]] = {}
+    bottom_by_signature: dict[tuple[str, int, int], dict[str, Any]] = {}
+    links: dict[tuple[str, int, int], set[tuple[str, int, int]]] = {}
 
-    if reliable:
-        for match in milestones:
-            top_attrs = _attrs(match.group("attrs"))
-            top_word = top_attrs.get("x-content", "").strip()
-            if not top_word:
-                reliable = False
-                break
-            bottom_words = []
-            for word_match in _WORD_RE.finditer(match.group("body")):
-                bottom = _token(word_match.group("word"), _attrs(word_match.group("attrs") or ""), bottom=True)
-                bottom_words.append(bottom)
+    if reliable and starts:
+        for event in _ALIGNMENT_EVENT_RE.finditer(raw_verse):
+            if event.group("start"):
+                attrs = _attrs(event.group("start_attrs") or "")
+                word = attrs.get("x-content", "").strip()
+                if not word:
+                    reliable = False
+                    break
+                top = _token(word, attrs, bottom=False)
+                signature = (top["word"], top["occurrence"], top["occurrences"])
+                if signature not in top_by_signature:
+                    top_order.append(signature)
+                    top_by_signature[signature] = top
+                    links[signature] = set()
+                stack.append(top_by_signature[signature])
+            elif event.group("end"):
+                if not stack:
+                    reliable = False
+                    break
+                stack.pop()
+            elif event.group("word_event") and stack:
+                bottom = _token(
+                    event.group("event_word") or "",
+                    _attrs(event.group("word_attrs") or ""),
+                    bottom=True,
+                )
+                bottom_signature = (
+                    bottom["word"], bottom["occurrence"], bottom["occurrences"],
+                )
+                bottom_by_signature[bottom_signature] = bottom
+                for top in stack:
+                    top_signature = (top["word"], top["occurrence"], top["occurrences"])
+                    links[top_signature].add(bottom_signature)
+        if stack:
+            reliable = False
+
+    if reliable and starts:
+        target_order = {
+            (token["word"], token["occurrence"], token["occurrences"]): index
+            for index, token in enumerate(word_bank)
+        }
+        grouped_top: dict[tuple[tuple[str, int, int], ...], list[dict[str, Any]]] = {}
+        group_order: list[tuple[tuple[str, int, int], ...]] = []
+        for top_signature in top_order:
+            bottoms = tuple(sorted(
+                links[top_signature], key=lambda value: target_order.get(value, 10**9),
+            ))
+            if bottoms not in grouped_top:
+                grouped_top[bottoms] = []
+                group_order.append(bottoms)
+            grouped_top[bottoms].append(top_by_signature[top_signature])
+        for bottom_signatures in group_order:
+            bottom_words = [bottom_by_signature[value] for value in bottom_signatures]
+            groups.append({
+                "topWords": grouped_top[bottom_signatures],
+                "bottomWords": bottom_words,
+            })
+            for bottom in bottom_words:
                 used[(bottom["word"], bottom["occurrence"], bottom["occurrences"])] += 1
-            groups.append({"topWords": [_token(top_word, top_attrs, bottom=False)], "bottomWords": bottom_words})
 
     if not reliable:
         groups = []
@@ -437,7 +493,7 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
     source_hash = hashlib.sha256(book.source_path.read_bytes()).hexdigest()
 
     manifest = {
-        "generator": {"name": "Bridge", "build": "0.8.0-dev"},
+        "generator": {"name": "Bridge", "build": "0.8.0-beta.1"},
         "target_language": {
             "id": language_id, "name": language_name, "direction": language_direction,
             "book": {"name": book.book_name},

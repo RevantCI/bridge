@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, selectedVerse, currentChapter, showSource, verseKey } from "../stores";
+  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, currentChapter, showSource, verseKey } from "../stores";
   import { buildSegments } from "../utils/highlight";
 
   export let onSelect: (verse: string) => void;
@@ -34,6 +34,7 @@
     {@const key = verseKey($currentChapter, v)}
     {@const findings = $findingsByVerse[key] ?? []}
     {@const checkStatus = $checkStatusByVerse[key]}
+    {@const alignmentStatus = $alignmentStatusByVerse[key] ?? "untouched"}
     {@const openCount = findings.filter((f) => f.status === "open").length}
     {@const segments = buildSegments($verseTexts[key] ?? "", findings)}
     <div
@@ -59,6 +60,9 @@
           {/if}
         {/each}
       </div>
+      <span class="alignment-state {alignmentStatus}" title={`Alignment: ${alignmentStatus}`}>
+        {alignmentStatus === "complete" ? "●" : alignmentStatus === "partial" ? "◐" : alignmentStatus === "invalid" ? "!" : "○"}
+      </span>
     </div>
   {/each}
 
@@ -77,5 +81,9 @@
   .verse.approved .vnum { color: var(--success); }
   .verse.check-failed .vnum { color: var(--danger, #ef4444); }
   .vtext { font-size: 16px; line-height: 1.85; color: var(--text); }
+  .alignment-state { margin-left: auto; flex-shrink: 0; padding-top: 3px; font-size: 11px; color: var(--text-3); }
+  .alignment-state.complete { color: var(--success); }
+  .alignment-state.partial { color: var(--warning); }
+  .alignment-state.invalid { color: var(--danger); font-weight: 800; }
   .empty { color: var(--text-3); font-size: 13px; }
 </style>
