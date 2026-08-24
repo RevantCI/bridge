@@ -111,7 +111,7 @@ which mode is actually active.
 | **v0.8.0-beta.1** | Real sidecar/UI core loop, fast multi-book import, background QA jobs, persistent decisions and edits, standalone USFM checker, manual word-alignment editor, aligned/non-aligned USFM export. | Release candidate |
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
 | v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
-| v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | Planned |
+| v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | Split: statistics ✅ Built (2026-08-24, backend/protocol-only, no UI); AI proposals still Planned (Phase 7) |
 | v1.0.x | Paratext/Logos live navigation and optional AI + Greek Room synthesis. | Planned |
 
 ## Phase 1 outcome: BridgeEngine

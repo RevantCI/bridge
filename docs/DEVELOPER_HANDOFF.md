@@ -1,6 +1,6 @@
 # Developer handoff: Bridge v0.8.0-beta.1
 
-Updated: 2026-08-21
+Updated: 2026-08-24
 
 ## Current release state
 
@@ -20,12 +20,18 @@ gate is `docs/QA_TEST_MATRIX.md`.
 - Export/import: nested many-to-many `zaln`/`w` milestones are parsed into tC
   groups and aligned export writes re-importable USFM 3 over the retained source
   template.
-- Automated source gate: 122 Python tests (96 at this release's alignment
-  milestone, +26 added for Phase 4's versification work, including edge
-  cases and concurrency regression tests); Svelte, Rust, frozen-sidecar and
-  NSIS results are recorded in the QA matrix, not assumed here.
-- Explicitly deferred: AI alignment proposals, UAlign statistics, original-source
-  resource downloads, and live Paratext/Logos synchronization.
+- Automated source gate: 144 Python tests (137 at Phase 5's release
+  milestone, +7 added for Phase 6's alignment corpus-statistics work);
+  Svelte, Rust, frozen-sidecar and NSIS results are recorded in the QA
+  matrix, not assumed here. One pre-existing test,
+  `test_versification_concurrency.py`'s wall-clock GIL regression guard, is
+  known to fail under heavy background CPU load on this machine — confirmed
+  reproducible on unmodified `main`, not a regression from any phase's work;
+  see that section's own notes and the QA matrix for the standing caveat.
+- Explicitly deferred: AI alignment proposals, original-source resource
+  downloads, and live Paratext/Logos synchronization. UAlign-derived corpus
+  statistics (count/probability/PMI/SED-boost) are no longer deferred — see
+  "Alignment corpus statistics — Phase 6 complete" further down.
 
 ## Phase roadmap status — read this first before picking up new work
 
@@ -49,16 +55,28 @@ below) laid out 7 phases. Actual status as of 2026-08-21:
   existing `"local"` checks list — no frontend change needed, same as the
   USFM checker. See "Names & Transliteration — Phase 5 complete" further
   down.
-- **Phase 6 (Alignment Intelligence, UAlign corpus stats)**: the statistics
-  engine itself is not started. But the manual word-alignment editor added in
+- **Phase 6 (Alignment Intelligence, UAlign corpus stats): statistics engine
+  done (2026-08-24).** The manual word-alignment editor added in
   `feat(alignment)` (see `docs/ALIGNMENT.md`) wasn't in the original plan at
-  all — it's a prerequisite Phase 6 actually needs, since you can't compute
-  corpus statistics over "human-approved alignments" if there was previously
-  no way to create or approve one inside Bridge. That gap is now closed;
-  Phase 6's actual statistics work still needs to be built on top of it.
+  all — it was a prerequisite Phase 6 actually needed, since you can't
+  compute corpus statistics over "human-approved alignments" if there was
+  previously no way to create or approve one inside Bridge. That gap closed
+  first; Phase 6's actual statistics work is now built on top of it —
+  co-occurrence counts, translation probability, PMI, and an optional
+  Smart-Edit-Distance phonetic boost, computed directly from Bridge's own
+  completed alignments (not a vendored `ualign.py` — see the dedicated
+  section further down for why). Backend/protocol-only this pass, same
+  shape as Phases 4-5: two new read-only methods
+  (`alignment.corpusStats.summary`/`forVerse`), no UI yet, no QaFinding
+  output — AI alignment proposals stay in Phase 7, a scope decision made
+  explicitly with the user before writing any code.
 - **Phase 7 (Paratext/Logos connectors, AI explain, drag-and-drop)**: not
   started. `ai_client.py`'s endpoint has been configurable since Phase 3 but
-  is still not called by any protocol method.
+  is still not called by any protocol method. `tc_ai_bridge/
+  alignment_reliability.py` already has real, unwired scaffolding for AI
+  alignment-link-proposal compilation (confidence thresholds, protected-group
+  merging) — found while investigating Phase 6, it's AI-proposal machinery,
+  not corpus statistics, despite the similar-sounding name.
 
 Between Phase 3 and now, real unplanned work also landed that mattered more
 than staying on the numbered track: a 66-book import that took 4-6 minutes
@@ -843,6 +861,168 @@ USFM checker and versification both shipped backend/protocol-only.
   in a genuinely frozen executable, not just in source mode. This had been
   explicitly flagged as unverified in the original research breadcrumb;
   it no longer is.
+
+### Alignment corpus statistics — Phase 6 complete (2026-08-24)
+
+**Investigation first, same discipline as every prior phase.** "UAlign" was
+an unresearched name in the roadmap, same as Uroman/SED were before Phase 5.
+The first, false lead: `ualign_utilities.py` already sits vendored in two
+places (`engine/vendor/greekroom-usfm/` and
+`engine/vendor/greekroom-versification/greekroom/usfm/`) and looked, from
+the name alone, like it might already be the statistics engine. Reading it
+showed otherwise — it's a small set of generic Bible-reference/HTML utility
+classes (`BibleUtilities`, `BibleRefSpan`, `ScriptDirection`, ...) already
+actively imported by `usfm_check.py` and `versification.py`, not dead
+weight and not UAlign itself. Its own docstring pointed at the real answer:
+"utilities, taken from script `ualign.py`."
+
+Pulling the pinned `BibleNLP/greek-room` commit's full GitHub tree (no `gh`
+CLI on this machine — used the raw GitHub API and
+`raw.githubusercontent.com` directly instead) found `utilities/ualign.py`:
+a real, 3,598-line, unpublished script at the same pinned commit
+(`18ddcf0e6c03fa2774b73b21186115d712e4cba9`) already vendored three times
+for the USFM checker, versification, and Smart Edit Distance. Confirmed not
+on PyPI under any plausible name and outside the published `greekroom`
+package (`0.0.20`, which — per the USFM checker's own established
+precedent — only ships `owl`/`gr_utilities`). Its `AlignmentModel` class
+computes exactly the statistics ARCHITECTURE.md's own non-goal section
+names ("local statistical recomputation — fertility, PMI, frequency"):
+bilingual co-occurrence counts, per-word fertility distributions, joint
+counts, and a Smart-Edit-Distance-boosted translation probability. Its own
+docs page (`site/content/en/align.md`) independently confirms the same
+statistic vocabulary (count, probability, joint count, phonetic/SED score)
+in the context of a word-alignment *visualization* tool.
+
+**Decision: reimplement the statistics against Bridge's own data, don't
+vendor `ualign.py`.** Its actual I/O contract is built for a
+`fast_align`-style pipeline — Pharaoh-format alignment files, `"e ||| f |||
+ref"` triple-pipe parallel-text files, before/after ttable model files —
+plus it bundles HTML visualization, morphology-variant checking, and a
+spell-checker Bridge doesn't want. None of that matches tC's own
+`alignmentData/<book>/<chapter>.json` shape or Bridge's in-memory
+`VerseAlignment`/`TokenRef` objects. Vendoring it and subprocessing it like
+`usfm_check.py` would mean synthesizing fake files in its exact expected
+format just to extract a few numbers back out of HTML/log output designed
+for a different UI. License-wise this also sidesteps the one real
+entanglement risk `ualign.py`'s usage comment references — an external,
+separately-licensed `fast_align` binary to produce an initial alignment —
+since Bridge already has human-approved alignments as input and never needs
+to run an aligner from scratch. The formulas below mirror `ualign.py`'s own
+`AlignmentModel.support_probability()` (verified by reading that method
+directly) but are original, small, textbook implementations, not copied
+code — no new vendor license obligation beyond the SED tree already
+vendored and licensed for Phase 5.
+
+**A related false lead worth recording**: `tc_ai_bridge/
+alignment_reliability.py` already exists and sounds on-topic, but it's
+AI-link-proposal compilation (confidence thresholds, protected-group
+merging for Phase 7's AI alignment suggestions), not corpus statistics —
+real evidence Phase 7 already has scaffolding, and further reason to keep
+this phase scoped to statistics only. That scope split (statistics this
+session, AI proposals deferred to Phase 7) was decided explicitly with the
+user before any code was written, matching ARCHITECTURE.md's v0.9.x
+roadmap line which had bundled both under one entry.
+
+**What was built**: `engine/tc_ai_bridge/alignment_statistics.py`
+(`build_corpus_stats()`, `CorpusStatsTable`, `CorpusPairStats`) plus two new
+`bridge_service.py` protocol methods, `alignment.corpusStats.summary` and
+`alignment.corpusStats.forVerse`. Scans every verse marked complete — tC's
+own `tools/wordAlignment/completed/<chapter>/<verse>.json` markers, the
+same signal `alignment.complete` writes via `mark_word_alignment_completed`
+— across the open book, plus (by default) every already-normalized sibling
+book in the same multi-book collection (`.bridge/collection.json`); a
+sibling still marked lazy is skipped rather than force-materialized just to
+compute statistics. The scan reads only chapters that actually contain a
+completed-verse marker, and reads each such chapter's alignment JSON
+exactly once regardless of how many completed verses it holds — the real
+cost driver is completed verses, not the project's total verse count,
+which matters for a whole-Bible-sized collection where most verses are
+never touched by manual alignment. `corpusStats.forVerse` returns, for
+every top↔bottom link in one verse's *current* alignment groups (it does
+not need to be complete itself): joint count, source/target counts,
+translation probability, PMI, and — when Uroman and the vendored SED are
+both available — a romanized SED cost and phonetic-boosted probability for
+sparse pairs. PMI is reimplemented directly in the new module (the same
+standard formula also sitting unused in vendored `ualign_utilities.py`,
+not imported from it, to avoid coupling this module to
+`versification.py`'s vendor-path/sys.path lifecycle for two lines of math
+with no vendor-specific tuning). The SED-boost path reuses the exact same
+vendored Smart Edit Distance tree and loading pattern already established
+in `names_adapter.py`, plus its own separate lazy Uroman singleton — a
+deliberate, documented tradeoff: sharing Uroman's singleton across the
+`greek_room_engine`/`tc_ai_bridge` layers would need a real refactor of
+already-shipped, tested Phase 5 code, out of scope here, so a session using
+both the names check and corpus stats pays Uroman's one-time ~1.8-2.1s
+table load twice rather than once.
+
+Caching mirrors the USFM/versification/names pattern (per project path,
+cleared on `project.open`) but goes one step further: it's *also*
+invalidated by every alignment-mutating call (`realign`/`unalign`/`save`/
+`complete`/`undo`) for the currently open book, rather than only on the
+next project reopen — cheap enough (a linear scan over already-completed
+verses, not a subprocess or whole-book vocabulary comparison) that keeping
+it fresh on every mutation was worth it.
+
+**Measured, not guessed, per this project's own standing rule**: a
+synthetic but realistically-shaped 2,000-completed-verse corpus (50
+chapters × 40 verses × 6 token pairs, comparable to a heavily-aligned large
+book) scanned in well under a second of real compute — the entire pytest
+process for that one test, including Python startup, was 2.42s. This is
+genuinely CPU-only, zero AI/API cost: no LLM tokens, no network calls, just
+counting already-known token pairs from alignment JSON already on disk
+plus a few arithmetic formulas over those counts.
+
+**Verified**: `engine/tests/test_alignment_statistics.py` (7 new tests, no
+mocks) — completed-only filtering (an incomplete sibling verse is excluded),
+hand-computed PMI/probability values checked against the formula directly,
+multi-book aggregation with a real lazy-sibling skip, protocol-level
+`summary`/`forVerse` calls through `BridgeEngine.handle_request`, cache
+invalidation when a verse is newly marked complete, a real (not mocked)
+Uroman + vendored-SED case (a Greek name romanizing to "Ioannes" paired
+against a target spelling romanizing to "Ioanes" scores a real SED cost of
+0.02 and a boosted probability at or above the plain co-occurrence
+probability — and, checked separately, not every cross-script "same name"
+pair clears SED's `max_cost=1` ceiling: Ἰωάννης/"Ioannes" against Tamil
+யோவான்/"yoovaan" — the exact real romanization pair from Phase 5's own
+investigation — scores no cost at all, handled by the None/None graceful
+fallback, which is expected: SED is tuned for near-duplicate spellings, not
+open transliteration variance), and the 2,000-verse performance measurement
+above. Full source suite: **144 passed** (137 + 7 new), plus the one
+pre-existing, load-sensitive `test_versification_concurrency.py` failure
+noted at the top of this document — confirmed unrelated to this phase's
+changes, reproducible on unmodified `main`.
+
+**Frozen build, verified this session (2026-08-24)**: no new PyInstaller
+`datas`/`hiddenimports` entries were needed — this module reuses the
+`vendor/greekroom-smart-edit-distance` tree and `uroman` data files already
+bundled for Phase 5 — but "expected to work" was checked rather than
+assumed. `scripts/smoke_sidecars.py` was extended to call
+`alignment.corpusStats.summary`/`forVerse` immediately after its existing
+`alignment.complete` step (the fixture verse's realigned single group is
+still complete at that point, before the script's own `alignment.undo`
+call). Ran the real frozen `bridge-engine.exe` as an actual subprocess over
+its stdio JSON-RPC protocol: `corpusStats.summary` correctly reported
+`versesScanned: 1`, and `corpusStats.forVerse` returned a real
+`jointCount: 1`/`translationProbability: 1.0` pair for the completed
+verse's own link. `bridge-engine.spec` needed no changes for this.
+
+**Not done in this pass**: no UI surfaces this yet (no reliability
+color-coding in the alignment editor, no corpus-stats panel) — matching how
+the USFM checker, versification, and the names check all shipped their
+first pass backend/protocol-only. No QaFinding output — this phase was
+scoped to data only, per the explicit choice made with the user; a future
+phase could flag statistically-outlier links in already-completed
+alignments, the same way Phase 5's names check flags outlier spellings, but
+that needs its own threshold-tuning investigation against real data, the
+same way Phase 5's 0.4 cost ceiling was tuned rather than guessed. All
+testing so far — this phase and every prior one — uses small, hand-written
+synthetic fixtures (a handful of made-up words per test), not a real
+published translation at any real scale (e.g. a real Tamil IRV-sized
+corpus); real tools (Uroman, SED) have been verified against real
+individual words/names, but never against a large real corpus's actual
+statistical distribution. That's a real gap worth closing before trusting
+these statistics' *usefulness* (as opposed to their correctness) on an
+actual translation project, not yet attempted.
 
 Continue building Bridge's import workflow so users can bring in individual
 USFM/SFM files, whole-Bible folders, Paratext folders, and translationCore

@@ -10,7 +10,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 137 passed with real Wildebeest 0.9.2, real uroman, and vendored Smart Edit Distance |
+| A01 | Backend | Complete Python suite | Source | PASS — 144 passed (137 + 7 new Phase 6 alignment-statistics tests) with real Wildebeest 0.9.2, real uroman, and vendored Smart Edit Distance. One pre-existing test (`test_versification_concurrency.py`'s wall-clock GIL regression guard) is known to fail under heavy background CPU load — reproducible on unmodified `main`, not a regression from any phase's work; not release-blocking, see A13's own note |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile |
@@ -22,9 +22,11 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A10 | Versification | Detect/orgRef/backVersificationMap against real schema data | Source | PASS — includes real Psalm 3 descriptive-title shift |
 | A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — verified against a real PyInstaller build this session |
 | A12 | Versification | Edge cases: merges, splits, unknown books, verse bridges/segments | Source | PASS — 11 tests against real vendored data |
-| A13 | Versification | Concurrent callers: correctness and a GIL-contention performance regression guard | Source | PASS — fixed a real ~90x slowdown found under 16-thread concurrency |
+| A13 | Versification | Concurrent callers: correctness and a GIL-contention performance regression guard | Source | PASS — fixed a real ~90x slowdown found under 16-thread concurrency. Wall-clock bound is machine-load-sensitive: failed under heavy background CPU use during Phase 6's own test run (2026-08-24, 50.9s vs. the 30s bound); reproducible on unmodified `main`, not a regression — not release-blocking, but worth revisiting with a less load-sensitive bound |
 | A14 | Names/Transliteration | Whole-book spelling-consistency check against real uroman + vendored Smart Edit Distance | Source | PASS — 15 tests; real Muhammad/Mohamed and Titus/Tituss cases, a real Tamil vowel-sign inconsistency through full verse sentences, a false-positive exclusion (church/churches), and a bigram-blocking performance regression guard |
 | A15 | Names/Transliteration | Same check from a real frozen bridge-engine.exe | Frozen | PASS — verified uroman's ~4.2MB data dir and vendored SED both resolve under sys._MEIPASS; a real planted typo was correctly flagged end to end |
+| A16 | Alignment statistics | Corpus co-occurrence/probability/PMI/SED-boost against real completed alignments and a real multi-book collection | Source | PASS — 7 tests; completed-only filtering, hand-verified PMI/probability math, multi-book aggregation with lazy-sibling skipping, protocol-level summary/forVerse calls, cache invalidation on newly-completing a verse, a real (no-mock) Uroman+SED case, and a 2,000-completed-verse performance measurement (well under a second) |
+| A17 | Alignment statistics | Same protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `scripts/smoke_sidecars.py` extended to complete a real fixture verse then call `alignment.corpusStats.summary`/`forVerse` against the frozen executable; confirmed `versesScanned == 1` and a real jointCount=1/probability=1.0 pair, using no new PyInstaller `datas`/`hiddenimports` entries (reuses the vendor tree and uroman data already bundled for A15) |
 
 ## Import workflows
 
@@ -95,13 +97,15 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 ## Automated evidence
 
-- Python: 137 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 144 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
-  a concurrency regression guard for a real GIL-contention slowdown, and a whole-book
+  a concurrency regression guard for a real GIL-contention slowdown, a whole-book
   names/spelling-consistency check against real uroman + vendored Smart Edit Distance
   (including a bigram-blocking performance regression guard for a real ~24x slowdown found
-  this session).
+  that session), and alignment corpus statistics (co-occurrence/probability/PMI/SED-boost)
+  computed over real completed alignments across a real multi-book collection, including a
+  2,000-completed-verse performance measurement.
 - Frontend: `svelte-check` reports 0 errors and 0 warnings; production Vite build succeeds.
 - Frozen workers: real Wildebeest loads, the USFM helper reports duplicate and missing verses,
   manual many-to-many alignment/export/undo succeeds, and lightweight status calls

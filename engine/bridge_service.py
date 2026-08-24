@@ -46,6 +46,7 @@ from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.resource_materializer import materialize_book_checks
 from tc_ai_bridge.usfm import whitespace_tokens
 from tc_ai_bridge import versification as versification_tool
+from tc_ai_bridge import alignment_statistics as corpus_stats_tool
 from check_jobs import (
     CheckJobConflict,
     CheckJobError,
@@ -180,6 +181,9 @@ class Methods:
     VERSIFICATION_ORG_REF = "versification.orgRef"
     VERSIFICATION_BACK_MAP = "versification.backVersificationMap"
 
+    ALIGNMENT_CORPUS_STATS_SUMMARY = "alignment.corpusStats.summary"
+    ALIGNMENT_CORPUS_STATS_FOR_VERSE = "alignment.corpusStats.forVerse"
+
 
 class BridgeEngine:
     def __init__(self, settings: Optional[AppSettings] = None) -> None:
@@ -203,6 +207,19 @@ class BridgeEngine:
         # invalidated by verse.edit either, see _names_findings_for_book.
         self._names_findings_by_book: dict[str, list[QaFinding]] = {}
         self._names_errors_by_book: dict[str, str] = {}
+        # UAlign-style corpus statistics (Phase 6) scan every COMPLETED verse
+        # across the open book's whole collection — see
+        # alignment_statistics.py's own docstring for why this is a fresh
+        # implementation against Bridge's own data rather than a vendored
+        # ualign.py. Cached per primary project path like the caches above,
+        # but ALSO invalidated by any alignment mutation that changes which
+        # verses are complete for the current book (_save_alignment,
+        # complete_alignment, undo_alignment) — unlike USFM/names findings,
+        # this cache is cheap enough (a linear scan over already-completed
+        # verses, not a subprocess or whole-book vocabulary comparison) that
+        # keeping it fresh on every mutation is worth it rather than waiting
+        # for the next project.open.
+        self._corpus_stats_by_book: dict[str, corpus_stats_tool.CorpusStatsTable] = {}
         self._checker_lock = threading.RLock()
         self._check_jobs = CheckJobManager()
         # AppSettings() with no path defaults to a real, persistent location
@@ -241,6 +258,7 @@ class BridgeEngine:
         self._versification_by_book.clear()
         self._names_findings_by_book.clear()
         self._names_errors_by_book.clear()
+        self._corpus_stats_by_book.clear()
         materialize_lazy_project(path)
         self.project = TranslationCoreProject(path)
         info = self._project_info()
@@ -549,6 +567,7 @@ class BridgeEngine:
             operation=operation,
         )
         self.project.mark_word_alignment_pending(chapter, verse)
+        self._corpus_stats_by_book.pop(str(self.project.path), None)
         return self._alignment_context(chapter, verse)
 
     def realign_words(
@@ -601,6 +620,7 @@ class BridgeEngine:
         self.project.mark_word_alignment_completed(
             chapter, verse, username=self.settings.reviewer_name or "Bridge Reviewer",
         )
+        self._corpus_stats_by_book.pop(str(self.project.path), None)
         return self._alignment_context(chapter, verse)
 
     def undo_alignment(
@@ -614,6 +634,7 @@ class BridgeEngine:
             chapter, verse, history_id=history_id, expected_original=expected_original,
         )
         self.project.mark_word_alignment_pending(chapter, verse)
+        self._corpus_stats_by_book.pop(str(self.project.path), None)
         return self._alignment_context(chapter, verse)
 
     def _usfm_findings_for_book(
@@ -1210,6 +1231,57 @@ class BridgeEngine:
             "map": versification_tool.back_versification_map(self.project.book_id, effective_schema),
         }
 
+    # -- alignment corpus statistics (Phase 6) -----------------------------
+
+    def _corpus_stats_for_book(self) -> corpus_stats_tool.CorpusStatsTable:
+        self._require_project()
+        book_key = str(self.project.path)
+        cached = self._corpus_stats_by_book.get(book_key)
+        if cached is not None:
+            return cached
+        table = corpus_stats_tool.build_corpus_stats(self.project, include_collection=True)
+        self._corpus_stats_by_book[book_key] = table
+        return table
+
+    def corpus_stats_summary(self) -> dict[str, Any]:
+        """Aggregate counts over every completed verse in the open book's
+        whole collection (see alignment_statistics.build_corpus_stats) —
+        cheap introspection so a caller can tell whether there's enough
+        approved data yet for per-verse stats to be meaningful."""
+        table = self._corpus_stats_for_book()
+        return {
+            "booksScanned": table.books_scanned,
+            "versesScanned": table.verses_scanned,
+            "distinctSourceTypes": len(table.source_counts),
+            "distinctTargetTypes": len(table.target_counts),
+            "distinctPairs": len(table.pair_counts),
+            "totalLinkInstances": table.total_pairs,
+        }
+
+    def corpus_stats_for_verse(self, chapter: str, verse: str) -> dict[str, Any]:
+        """Corpus-wide count/probability/PMI (and, when Uroman + the
+        vendored Smart Edit Distance are available, a phonetic-boosted
+        probability for sparse pairs) for every top<->bottom link in one
+        verse's CURRENT alignment groups. Works on a verse that isn't
+        complete yet — useful while still aligning it, to see how the
+        current groupings compare to the rest of the corpus. Read-only:
+        never mutates the alignment, and never counts the verse's OWN links
+        against itself beyond however build_corpus_stats already counted
+        them if this same verse happens to be complete (no leave-one-out
+        adjustment — this reports, it doesn't iteratively retrain)."""
+        self._require_project()
+        table = self._corpus_stats_for_book()
+        alignment = self.project.load_verse_alignment(chapter, verse)
+        pairs: list[dict[str, Any]] = []
+        for group in alignment.alignments:
+            if not group.top_words or not group.bottom_words:
+                continue
+            for top in group.top_words:
+                for bottom in group.bottom_words:
+                    stats = table.pair_stats(top.word, bottom.word)
+                    pairs.append(stats.to_dict())
+        return {"chapter": str(chapter), "verse": str(verse), "pairs": pairs}
+
     # -- settings ---------------------------------------------------------
 
     def get_settings(self) -> dict[str, Any]:
@@ -1347,6 +1419,12 @@ class BridgeEngine:
                 return EngineResponse.ok(
                     request.id, result=self.versification_back_map(p.get("schema", "")),
                 )
+            if m == Methods.ALIGNMENT_CORPUS_STATS_SUMMARY:
+                return EngineResponse.ok(request.id, result=self.corpus_stats_summary())
+            if m == Methods.ALIGNMENT_CORPUS_STATS_FOR_VERSE:
+                return EngineResponse.ok(request.id, result=self.corpus_stats_for_verse(
+                    p["chapter"], p["verse"],
+                ))
 
             return EngineResponse.fail(request.id, "unknown_method", f"No handler for '{m}'")
         except ProjectError as exc:

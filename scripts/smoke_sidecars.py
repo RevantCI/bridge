@@ -201,6 +201,19 @@ def main() -> int:
             )
             if not completed.get("success") or completed["result"].get("completionState") != "completed":
                 raise SystemExit(f"Frozen alignment completion failed: {completed}")
+
+            corpus_summary = request("corpus-stats-summary", "alignment.corpusStats.summary", {})
+            if not corpus_summary.get("success") or corpus_summary["result"].get("versesScanned") != 1:
+                raise SystemExit(f"Frozen corpus stats summary failed: {corpus_summary}")
+            corpus_for_verse = request(
+                "corpus-stats-for-verse", "alignment.corpusStats.forVerse", {"chapter": "1", "verse": "1"},
+            )
+            if not corpus_for_verse.get("success"):
+                raise SystemExit(f"Frozen corpus stats forVerse failed: {corpus_for_verse}")
+            pairs = corpus_for_verse["result"].get("pairs", [])
+            if not pairs or pairs[0].get("jointCount") != 1 or pairs[0].get("translationProbability") != 1.0:
+                raise SystemExit(f"Frozen corpus stats forVerse returned unexpected data: {corpus_for_verse}")
+
             aligned_path = Path(temp) / "tit-aligned.usfm"
             exported = request(
                 "alignment-export", "export.aligned", {"outputPath": str(aligned_path)},
