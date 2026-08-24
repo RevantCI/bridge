@@ -15,6 +15,10 @@ engine/*.spec
 !engine/bridge-engine.spec
 !engine/bridge-usfm-checker.spec
 
+# ===== Paratext companion plugin (paratext_plugin/) =====
+# csc.exe build output — a compiled DLL, not source. See paratext_plugin/build.ps1.
+paratext_plugin/build/
+
 # ===== Rust / Tauri (src-tauri/) =====
 src-tauri/target/
 

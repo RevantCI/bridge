@@ -367,6 +367,105 @@ pub async fn alignment_restore(
         .await
 }
 
+/// Read-only: asks AI for individual token links and returns a deterministically
+/// compiled proposal for human review. Nothing is written to project files by this
+/// call — see alignment_ai_apply_proposal for the separate, explicit apply step.
+#[tauri::command]
+pub async fn alignment_ai_propose(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    mode: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.aiPropose",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse,
+                "mode": mode.unwrap_or_else(|| "gap_fill".to_string()),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn alignment_ai_apply_proposal(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    proposal: Value,
+    expected_original: Value,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "alignment.aiApplyProposal",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "proposal": proposal,
+                "expectedOriginal": expected_original,
+            }),
+        )
+        .await
+}
+
+/// One-click AI preparation of a verse's checks for the human reviewer. Read-only:
+/// nothing is written to project files. Can take a real model call's worth of time,
+/// see sidecar.rs's per-method timeout table.
+#[tauri::command]
+pub async fn ai_explain(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "ai.explain",
+            serde_json::json!({ "chapter": chapter, "verse": verse }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn paratext_get_state(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+    sidecar
+        .send_request("paratext.getState", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn paratext_set_reference(
+    sidecar: State<'_, EngineSidecar>,
+    reference: String,
+    origin_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "paratext.setReference",
+            serde_json::json!({ "reference": reference, "originId": origin_id.unwrap_or_default() }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn logos_get_state(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+    sidecar
+        .send_request("logos.getState", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn logos_set_reference(
+    sidecar: State<'_, EngineSidecar>,
+    reference: String,
+    origin_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "logos.setReference",
+            serde_json::json!({ "reference": reference, "originId": origin_id.unwrap_or_default() }),
+        )
+        .await
+}
+
 #[tauri::command]
 pub async fn settings_get(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar

@@ -1,0 +1,1 @@
+What is foreground information, and how can I show that some information is foreground information?

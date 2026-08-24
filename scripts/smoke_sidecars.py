@@ -214,6 +214,51 @@ def main() -> int:
             if not pairs or pairs[0].get("jointCount") != 1 or pairs[0].get("translationProbability") != 1.0:
                 raise SystemExit(f"Frozen corpus stats forVerse returned unexpected data: {corpus_for_verse}")
 
+            # No API key is configured in this smoke test (no real network call is made or
+            # needed) — this exists to confirm ai_client.py/alignment_engine.py's new imports
+            # (apply_proposal, validate_preparation_proposal) and alignment_reliability.py are
+            # actually bundled and importable inside the FROZEN executable, not just in source
+            # mode. A missing/broken bundle would surface as an internal_error or a crash here,
+            # not the expected clean ai_error.
+            ai_propose = request(
+                "ai-propose-no-key", "alignment.aiPropose", {"chapter": "1", "verse": "1"},
+            )
+            if ai_propose.get("success") or ai_propose.get("error", {}).get("code") != "ai_error":
+                raise SystemExit(f"Frozen alignment.aiPropose did not fail cleanly with ai_error: {ai_propose}")
+
+            # Same reasoning as ai-propose-no-key above: confirms ai.explain's imports
+            # (knowledge_base.py, the now-bundled translationAcademy resource tree) are
+            # real and importable inside the frozen executable. This fixture project has
+            # no application-storage resources/ folder of its own (it's hand-built, not
+            # created via project.import's real materialization flow), so
+            # TranslationHelpsKnowledgeBase's constructor legitimately raises
+            # knowledge_base_error before ai_client.py ever reaches its own missing-API-key
+            # check — both are real, clean failures proving the bundle is intact; only an
+            # internal_error/crash would indicate a real packaging gap.
+            ai_explain = request(
+                "ai-explain-no-key", "ai.explain", {"chapter": "1", "verse": "1"},
+            )
+            if ai_explain.get("success") or ai_explain.get("error", {}).get("code") not in ("ai_error", "knowledge_base_error"):
+                raise SystemExit(f"Frozen ai.explain did not fail cleanly: {ai_explain}")
+
+            # No companion Paratext plugin is running in this smoke test — confirms
+            # paratext_connector.py is bundled/importable and fails cleanly rather than
+            # crashing the dispatcher.
+            paratext_state = request("paratext-no-companion", "paratext.getState", {})
+            if paratext_state.get("success") or paratext_state.get("error", {}).get("code") != "paratext_connector_error":
+                raise SystemExit(f"Frozen paratext.getState did not fail cleanly: {paratext_state}")
+
+            # Real, meaningful check: this actually spawns the bundled logos_bridge.ps1
+            # from under sys._MEIPASS (see bridge-engine.spec's logos_connector datas
+            # entry) — a missing/broken bundle would show up as a different failure
+            # shape (a spawn/file-not-found error) than the real "Logos isn't installed"
+            # COM error this asserts on.
+            logos_state = request("logos-not-installed", "logos.getState", {}, timeout=25)
+            if logos_state.get("success") or logos_state.get("error", {}).get("code") != "logos_connector_error":
+                raise SystemExit(f"Frozen logos.getState did not fail cleanly: {logos_state}")
+            if "not registered" not in logos_state["error"]["message"].lower() and "logos" not in logos_state["error"]["message"].lower():
+                raise SystemExit(f"Frozen logos.getState failed for an unexpected reason (bundle may be missing): {logos_state}")
+
             aligned_path = Path(temp) / "tit-aligned.usfm"
             exported = request(
                 "alignment-export", "export.aligned", {"outputPath": str(aligned_path)},

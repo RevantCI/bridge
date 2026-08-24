@@ -111,8 +111,8 @@ which mode is actually active.
 | **v0.8.0-beta.1** | Real sidecar/UI core loop, fast multi-book import, background QA jobs, persistent decisions and edits, standalone USFM checker, manual word-alignment editor, aligned/non-aligned USFM export. | Release candidate |
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
 | v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
-| v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | Split: statistics ✅ Built (2026-08-24, backend/protocol-only, no UI); AI proposals still Planned (Phase 7) |
-| v1.0.x | Paratext/Logos live navigation and optional AI + Greek Room synthesis. | Planned |
+| v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/DEVELOPER_HANDOFF.md's Phase 7 section) |
+| v1.0.x | Paratext/Logos live navigation, AI explain, and optional AI + Greek Room synthesis. | Drag-and-drop import and ai.explain ✅ Built (2026-08-24, tested against a fake transport — no real API key available). Paratext/Logos connector plugins now exist and are wired (2026-08-24) but are unverified against a live Paratext/Logos instance — see docs/DEVELOPER_HANDOFF.md's Phase 7 sections for exactly what's confirmed vs. not, and paratext_plugin/README.md + engine/logos_connector/README.md for the remaining steps |
 
 ## Phase 1 outcome: BridgeEngine
 
@@ -132,9 +132,18 @@ Protocol methods implemented so far: `ping`, `engine.info`, `project.open`,
 `project.scan`, `project.inspectImport`, `project.import`, `chapter.verses`,
 `chapter.verseData`, `checks.start/status/cancel/retry`, `verse.get/runChecks/decide/edit`,
 `alignment.get/status/realign/unalign/save/complete/undo/backups/restore`,
+`alignment.corpusStats.summary/forVerse`, `alignment.aiPropose/aiApplyProposal`,
+`ai.explain`, `paratext.getState/setReference`, `logos.getState/setReference`,
+`versification.detect/orgRef/backVersificationMap`,
 `settings.get/set`, `export.aligned`, and `export.nonAligned`.
 
-Not yet wired (real logic exists in `tc_ai_bridge` but no protocol method calls it yet): Paratext/Logos connectors, AI client (`ai_client.py`), Git service, reporting, terminology/Psalms QA. These are Phase-appropriate follow-ups per the table above, not gaps in the design.
+Not yet wired (real logic exists in `tc_ai_bridge` but no protocol method calls it yet):
+Git service, reporting, terminology/Psalms QA, and `navigation.py`'s
+`NavigationBroker`/`NavigationOwnership` (the Paratext/Logos connector protocol methods above
+are direct pass-through calls — read state, push one reference — not yet wired into an
+automatic background live-sync polling loop; see docs/DEVELOPER_HANDOFF.md's Phase 7
+sections for why that's a deliberate scope boundary, not an oversight). These are
+Phase-appropriate follow-ups per the table above, not gaps in the design.
 
 ## Explicit non-goals (for now)
 

@@ -110,6 +110,89 @@ export interface AlignmentStatusResponse {
   verses: Record<string, AlignmentWorkStatus>;
 }
 
+/**
+ * Field names deliberately match alignment_reliability.compile_link_proposal's
+ * own schema verbatim (snake_case), not this file's usual camelCase convention —
+ * this object round-trips unchanged from alignment.aiPropose back into
+ * alignment.aiApplyProposal, which expects exactly these keys. See
+ * bridge_service.py's propose_ai_alignment for the full rationale.
+ */
+export interface AlignmentAiProposalGroup {
+  top_ids: string[];
+  bottom_ids: string[];
+  confidence: number;
+  reason: string;
+  origin: "existing" | "ai_compiled" | "extended_protected" | "implicit" | "unresolved";
+  relation?: string;
+}
+
+export interface AlignmentAiProposal {
+  groups: AlignmentAiProposalGroup[];
+  links: Array<{ top_id: string; bottom_id: string; confidence: number; reason: string }>;
+  uncertain_links: Array<{ top_id: string; bottom_id: string; confidence: number; reason: string }>;
+  implicit_top_ids: string[];
+  target_only_ids: string[];
+  review_notes: string[];
+  diagnostics: Array<Record<string, unknown>>;
+  conflicts: Array<Record<string, unknown>>;
+  requires_human_review: boolean;
+  compiler_version: string;
+  mode: string;
+  lock_policy: string;
+  thresholds: { auto: number; review: number };
+}
+
+export interface AlignmentAiProposeResponse {
+  proposal: AlignmentAiProposal;
+  usage: { totalTokens: number; estimatedCostUSD: number };
+}
+
+/** Field names match AICheckReview.to_dict()/QAIssue.to_dict() verbatim (Python's own
+ * dict output, snake_case) — this is display-only data, never sent back to the engine,
+ * but declaring it with the wire shape it actually has avoids a silently-wrong type. */
+export interface AiCheckReview {
+  tool: string;
+  group_id: string;
+  check_id: string;
+  source_quote: string;
+  proposed_selection_ids: string[];
+  proposed_selection_text: string[];
+  nothing_to_select: boolean;
+  verdict: "pass" | "review" | "problem" | "not_applicable";
+  severity: "critical" | "high" | "medium" | "editorial" | "info";
+  rationale: string;
+  suggested_correction: string;
+  confidence: number;
+  evidence_used: Array<Record<string, unknown>>;
+}
+
+export interface AiQaIssue {
+  code: string;
+  severity: "critical" | "high" | "medium" | "editorial" | "info";
+  title: string;
+  detail: string;
+  source: string;
+  check_id?: string;
+  group_id?: string;
+  confidence?: number;
+}
+
+export interface AiExplainResult {
+  summary: string;
+  checkReviews: AiCheckReview[];
+  qaIssues: AiQaIssue[];
+  alignmentProposal: AlignmentAiProposal | null;
+  alignmentWasAIProposed: boolean;
+  usage: { totalTokens: number; estimatedCostUSD: number };
+}
+
+export interface DesktopConnectorState {
+  connected: boolean;
+  detected?: boolean;
+  reference?: string;
+  [key: string]: unknown;
+}
+
 export interface ProjectInfo {
   path: string;
   bookId: string;

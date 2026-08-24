@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy, onMount } from "svelte";
   import { iso6393 } from "iso-639-3";
   import { bridge } from "../api/bridgeClient";
   import { project } from "../stores";
@@ -11,10 +12,32 @@
   let preview: ImportPreview | null = null;
   let languageQuery = "";
   let showLanguages = false;
+  let draggingOver = false;
+  let unlistenDrop: (() => void) | null = null;
   let metadata: ImportMetadata = {
     languageId: "", languageName: "", languageDirection: "ltr",
     projectName: "", bibleName: "",
   };
+
+  onMount(async () => {
+    unlistenDrop = await bridge.onFileDrop(
+      (paths) => {
+        draggingOver = false;
+        // The native picker only ever selects one file/folder at a time; match
+        // that for a drop too rather than silently importing just the first of
+        // several and discarding the rest.
+        if (paths.length > 1) {
+          error = "Drop one file or folder at a time.";
+          return;
+        }
+        const [path] = paths;
+        if (path && preview === null && !loading) void inspect(path);
+      },
+      (phase) => { draggingOver = phase === "over" && preview === null && !loading; },
+    );
+  });
+
+  onDestroy(() => unlistenDrop?.());
 
   const languages = iso6393
     .filter((language) => language.type !== "special")
@@ -109,12 +132,12 @@
   }
 </script>
 
-<div class="import-overlay">
+<div class="import-overlay" class:drag-active={draggingOver}>
   <main class="card" class:wide={preview !== null}>
     {#if preview === null}
       <div class="eyebrow">BRIDGE PROJECT SETUP</div>
       <h1>Open or import a Bible translation</h1>
-      <p class="intro">Import individual USFM/SFM files, a multi-book or Paratext folder, or a translationCore/translationStudio archive. Your source files are preserved.</p>
+      <p class="intro">Import individual USFM/SFM files, a multi-book or Paratext folder, or a translationCore/translationStudio archive. Your source files are preserved. You can also drag a file or folder anywhere onto this window.</p>
 
       <div class="choice-grid">
         <button class="choice primary" on:click={chooseFile} disabled={loading}>
@@ -129,6 +152,10 @@
 
       <div class="divider"><span>or</span></div>
       <button class="link-button" on:click={openExisting} disabled={loading}>Open an existing Bridge/translationCore project without copying it</button>
+
+      {#if draggingOver}
+        <div class="drop-hint" role="presentation">Drop to import</div>
+      {/if}
     {:else}
       <div class="header-row">
         <div>
@@ -210,7 +237,9 @@
 
 <style>
   .import-overlay { position: absolute; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 28px; overflow: auto; }
-  .card { width: min(570px, 100%); border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 34px; box-shadow: 0 18px 55px rgba(25, 35, 55, 0.10); }
+  .import-overlay.drag-active .card { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+  .card { position: relative; width: min(570px, 100%); border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 34px; box-shadow: 0 18px 55px rgba(25, 35, 55, 0.10); }
+  .drop-hint { position: absolute; inset: 10px; display: flex; align-items: center; justify-content: center; border: 2px dashed var(--accent); border-radius: 12px; background: var(--accent-bg); color: var(--accent); font-size: 14px; font-weight: 700; pointer-events: none; }
   .card.wide { width: min(940px, 100%); }
   .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; font-weight: 800; margin-bottom: 8px; }
   h1 { font-size: 22px; line-height: 1.2; margin: 0; color: var(--text); }

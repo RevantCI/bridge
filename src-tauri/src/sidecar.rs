@@ -160,6 +160,20 @@ impl EngineSidecar {
             // headroom for process startup/report parsing. A background-job
             // protocol can replace this longer interactive timeout later.
             "verse.runChecks" => 150,
+            // A single call to an OpenAI-compatible endpoint: ai_client.py's own HTTP
+            // timeout is 240s (with retries on transient 5xx/429), so this must clear
+            // that comfortably or the UI would report "timed out" while the sidecar is
+            // still legitimately waiting on a slow model.
+            "alignment.aiPropose" => 260,
+            // ai.explain can make up to two sequential real model calls (an alignment
+            // proposal, then the full evidence-backed review) — needs more headroom
+            // than a single alignment.aiPropose call.
+            "ai.explain" => 300,
+            // logos.getState/setReference start a persistent -STA PowerShell helper on
+            // first use; real measured startup during development was well over a
+            // second even before any COM call, so the default interactive timeout is
+            // too tight for a cold first call.
+            "logos.getState" | "logos.setReference" => 20,
             _ => 30,
         };
         match tokio::time::timeout(std::time::Duration::from_secs(timeout_seconds), rx).await {

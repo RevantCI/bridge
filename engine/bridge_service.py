@@ -14,12 +14,14 @@ only wrapped. See docs/ARCHITECTURE.md for the reasoning.
 """
 from __future__ import annotations
 
+import atexit
 import hashlib
 import json
 import os
 import re
 import threading
 from collections import Counter
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -38,9 +40,16 @@ from tc_ai_bridge.project_import import (
     materialize_lazy_project,
 )
 from tc_ai_bridge.local_checks import run_local_qa
-from tc_ai_bridge.alignment_engine import AlignmentError, make_inventory, realign, unalign_bottom
+from tc_ai_bridge.alignment_engine import (
+    AlignmentError, apply_proposal, make_inventory, realign, unalign_bottom,
+    validate_preparation_proposal,
+)
 from tc_ai_bridge.aligned_usfm import AlignedUsfmError, render_aligned_verse
 from tc_ai_bridge.alignment_reliability import structural_issues
+from tc_ai_bridge.ai_client import AIError, OpenAIResponsesClient, Transport
+from tc_ai_bridge.knowledge_base import KnowledgeBaseError
+from tc_ai_bridge.paratext_connector import ParatextConnectorClient, ParatextConnectorError
+from tc_ai_bridge.logos_connector import LogosConnectorClient, LogosConnectorError
 from tc_ai_bridge.models import QAIssue, TokenRef, VerseAlignment
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.resource_materializer import materialize_book_checks
@@ -184,9 +193,34 @@ class Methods:
     ALIGNMENT_CORPUS_STATS_SUMMARY = "alignment.corpusStats.summary"
     ALIGNMENT_CORPUS_STATS_FOR_VERSE = "alignment.corpusStats.forVerse"
 
+    ALIGNMENT_AI_PROPOSE = "alignment.aiPropose"
+    ALIGNMENT_AI_APPLY_PROPOSAL = "alignment.aiApplyProposal"
+
+    AI_EXPLAIN_VERSE = "ai.explain"
+
+    PARATEXT_GET_STATE = "paratext.getState"
+    PARATEXT_SET_REFERENCE = "paratext.setReference"
+
+    LOGOS_GET_STATE = "logos.getState"
+    LOGOS_SET_REFERENCE = "logos.setReference"
+
 
 class BridgeEngine:
-    def __init__(self, settings: Optional[AppSettings] = None) -> None:
+    def __init__(self, settings: Optional[AppSettings] = None, ai_transport: Optional[Transport] = None) -> None:
+        # ai_transport lets tests inject a fake OpenAI-Responses-shaped
+        # transport (the same Callable[[url, headers, body, timeout],
+        # (status, bytes)] shape ai_client.OpenAIResponsesClient already
+        # accepts) instead of a real network call — mirrors that class's
+        # own existing dependency-injection pattern, extended one level up
+        # so BridgeEngine's AI protocol methods are unit-testable without a
+        # real API key. None in production means "use the real network".
+        self._ai_transport = ai_transport
+        # LogosConnectorClient owns one persistent -STA PowerShell subprocess (COM
+        # automation needs a single-threaded apartment) — unlike ParatextConnectorClient's
+        # stateless per-call named-pipe open, spawning a fresh PowerShell process on every
+        # poll would be far too slow (real measured startup well over a second). Created
+        # lazily on first use, reused for the rest of this process's life.
+        self._logos_client: Optional[LogosConnectorClient] = None
         self.greek_room = GreekRoomEngine()
         self.project: Optional[TranslationCoreProject] = None
         # USFM structural checks run once per whole book (not once per
@@ -636,6 +670,134 @@ class BridgeEngine:
         self.project.mark_word_alignment_pending(chapter, verse)
         self._corpus_stats_by_book.pop(str(self.project.path), None)
         return self._alignment_context(chapter, verse)
+
+    def _ai_client(self) -> OpenAIResponsesClient:
+        api_key = self.settings.get_api_key()
+        if not api_key:
+            raise AIError(
+                "No OpenAI-compatible API key is configured. Add one in Settings before "
+                "requesting an AI alignment proposal."
+            )
+        kwargs: dict[str, Any] = {}
+        if self._ai_transport is not None:
+            kwargs["transport"] = self._ai_transport
+        return OpenAIResponsesClient(
+            api_key, model=self.settings.model, base_url=self.settings.api_base_url, **kwargs
+        )
+
+    def propose_ai_alignment(self, chapter: str, verse: str, mode: str = "gap_fill") -> dict[str, Any]:
+        """Ask AI for individual token links, then compile them deterministically into
+        legal tC groups via alignment_reliability.compile_link_proposal. Read-only: the
+        proposal is returned for human review and is not written to project files —
+        alignment.aiApplyProposal is a separate, explicit step. gap_fill (the default)
+        protects every existing non-empty group; audit is a read-only whole-verse
+        comparison not meant to be applied directly (see compile_link_proposal's own
+        docstring — an audit proposal is rejected by alignment.aiApplyProposal's
+        validate_preparation_proposal safety check if it would detach an established
+        group)."""
+        self._require_project()
+        client = self._ai_client()
+        alignment = self.project.load_verse_alignment(chapter, verse)
+        proposal = client.propose_alignment(self.project, chapter, verse, alignment, mode=mode)
+        self.settings.record_ai_usage(client.last_usage.total_tokens, client.last_cost_usd)
+        return {
+            # The proposal's internal field names (top_ids/bottom_ids/requires_human_review/...)
+            # match alignment_reliability.compile_link_proposal's own schema verbatim, unlike this
+            # file's usual camelCase protocol convention — it must round-trip byte-for-byte back
+            # into alignment.aiApplyProposal's apply_proposal() call, which reads those exact
+            # snake_case keys. Re-keying it here would risk a lossy/asymmetric conversion for no
+            # benefit, since the frontend only needs to read top_ids/bottom_ids generically to
+            # resolve token labels, the same way it already does for existing alignment groups.
+            "proposal": proposal,
+            "usage": {
+                "totalTokens": client.last_usage.total_tokens,
+                "estimatedCostUSD": round(client.last_cost_usd, 6),
+            },
+        }
+
+    def apply_ai_alignment_proposal(
+        self, chapter: str, verse: str, proposal: dict[str, Any], expected_original: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Human-triggered, explicit step that actually writes a previously returned AI
+        proposal to the project — never called automatically by propose_ai_alignment.
+        Goes through the exact same identity-preserving save pipeline as a manual
+        realign/save (_save_alignment), so an AI proposal can add no protection an
+        ordinary manual edit wouldn't also get."""
+        self._require_project()
+        current = self.project.load_verse_alignment(chapter, verse)
+        validate_preparation_proposal(current, proposal)
+        proposed = apply_proposal(current, proposal)
+        return self._save_alignment(chapter, verse, proposed, expected_original, "ai_propose_apply")
+
+    def explain_verse(self, chapter: str, verse: str) -> dict[str, Any]:
+        """ai.explain: one-click AI preparation of a verse's translationCore checks
+        for the human final reviewer (ai_client.OpenAIResponsesClient.prepare_verse_review).
+        AI reads translationNotes/translationWords/translationAcademy evidence, proposes
+        target-word selections for each check, and performs whole-verse QA — all backed by
+        real evidence_catalog citations. Nothing is written to project files: the human
+        reviewer sees this as a preparation to confirm/reject, same "AI says what it may
+        mean, human decides" boundary as everywhere else in Bridge. Requires both an
+        original-language source (to build the alignment inventory) and a configured API
+        key; needs real translationNotes/translationWords/translationAcademy evidence to be
+        materialized for grounded results — a project still 'requires-resource-index' will
+        simply get thin evidence, not an error, matching how run_full_review degrades."""
+        self._require_project()
+        client = self._ai_client()
+        alignment = self.project.load_verse_alignment(chapter, verse)
+        proposal, review_alignment, reviews, issues, summary, meta = client.prepare_verse_review(
+            self.project, chapter, verse, alignment,
+        )
+        self.settings.record_ai_usage(
+            int(meta.get("total_tokens_for_prepare", 0) or 0), float(meta.get("estimated_cost_usd", 0.0) or 0.0),
+        )
+        return {
+            "summary": summary,
+            "checkReviews": [r.to_dict() for r in reviews],
+            "qaIssues": [i.to_dict() for i in issues],
+            "alignmentProposal": proposal,
+            "alignmentWasAIProposed": bool(proposal is not None),
+            "usage": {
+                "totalTokens": int(meta.get("total_tokens_for_prepare", 0) or 0),
+                "estimatedCostUSD": round(float(meta.get("estimated_cost_usd", 0.0) or 0.0), 6),
+            },
+        }
+
+    # -- live desktop connectors (Paratext/Logos) --------------------------
+    #
+    # Direct pass-through calls only in this pass: read the connector's current
+    # state, or push one explicit reference into it. This deliberately does NOT
+    # wire tc_ai_bridge/navigation.py's NavigationBroker/NavigationOwnership into
+    # an automatic background polling loop yet — that's a real, separate UX design
+    # (conflict handling, a background job, a live-sync toggle) worth its own pass
+    # once these two connectors have been proven against real running
+    # Paratext/Logos instances. What's here is already useful on its own: a
+    # "Connections" panel can show live state and let a reviewer manually push
+    # Bridge's current verse into either application.
+
+    def paratext_get_state(self) -> dict[str, Any]:
+        state = ParatextConnectorClient().get_state()
+        return asdict(state)
+
+    def paratext_set_reference(self, reference: str, origin_id: str = "") -> dict[str, Any]:
+        return ParatextConnectorClient().set_reference(reference, origin_id)
+
+    def _logos_client_instance(self) -> LogosConnectorClient:
+        if self._logos_client is None:
+            self._logos_client = LogosConnectorClient()
+            # Best-effort clean shutdown of the persistent PowerShell helper on a
+            # normal interpreter exit. atexit does not run on a hard kill (e.g. Tauri
+            # force-terminating the sidecar) — a known, documented limitation, not
+            # silently unaddressed; see logos_connector/README.md.
+            atexit.register(self._logos_client.close)
+        return self._logos_client
+
+    def logos_get_state(self) -> dict[str, Any]:
+        state = self._logos_client_instance().get_state()
+        return asdict(state)
+
+    def logos_set_reference(self, reference: str, origin_id: str = "") -> dict[str, Any]:
+        state = self._logos_client_instance().set_reference(reference, origin_id=origin_id)
+        return asdict(state)
 
     def _usfm_findings_for_book(
         self, project: Optional[TranslationCoreProject] = None,
@@ -1425,12 +1587,42 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.corpus_stats_for_verse(
                     p["chapter"], p["verse"],
                 ))
+            if m == Methods.ALIGNMENT_AI_PROPOSE:
+                return EngineResponse.ok(request.id, result=self.propose_ai_alignment(
+                    p["chapter"], p["verse"], p.get("mode", "gap_fill"),
+                ))
+            if m == Methods.ALIGNMENT_AI_APPLY_PROPOSAL:
+                return EngineResponse.ok(request.id, result=self.apply_ai_alignment_proposal(
+                    p["chapter"], p["verse"], p["proposal"], p["expectedOriginal"],
+                ))
+            if m == Methods.AI_EXPLAIN_VERSE:
+                return EngineResponse.ok(request.id, result=self.explain_verse(p["chapter"], p["verse"]))
+            if m == Methods.PARATEXT_GET_STATE:
+                return EngineResponse.ok(request.id, result=self.paratext_get_state())
+            if m == Methods.PARATEXT_SET_REFERENCE:
+                return EngineResponse.ok(request.id, result=self.paratext_set_reference(
+                    p["reference"], p.get("originId", ""),
+                ))
+            if m == Methods.LOGOS_GET_STATE:
+                return EngineResponse.ok(request.id, result=self.logos_get_state())
+            if m == Methods.LOGOS_SET_REFERENCE:
+                return EngineResponse.ok(request.id, result=self.logos_set_reference(
+                    p["reference"], p.get("originId", ""),
+                ))
 
             return EngineResponse.fail(request.id, "unknown_method", f"No handler for '{m}'")
         except ProjectError as exc:
             return EngineResponse.fail(request.id, "project_error", str(exc))
         except AlignmentError as exc:
             return EngineResponse.fail(request.id, "alignment_error", str(exc))
+        except AIError as exc:
+            return EngineResponse.fail(request.id, "ai_error", str(exc))
+        except KnowledgeBaseError as exc:
+            return EngineResponse.fail(request.id, "knowledge_base_error", str(exc))
+        except ParatextConnectorError as exc:
+            return EngineResponse.fail(request.id, "paratext_connector_error", str(exc))
+        except LogosConnectorError as exc:
+            return EngineResponse.fail(request.id, "logos_connector_error", str(exc))
         except UsfmCheckerError as exc:
             return EngineResponse.fail(request.id, "checker_error", str(exc))
         except versification_tool.VersificationUnavailable as exc:

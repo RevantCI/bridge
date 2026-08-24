@@ -35,6 +35,12 @@ a = Analysis(
         ('resources', 'resources'),
         ('vendor/greekroom-versification', 'vendor/greekroom-versification'),
         ('vendor/greekroom-smart-edit-distance', 'vendor/greekroom-smart-edit-distance'),
+        # tc_ai_bridge/logos_connector.py's LogosConnectorClient resolves this script
+        # relative to sys._MEIPASS in a frozen build (_default_script_path()) — like
+        # the vendor trees above, it's reached only via a runtime path join, invisible
+        # to PyInstaller's static import analysis, so it must be listed explicitly or
+        # a frozen build ships with no Logos bridge helper at all (Phase 7).
+        ('logos_connector', 'logos_connector'),
         *collect_data_files('uroman'),
         *wildebeest_datas,
     ],

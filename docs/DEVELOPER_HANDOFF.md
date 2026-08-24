@@ -70,13 +70,24 @@ below) laid out 7 phases. Actual status as of 2026-08-21:
   (`alignment.corpusStats.summary`/`forVerse`), no UI yet, no QaFinding
   output — AI alignment proposals stay in Phase 7, a scope decision made
   explicitly with the user before writing any code.
-- **Phase 7 (Paratext/Logos connectors, AI explain, drag-and-drop)**: not
-  started. `ai_client.py`'s endpoint has been configurable since Phase 3 but
-  is still not called by any protocol method. `tc_ai_bridge/
-  alignment_reliability.py` already has real, unwired scaffolding for AI
-  alignment-link-proposal compilation (confidence thresholds, protected-group
-  merging) — found while investigating Phase 6, it's AI-proposal machinery,
-  not corpus statistics, despite the similar-sounding name.
+- **Phase 7 (Paratext/Logos connectors, AI explain, drag-and-drop): all four
+  slices have real, tested work as of 2026-08-24, on a best-effort basis for
+  the two that need a live external application to fully verify.** AI
+  alignment proposals and drag-and-drop import are done and verified
+  end-to-end (source + frozen). AI explain is wired and tested against real
+  materialized evidence (a real TWL resource-layout bug and a missing
+  translationAcademy bundle were both found and fixed along the way — see
+  below), verified with a fake transport since no real API key was available
+  this session. The Paratext connector's real, previously-missing companion
+  plugin now exists and compiles against Paratext's actual installed
+  interfaces, but was not deployed or loaded by a running Paratext instance
+  this session (a protected-system-directory write was correctly blocked by
+  this session's own safety controls). The Logos connector's real,
+  previously-missing PowerShell/COM bridge script now exists and its
+  process/protocol wiring is genuinely tested, but the actual COM automation
+  calls inside it are unverified — Logos was not installed on this machine.
+  See "Paratext/Logos connectors and AI explain — Phase 7 continued" further
+  down for the full detail, what's verified vs. not, and exact next steps.
 
 Between Phase 3 and now, real unplanned work also landed that mattered more
 than staying on the numbered track: a 66-book import that took 4-6 minutes
@@ -1023,6 +1034,417 @@ individual words/names, but never against a large real corpus's actual
 statistical distribution. That's a real gap worth closing before trusting
 these statistics' *usefulness* (as opposed to their correctness) on an
 actual translation project, not yet attempted.
+
+### AI alignment proposals and drag-and-drop import — Phase 7, part 1 (2026-08-24)
+
+A prior session's investigation (recorded in the previous revision of this
+section) found that `tc_ai_bridge/ai_client.py`'s `propose_alignment()` and
+`tc_ai_bridge/alignment_reliability.py`'s `compile_link_proposal()` were
+already real, complete implementations from Phases 1-3 — deterministic
+confidence thresholds, protected/locked existing-group handling, connected-
+component group compilation — with **zero test coverage anywhere in the repo**
+and no protocol method calling either one. This session verified that was
+still true (`grep -rl "OpenAIResponsesClient\|compile_link_proposal"
+--include=*.py` outside `tc_ai_bridge/` matched only `bridge_service.py`'s
+unrelated `structural_issues` import), then wired and tested it, and
+separately wired drag-and-drop import. The user was asked explicitly which
+Phase 7 slice(s) to prioritize (see the AskUserQuestion in this session);
+AI explain and the live Paratext/Logos connectors were deliberately not
+attempted — see their own subsections below for the real, confirmed
+blockers.
+
+**AI alignment proposals — new protocol methods, `alignment.aiPropose` and
+`alignment.aiApplyProposal`, in `bridge_service.py`.** Deliberately two
+separate calls, not one: `aiPropose` is read-only (asks AI for individual
+token links, then `compile_link_proposal` compiles them deterministically
+into legal tC groups) and writes nothing to project files; `aiApplyProposal`
+is a separate, explicit, human-triggered step. This keeps AI alignment on
+the same "nothing auto-applies without human approval" side of
+`docs/ARCHITECTURE.md`'s three-way design boundary as every other Greek
+Room/AI feature in Bridge.
+
+- `BridgeEngine.__init__` gained an `ai_transport: Optional[Transport] = None`
+  parameter — the same `Callable[[url, headers, body, timeout], (status,
+  bytes)]` shape `ai_client.OpenAIResponsesClient` already accepted,
+  threaded one level up so `propose_ai_alignment()` can be unit-tested with
+  a fake HTTP transport instead of a real OpenAI-compatible API key. This is
+  exactly the dependency-injection pattern the previous session's
+  investigation flagged as the way to test this without live network
+  access. Production code paths still pass `None`, meaning "use the real
+  network" (`ai_client.default_transport`).
+- `apply_ai_alignment_proposal()` reuses the *exact* identity-checked save
+  pipeline manual realign/save already goes through (`_save_alignment`,
+  including `validate_preparation_proposal`'s defense-in-depth check that an
+  AI proposal cannot detach/remap an already-established group, on top of
+  `compile_link_proposal`'s own protection) — an AI-sourced edit gets no
+  more trust than a manual one.
+- `propose_ai_alignment()`'s returned `proposal` object keeps
+  `compile_link_proposal`'s own snake_case field names
+  (`top_ids`/`bottom_ids`/`requires_human_review`/...) verbatim, breaking
+  this file's usual camelCase protocol convention on purpose: the object
+  must round-trip byte-for-byte from `aiPropose`'s response back into
+  `aiApplyProposal`'s request body, which calls `alignment_engine.
+  apply_proposal()` expecting those exact keys. Re-keying it in either
+  direction would risk a lossy/asymmetric conversion for no real benefit,
+  since the frontend only needs to read `top_ids`/`bottom_ids` generically
+  to resolve token labels — the same way `AlignmentModal.svelte` already
+  does for ordinary alignment groups. See the comment at the return
+  statement in `propose_ai_alignment()` for the same rationale inline.
+- `settings.record_ai_usage()` (`tc_ai_bridge/secret_store.py`) was itself
+  real, already-implemented, dead code before this session — nothing called
+  it, confirmed by grepping the whole `engine/` tree. `alignment.aiPropose`
+  is now its first real caller, so `settings.get`'s `aiUsage` total actually
+  accumulates real token/cost data instead of always reading zero.
+- Rust: `alignment_ai_propose`/`alignment_ai_apply_proposal` commands added
+  to `commands.rs` and registered in `main.rs`'s `generate_handler!`, the
+  same thin-wrapper shape as every other alignment command.
+  `sidecar.rs`'s per-method timeout table gained
+  `"alignment.aiPropose" => 260` — `ai_client.py`'s own HTTP timeout is 240s
+  with retries, so the default 30s interactive timeout would have made the
+  UI report "timed out" while the sidecar was still legitimately waiting on
+  a real model call. This one call is a direct blocking request (like
+  `verse.runChecks`'s existing 150s), not routed through the `checks.start`
+  background-job system — consistent with that method's own precedent for a
+  single-verse operation, and simpler than building job-tracking for what
+  is, from the UI's perspective, one blocking button press.
+- Frontend: `AlignmentModal.svelte` gained an "Ask AI to propose alignment"
+  button next to the existing manual align/unalign controls, and a
+  preview panel for the returned proposal — shows only the non-`existing`
+  groups (what would actually change), a `requires_human_review` warning
+  banner summarizing conflict/uncertain-link/target-only counts when
+  present, and explicit "Apply proposal & save" / "Discard proposal"
+  buttons. Applying reuses the same `refreshChecks()` path (re-run
+  local+Greek Room checks, update stores) every other alignment mutation in
+  this component already uses. `bridgeClient.ts` gained
+  `aiProposeAlignment`/`aiApplyAlignmentProposal`, and `types/finding.ts`
+  gained `AlignmentAiProposal`/`AlignmentAiProposeResponse` (documented
+  inline with the same snake_case rationale as above).
+
+**Verified**: `engine/tests/test_ai_alignment_propose.py` (4 new tests, real
+`compile_link_proposal`/`apply_proposal` logic exercised through
+`BridgeEngine.handle_request` with a fake transport, no mocks of Bridge's
+own code) — `alignment.aiPropose` fails with a clear `ai_error` when no API
+key is configured; a real accepted link compiles into a new group while the
+existing protected group survives untouched, and `settings.
+get_ai_usage_totals()` reflects the call; a cross-link between two different
+already-established groups is correctly rejected as a
+`protected_alignment_conflict` (not applied, `requires_human_review: true`)
+rather than silently merging two independent human decisions; and
+`alignment.aiApplyProposal` saves a proposal through the normal
+identity-checked pipeline, filling the previously-empty word bank and
+empty-bottom group. One real fixture bug found while writing these: the
+project's existing test fixtures for alignment data always include
+`"type": "bottomWord"` on every bottom-side token because
+`TokenRef.to_dict(bottom=True)` always adds it — a first draft of this
+session's fixture helper omitted it, which made `alignment.aiApplyProposal`
+spuriously report "changed on disk" (the raw-file identity check in
+`save_verse_alignment` compares byte-for-byte against `expectedOriginal`,
+which came from a real `to_dict()` call that *does* include `type`). Fixed
+in the test fixture, not in product code — this is a pre-existing,
+already-correct on-disk data contract this session hadn't matched yet, not
+a Bridge bug. Full source suite: 148 passed (144 + 4 new), plus the one
+pre-existing, load-sensitive `test_versification_concurrency.py` failure
+noted at the top of this document (confirmed unrelated, reproduced again
+this session under background load). `npm run check` (0 errors/0 warnings)
+and `npm run build` (succeeds, same pre-existing chunk-size warning) both
+still pass. `cargo check` succeeds.
+
+**Not done in this pass**: not click-tested in a running Tauri window (no
+sidecar binary was built this session — same build constraint noted
+elsewhere in this document). `mode: "audit"` is wired end-to-end on the
+backend and typed on the frontend but the UI only ever requests
+`"gap_fill"` — `compile_link_proposal`'s own docstring frames `audit` as a
+read-only whole-verse comparison "not meant to be applied directly", and
+`aiApplyAlignmentProposal`'s `validate_preparation_proposal` call correctly
+rejects an audit-mode proposal that would detach an established group, but
+no UI surfaces an audit-only read-only comparison view yet. AI usage
+totals accumulate in `settings.json` but are still not displayed anywhere
+in `SettingsModal.svelte` — `get_ai_usage_totals()`'s data has been real
+since this phase but remains invisible to the user; a small, separate UI
+gap worth closing later.
+
+**Drag-and-drop import — `bridgeClient.ts` gained `onFileDrop()`**, using
+Tauri v2's native OS drag-and-drop (`getCurrentWebview().onDragDropEvent`,
+confirmed against the installed `node_modules/@tauri-apps/api/webview.d.ts`
+rather than assumed from memory — its `DragDropEvent` union is
+`{type:'enter'|'over'|'drop', paths, position} | {type:'leave'}`), kept
+behind the same "only `bridgeClient.ts` imports `@tauri-apps/api`" rule the
+file's own header comment already states. `ImportScreen.svelte` listens in
+`onMount`/unlistens in `onDestroy`, reuses the exact same `inspect(path)`
+function the existing file/folder pickers already call (so drag-drop gets
+every validation/preview/warning path the picker flow already has, free),
+shows a dashed drop-target highlight only while a drag is over the initial
+picker screen (not during import-review, where a drop is intentionally
+ignored — dropping a second source while reviewing the first would be
+confusing, matching how the existing "Choose another source" flow requires
+an explicit reset first), and rejects a multi-path drop with a clear error
+instead of silently importing only the first path and discarding the rest.
+No Rust/`tauri.conf.json` change was needed — Tauri v2's window-level
+`dragDropEnabled` defaults to `true` and nothing in `tauri.conf.json` turns
+it off (checked, not assumed). **Not click-tested in a running Tauri
+window** in this session (same build constraint as above) — `npm run
+check`/`npm run build` verify the code compiles and type-checks, not that
+a real OS-level file drag actually reaches the webview and imports
+correctly; worth a real click-through (drag a `.usfm` file, then a
+multi-book folder, onto the window) before treating this as fully verified.
+
+### Paratext/Logos connectors and AI explain — Phase 7 continued (2026-08-24)
+
+Picked up immediately after part 1 above, in the same session, on the user's
+explicit "go ahead on all counts on a best-effort basis" instruction — with
+the honest caveat given back at the time: two of these three slices
+fundamentally need a live external application (Paratext, Logos) this
+machine either didn't have running or didn't have installed at all, so
+"best effort" here means real, compiling, protocol-correct code that has
+never been exercised against the real external app. Every such gap is
+flagged explicitly below and in the new files' own README/header comments —
+never silently presented as more verified than it is.
+
+**translationWordsLinks resource-layout bug — found and fixed first, because
+AI explain depends on it.** `knowledge_base.py`'s `twl_occurrences()` reads
+`translationWordsLinks/<version>/{kt,names,other}/groups/<book>/<term>.json`
+— a *resource-level* layout, keyed by category and term — but
+`resource_materializer.materialize_translation_words()` only ever wrote the
+*project-level* check-index shape
+(`.apps/translationCore/index/translationWords/<book>/<group>.json`),
+confirmed by reading both functions directly, not assumed from the earlier
+research breadcrumb. Fixed with a new function,
+`materialize_translation_words_links_index()`, that parses the exact same
+bundled `twl_<BOOK>.tsv` a second time (no shared-parsing risk with the
+already-tested project-level writer) into the resource-level shape,
+called from `materialize_book_checks()` alongside the two existing
+materializers. Verified with 3 new tests, including one that calls
+`TranslationHelpsKnowledgeBase.twl_occurrences()` directly and confirms it
+now returns real data — not just "the files got written."
+
+**translationAcademy — bundled for the first time, and its own real reading
+bug found and fixed.** Two real gaps stacked here, found only by actually
+downloading and inspecting the content, the same way every other resource
+gap in this project has been found:
+
+1. `ensure_resources_installed()`'s resource list was
+   `('translationNotes', 'translationWordsLinks', 'translationWords')` —
+   `translationAcademy` was never in it, so even after bundling real content
+   under `engine/resources/`, nothing would ever copy it into application
+   storage. Fixed by adding it to that tuple.
+2. The real content itself: downloaded the actual
+   `git.door43.org/unfoldingWord/en_ta` repository at tag `v90` (the same
+   tag already used for tN/TW/TWL — confirmed to exist via that Gitea
+   instance's own API, not GitHub; `unfoldingWord/en_ta` and
+   `unfoldingWord/en_tn` both 404 on api.github.com, confirming this
+   content was never on GitHub proper for either resource, and the earlier
+   P0 bundling pass's own "Door43" references meant the Gitea instance all
+   along) — a real 2.2MB, 728-file, CC BY-SA 4.0 archive, not a synthetic
+   fixture. Extracting and inspecting it directly showed
+   `knowledge_base.py`'s `_find_article()`/`global_checking_evidence()` were
+   both written for a **flat** `"<identifier>.md"` file shape — correct for
+   translationWords (confirmed by the earlier, already-passing P0
+   acceptance tests) but wrong for translationAcademy, whose real articles
+   are **directories** (`checking/accuracy-check/{title.md, sub-title.md,
+   01.md}`). This is the same bug *class* every vendored/bundled
+   integration in this project has hit — an assumption written before real
+   content existed to check it against — just newly found in
+   `knowledge_base.py` instead of a vendored tool. Fixed with a dedicated
+   `_find_ta_article_dirs()` (left `_find_article()` itself untouched, since
+   translationWords' flat-file use of it is correct and already tested) plus
+   updated `ta_articles()`/`global_checking_evidence()` to read `01.md` for
+   body content and `title.md` for a real human-readable title instead of
+   using the raw `"01"` filename stem. Verified with 4 new tests against the
+   real downloaded content, including all 13 of `global_checking_evidence()`'s
+   hardcoded checking-category identifiers confirmed as real, existing
+   slugs (not guessed).
+
+**`ai.explain` — new protocol method wiring `ai_client.OpenAIResponsesClient
+.prepare_verse_review()`**, itself real, complete, already-implemented code
+from Phases 1-3 that had zero protocol wiring and zero test coverage before
+this pass (same shape of gap as `alignment.aiPropose`'s scaffolding in part
+1 above). Read-only — nothing is written to project files; the human
+reviewer sees AI's evidence-backed check-review preparation and whole-verse
+QA as something to confirm or reject, same "AI says what it may mean, human
+decides" boundary as everywhere else in Bridge. Verified with 2 tests using
+the same fake-transport injection seam as `alignment.aiPropose`, against
+*real* materialized translationNotes/translationWords evidence (a real
+import + `verse.runChecks` preflight, not synthetic fixtures) — the fake AI
+response's `check_reviews` are built from checkIds discovered from the real
+project data, not guessed, so the test genuinely exercises
+`prepare_verse_review`'s "every supplied check must come back or the model
+response is rejected" validation. `bridge-engine.spec` needed no new
+`datas`/`hiddenimports` entries (this reuses the `resources` tree, now
+including translationAcademy, already bundled wholesale). Frozen build
+verified via an extended `scripts/smoke_sidecars.py`: since that fixture
+project has no application-storage `resources/` folder of its own, `ai
+.explain` legitimately hits `knowledge_base_error` before `ai_client.py`'s
+own missing-API-key check ever runs — the smoke test accepts either clean
+error code, since both prove the bundle (imports, and now translationAcademy
+data) is genuinely intact rather than crashing.
+
+**Frontend**: `ReviewPanel.svelte` gained a "🤖 Explain with AI" button and
+a results section (summary, per-check verdict/rationale/suggested
+correction, whole-verse QA issues) — deliberately no new evidence-browser
+UI; check reviews and issues render with the same finding-card visual
+language the rest of the panel already uses. `bridgeClient.ts` gained
+`aiExplainVerse()`; `types/finding.ts` gained `AiExplainResult`/
+`AiCheckReview`/`AiQaIssue` (documented inline with the same snake_case
+wire-shape rationale as `AlignmentAiProposal` in part 1 — these mirror
+`AICheckReview.to_dict()`/`QAIssue.to_dict()`'s real Python output verbatim,
+since it's read-only display data with no round-trip requirement to get
+"wrong" the way the alignment proposal has, but declaring the true shape
+still beats a silently-incorrect camelCase guess).
+
+**Paratext companion plugin — the real, previously-missing artifact now
+exists.** `paratext_connector.py`'s `ParatextConnectorClient` only ever
+talked to a companion plugin over a named pipe
+(`\\.\pipe\translationCoreAIBridge`) that did not exist anywhere in this
+repo; building one had been flagged as "a different technology stack, a
+genuinely separate undertaking" by the investigation earlier this session.
+It turned out to be more tractable than that framing suggested, once
+actually investigated rather than assumed:
+
+- The real Paratext plugin interface DLLs
+  (`PluginInterfaces.dll`/`CorePluginInterfaces.dll`/
+  `EmbeddedUiPluginInterfaces.dll`) are already installed locally at
+  `C:\Program Files\Paratext 9`. Reflecting into them directly (PowerShell's
+  `[System.Reflection.Assembly]::LoadFrom` + `GetTypes()`/`GetMethods()`,
+  not documentation) gave the real interface surface: `IPluginHost
+  .add_VerseRefChanged(ReferenceChangedHandler)`,
+  `SetReferenceForSyncGroup(IVerseRef, SyncReferenceGroup)`, `IVerseRef`,
+  `IParatextChildState`, `IProject`/`IReadOnlyProject`, and
+  `ParatextInternal.IParatextPlugin` (the real, if oddly-namespaced, base
+  interface every plugin implements) — everything
+  `tc_ai_bridge/navigation.py`'s `NavigationBroker` design already needs.
+- No Visual Studio, modern .NET SDK, or NuGet install was needed: the C#
+  compiler bundled with Windows' own .NET Framework
+  (`csc.exe`) compiles directly against those installed DLLs plus
+  `System.Web.Extensions.dll` (bundled, provides `JavaScriptSerializer` for
+  JSON with no external dependency) and `netstandard.dll` (also already
+  present — the plugin interfaces are themselves built against
+  netstandard2.0, discovered from the compiler's own first-attempt `CS0012`
+  errors, not assumed).
+- The real plugin *deployment* mechanism was confirmed from Paratext's own
+  official demo-plugins wiki (`ubsicap/paratext_demo_plugins`, fetched
+  directly via `raw.githubusercontent.com`, not assumed): a compiled DLL
+  renamed to `.ptxplg`, copied into
+  `C:\Program Files\Paratext 9\plugins\{PluginFolder}\` while Paratext is
+  closed. No marketplace registration or signing is required for local
+  development use.
+- New code: `paratext_plugin/TranslationCoreAIBridgePlugin.cs` — implements
+  `get_state` (reads the active window's verse reference/project/sync
+  group) and `set_reference` (calls `SetReferenceForSyncGroup`) over the
+  exact newline-delimited JSON protocol `paratext_connector.py`'s
+  `_exchange()` already speaks. **`create_note` is deliberately NOT
+  implemented** — it returns a clear "not implemented" error — because
+  Bridge already has a complete, working Paratext Notes 1.1 XML writer
+  (`tc_ai_bridge/paratext_notes.py`) that writes notes directly to disk
+  without needing the plugin at all; a live `AddNote()` call would need an
+  `IWriteLock`/`IScriptureTextSelection`/`CommentParagraph` this session had
+  no way to construct or verify against a real running Paratext instance.
+- **What's verified**: the plugin compiles cleanly (`paratext_plugin
+  /build.ps1`) against the real reflected interfaces. **What's not**:
+  it has never been loaded by a running Paratext instance. Deploying it
+  requires writing into `C:\Program Files\Paratext 9\plugins\...`, a
+  protected system directory — this session's own safety controls correctly
+  blocked that write rather than silently proceeding. See
+  `paratext_plugin/README.md` for the exact remaining steps (close
+  Paratext, run `build.ps1 -Deploy` elevated, check
+  `%LOCALAPPDATA%\Paratext95\ParatextLog.log` for the plugin loading).
+
+**Logos bridge script — the real, previously-missing artifact now exists,
+with its own genuinely-tested process wiring.**
+`logos_connector.py`'s `LogosConnectorClient` spawns
+`logos_connector/logos_bridge.ps1` as a persistent `-STA` PowerShell helper
+and talks to it over its own stdin/stdout — that script did not exist
+anywhere in the repo before this pass, and Logos is not installed on this
+machine (the user is installing it; a colleague with a working Logos
+install will do the real functional testing).
+
+- The real COM API surface (type library `Logos4Lib`, GUID
+  `{81490292-5570-4D02-A2AC-7B828DBD0A8A}`; `new LogosLauncher().Application`;
+  `LogosApplication.ApiVersion/.Activate()/.Exit()/.ExecuteUri()/
+  .CreateNavigationRequest()/.Navigate(request)/.DataTypes.LoadReference()/
+  .GetDataType()`; `PanelActivated`/`PanelChanged`/`PanelOpened`/
+  `PanelClosed`/`Exiting` events) was pulled from `LogosBible
+  /Logos4ComApiDemo`'s actual `.cs`/`.csproj` source, fetched directly from
+  `raw.githubusercontent.com` (the wiki page itself 403'd), the same
+  standard this project applies to every other integration.
+- **Two things are genuinely unverified and flagged inline in the script's
+  own header** (the most likely things to need a real fix once tested
+  against live Logos): the exact COM ProgID string
+  (`"Logos4Lib.LogosLauncher"` follows the standard `tlbimp` naming
+  convention but was never seen registered for real — `Get-LogosLauncher`
+  searches the registry for a plausible alternative and reports it if the
+  literal string fails), and reading the *currently active panel's*
+  reference (`Get-CurrentReferenceInfo`'s `$app.ActivePanel` guess) — the
+  official demo only shows *pushing* a reference via `Navigate()`, never
+  reading one back, so there was no real source to confirm this against.
+  Both paths are wrapped in defensive `try`/`catch` so a wrong guess
+  degrades to an empty/error response rather than crashing the helper.
+- No live COM event push is attempted — a plain PowerShell script has no
+  message loop to reliably pump COM callbacks, and `navigation.py`'s
+  `NavigationBroker` is already designed around a *polling* connector
+  (its echo-suppression/settling-window logic exists specifically to make
+  repeated polling safe), so a poll-only helper matches the existing
+  design rather than falling short of it.
+- **What's genuinely verified, real subprocess-level testing, not just
+  syntax-checking**: `engine/tests/test_logos_connector.py` (4 tests) proves
+  `LogosConnectorClient` actually spawns this exact script in `-STA` mode,
+  exchanges real newline-delimited JSON, and a real "Logos isn't installed"
+  COM failure round-trips as a clean `LogosConnectorError` — not a hang, not
+  a malformed-response error. A real bug was found and fixed this way: the
+  first draft double-printed the `close` action's response (an inline
+  `WriteLine` inside the request-dispatch `switch` *and* the general
+  response-write path after it) — caught by actually running the script
+  with real stdin input, not by reading the code.
+
+**Python-side connector protocol wiring — deliberately scoped to direct
+pass-through, not full automatic live sync.** New methods:
+`paratext.getState`/`paratext.setReference`,
+`logos.getState`/`logos.setReference`. `BridgeEngine` caches one
+`LogosConnectorClient` instance per process (unlike Paratext's stateless
+per-call named-pipe open, spawning a fresh `-STA` PowerShell process on
+every poll would be far too slow — real measured cold-start well over a
+second), registered with `atexit` for best-effort clean shutdown (a known,
+documented limitation: `atexit` does not run on a hard kill, e.g. Tauri
+force-terminating the sidecar — see `logos_connector/README.md`). This
+deliberately does **not** wire `navigation.py`'s
+`NavigationBroker`/`NavigationOwnership` into an automatic background
+polling loop yet — that's a real, separate UX design (conflict handling, a
+background job, a live-sync toggle) worth its own pass once these two
+connectors have been proven against real running Paratext/Logos instances.
+What's here is already useful on its own: a future "Connections" panel can
+show live state and let a reviewer manually push Bridge's current verse
+into either application. Verified with 4 protocol-level tests (clean error
+codes for both connectors with no companion running) plus the real Logos
+subprocess tests above, run again through the full `BridgeEngine
+.handle_request` dispatch this time. Frozen build verified via
+`scripts/smoke_sidecars.py`: `paratext.getState` fails cleanly with no
+companion plugin, and `logos.getState` genuinely spawns the bundled
+`logos_bridge.ps1` from under `sys._MEIPASS` (confirming a new
+`bridge-engine.spec` `datas` entry — `logos_connector/`, invisible to
+PyInstaller's static analysis the same way every other runtime-resolved
+vendor/helper path in this project has been) and gets the real "Logos isn't
+installed" COM error, not a missing-file/spawn error.
+
+**Full source suite after this continuation**: see `docs/QA_TEST_MATRIX.md`'s
+A20-A26 rows for the exact test counts and what each verifies. `npm run
+check` (0 errors/0 warnings) and `npm run build` both still pass. `cargo
+check` succeeds with the six new Tauri commands
+(`ai_explain`/`paratext_get_state`/`paratext_set_reference`/
+`logos_get_state`/`logos_set_reference`, plus the two from part 1)
+registered and per-method sidecar timeouts tuned (`ai.explain` needs up to
+two sequential real model calls; `logos.*` needs headroom for the helper's
+slow cold start).
+
+**Not done in this pass**: no click-through in a running Tauri window for
+any of this (same build constraint as part 1 — no interactive window
+automation available in this environment, confirmed by two failed
+standard Windows foreground-focus tricks earlier in the session). The
+Paratext plugin has never been loaded by real Paratext. The Logos bridge
+script has never made a real COM call. No "Connections" panel UI exists yet
+for either connector — only the protocol methods and (for Logos) the fake
+`get_state`/`set_reference` failure paths are exercised. `mode: "audit"`
+for `alignment.aiPropose` remains backend-only with no UI. AI usage totals
+still accumulate in `settings.json` but still aren't surfaced anywhere in
+`SettingsModal.svelte`.
 
 Continue building Bridge's import workflow so users can bring in individual
 USFM/SFM files, whole-Bible folders, Paratext folders, and translationCore

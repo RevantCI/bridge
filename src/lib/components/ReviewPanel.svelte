@@ -5,7 +5,7 @@
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
     verseTexts, checkStatusByVerse, alignmentStatusByVerse, checkingProgress, verseKey,
   } from "../stores";
-  import type { FindingStatus } from "../types/finding";
+  import type { AiExplainResult, FindingStatus } from "../types/finding";
 
   let greekRoomChecking = false;
   let lastCheckedKey = "";
@@ -87,6 +87,10 @@
   let editErrorKey = "";
   let alignmentOpen = false;
   let alignmentKey = "";
+  let aiExplainBusy = false;
+  let aiExplainError = "";
+  let aiExplainResult: AiExplainResult | null = null;
+  let aiExplainKey = "";
 
   $: if (
     editing && !editSaving && $selectedVerse &&
@@ -94,6 +98,31 @@
   ) {
     editing = false;
     editError = null;
+  }
+
+  $: if (
+    aiExplainResult && $selectedVerse &&
+    verseKey($currentChapter, $selectedVerse) !== aiExplainKey
+  ) {
+    aiExplainResult = null;
+    aiExplainError = "";
+  }
+
+  async function askAiExplain() {
+    if (!$selectedVerse || aiExplainBusy) return;
+    const chapter = $currentChapter;
+    const verse = $selectedVerse;
+    aiExplainBusy = true;
+    aiExplainError = "";
+    aiExplainResult = null;
+    try {
+      aiExplainResult = await bridge.aiExplainVerse(chapter, verse);
+      aiExplainKey = verseKey(chapter, verse);
+    } catch (e) {
+      aiExplainError = e instanceof Error ? e.message : String(e);
+    } finally {
+      aiExplainBusy = false;
+    }
   }
 
   $: if (
@@ -262,6 +291,43 @@
         {/each}
       </div>
 
+      {#if aiExplainError}
+        <div class="section ai-explain-section">
+          <div class="section-title">AI explanation</div>
+          <p class="ai-error">{aiExplainError}</p>
+        </div>
+      {:else if aiExplainResult}
+        <div class="section ai-explain-section">
+          <div class="section-title">
+            AI explanation
+            <span class="ai-cost">~${aiExplainResult.usage.estimatedCostUSD.toFixed(4)}</span>
+          </div>
+          <p class="ai-summary">{aiExplainResult.summary}</p>
+          {#each aiExplainResult.checkReviews as review}
+            <div class="finding ai-check-review">
+              <div class="verdict">
+                <span class="badge {severityBadge[review.severity] ?? 'badge-review'}">{review.verdict}</span>
+                <span class="check-id">{review.tool}{review.group_id ? ` · ${review.group_id}` : ""}</span>
+              </div>
+              <p class="explain">{review.rationale}</p>
+              {#if review.suggested_correction}<p class="ai-suggestion">Suggested: {review.suggested_correction}</p>{/if}
+            </div>
+          {/each}
+          {#each aiExplainResult.qaIssues as issue}
+            <div class="finding ai-qa-issue">
+              <div class="verdict">
+                <span class="badge {severityBadge[issue.severity] ?? 'badge-review'}">{issue.severity}</span>
+                <span class="check-id">{issue.title}</span>
+              </div>
+              <p class="explain">{issue.detail}</p>
+            </div>
+          {/each}
+          {#if aiExplainResult.checkReviews.length === 0 && aiExplainResult.qaIssues.length === 0}
+            <p class="none">AI found nothing to flag for this verse.</p>
+          {/if}
+        </div>
+      {/if}
+
     </div>
 
     <div class="footer-actions">
@@ -277,6 +343,12 @@
         disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey)}
         title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
       >✎ Edit verse</button>
+      <button
+        class="ai-explain-btn"
+        on:click={askAiExplain}
+        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey) || aiExplainBusy}
+        title="Ask AI to prepare evidence-backed check reviews for this verse"
+      >{aiExplainBusy ? "Asking AI…" : "🤖 Explain with AI"}</button>
     </div>
   {:else}
     <div class="empty-panel">Select a verse to review its findings.</div>
@@ -328,9 +400,14 @@
   .edit-actions .accept { border: none; }
   .cancel { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
   .decision-row button:disabled, .edit-actions button:disabled { opacity: .55; cursor: not-allowed; }
-  .footer-actions { padding: 12px 16px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .footer-actions { padding: 12px 16px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .edit-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
-  .align-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
-  .edit-btn:disabled, .align-btn:disabled { opacity: .55; cursor: not-allowed; }
+  .align-btn, .ai-explain-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+  .edit-btn:disabled, .align-btn:disabled, .ai-explain-btn:disabled { opacity: .55; cursor: not-allowed; }
   .empty-panel { padding: 24px 16px; font-size: 12px; color: var(--text-3); }
+  .ai-explain-section { border-color: var(--accent); }
+  .ai-cost { margin-left: auto; font-size: 10px; font-weight: 400; color: var(--text-3); }
+  .ai-summary { font-size: 12px; color: var(--text); line-height: 1.5; margin: 0 0 10px; }
+  .ai-error { font-size: 12px; color: var(--danger); line-height: 1.5; margin: 0; }
+  .ai-suggestion { font-size: 11px; color: var(--accent); margin: -4px 0 8px; }
 </style>

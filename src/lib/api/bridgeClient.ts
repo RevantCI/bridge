@@ -1,6 +1,7 @@
 import type {
-  AlignmentContext, AlignmentStatusResponse, CheckJobSnapshot, ImportMetadata,
-  ImportPreview, ProjectInfo, VerseAlignment, VerseData, QaFinding, SettingsData,
+  AiExplainResult, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
+  AlignmentStatusResponse, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
+  ProjectInfo, VerseAlignment, VerseData, QaFinding, SettingsData,
 } from "../types/finding";
 
 /**
@@ -14,6 +15,33 @@ import type {
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
   return tauriInvoke<T>(cmd, args);
+}
+
+export type FileDropPhase = "over" | "drop" | "leave";
+
+/**
+ * Native OS drag-and-drop (dropping a file/folder from Explorer onto the window),
+ * not the HTML5 drag/drop DOM API — Tauri's webview intercepts that itself. `onDrop`
+ * fires with the dropped path(s) once the drop completes; `onPhaseChange` is optional
+ * and only useful for "is something being dragged over the window right now" styling.
+ * Returns an unlisten function the caller must invoke on unmount.
+ */
+async function onFileDrop(
+  onDrop: (paths: string[]) => void,
+  onPhaseChange?: (phase: FileDropPhase) => void,
+): Promise<() => void> {
+  const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+  return getCurrentWebview().onDragDropEvent((event) => {
+    const payload = event.payload;
+    if (payload.type === "drop") {
+      onPhaseChange?.("drop");
+      onDrop(payload.paths);
+    } else if (payload.type === "over") {
+      onPhaseChange?.("over");
+    } else if (payload.type === "leave") {
+      onPhaseChange?.("leave");
+    }
+  });
 }
 
 interface EngineEnvelope<T> {
@@ -36,6 +64,8 @@ export const bridge = {
   ping(): Promise<{ pong: boolean }> {
     return call("engine_ping");
   },
+
+  onFileDrop,
 
   engineInfo(): Promise<Record<string, unknown>> {
     return call("engine_info");
@@ -155,6 +185,38 @@ export const bridge = {
     chapter: string, verse: string, historyId: string, expectedOriginal: VerseAlignment,
   ): Promise<AlignmentContext> {
     return call("alignment_restore", { chapter, verse, historyId, expectedOriginal });
+  },
+
+  /** Read-only: nothing is written to project files. See aiApplyAlignmentProposal. */
+  aiProposeAlignment(chapter: string, verse: string, mode: "gap_fill" | "audit" = "gap_fill"): Promise<AlignmentAiProposeResponse> {
+    return call("alignment_ai_propose", { chapter, verse, mode });
+  },
+
+  aiApplyAlignmentProposal(
+    chapter: string, verse: string, proposal: AlignmentAiProposal, expectedOriginal: VerseAlignment,
+  ): Promise<AlignmentContext> {
+    return call("alignment_ai_apply_proposal", { chapter, verse, proposal, expectedOriginal });
+  },
+
+  /** Read-only AI preparation of a verse's checks — nothing is written to project files. */
+  aiExplainVerse(chapter: string, verse: string): Promise<AiExplainResult> {
+    return call("ai_explain", { chapter, verse });
+  },
+
+  paratextGetState(): Promise<DesktopConnectorState> {
+    return call("paratext_get_state");
+  },
+
+  paratextSetReference(reference: string, originId?: string): Promise<Record<string, unknown>> {
+    return call("paratext_set_reference", { reference, originId });
+  },
+
+  logosGetState(): Promise<DesktopConnectorState> {
+    return call("logos_get_state");
+  },
+
+  logosSetReference(reference: string, originId?: string): Promise<DesktopConnectorState> {
+    return call("logos_set_reference", { reference, originId });
   },
 
   getSettings(): Promise<SettingsData> {

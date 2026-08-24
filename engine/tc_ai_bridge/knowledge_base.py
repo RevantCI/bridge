@@ -222,6 +222,16 @@ class TranslationHelpsKnowledgeBase:
             return sorted(exact)
         return []
 
+    def _find_ta_article_dirs(self, root: Path, identifier: str) -> list[Path]:
+        """Real Door43 unfoldingWord/en_ta shape: each article is a DIRECTORY
+        named by its slug (e.g. checking/accuracy-check/), holding 01.md (body)
+        and title.md — unlike translationWords, which really is flat
+        "<term>.md" files (that shape is correctly handled by _find_article
+        above). Confirmed by downloading and inspecting the real v90 tag
+        content directly rather than assumed — see
+        docs/DEVELOPER_HANDOFF.md's Phase 7 section."""
+        return sorted(p for p in root.rglob(identifier) if p.is_dir() and (p / '01.md').is_file())
+
     def ta_articles(self, group_id: str) -> list[EvidenceItem]:
         cache_key = ('ta', group_id)
         if cache_key in self._article_cache:
@@ -232,25 +242,32 @@ class TranslationHelpsKnowledgeBase:
         alias = self.TA_ALIASES.get(group_id)
         if alias:
             ids.append(alias)
-        paths: list[Path] = []
+        dirs: list[Path] = []
         for ident in ids:
-            paths.extend(self._find_article(root, ident))
-            if paths:
+            dirs.extend(self._find_ta_article_dirs(root, ident))
+            if dirs:
                 break
         authoritative = True
         # Legacy fallback for an identifier removed from current TA.
-        if not paths:
+        if not dirs:
             legacy_root = self._resource_dir('translationAcademy')
             older = sorted([p for p in legacy_root.iterdir() if p.is_dir() and p != root], key=lambda p: _version_key(p.name), reverse=True)
             for candidate in older:
-                paths = self._find_article(candidate, group_id)
-                if paths:
+                dirs = self._find_ta_article_dirs(candidate, group_id)
+                if dirs:
                     authoritative = False
                     break
-        items = [
-            EvidenceItem('translationAcademy', f'Translation Academy: {p.stem}', _strip_md(self._read_text(p)), str(p), ref.version, ref.provider, p.stem, authoritative)
-            for p in paths[:3]
-        ]
+        items = []
+        for article_dir in dirs[:3]:
+            title = article_dir.name
+            title_file = article_dir / 'title.md'
+            if title_file.is_file():
+                title = self._read_text(title_file).strip() or article_dir.name
+            body_file = article_dir / '01.md'
+            items.append(EvidenceItem(
+                'translationAcademy', f'Translation Academy: {title}', _strip_md(self._read_text(body_file)),
+                str(body_file), ref.version, ref.provider, article_dir.name, authoritative,
+            ))
         self._article_cache[cache_key] = items
         return items
 
@@ -310,7 +327,7 @@ class TranslationHelpsKnowledgeBase:
         ]
         out=[]
         for ident,title in wanted:
-            p=root/f'{ident}.md'
+            p=root/ident/'01.md'
             if p.exists():
                 out.append(EvidenceItem('translationAcademyChecking',f'Translation Academy — {title}',_strip_md(self._read_text(p),8000),str(p),ref.version,ref.provider,ident,True))
         return out

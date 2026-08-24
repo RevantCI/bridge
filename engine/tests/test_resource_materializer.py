@@ -3,8 +3,12 @@ from pathlib import Path
 
 from bridge_service import BridgeEngine
 from greek_room_engine.protocol import EngineRequest
-from tc_ai_bridge.resource_materializer import materialize_book_checks, ensure_resources_installed
+from tc_ai_bridge.knowledge_base import TranslationHelpsKnowledgeBase
+from tc_ai_bridge.resource_materializer import (
+    materialize_book_checks, materialize_translation_words_links_index, ensure_resources_installed,
+)
 from tc_ai_bridge.secret_store import AppSettings
+from tc_ai_bridge.tc_project import TranslationCoreProject
 
 
 # Real chapter/verse content that exists in the bundled Titus tN/TWL slice
@@ -46,6 +50,12 @@ def test_ensure_resources_installed_copies_bundled_snapshot_once(tmp_path):
     versions = list(tn_dir.iterdir())
     assert versions, "expected at least one bundled translationNotes version folder"
     assert (versions[0] / "tn_TIT.tsv").is_file()
+
+    # translationAcademy was NOT in this function's resource list before Phase 7
+    # (see docs/DEVELOPER_HANDOFF.md) — a real gap, not an oversight in this test.
+    ta_dir = app_resources_root / "en" / "translationHelps" / "translationAcademy"
+    assert ta_dir.is_dir()
+    assert list(ta_dir.iterdir()), "expected at least one bundled translationAcademy version folder"
 
     # Calling again must not touch (or duplicate/overwrite) an already-installed version.
     marker = versions[0] / "tn_TIT.tsv"
@@ -125,3 +135,59 @@ def test_raw_import_defers_real_tn_tw_until_checks_and_then_surfaces_them(tmp_pa
     assert manifest["tc_en_check_version_translationWords"]
     categories = {f["category"] for f in response["findings"]}
     assert "translation_note" in categories or "translation_word" in categories
+
+
+def test_materialize_translation_words_links_index_produces_resource_level_groups(tmp_path):
+    """The real gap found while investigating Phase 7's ai.explain prerequisite (see
+    docs/DEVELOPER_HANDOFF.md): knowledge_base.py's TWL reader expects a DIFFERENT,
+    resource-level layout than materialize_book_checks() alone ever produced."""
+    resources_root = tmp_path / "resources"
+    ensure_resources_installed(resources_root)
+
+    result = materialize_translation_words_links_index("tit", resources_root)
+
+    assert result is not None
+    assert result.checks > 0
+    # Real term from the bundled Titus TWL slice (rc://*/tw/dict/bible/names/paul).
+    paul_file = resources_root / "en" / "translationHelps" / "translationWordsLinks" / result.version / "names" / "groups" / "tit" / "paul.json"
+    assert paul_file.is_file()
+    entries = json.loads(paul_file.read_text(encoding="utf-8"))
+    assert entries
+    ctx = entries[0]["contextId"]
+    assert ctx["reference"]["bookId"] == "tit"
+    assert ctx["reference"]["chapter"] and ctx["reference"]["verse"]
+    assert ctx["quoteString"]
+
+
+def test_materialize_translation_words_links_index_is_idempotent(tmp_path):
+    resources_root = tmp_path / "resources"
+    ensure_resources_installed(resources_root)
+    first = materialize_translation_words_links_index("tit", resources_root)
+    second = materialize_translation_words_links_index("tit", resources_root)
+    assert first.checks == second.checks
+    assert first.groups == second.groups
+
+
+def test_knowledge_base_twl_occurrences_reads_real_materialized_data_end_to_end(tmp_path):
+    """Not just "the files got written" — confirms the actual consumer
+    (TranslationHelpsKnowledgeBase.twl_occurrences, used by ai_client.py's
+    evidence-gathering) can now read real data, closing the gap rather than
+    just plausibly fixing it."""
+    isolated = AppSettings(path=tmp_path / "settings.json")
+    engine = BridgeEngine(settings=isolated)
+    source = tmp_path / "57-TIT.usfm"
+    source.write_text(
+        "\\id TIT\n\\h Titus\n\\c 1\n\\p\n\\v 1 Paul, a servant of God.\n", encoding="utf-8",
+    )
+    result = engine.import_project(str(source), _metadata())
+    # tN/tW/TWL materialization is deferred until the first checking preflight
+    # for a raw import (see the "requires-resource-index" test above) — it
+    # doesn't happen at import time.
+    _call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+    project = TranslationCoreProject(Path(result["path"]))
+    kb = TranslationHelpsKnowledgeBase(project)
+
+    occurrences = kb.twl_occurrences("paul")
+
+    assert occurrences
+    assert occurrences[0]["contextId"]["reference"]["bookId"] == "tit"

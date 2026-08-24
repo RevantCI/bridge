@@ -59,7 +59,7 @@ def ensure_resources_installed(app_resources_root: Path) -> None:
     source = bundled_resources_source()
     if not source.exists():
         return
-    for resource in ('translationNotes', 'translationWordsLinks', 'translationWords'):
+    for resource in ('translationNotes', 'translationWordsLinks', 'translationWords', 'translationAcademy'):
         src_resource_dir = source / RESOURCE_LANGUAGE / 'translationHelps' / resource
         if not src_resource_dir.is_dir():
             continue
@@ -102,6 +102,20 @@ def _split_reference(reference: str) -> tuple[str, str] | None:
 
 def _term_from_twlink(link: str) -> str:
     return (link or '').rstrip('/').rsplit('/', 1)[-1]
+
+
+_TWL_CATEGORIES = ('kt', 'names', 'other')
+
+
+def _category_from_twlink(link: str) -> str:
+    """TWLink is rc://*/tw/dict/bible/{category}/{term} — category is the
+    second-to-last path segment. Falls back to 'other' for a malformed or
+    unrecognized category rather than dropping the row, matching this
+    resource's own only-three-real-categories shape (confirmed against the
+    bundled TSVs, e.g. 'rc://*/tw/dict/bible/names/paul')."""
+    parts = (link or '').rstrip('/').split('/')
+    category = parts[-2] if len(parts) >= 2 else ''
+    return category if category in _TWL_CATEGORIES else 'other'
 
 
 def _group_from_support_reference(support_reference: str) -> str:
@@ -210,6 +224,73 @@ def materialize_translation_words(project_root: Path, book_id: str, resources_ro
     return MaterializeResult('translationWords', version_dir.name, sum(len(v) for v in groups.values()), len(groups))
 
 
+def materialize_translation_words_links_index(book_id: str, app_resources_root: Path) -> MaterializeResult | None:
+    """Parse the same bundled twl_<BOOK>.tsv into the SEPARATE, resource-level
+    grouped-by-term layout TranslationHelpsKnowledgeBase.twl_occurrences()
+    actually reads: translationWordsLinks/<version>/{kt,names,other}/groups/
+    <book>/<term>.json — a real gap found while investigating Phase 7's
+    ai.explain prerequisites (see docs/DEVELOPER_HANDOFF.md): this resource
+    was bundled and materialize_translation_words() already parses the exact
+    same TSV, but only into the project-level check-index shape
+    (.apps/translationCore/index/translationWords/<book>/<group>.json),
+    which knowledge_base.py's evidence-gathering never reads. This writes the
+    second, resource-level shape from the same source data — not project
+    data, so it's shared reference content under app_resources_root, not
+    project_root, and (like ensure_resources_installed) is safe to
+    regenerate freely since nothing else treats it as mutable state.
+
+    Each entry's shape matches materialize_translation_words()'s own
+    contextId shape exactly, since TranslationHelpsKnowledgeBase.twl_occurrences()
+    reads x['contextId']['reference']['chapter'/'verse'] and
+    x['contextId']['quoteString'] — verified by reading that method directly,
+    not assumed from the TSV's own column names.
+    """
+    version_dir = _latest_version_dir(app_resources_root, 'translationWordsLinks')
+    if version_dir is None:
+        return None
+    tsv_path = version_dir / f'twl_{book_id.upper()}.tsv'
+    if not tsv_path.is_file():
+        return None
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in _parse_tsv(tsv_path):
+        parsed = _split_reference(row.get('Reference', ''))
+        if not parsed:
+            continue
+        chapter, verse = parsed
+        link = row.get('TWLink', '')
+        term_id = _term_from_twlink(link)
+        if not term_id:
+            continue
+        category = _category_from_twlink(link)
+        entry = {
+            'contextId': {
+                'reference': {'bookId': book_id, 'chapter': chapter, 'verse': verse},
+                'tool': 'translationWords',
+                'groupId': term_id,
+                'checkId': row.get('ID', ''),
+                'quoteString': row.get('OrigWords', ''),
+                'occurrence': int(row.get('Occurrence') or 1),
+                'occurrenceNote': '',
+            },
+            'selections': False,
+            'nothingToSelect': False,
+            'invalidated': False,
+        }
+        groups.setdefault((category, term_id), []).append(entry)
+    for category in _TWL_CATEGORIES:
+        book_dir = version_dir / category / 'groups' / book_id
+        if book_dir.exists():
+            for existing in book_dir.glob('*.json'):
+                existing.unlink()
+    total_checks = 0
+    for (category, term_id), entries in groups.items():
+        book_dir = version_dir / category / 'groups' / book_id
+        book_dir.mkdir(parents=True, exist_ok=True)
+        _write_json_atomic(book_dir / f'{_safe_filename(term_id)}.json', entries)
+        total_checks += len(entries)
+    return MaterializeResult('translationWordsLinksIndex', version_dir.name, total_checks, len(groups))
+
+
 def materialize_book_checks(project_root: Path, book_id: str, app_resources_root: Path) -> dict[str, Any]:
     """Materialize real translationNotes/translationWords project indexes
     for one imported book from the bundled English resource snapshot.
@@ -224,6 +305,12 @@ def materialize_book_checks(project_root: Path, book_id: str, app_resources_root
     ensure_resources_installed(app_resources_root)
     tn = materialize_translation_notes(project_root, book_id, app_resources_root)
     tw = materialize_translation_words(project_root, book_id, app_resources_root)
+    # Resource-level index, not project-level — see that function's own
+    # docstring. Parses the exact same TSV materialize_translation_words()
+    # just parsed successfully, so this has no meaningfully distinct failure
+    # mode from the two calls above it and isn't given special error handling
+    # they don't also have.
+    materialize_translation_words_links_index(book_id, app_resources_root)
     return {
         'translationNotes': {
             'status': 'ready' if tn and tn.checks else 'unavailable',
