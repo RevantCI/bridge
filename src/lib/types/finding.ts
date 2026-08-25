@@ -194,6 +194,9 @@ export interface DesktopConnectorState {
 }
 
 export interface ProjectInfo {
+  projectId?: string;
+  collectionId?: string;
+  managed?: boolean;
   path: string;
   bookId: string;
   bookName: string;
@@ -232,9 +235,50 @@ export interface ImportPreview {
   books: ImportBook[];
   missingFields: string[];
   warnings: string[];
+  duplicates: DuplicateAssessment;
+}
+
+export type DuplicateClassification = "new" | "exactDuplicate" | "possibleDuplicate" | "partialOverlap";
+
+export interface DuplicateMatch {
+  match: "exact" | "possible";
+  projectId: string;
+  collectionId?: string;
+  path: string;
+  bookId: string;
+  bookName: string;
+  projectName?: string;
+  bibleName?: string;
+  lastOpenedAt?: string;
+  missing: boolean;
+}
+
+export interface DuplicateAssessment {
+  classification: DuplicateClassification;
+  matches: DuplicateMatch[];
+  sourceFingerprints: Record<string, string>;
+  collectionFingerprint: string;
+}
+
+export interface RegisteredProject {
+  projectId: string;
+  collectionId?: string;
+  path: string;
+  managed: boolean;
+  missing: boolean;
+  bookId: string;
+  bookName: string;
+  targetLanguageId?: string;
+  targetLanguage?: string;
+  projectName?: string;
+  bibleName?: string;
+  lastOpenedAt?: string;
 }
 
 export interface ImportedProject {
+  projectId?: string;
+  collectionId?: string;
+  directoryName?: string;
   path: string;
   bookId: string;
   bookName: string;

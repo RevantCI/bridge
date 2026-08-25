@@ -19,6 +19,25 @@ import. Imported projects are written to application-owned storage. Name
 collisions create a new suffixed project rather than overwriting an existing
 one.
 
+## Project Home, identity, and duplicate safety
+
+Bridge keeps an atomic `project-registry.json` beside application settings and
+discovers older projects already present in its managed `projects` directory.
+Each managed project also receives `.bridge/project.json` with a stable UUID.
+The Project Home lists recent projects (one card per multi-book collection), keeps missing entries visible, and lets
+the user locate a moved folder or forget the registry entry. Forget never
+deletes project files.
+
+Import preview fingerprints every approved source book and compares it with the
+registry. An exact existing import defaults to **Open existing project**. A new
+copy is possible only through the explicit **Import as a separate copy** action;
+Bridge does not silently merge or overwrite projects. A matching book/language/
+Bible identity without an exact source hash is shown as a possible overlap for
+human review.
+
+Native file/folder drag-and-drop uses the same read-only preview and duplicate
+decision flow as the pickers, including when another project is already open.
+
 ## Normalized project data
 
 For a single-book import and the first book of a collection, Bridge creates or
@@ -42,8 +61,9 @@ preserves immediately:
 For a multi-book collection, every remaining source file is copied immediately
 into its own lightweight project directory with `.bridge/lazy-import.json`.
 That book is normalized into the structure above the first time the user opens
-it. `.bridge/collection.json` in every sibling restores the complete book list
-after an app restart. This keeps the approved source self-contained while
+it. `.bridge/collection.json` in every sibling stores a stable collection UUID
+and sibling directory names (not machine-specific absolute paths), restoring
+the complete book list after restart or after the collection is moved. This keeps the approved source self-contained while
 avoiding tens of thousands of synchronous JSON writes before the editor opens.
 
 Every target token begins in `wordBank` unless a supported USFM 3 alignment

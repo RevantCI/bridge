@@ -115,6 +115,20 @@ def test_import_collection_creates_one_book_project_per_usfm(tmp_path):
     assert TranslationCoreProject(deferred["path"]).chapters() == ["1"]
     assert materialize_lazy_project(deferred["path"]) is False
 
+    collection_data = json.loads(
+        (Path(primary["path"]) / ".bridge" / "collection.json").read_text(encoding="utf-8")
+    )
+    assert collection_data["schemaVersion"] == 2
+    assert collection_data["collectionId"]
+    assert all("path" not in entry and entry["directoryName"] for entry in collection_data["projects"])
+
+    imported_root = tmp_path / "projects"
+    moved_root = tmp_path / "moved-projects"
+    imported_root.rename(moved_root)
+    moved_primary = moved_root / Path(primary["path"]).name
+    reopened_collection = project_import.collection_projects(moved_primary)
+    assert {Path(item["path"]).parent for item in reopened_collection} == {moved_root.resolve()}
+
 
 def test_open_deferred_book_restores_collection_after_restart(tmp_path):
     source = tmp_path / "Bible"
@@ -238,6 +252,99 @@ def test_bridge_import_protocol_opens_primary_project(tmp_path):
     assert result["result"]["bibleName"] == "Test Bible"
     assert result["result"]["chapters"] == ["1", "2"]
     assert Path(result["result"]["path"]).is_relative_to(tmp_path / "projects")
+
+
+def test_duplicate_import_is_blocked_until_separate_copy_is_explicit(tmp_path):
+    source = tmp_path / "TIT.usfm"
+    source.write_text(SIMPLE_USFM, encoding="utf-8")
+    engine = BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
+
+    before = _call(engine, "project.inspectImport", {"path": str(source)})
+    assert before["result"]["duplicates"]["classification"] == "new"
+
+    first = _call(engine, "project.import", {"path": str(source), "metadata": _metadata()})
+    assert first["success"] is True
+    after = _call(engine, "project.inspectImport", {"path": str(source)})
+    assert after["result"]["duplicates"]["classification"] == "exactDuplicate"
+    assert after["result"]["duplicates"]["matches"][0]["projectId"] == first["result"]["projectId"]
+
+    blocked = _call(engine, "project.import", {"path": str(source), "metadata": _metadata()})
+    assert blocked["success"] is False
+    assert "already been imported" in blocked["error"]["message"]
+
+    separate = _call(engine, "project.import", {
+        "path": str(source), "metadata": _metadata(), "allowDuplicate": True,
+    })
+    assert separate["success"] is True
+    assert separate["result"]["path"] != first["result"]["path"]
+
+    listed = _call(engine, "project.list")["result"]["projects"]
+    assert len(listed) == 2
+    assert {item["projectId"] for item in listed} == {
+        first["result"]["projectId"], separate["result"]["projectId"],
+    }
+
+
+def test_changed_source_is_reported_as_possible_overlap_after_metadata_review(tmp_path):
+    source = tmp_path / "TIT.usfm"
+    source.write_text(SIMPLE_USFM, encoding="utf-8")
+    engine = BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
+    imported = _call(engine, "project.import", {"path": str(source), "metadata": _metadata()})
+    assert imported["success"] is True
+    source.write_text(SIMPLE_USFM.replace("eternal life", "everlasting life"), encoding="utf-8")
+
+    initial = _call(engine, "project.inspectImport", {"path": str(source)})["result"]
+    reviewed = _call(engine, "project.inspectImport", {
+        "path": str(source), "metadata": _metadata(),
+    })["result"]
+
+    assert initial["duplicates"]["classification"] == "new"
+    assert reviewed["duplicates"]["classification"] == "possibleDuplicate"
+    assert reviewed["duplicates"]["matches"][0]["match"] == "possible"
+
+
+def test_forget_removes_registry_entry_without_deleting_project(tmp_path):
+    source = tmp_path / "TIT.usfm"
+    source.write_text(SIMPLE_USFM, encoding="utf-8")
+    engine = BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
+    imported = _call(engine, "project.import", {"path": str(source), "metadata": _metadata()})["result"]
+    project_path = Path(imported["path"])
+
+    forgotten = _call(engine, "project.forget", {"projectId": imported["projectId"]})
+
+    assert forgotten["result"] == {"forgotten": True}
+    assert project_path.is_dir()
+    # Managed-project discovery intentionally restores the entry on the next
+    # list. Forget is not delete, and app-owned projects remain recoverable.
+    listed = _call(engine, "project.list")["result"]["projects"]
+    assert [item["projectId"] for item in listed] == [imported["projectId"]]
+
+
+def test_locate_rejects_a_different_book_for_missing_project(tmp_path):
+    source = tmp_path / "TIT.usfm"
+    source.write_text(SIMPLE_USFM, encoding="utf-8")
+    engine = BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
+    imported = _call(engine, "project.import", {"path": str(source), "metadata": _metadata()})["result"]
+    moved = tmp_path / "moved-titus"
+    Path(imported["path"]).rename(moved)
+
+    wrong = tmp_path / "wrong" / "phm"
+    (wrong / "phm").mkdir(parents=True)
+    (wrong / "manifest.json").write_text(json.dumps({
+        "project": {"id": "phm", "name": "Philemon"},
+        "target_language": {"id": "eng", "name": "English"},
+    }), encoding="utf-8")
+    (wrong / "phm" / "1.json").write_text('{"1": "Grace."}', encoding="utf-8")
+    alignment = wrong / ".apps" / "translationCore" / "alignmentData" / "phm"
+    alignment.mkdir(parents=True)
+    (alignment / "1.json").write_text('{"1": {"alignments": [], "wordBank": []}}', encoding="utf-8")
+
+    result = _call(engine, "project.open", {
+        "path": str(wrong), "projectId": imported["projectId"],
+    })
+
+    assert result["success"] is False
+    assert "missing project is TIT" in result["error"]["message"]
 
 
 def test_verse_bridge_import_and_check_does_not_crash(tmp_path):

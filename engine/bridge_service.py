@@ -39,6 +39,7 @@ from tc_ai_bridge.project_import import (
     inspect_import,
     materialize_lazy_project,
 )
+from tc_ai_bridge.project_registry import ProjectRegistry, source_fingerprints
 from tc_ai_bridge.local_checks import run_local_qa
 from tc_ai_bridge.alignment_engine import (
     AlignmentError, apply_proposal, make_inventory, realign, unalign_bottom,
@@ -64,7 +65,7 @@ from check_jobs import (
     CheckJobSpec,
 )
 
-BRIDGE_VERSION = "0.8.0-beta.2"
+BRIDGE_VERSION = "0.8.0-beta.3"
 
 # tc_ai_bridge's QAIssue.severity strings -> our shared Severity enum
 _SEVERITY_MAP = {
@@ -154,6 +155,8 @@ class Methods:
     ENGINE_INFO = "engine.info"
 
     PROJECT_OPEN = "project.open"
+    PROJECT_LIST = "project.list"
+    PROJECT_FORGET = "project.forget"
     PROJECT_SCAN = "project.scan"
     PROJECT_INSPECT_IMPORT = "project.inspectImport"
     PROJECT_IMPORT = "project.import"
@@ -255,6 +258,7 @@ class BridgeEngine:
         # for the next project.open.
         self._corpus_stats_by_book: dict[str, corpus_stats_tool.CorpusStatsTable] = {}
         self._checker_lock = threading.RLock()
+        self._import_lock = threading.Lock()
         self._check_jobs = CheckJobManager()
         # AppSettings() with no path defaults to a real, persistent location
         # (%LOCALAPPDATA%/.translationcore-ai-bridge/settings.json on
@@ -276,6 +280,9 @@ class BridgeEngine:
             except OSError:
                 pass
         self.project_root = settings_root / "projects"
+        self.project_registry = ProjectRegistry(
+            settings_root / "project-registry.json", self.project_root,
+        )
 
     # -- lifecycle ------------------------------------------------------
 
@@ -286,7 +293,7 @@ class BridgeEngine:
             "greekRoom": self.greek_room.info(),
         }
 
-    def open_project(self, path: str) -> dict[str, Any]:
+    def open_project(self, path: str, project_id: str = "") -> dict[str, Any]:
         self._usfm_findings_by_book.clear()
         self._usfm_errors_by_book.clear()
         self._versification_by_book.clear()
@@ -294,12 +301,45 @@ class BridgeEngine:
         self._names_errors_by_book.clear()
         self._corpus_stats_by_book.clear()
         materialize_lazy_project(path)
-        self.project = TranslationCoreProject(path)
+        candidate = TranslationCoreProject(path)
+        if project_id:
+            existing = self.project_registry.get(project_id)
+            if existing:
+                existing_book = str(existing.get("bookId") or "").lower()
+                existing_language = str(existing.get("targetLanguageId") or "").lower()
+                candidate_target = candidate.manifest.get("target_language", {})
+                candidate_language = str(
+                    candidate_target.get("id") or "" if isinstance(candidate_target, dict) else ""
+                ).lower()
+                if existing_book and existing_book != candidate.book_id.lower():
+                    raise ProjectError(
+                        f"The selected folder is {candidate.book_id.upper()}, but the missing "
+                        f"project is {existing_book.upper()}. Choose the original project folder."
+                    )
+                if existing_language and candidate_language and existing_language != candidate_language:
+                    raise ProjectError(
+                        "The selected folder has a different target language from the missing project."
+                    )
+        self.project = candidate
         info = self._project_info()
         siblings = collection_projects(path)
         if siblings:
             info["importedProjects"] = siblings
+        registered = self.project_registry.register(path, touch=True, project_id=project_id)
+        info.update({
+            "projectId": registered["projectId"],
+            "collectionId": registered.get("collectionId", ""),
+            "managed": registered.get("managed", False),
+        })
         return info
+
+    def list_projects(self) -> dict[str, Any]:
+        return {"projects": self.project_registry.list_projects()}
+
+    def forget_project(self, project_id: str) -> dict[str, Any]:
+        if not project_id:
+            raise ProjectError("projectId is required")
+        return {"forgotten": self.project_registry.forget(project_id)}
 
     def _project_info(self) -> dict[str, Any]:
         self._require_project()
@@ -321,12 +361,14 @@ class BridgeEngine:
             "checkTypes": self.project.check_types(),
         }
 
-    def inspect_project_import(self, path: str) -> dict[str, Any]:
+    def inspect_project_import(self, path: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         """Read-only detection/validation used before the metadata form."""
-        return inspect_import(path)
+        preview = inspect_import(path)
+        preview["duplicates"] = self.project_registry.classify(preview, metadata)
+        return preview
 
     def import_project(self, path: str, metadata: dict[str, Any],
-                       destination_root: str = "") -> dict[str, Any]:
+                       destination_root: str = "", allow_duplicate: bool = False) -> dict[str, Any]:
         """Normalize USFM/SFM, Paratext folders, or tC archives, then open it.
 
         Existing translationCore state is copied intact. Raw Scripture becomes
@@ -335,19 +377,38 @@ class BridgeEngine:
         TranslationNotes/translationWords indexes are prepared by the checking
         job instead of blocking navigation into the editor.
         """
-        root = Path(destination_root).resolve() if destination_root else self.project_root
-        result = import_source(path, root, metadata)
+        if not self._import_lock.acquire(blocking=False):
+            raise ProjectError("Another project import is already running.")
+        try:
+            preview = inspect_import(path)
+            duplicate = self.project_registry.classify(preview, metadata)
+            if duplicate["classification"] == "exactDuplicate" and not allow_duplicate:
+                raise ProjectError(
+                    "This source has already been imported. Open the existing project, "
+                    "or explicitly choose Import as separate copy."
+                )
+            root = Path(destination_root).resolve() if destination_root else self.project_root
+            result = import_source(path, root, metadata)
+            fingerprints = source_fingerprints(preview)
+            for imported in result["projects"]:
+                book_id = str(imported.get("bookId") or "").lower()
+                registered = self.project_registry.register(
+                    imported["path"],
+                    source_fingerprint=fingerprints.get(book_id, ""),
+                    project_id=str(imported.get("projectId") or ""),
+                    collection_id=str(imported.get("collectionId") or ""),
+                )
+                imported.update({
+                    "projectId": registered["projectId"],
+                    "collectionId": registered.get("collectionId", ""),
+                })
 
-        self.project = TranslationCoreProject(result["primaryProjectPath"])
-        self._usfm_findings_by_book.clear()
-        self._usfm_errors_by_book.clear()
-        self._versification_by_book.clear()
-        self._names_findings_by_book.clear()
-        self._names_errors_by_book.clear()
-        info = self._project_info()
-        info["import"] = result
-        info["importedProjects"] = result["projects"]
-        return info
+            info = self.open_project(result["primaryProjectPath"])
+            info["import"] = result
+            info["importedProjects"] = result["projects"]
+            return info
+        finally:
+            self._import_lock.release()
 
     def _ensure_resource_indexes(self, project: TranslationCoreProject) -> None:
         """Prepare raw-import tN/tW indexes on demand, once per book."""
@@ -1485,14 +1546,23 @@ class BridgeEngine:
             if m == Methods.ENGINE_INFO:
                 return EngineResponse.ok(request.id, result=self.info())
             if m == Methods.PROJECT_OPEN:
-                return EngineResponse.ok(request.id, result=self.open_project(p["path"]))
+                return EngineResponse.ok(request.id, result=self.open_project(
+                    p["path"], p.get("projectId", ""),
+                ))
+            if m == Methods.PROJECT_LIST:
+                return EngineResponse.ok(request.id, result=self.list_projects())
+            if m == Methods.PROJECT_FORGET:
+                return EngineResponse.ok(request.id, result=self.forget_project(p.get("projectId", "")))
             if m == Methods.PROJECT_SCAN:
                 return EngineResponse.ok(request.id, result=self.scan_project())
             if m == Methods.PROJECT_INSPECT_IMPORT:
-                return EngineResponse.ok(request.id, result=self.inspect_project_import(p["path"]))
+                return EngineResponse.ok(request.id, result=self.inspect_project_import(
+                    p["path"], p.get("metadata"),
+                ))
             if m == Methods.PROJECT_IMPORT:
                 return EngineResponse.ok(request.id, result=self.import_project(
                     p["path"], p.get("metadata", {}), p.get("destinationRoot", ""),
+                    bool(p.get("allowDuplicate", False)),
                 ))
             if m == Methods.CHAPTER_VERSES:
                 return EngineResponse.ok(request.id, result={"verses": self.chapter_verses(p["chapter"])})

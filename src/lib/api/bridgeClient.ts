@@ -1,7 +1,7 @@
 import type {
   AiExplainResult, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
   AlignmentStatusResponse, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
-  ProjectInfo, VerseAlignment, VerseData, QaFinding, SettingsData,
+  ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
 } from "../types/finding";
 
 /**
@@ -79,20 +79,28 @@ export const bridge = {
     return invoke<string | null>("pick_import_file");
   },
 
-  openProject(path: string): Promise<ProjectInfo> {
-    return call("project_open", { path });
+  openProject(path: string, projectId?: string): Promise<ProjectInfo> {
+    return call("project_open", { path, projectId });
+  },
+
+  listProjects(): Promise<{ projects: RegisteredProject[] }> {
+    return call("project_list");
+  },
+
+  forgetProject(projectId: string): Promise<{ forgotten: boolean }> {
+    return call("project_forget", { projectId });
   },
 
   scanProject(): Promise<{ chapters: string[]; checkTypes: Record<string, number>; indexTools: Record<string, number> }> {
     return call("project_scan");
   },
 
-  inspectImport(path: string): Promise<ImportPreview> {
-    return call("project_inspect_import", { path });
+  inspectImport(path: string, metadata?: ImportMetadata): Promise<ImportPreview> {
+    return call("project_inspect_import", { path, metadata });
   },
 
-  importProject(path: string, metadata: ImportMetadata): Promise<ProjectInfo> {
-    return call("project_import", { path, metadata });
+  importProject(path: string, metadata: ImportMetadata, allowDuplicate = false): Promise<ProjectInfo> {
+    return call("project_import", { path, metadata, allowDuplicate });
   },
 
   chapterVerses(chapter: string): Promise<{ verses: string[] }> {

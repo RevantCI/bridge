@@ -1,4 +1,4 @@
-# Developer handoff: Bridge v0.8.0-beta.2
+# Developer handoff: Bridge v0.8.0-beta.3
 
 Updated: 2026-08-25
 

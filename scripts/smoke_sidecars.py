@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import queue
 import subprocess
 import sys
@@ -117,9 +118,11 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory(prefix="bridge-frozen-smoke-") as temp:
         project = _fixture_project(Path(temp))
+        process_env = os.environ.copy()
+        process_env["LOCALAPPDATA"] = str(Path(temp) / "app-data")
         process = subprocess.Popen(
             [str(engine)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, encoding="utf-8",
+            stderr=subprocess.PIPE, text=True, encoding="utf-8", env=process_env,
         )
         frames: queue.Queue[dict] = queue.Queue()
 
@@ -151,7 +154,7 @@ def main() -> int:
             info = request("info", "engine.info", {})
             if not info.get("success"):
                 raise SystemExit(f"Request info failed: {info}")
-            if info.get("result", {}).get("bridgeVersion") != "0.8.0-beta.2":
+            if info.get("result", {}).get("bridgeVersion") != "0.8.0-beta.3":
                 raise SystemExit(f"Frozen engine version is stale or inconsistent: {info}")
             wildebeest = (
                 info.get("result", {})
@@ -204,6 +207,19 @@ def main() -> int:
             opened = request("open", "project.open", {"path": str(project)})
             if not opened.get("success"):
                 raise SystemExit(f"Request open failed: {opened}")
+            project_id = opened.get("result", {}).get("projectId")
+            if not project_id:
+                raise SystemExit(f"Frozen project.open did not assign a stable project id: {opened}")
+            listed = request("project-list", "project.list", {})
+            registered = listed.get("result", {}).get("projects", [])
+            if not listed.get("success") or not any(
+                item.get("projectId") == project_id and Path(item.get("path", "")) == project
+                for item in registered
+            ):
+                raise SystemExit(f"Frozen project registry did not return the opened project: {listed}")
+            duplicate = request("project-duplicate", "project.inspectImport", {"path": str(project)})
+            if duplicate.get("result", {}).get("duplicates", {}).get("classification") != "exactDuplicate":
+                raise SystemExit(f"Frozen duplicate classification failed: {duplicate}")
 
             versification_detect = request("versification-detect", "versification.detect", {})
             if (
@@ -384,8 +400,8 @@ def main() -> int:
     print(
         "Frozen sidecar smoke test passed: real Wildebeest/Uroman loaded; "
         "versification, names/transliteration, alignment statistics/proposal packaging, "
-        "AI explain packaging, desktop connectors, alignment/export/undo, and "
-        "duplicate/missing-verse checks succeeded."
+        "AI explain packaging, desktop connectors, project registry/duplicate import, "
+        "alignment/export/undo, and duplicate/missing-verse checks succeeded."
     )
     return 0
 

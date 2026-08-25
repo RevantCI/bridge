@@ -60,9 +60,33 @@ pub async fn pick_import_file(app: tauri::AppHandle) -> Result<Option<String>, S
 pub async fn project_open(
     sidecar: State<'_, EngineSidecar>,
     path: String,
+    project_id: Option<String>,
 ) -> Result<Value, String> {
     sidecar
-        .send_request("project.open", serde_json::json!({ "path": path }))
+        .send_request(
+            "project.open",
+            serde_json::json!({ "path": path, "projectId": project_id.unwrap_or_default() }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn project_list(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+    sidecar
+        .send_request("project.list", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn project_forget(
+    sidecar: State<'_, EngineSidecar>,
+    project_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "project.forget",
+            serde_json::json!({ "projectId": project_id }),
+        )
         .await
 }
 
@@ -77,9 +101,13 @@ pub async fn project_scan(sidecar: State<'_, EngineSidecar>) -> Result<Value, St
 pub async fn project_inspect_import(
     sidecar: State<'_, EngineSidecar>,
     path: String,
+    metadata: Option<Value>,
 ) -> Result<Value, String> {
     sidecar
-        .send_request("project.inspectImport", serde_json::json!({ "path": path }))
+        .send_request(
+            "project.inspectImport",
+            serde_json::json!({ "path": path, "metadata": metadata.unwrap_or(Value::Null) }),
+        )
         .await
 }
 
@@ -88,11 +116,16 @@ pub async fn project_import(
     sidecar: State<'_, EngineSidecar>,
     path: String,
     metadata: Value,
+    allow_duplicate: Option<bool>,
 ) -> Result<Value, String> {
     sidecar
         .send_request(
             "project.import",
-            serde_json::json!({ "path": path, "metadata": metadata }),
+            serde_json::json!({
+                "path": path,
+                "metadata": metadata,
+                "allowDuplicate": allow_duplicate.unwrap_or(false),
+            }),
         )
         .await
 }

@@ -20,15 +20,54 @@
   let monitorGeneration = 0;
   let openingBook = "";
   let bookOpenError = "";
+  let droppedPath = "";
+  let dropSequence = 0;
+  let draggingOver = false;
+  let dropError = "";
 
-  onMount(async () => {
-    try {
-      await bridge.ping();
-      engineStatus = "ready";
-    } catch {
-      engineStatus = "error";
-    }
+  onMount(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    void (async () => {
+      try {
+        await bridge.ping();
+        engineStatus = "ready";
+        const stopListening = await bridge.onFileDrop(
+          (paths) => void handleDroppedPaths(paths),
+          (phase) => { draggingOver = phase === "over"; },
+        );
+        if (disposed) stopListening();
+        else unlisten = stopListening;
+      } catch {
+        engineStatus = "error";
+      }
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   });
+
+  async function handleDroppedPaths(paths: string[]) {
+    draggingOver = false;
+    dropError = "";
+    if (paths.length !== 1) {
+      dropError = "Drop exactly one project file or folder at a time.";
+      return;
+    }
+    await showProjectHome();
+    droppedPath = paths[0];
+    dropSequence += 1;
+  }
+
+  async function showProjectHome() {
+    await stopActiveJob();
+    resetBookState();
+    project.set(null);
+    opened = false;
+    openingBook = "";
+    bookOpenError = "";
+  }
 
   async function handleOpened() {
     opened = true;
@@ -271,12 +310,13 @@
 
 <div class="frame">
   {#if !opened}
-    <ImportScreen onOpened={handleOpened} />
+    <ImportScreen onOpened={handleOpened} {droppedPath} {dropSequence} />
   {/if}
 
   <TopBar
     onOpenSettings={() => settingsOpen.set(true)}
     onOpenExport={() => exportOpen.set(true)}
+    onOpenProjects={showProjectHome}
     onGotoVerse={gotoVerse}
     onChapterChange={switchChapter}
     onBookChange={switchBook}
@@ -353,6 +393,13 @@
   {#if $exportOpen}
     <ExportModal reviewComplete={allApproved} onClose={() => exportOpen.set(false)} />
   {/if}
+
+  {#if draggingOver}
+    <div class="global-drop" role="presentation">Drop to review this project source</div>
+  {/if}
+  {#if dropError}
+    <div class="drop-error">{dropError}<button on:click={() => (dropError = "")}>Dismiss</button></div>
+  {/if}
 </div>
 
 <style>
@@ -378,4 +425,7 @@
   .whole-book-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .grow { flex: 1; }
   .statusbar { height: 28px; background: var(--surface); border-top: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 16px; font-size: 11px; color: var(--text-2); flex-shrink: 0; }
+  .global-drop { position: absolute; inset: 12px; z-index: 100; display: grid; place-items: center; border: 3px dashed var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--accent-bg) 92%, transparent); color: var(--accent); font-size: 17px; font-weight: 750; pointer-events: none; }
+  .drop-error { position: absolute; z-index: 101; left: 50%; bottom: 42px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; border: 1px solid var(--danger); border-radius: 8px; background: var(--surface); color: var(--danger); padding: 9px 12px; font-size: 11px; box-shadow: 0 8px 24px rgba(0,0,0,.14); }
+  .drop-error button { border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 11px; }
 </style>

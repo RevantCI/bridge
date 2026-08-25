@@ -3,6 +3,7 @@
 
   export let onOpenSettings: () => void;
   export let onOpenExport: () => void;
+  export let onOpenProjects: () => void;
   export let onGotoVerse: (verse: string) => void;
   export let onChapterChange: (chapter: string) => void;
   export let onBookChange: (path: string) => void;
@@ -63,6 +64,7 @@
   {/if}
 
   <div class="grow" />
+  <button class="btn ghost" on:click={onOpenProjects}>Projects</button>
   <button class="btn primary" disabled={!exportEnabled} on:click={onOpenExport}>Export</button>
   <button class="btn ghost" on:click={onOpenSettings}>Settings</button>
 </div>

@@ -51,7 +51,7 @@ py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v
 ```
 
-Should show **165 passed** in the maintained Windows/Python 3.12 development
+Should show **172 passed** in the maintained Windows/Python 3.12 development
 environment. Try `python demo.py` for a live walkthrough
 against a throwaway fixture project — no real translationCore project
 needed.
@@ -112,7 +112,7 @@ filename examples.
 `npm run tauri dev` starts the frontend development server, compiles the Rust
 shell, launches the sidecar, and opens the Bridge desktop window.
 
-## Current development status: v0.8.0-beta.2 release candidate
+## Current development status: v0.8.0-beta.3 release candidate
 
 The import → check → review → manual-align → export loop is implemented. See
 [`docs/ALIGNMENT.md`](docs/ALIGNMENT.md) for the alignment protocol, persistence
@@ -121,6 +121,20 @@ release gate.
 
 **Implemented and verified:**
 
+- ✅ **Project Home and safe reopening** — app-managed and previously opened
+  external projects are registered with stable identities, sorted by recency,
+  and remain visible when a folder is missing so it can be located or forgotten
+  without deleting data.
+- ✅ **Duplicate-safe importing** — source fingerprints distinguish exact
+  duplicates from possible book/language/Bible overlaps. Exact duplicates open
+  the existing project by default; creating a separate suffixed copy requires
+  an explicit action. Automatic merge and overwrite are intentionally absent.
+- ✅ **Global native drag-and-drop** — dropping one source file or folder
+  anywhere in the desktop window enters the same inspect/preview/duplicate flow
+  as the native pickers, even while a project is open.
+- ✅ **Portable multi-book collections** — collection metadata uses stable IDs
+  and relative sibling directory names, so moving the collection parent no
+  longer breaks book switching.
 - ✅ **Real background check jobs** — `checks.start/status/cancel/retry` keep the sidecar responsive while chapter or whole-book tN, tW, Alignment, USFM, and Greek Room QA execute. The UI displays real stage/verse progress instead of advancing a frontend-owned loop.
 - ✅ **Cancellation and retry** — cancellation is cooperative at safe check boundaries; failed and cancelled jobs remain retryable without treating unfinished verses as clean.
 - ✅ **Secret-safe settings** — API keys remain session-only in memory and DPAPI-protected on Windows; ordinary settings saves cannot serialize private values. Startup also sanitizes plaintext `_session_api_key` values left by older builds.

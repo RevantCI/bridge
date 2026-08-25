@@ -28,6 +28,8 @@ fn main() {
             commands::pick_project_folder,
             commands::pick_import_file,
             commands::project_open,
+            commands::project_list,
+            commands::project_forget,
             commands::project_scan,
             commands::project_inspect_import,
             commands::project_import,

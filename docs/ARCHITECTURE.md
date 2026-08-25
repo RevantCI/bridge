@@ -108,7 +108,8 @@ which mode is actually active.
 | Version | Scope | Status |
 |---|---|---|
 | **v0.7.5** | `GreekRoomEngine` sidecar, stable JSON protocol, `QaFinding` model, Wildebeest (mock fallback). | ✅ Built |
-| **v0.8.0-beta.2** | Real sidecar/UI core loop, fast multi-book import, background QA jobs, persistent decisions and edits, standalone USFM checker, manual word-alignment editor, aligned/non-aligned USFM export. | Release candidate |
+| v0.8.0-beta.2 | Real sidecar/UI core loop, fast multi-book import, background QA jobs, persistent decisions and edits, standalone USFM checker, manual word-alignment editor, aligned/non-aligned USFM export. | Complete |
+| **v0.8.0-beta.3** | Stable project registry and identities, Project Home, duplicate-safe import decisions, global native drag-and-drop, missing-project repair, and portable multi-book collections. | Release candidate |
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
 | v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
 | v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/DEVELOPER_HANDOFF.md's Phase 7 section) |
@@ -129,7 +130,7 @@ Key implementation notes discovered while wiring this up (worth knowing before e
 - All of this was verified against a **real fixture project** built directly from reading `TranslationCoreProject`'s actual parsing code (see `tests/test_bridge_service.py`), not assumed — including a real transaction-journal backup being created on `verse.edit` and a real QA-decision JSON file landing on disk on `verse.decide`.
 
 Protocol methods implemented so far: `ping`, `engine.info`, `project.open`,
-`project.scan`, `project.inspectImport`, `project.import`, `chapter.verses`,
+`project.list`, `project.forget`, `project.scan`, `project.inspectImport`, `project.import`, `chapter.verses`,
 `chapter.verseData`, `checks.start/status/cancel/retry`, `verse.get/runChecks/decide/edit`,
 `alignment.get/status/realign/unalign/save/complete/undo/backups/restore`,
 `alignment.corpusStats.summary/forVerse`, `alignment.aiPropose/aiApplyProposal`,

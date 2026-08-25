@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import tempfile
+import uuid
 import zipfile
 from collections import Counter
 from dataclasses import dataclass
@@ -493,7 +494,7 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
     source_hash = hashlib.sha256(book.source_path.read_bytes()).hexdigest()
 
     manifest = {
-        "generator": {"name": "Bridge", "build": "0.8.0-beta.2"},
+        "generator": {"name": "Bridge", "build": "0.8.0-beta.3"},
         "target_language": {
             "id": language_id, "name": language_name, "direction": language_direction,
             "book": {"name": book.book_name},
@@ -660,15 +661,28 @@ _COLLECTION_PATH = Path(".bridge") / "collection.json"
 
 
 def _collection_projects(project_root: Path) -> list[dict[str, Any]]:
-    """Return a persisted multi-book collection, correcting lazy state from disk."""
+    """Return a persisted multi-book collection, correcting lazy state from disk.
+
+    Schema 2 stores sibling directory names instead of absolute paths, so a
+    collection survives moving its parent directory. Schema 1 absolute paths
+    remain readable for projects created by Beta 2 and earlier.
+    """
     data = _read_json(project_root / _COLLECTION_PATH)
     projects = data.get("projects") if isinstance(data.get("projects"), list) else []
     result: list[dict[str, Any]] = []
     for value in projects:
-        if not isinstance(value, dict) or not value.get("path"):
+        if not isinstance(value, dict):
             continue
         entry = copy.deepcopy(value)
-        lazy = (Path(str(entry["path"])) / _LAZY_IMPORT_PATH).is_file()
+        directory_name = str(entry.get("directoryName") or "")
+        if directory_name:
+            sibling = (project_root.parent / directory_name).resolve(strict=False)
+        elif entry.get("path"):
+            sibling = Path(str(entry["path"])).resolve(strict=False)
+        else:
+            continue
+        entry["path"] = str(sibling)
+        lazy = (sibling / _LAZY_IMPORT_PATH).is_file()
         entry["lazy"] = lazy
         if not lazy and entry.get("checkIndexStatus") == "deferred":
             entry["checkIndexStatus"] = "requires-resource-index"
@@ -765,6 +779,7 @@ def import_source(source_path: str | Path, destination_root: str | Path, metadat
             # project placeholders and normalize each one when it is opened.
             preview_books = preview["books"]
             resource_id = _slug(combined.get("resourceId") or combined["bibleName"], "bible")[:24]
+            collection_id = str(uuid.uuid4()) if len(preview_books) > 1 else ""
             planned: list[dict[str, Any]] = []
             for index, book_info in enumerate(preview_books):
                 book_id = str(book_info["bookId"]).lower()
@@ -775,14 +790,18 @@ def import_source(source_path: str | Path, destination_root: str | Path, metadat
                     "bookName": str(book_info["bookName"]), "chapters": [],
                     "checkIndexStatus": "deferred" if index else "requires-resource-index",
                     "lazy": index > 0,
+                    "projectId": str(uuid.uuid4()),
+                    "collectionId": collection_id,
+                    "directoryName": final.name,
                 })
 
             collection = {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
+                "collectionId": collection_id,
                 "sourcePath": str(source),
                 "projectName": combined["projectName"],
                 "bibleName": combined["bibleName"],
-                "projects": planned,
+                "projects": [{key: value for key, value in entry.items() if key != "path"} for entry in planned],
             }
             for index, (book_info, entry) in enumerate(zip(preview_books, planned)):
                 work = staging / f"book-{index:03d}-{entry['bookId']}"
