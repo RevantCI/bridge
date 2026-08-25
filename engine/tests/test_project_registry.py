@@ -65,3 +65,28 @@ def test_corrupt_registry_is_quarantined_and_managed_projects_are_rediscovered(t
     assert len(listed) == 1
     assert listed[0]["path"] == str(project.resolve())
     assert list(tmp_path.glob("project-registry.corrupt-*.json"))
+
+
+def test_legacy_collection_entries_receive_one_stable_group_identity(tmp_path):
+    managed = tmp_path / "projects"
+    titus = _project(managed, "tit")
+    philemon = _project(managed, "phm")
+    collection = {
+        "schemaVersion": 1,
+        "projectName": "Legacy NT",
+        "projects": [
+            {"path": str(titus), "bookId": "tit"},
+            {"path": str(philemon), "bookId": "phm"},
+        ],
+    }
+    for project in (titus, philemon):
+        bridge = project / ".bridge"
+        bridge.mkdir()
+        (bridge / "collection.json").write_text(json.dumps(collection), encoding="utf-8")
+
+    registry = ProjectRegistry(tmp_path / "project-registry.json", managed)
+    listed = registry.list_projects()
+
+    assert len(listed) == 2
+    assert listed[0]["collectionId"]
+    assert {entry["collectionId"] for entry in listed} == {listed[0]["collectionId"]}

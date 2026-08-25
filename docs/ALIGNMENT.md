@@ -1,6 +1,6 @@
 # Manual word alignment
 
-Bridge v0.8.0-beta.3 provides a human-controlled, translationCore-compatible
+Bridge v0.8.0-beta.4 provides a human-controlled, translationCore-compatible
 word-alignment editor. It never invents original-language tokens and never
 changes Scripture text as a side effect of alignment work.
 

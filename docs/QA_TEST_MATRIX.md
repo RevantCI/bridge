@@ -10,17 +10,17 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 172 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes the Beta 3 project identity, relocation validation, corrupt-registry recovery, exact and metadata-aware possible duplicate detection, forget-without-delete, and portable-collection regressions |
+| A01 | Backend | Complete Python suite | Source | PASS — 173 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes project identity, relocation validation, legacy collection grouping, corrupt-registry recovery, exact and metadata-aware possible duplicate detection, forget-without-delete, and portable-collection regressions |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; `cargo test` currently contains 0 Rust unit tests |
-| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 3; the `dist`, Tauri staging, and release-staged copies are byte-identical |
+| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 4; the `dist`, Tauri staging, and release-staged copies are byte-identical |
 | A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | PASS — the real standalone checker found both conditions in the packaged Odia fixture |
 | A07 | Protocol | Sidecar remains responsive during a background job | Frozen | PASS — status polling completed the background job while lightweight requests remained responsive |
 | A08 | Security | Settings never serialize plaintext secrets | Source | PASS — regression suite |
 | A09 | Alignment | Manual protocol, conflicts, history, restart and USFM round trip | Source | PASS |
 | A10 | Versification | Detect/orgRef/backVersificationMap against real schema data | Source | PASS — includes real Psalm 3 descriptive-title shift |
-| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 3 release-staged worker |
+| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 4 release-staged worker |
 | A12 | Versification | Edge cases: merges, splits, unknown books, verse bridges/segments | Source | PASS — 11 tests against real vendored data |
 | A13 | Versification | Concurrent callers: correctness and a GIL-contention regression guard | Source | PASS — a fresh-process test verifies concurrent first-load correctness against real schema data; a deterministic instrumented test verifies the expensive matcher is serialized (`max_active == 1`) without using a machine-dependent deadline |
 | A14 | Names/Transliteration | Whole-book spelling-consistency check against real uroman + vendored Smart Edit Distance | Source | PASS — 15 tests; real Muhammad/Mohamed and Titus/Tituss cases, a real Tamil vowel-sign inconsistency through full verse sentences, a false-positive exclusion (church/churches), and a bigram-blocking performance regression guard |
@@ -56,6 +56,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | I13 | Same book/language/Bible with changed or unknown source | Possible overlap is shown for human review; no automatic merge or overwrite | PASS — deterministic registry classification coverage; desktop wording still needs manual acceptance |
 | I14 | Move a registered project and locate it | Stable project identity is retained and the registry path is repaired | PASS — managed rename discovery and external locate regressions |
 | I15 | Move a multi-book collection parent | Every sibling remains switchable through portable relative collection metadata | PASS — schema 2 move/reopen regression; schema 1 absolute paths remain readable |
+| I16 | Inspect a large folder with hundreds of registered book projects | Registry discovery is not repeatedly hashed; request has bounded 180-second headroom | PASS — real 337-entry Project Home discovery measured 5.20s and a real 66-book folder inspection measured 1.58s after the fix; installed Beta 4 GUI retest NOT RUN |
 
 ## Desktop core loop
 
@@ -82,6 +83,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | P04 | Locate a moved folder | Old project ID is retained and path is updated atomically | PASS — source regression |
 | P05 | Forget a missing project | Registry entry is removed; files are never deleted | PASS — source regression |
 | P06 | Corrupt registry | Damaged file is quarantined and managed projects are rediscovered | PASS — source regression |
+| P07 | Run the Python suite | Default `BridgeEngine()` instances use isolated temporary app data and cannot pollute the user's Project Home | PASS — autouse isolation fixture; 84 leaked Beta 3 development entries were backed up and removed from the affected machine |
 
 ## Export and compatibility
 
@@ -91,7 +93,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | E02 | Non-aligned export | Valid USFM is generated and re-importable | PASS |
 | E03 | Footnotes/headings/poetry/milestones | No silent structural loss | PASS — source-template export; explicit fallback without source |
 | E04 | ESFM content | Supported markers preserved or limitation made explicit | PASS — custom markers retained by source-template export |
-| E05 | Windows bundle | Both helper executables are present and runnable | PASS — Beta 3 app and NSIS installer produced; both workers are version-checked, hash-matched across staging locations, and exercised by the enhanced frozen smoke |
+| E05 | Windows bundle | Both helper executables are present and runnable | PASS — Beta 4 app and NSIS installer produced; both workers are version-checked, hash-matched across staging locations, and exercised by the enhanced frozen smoke |
 | E06 | macOS/Linux bundles | Build, permissions and runtime behavior verified | BLOCKED |
 
 ## Manual word alignment
@@ -107,7 +109,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | L07 | Missing original source | Readable import guidance; no invented/downloaded tokens | PASS — source and UI |
 | L08 | RTL source/target | Direction metadata is respected by token panes | PASS — source/UI diagnostics; manual RTL layout NOT RUN |
 | L09 | Restart persistence | Alignment, completion and history survive a new engine instance | PASS — source tests |
-| L10 | Frozen protocol/export/undo | Packaged sidecars perform the real workflow | PASS — the Beta 3 frozen worker completed many-to-many alignment, completion, aligned export, and undo |
+| L10 | Frozen protocol/export/undo | Packaged sidecars perform the real workflow | PASS — the Beta 4 frozen worker completed many-to-many alignment, completion, aligned export, and undo |
 
 ## Manual desktop and usability checks
 
@@ -122,7 +124,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 ## Automated evidence
 
-- Python: 172 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 173 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book
@@ -142,10 +144,25 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
   connector error paths, Project Registry/exact-duplicate protocol, manual many-to-many
   alignment/export/undo, and USFM duplicate/missing-verse checks pass. Lightweight
   status calls remain responsive during the job.
-- Windows: the Beta 3 release executable and NSIS installer were produced with both
+- Windows: the Beta 4 release executable and NSIS installer were produced with both
   verified worker binaries. The installer is
-  `Bridge_0.8.0-beta.3_x64-setup.exe` (SHA-256
-  `DF27F012ADDC630E04DDDF919F3A38D4ED5982011F34665D51E7ADE8886C4205`).
+  `Bridge_0.8.0-beta.4_x64-setup.exe` (SHA-256
+  `6CEEC85756699CD1EF837F553F457D94DBC3F50C295EBD481B9C3DC02D5E5773`).
+
+## Beta 4 artifact provenance — 2026-08-25
+
+- Release source: current Project Home/import-timeout hotfix worktree (commit pending).
+- Desktop executable: 12,738,048 bytes, ProductVersion `0.8.0-beta.4`, SHA-256
+  `AC901355BC51374BB6865801E515A9F75DB41F4A19D23CC7743B4EE11035B241`.
+- `bridge-engine.exe`: 21,044,416 bytes, SHA-256
+  `0D26E9E24945E718D7D37F5D2422E8AECA373C6B35F563303C92415D4C3D523F`.
+- `bridge-usfm-checker.exe`: 7,673,522 bytes, SHA-256
+  `8BDF3FCFE138AC4ECAAC8F2E9030715774366745BEACAC9B5CB649A19F20E863`.
+- Installer: 30,669,520 bytes, ProductVersion `0.8.0-beta.4`, SHA-256
+  `6CEEC85756699CD1EF837F553F457D94DBC3F50C295EBD481B9C3DC02D5E5773`.
+- Exact release-staged workers passed the enhanced frozen smoke. The app, workers,
+  and installer remain `NotSigned`; installed GUI and native drag-and-drop acceptance
+  remain manual release gates.
 
 ## Beta 3 artifact provenance — 2026-08-25
 

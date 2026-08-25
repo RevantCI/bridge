@@ -37,6 +37,9 @@ human review.
 
 Native file/folder drag-and-drop uses the same read-only preview and duplicate
 decision flow as the pickers, including when another project is already open.
+Managed-library discovery is cached for duplicate classification and does not
+rehash every project's Scripture tree on each preview. Large-folder inspection
+has a separate bounded desktop timeout from ordinary interactive commands.
 
 ## Normalized project data
 

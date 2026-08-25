@@ -108,7 +108,7 @@ class OpenAIResponsesClient:
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
-            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.3',
+            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.4',
         }
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
         status = 0
@@ -154,7 +154,7 @@ class OpenAIResponsesClient:
         url = f'{self.models_endpoint}/{urllib.parse.quote(self.model, safe="")}'
         req = urllib.request.Request(url, headers={
             'Authorization': f'Bearer {self.api_key}',
-            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.3',
+            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.4',
         }, method='GET')
         try:
             with urllib.request.urlopen(req, timeout=min(self.timeout, 30.0)) as response:

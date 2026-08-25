@@ -494,7 +494,7 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
     source_hash = hashlib.sha256(book.source_path.read_bytes()).hexdigest()
 
     manifest = {
-        "generator": {"name": "Bridge", "build": "0.8.0-beta.3"},
+        "generator": {"name": "Bridge", "build": "0.8.0-beta.4"},
         "target_language": {
             "id": language_id, "name": language_name, "direction": language_direction,
             "book": {"name": book.book_name},

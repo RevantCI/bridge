@@ -16,6 +16,28 @@ use tokio::sync::{oneshot, Mutex};
 
 type PendingMap = Arc<Mutex<HashMap<String, oneshot::Sender<Value>>>>;
 
+fn request_timeout_seconds(method: &str) -> u64 {
+    match method {
+        "project.import" => 300,
+        // Inspecting a whole Bible parses every Scripture file and computes
+        // source fingerprints for duplicate detection. Project Home may also
+        // discover a large pre-Beta-3 managed library on its first run.
+        "project.inspectImport" | "project.list" => 180,
+        // The first check for a book starts the isolated structural
+        // checker, whose own hard timeout is 120 seconds. Keep enough
+        // headroom for process startup/report parsing.
+        "verse.runChecks" => 150,
+        // A single call to an OpenAI-compatible endpoint: ai_client.py's own HTTP
+        // timeout is 240s (with retries on transient 5xx/429).
+        "alignment.aiPropose" => 260,
+        // ai.explain can make up to two sequential real model calls.
+        "ai.explain" => 300,
+        // Logos starts a persistent -STA PowerShell helper on first use.
+        "logos.getState" | "logos.setReference" => 20,
+        _ => 30,
+    }
+}
+
 pub struct EngineSidecar {
     child: Arc<Mutex<Option<CommandChild>>>,
     pending: PendingMap,
@@ -153,29 +175,7 @@ impl EngineSidecar {
         // A whole-Bible import can parse and normalize dozens of files. Keep
         // the normal interactive timeout short, but give that bounded local
         // operation enough time to finish on slower disks.
-        let timeout_seconds = match method {
-            "project.import" => 300,
-            // The first check for a book starts the isolated structural
-            // checker, whose own hard timeout is 120 seconds. Keep enough
-            // headroom for process startup/report parsing. A background-job
-            // protocol can replace this longer interactive timeout later.
-            "verse.runChecks" => 150,
-            // A single call to an OpenAI-compatible endpoint: ai_client.py's own HTTP
-            // timeout is 240s (with retries on transient 5xx/429), so this must clear
-            // that comfortably or the UI would report "timed out" while the sidecar is
-            // still legitimately waiting on a slow model.
-            "alignment.aiPropose" => 260,
-            // ai.explain can make up to two sequential real model calls (an alignment
-            // proposal, then the full evidence-backed review) — needs more headroom
-            // than a single alignment.aiPropose call.
-            "ai.explain" => 300,
-            // logos.getState/setReference start a persistent -STA PowerShell helper on
-            // first use; real measured startup during development was well over a
-            // second even before any COM call, so the default interactive timeout is
-            // too tight for a cold first call.
-            "logos.getState" | "logos.setReference" => 20,
-            _ => 30,
-        };
+        let timeout_seconds = request_timeout_seconds(method);
         match tokio::time::timeout(std::time::Duration::from_secs(timeout_seconds), rx).await {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(_)) => Err("sidecar response channel closed unexpectedly".into()),
@@ -184,5 +184,18 @@ impl EngineSidecar {
                 Err(format!("sidecar request '{method}' timed out"))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::request_timeout_seconds;
+
+    #[test]
+    fn large_project_discovery_and_inspection_have_bounded_headroom() {
+        assert_eq!(request_timeout_seconds("project.inspectImport"), 180);
+        assert_eq!(request_timeout_seconds("project.list"), 180);
+        assert_eq!(request_timeout_seconds("project.import"), 300);
+        assert_eq!(request_timeout_seconds("ping"), 30);
     }
 }

@@ -113,6 +113,7 @@ class ProjectRegistry:
         self.path = Path(path)
         self.managed_root = Path(managed_root).resolve(strict=False)
         self._data = self._load()
+        self._managed_discovered = False
 
     def _load(self) -> dict[str, Any]:
         if not self.path.is_file():
@@ -176,6 +177,21 @@ class ProjectRegistry:
         }
 
     @staticmethod
+    def _legacy_collection_id(collection: dict[str, Any]) -> str:
+        """Group schema-1 collections without merging separate import runs."""
+        projects = collection.get("projects")
+        if not isinstance(projects, list) or len(projects) < 2:
+            return ""
+        paths = sorted(
+            canonical_path_key(str(entry.get("path") or ""))
+            for entry in projects
+            if isinstance(entry, dict) and entry.get("path")
+        )
+        if len(paths) < 2:
+            return ""
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, "bridge-legacy-collection:" + "\n".join(paths)))
+
+    @staticmethod
     def _source_fingerprint(path: Path, identity: dict[str, Any]) -> str:
         remembered = str(identity.get("sourceFingerprint") or "")
         if remembered:
@@ -200,19 +216,6 @@ class ProjectRegistry:
         except OSError:
             return ""
 
-    @staticmethod
-    def _scripture_fingerprint(path: Path) -> str:
-        manifest = _read_json(path / "manifest.json")
-        project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
-        book_id = str(project.get("id") or "").lower()
-        book_root = path / book_id
-        if book_id and book_root.is_dir():
-            return _tree_fingerprint(book_root, include_state=False)
-        lazy = _read_json(path / _LAZY_IMPORT_PATH)
-        source_copy = str(lazy.get("sourceCopy") or "")
-        copied = path / source_copy
-        return _sha256_file(copied) if source_copy and copied.is_file() else ""
-
     def register(
         self,
         path: str | Path,
@@ -230,6 +233,8 @@ class ProjectRegistry:
         project_id = str(project_id or identity.get("projectId") or "")
         collection = _read_json(project_path / _COLLECTION_PATH)
         collection_id = str(collection_id or identity.get("collectionId") or collection.get("collectionId") or "")
+        if not collection_id:
+            collection_id = self._legacy_collection_id(collection)
         if not project_id:
             project_id = str(uuid.uuid4())
         if managed:
@@ -256,7 +261,6 @@ class ProjectRegistry:
             "managed": managed,
             "missing": not project_path.exists(),
             "sourceFingerprint": source_fingerprint or self._source_fingerprint(project_path, identity),
-            "scriptureFingerprint": self._scripture_fingerprint(project_path) if project_path.exists() else "",
             **metadata,
         })
         if touch:
@@ -265,13 +269,15 @@ class ProjectRegistry:
             self._save()
         return dict(entry)
 
-    def list_projects(self) -> list[dict[str, Any]]:
+    def list_projects(self, *, refresh_managed: bool = True) -> list[dict[str, Any]]:
         self.managed_root.mkdir(parents=True, exist_ok=True)
-        for child in self.managed_root.iterdir():
-            if not child.is_dir() or child.name.startswith(".bridge-import-"):
-                continue
-            if (child / "manifest.json").is_file() or (child / _LAZY_IMPORT_PATH).is_file():
-                self.register(child, save=False)
+        if refresh_managed or not self._managed_discovered:
+            for child in self.managed_root.iterdir():
+                if not child.is_dir() or child.name.startswith(".bridge-import-"):
+                    continue
+                if (child / "manifest.json").is_file() or (child / _LAZY_IMPORT_PATH).is_file():
+                    self.register(child, save=False)
+            self._managed_discovered = True
         for entry in self._data["projects"]:
             if not isinstance(entry, dict):
                 continue
@@ -303,7 +309,7 @@ class ProjectRegistry:
         return dict(entry) if entry is not None else None
 
     def classify(self, preview: dict[str, Any], metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-        projects = self.list_projects()
+        projects = self.list_projects(refresh_managed=False)
         source_by_book = source_fingerprints(preview)
         combined = dict(preview.get("metadata") or {})
         combined.update(metadata or {})
