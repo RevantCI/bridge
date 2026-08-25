@@ -263,24 +263,18 @@ class BridgeEngine:
         self._import_lock = threading.Lock()
         self._check_jobs = CheckJobManager()
         # AppSettings() with no path defaults to a real, persistent location
-        # (%LOCALAPPDATA%/.translationcore-ai-bridge/settings.json on
-        # Windows), and get_api_key() also checks OPENAI_API_KEY. That's
-        # correct for production use — settings should survive restarts —
-        # but tests must inject an isolated instance rather than touch the
-        # real machine's settings. See tests/test_bridge_service.py.
+        # (%LOCALAPPDATA%/Bridge/data/settings.json on Windows — a subfolder
+        # of the NSIS install dir, not the dir itself, so an uninstall can't
+        # wipe user data as a side effect; see _default_app_root()'s
+        # docstring in secret_store.py for the legacy-path migration), and
+        # get_api_key() also checks OPENAI_API_KEY. That's correct for
+        # production use — settings should survive restarts — but tests must
+        # inject an isolated instance rather than touch the real machine's
+        # settings. See tests/test_bridge_service.py.
         self.settings = settings if settings is not None else AppSettings()
 
-        # Keep imported projects in application-owned storage. Older builds
-        # placed settings.json directly under LOCALAPPDATA, so account for
-        # that legacy path instead of creating a generic LOCALAPPDATA/projects.
+        # Keep imported projects in the same application-owned folder as settings.
         settings_root = self.settings.path.parent
-        local_app_data = os.getenv("LOCALAPPDATA")
-        if local_app_data:
-            try:
-                if settings_root.resolve() == Path(local_app_data).resolve():
-                    settings_root = settings_root / ".translationcore-ai-bridge"
-            except OSError:
-                pass
         self.project_root = settings_root / "projects"
         self.project_registry = ProjectRegistry(
             settings_root / "project-registry.json", self.project_root,

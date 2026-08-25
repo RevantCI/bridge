@@ -50,11 +50,50 @@ def dpapi_unprotect(encoded: str) -> str:
         ctypes.windll.kernel32.LocalFree(out.pbData)
 
 
+def _default_app_root() -> Path:
+    """Return (and, on first use, migrate into) Bridge's per-user data folder.
+
+    This used to be ``Path(os.getenv('LOCALAPPDATA') or Path.home() / '.translationcore-ai-bridge')``
+    — `or` binds looser than `/`, so on any machine with LOCALAPPDATA set (i.e.
+    every real Windows install) `root` was the *entire* LOCALAPPDATA directory,
+    not a namespaced subfolder. That put settings.json loose at
+    ``%LOCALAPPDATA%\\settings.json`` and forced a workaround in
+    bridge_service.py to redirect the project registry into a differently
+    named ``.translationcore-ai-bridge`` folder. Three inconsistent names for
+    one app's data (install dir "Bridge", WebView2's identifier-keyed folder,
+    and this legacy pair) made it easy for an unrelated/older install sharing
+    the legacy name to have its projects auto-discovered as this app's own.
+    ``data`` is a subfolder of the install-named "Bridge" directory (not the
+    same path) so an NSIS uninstall — which wipes its install directory
+    (``$INSTDIR``) — cannot delete user settings/projects as a side effect.
+
+    Both legacy artifacts (the loose settings.json and the differently-named
+    project folder) could exist independently, so each is migrated on its
+    own rather than as an either/or.
+    """
+    local_app_data = os.getenv('LOCALAPPDATA')
+    base = Path(local_app_data) if local_app_data else Path.home()
+    root = base / 'Bridge' / 'data'
+    legacy_root = base / '.translationcore-ai-bridge'
+    if not root.exists() and legacy_root.is_dir():
+        try:
+            legacy_root.rename(root)
+        except OSError:
+            pass
+    legacy_loose_settings = base / 'settings.json'
+    if legacy_loose_settings.is_file() and not (root / 'settings.json').exists():
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            legacy_loose_settings.rename(root / 'settings.json')
+        except OSError:
+            pass
+    return root
+
+
 class AppSettings:
     def __init__(self, path: Path | None = None):
         if path is None:
-            root = Path(os.getenv('LOCALAPPDATA') or Path.home() / '.translationcore-ai-bridge')
-            path = root / 'settings.json'
+            path = _default_app_root() / 'settings.json'
         self.path = Path(path)
         self.data: dict = {}
         if self.path.exists():
