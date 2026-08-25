@@ -76,6 +76,18 @@ class OpenAIResponsesClient:
         self.last_cost_usd = 0.0
         self.last_privacy_manifest: dict[str, Any] = {}
 
+    def _model_supports_reasoning_effort(self) -> bool:
+        name = self.model.lower()
+        # Reasoning-family models (o1/o3/o4-mini, gpt-5.x incl. this app's
+        # own gpt-5.6 tiers) accept 'reasoning.effort'. Non-reasoning chat
+        # models (gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-4, gpt-3.5, ...) do
+        # not and return HTTP 400 if it's present.
+        if name.startswith(('o1', 'o3', 'o4')):
+            return True
+        if name.startswith('gpt-5'):
+            return True
+        return False
+
     @staticmethod
     def _extract_text(data: dict[str, Any]) -> str:
         # Some wrappers expose output_text. Raw Responses API uses output[].content[].text.
@@ -148,7 +160,6 @@ class OpenAIResponsesClient:
             'store': False,
             'instructions': instructions,
             'input': input_text,
-            'reasoning': {'effort': self.reasoning_effort},
             'text': {
                 'format': {
                     'type': 'json_schema',
@@ -158,6 +169,12 @@ class OpenAIResponsesClient:
                 }
             },
         }
+        # The 'reasoning' parameter is only accepted by reasoning-family
+        # models (o-series, gpt-5.x). Non-reasoning chat models such as
+        # gpt-4o-mini reject it with HTTP 400 "Unsupported parameter", so
+        # only attach it when the configured model is known to support it.
+        if self._model_supports_reasoning_effort():
+            payload['reasoning'] = {'effort': self.reasoning_effort}
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
