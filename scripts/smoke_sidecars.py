@@ -34,6 +34,11 @@ def _fixture_project(root: Path) -> Path:
         "1": "ପ୍ରଥମ ପଦ।",
         "3": "ତୃତୀୟ ପଦ।",
     })
+    _write_json(project / "tit" / "2.json", {
+        "1": "Paul sent greetings to Titus his true son.",
+        "4": "Titus is a beloved child in the common faith.",
+        "7": "In everything show yourself an example, Tituss my son.",
+    })
     _write_json(project / ".apps" / "translationCore" / "alignmentData" / "tit" / "1.json", {
         "1": {
             "alignments": [
@@ -75,6 +80,11 @@ def _fixture_project(root: Path) -> Path:
             }],
             "wordBank": [],
         },
+    })
+    _write_json(project / ".apps" / "translationCore" / "alignmentData" / "tit" / "2.json", {
+        "1": {"alignments": [], "wordBank": []},
+        "4": {"alignments": [], "wordBank": []},
+        "7": {"alignments": [], "wordBank": []},
     })
     (project / "tit.usfm").write_text(
         "\\id TIT\n\\h Titus\n\\toc1 The Letter to Titus\n\\c 1\n\\p\n"
@@ -154,6 +164,17 @@ def main() -> int:
                     "Frozen engine is using the Wildebeest mock fallback: "
                     f"{wildebeest}"
                 )
+            names = (
+                info.get("result", {})
+                .get("greekRoom", {})
+                .get("adapters", {})
+                .get("names", {})
+            )
+            if not names.get("available") or not names.get("usingRealEngine"):
+                raise SystemExit(
+                    "Frozen engine is missing real Uroman/Smart Edit Distance: "
+                    f"{names}"
+                )
 
             if args.import_source:
                 started_at = time.perf_counter()
@@ -183,6 +204,55 @@ def main() -> int:
             opened = request("open", "project.open", {"path": str(project)})
             if not opened.get("success"):
                 raise SystemExit(f"Request open failed: {opened}")
+
+            versification_detect = request("versification-detect", "versification.detect", {})
+            if (
+                not versification_detect.get("success")
+                or not versification_detect["result"].get("bestSchema")
+            ):
+                raise SystemExit(
+                    f"Frozen versification detection failed: {versification_detect}"
+                )
+            versification_org_ref = request(
+                "versification-org-ref",
+                "versification.orgRef",
+                {"chapter": "1", "verse": "1", "schema": "eng"},
+            )
+            if (
+                not versification_org_ref.get("success")
+                or versification_org_ref["result"].get("orgRef") != "TIT 1:1"
+            ):
+                raise SystemExit(
+                    f"Frozen versification orgRef failed: {versification_org_ref}"
+                )
+            versification_back_map = request(
+                "versification-back-map",
+                "versification.backVersificationMap",
+                {"schema": "eng"},
+            )
+            if not versification_back_map.get("success"):
+                raise SystemExit(
+                    f"Frozen versification backVersificationMap failed: {versification_back_map}"
+                )
+
+            names_check = request(
+                "names-check",
+                "verse.runChecks",
+                {"chapter": "2", "verse": "7", "checks": ["names"]},
+            )
+            names_findings = names_check.get("findings", [])
+            if (
+                not names_check.get("success")
+                or not any(
+                    finding.get("engine") == "names"
+                    and finding.get("original_text") == "Tituss"
+                    and finding.get("suggested_replacement") == "Titus"
+                    for finding in names_findings
+                )
+            ):
+                raise SystemExit(
+                    f"Frozen names/transliteration check missed Titus/Tituss: {names_check}"
+                )
 
             alignment = request("alignment-get", "alignment.get", {"chapter": "1", "verse": "1"})
             if not alignment.get("success") or not alignment["result"].get("sourceAvailable"):
@@ -312,8 +382,10 @@ def main() -> int:
                 process.communicate(timeout=5)
 
     print(
-        "Frozen sidecar smoke test passed: real Wildebeest loaded and the "
-        "alignment workflow/export/undo and duplicate/missing-verse checks succeeded."
+        "Frozen sidecar smoke test passed: real Wildebeest/Uroman loaded; "
+        "versification, names/transliteration, alignment statistics/proposal packaging, "
+        "AI explain packaging, desktop connectors, alignment/export/undo, and "
+        "duplicate/missing-verse checks succeeded."
     )
     return 0
 

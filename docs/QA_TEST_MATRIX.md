@@ -14,27 +14,27 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; `cargo test` currently contains 0 Rust unit tests |
-| A05 | Packaging | Build both target-suffixed sidecars | Frozen | FAIL — the staged workers and NSIS installer predate the 2026-08-24 Phase 6/7 source commits; rebuild is the Milestone 2 release gate |
-| A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | NOT RUN — rerun against the Milestone 2 current-source workers |
-| A07 | Protocol | Sidecar remains responsive during a background job | Frozen | NOT RUN — rerun against the Milestone 2 current-source workers |
+| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt from `a7a0747`; the `dist`, Tauri staging, and release-staged copies are byte-identical |
+| A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | PASS — the real standalone checker found both conditions in the packaged Odia fixture |
+| A07 | Protocol | Sidecar remains responsive during a background job | Frozen | PASS — status polling completed the background job while lightweight requests remained responsive |
 | A08 | Security | Settings never serialize plaintext secrets | Source | PASS — regression suite |
 | A09 | Alignment | Manual protocol, conflicts, history, restart and USFM round trip | Source | PASS |
 | A10 | Versification | Detect/orgRef/backVersificationMap against real schema data | Source | PASS — includes real Psalm 3 descriptive-title shift |
-| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | NOT RUN — existing worker is stale; rerun after the Milestone 2 rebuild |
+| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 2 release-staged worker |
 | A12 | Versification | Edge cases: merges, splits, unknown books, verse bridges/segments | Source | PASS — 11 tests against real vendored data |
 | A13 | Versification | Concurrent callers: correctness and a GIL-contention regression guard | Source | PASS — a fresh-process test verifies concurrent first-load correctness against real schema data; a deterministic instrumented test verifies the expensive matcher is serialized (`max_active == 1`) without using a machine-dependent deadline |
 | A14 | Names/Transliteration | Whole-book spelling-consistency check against real uroman + vendored Smart Edit Distance | Source | PASS — 15 tests; real Muhammad/Mohamed and Titus/Tituss cases, a real Tamil vowel-sign inconsistency through full verse sentences, a false-positive exclusion (church/churches), and a bigram-blocking performance regression guard |
-| A15 | Names/Transliteration | Same check from a real frozen bridge-engine.exe | Frozen | NOT RUN — existing worker is stale; rerun after the Milestone 2 rebuild |
+| A15 | Names/Transliteration | Same check from a real frozen bridge-engine.exe | Frozen | PASS — real Uroman and vendored Smart Edit Distance loaded, and the planted Titus/Tituss inconsistency was found through `verse.runChecks` |
 | A16 | Alignment statistics | Corpus co-occurrence/probability/PMI/SED-boost against real completed alignments and a real multi-book collection | Source | PASS — 7 tests; completed-only filtering, hand-verified PMI/probability math, multi-book aggregation with lazy-sibling skipping, protocol-level summary/forVerse calls, cache invalidation on newly-completing a verse, a real (no-mock) Uroman+SED case, and a 2,000-completed-verse performance measurement (well under a second) |
-| A17 | Alignment statistics | Same protocol methods from a real frozen bridge-engine.exe | Frozen | FAIL — the staged worker returns `unknown_method` for `alignment.corpusStats.summary`; rebuild and rerun the smoke test in Milestone 2 |
+| A17 | Alignment statistics | Same protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — summary/forVerse returned the expected completed-alignment joint count and probability |
 | A18 | AI alignment proposals | `alignment.aiPropose`/`alignment.aiApplyProposal` against real `compile_link_proposal`/`apply_proposal` logic, fake HTTP transport (no live API key) | Source | PASS — 4 tests; missing-API-key error, an accepted link compiled into a new group with the existing protected group surviving untouched, real AI-usage-totals accumulation confirmed (`settings.record_ai_usage` was dead code before this phase), a cross-link between two different established groups correctly rejected as a conflict rather than silently merged, and apply saving through the normal identity-checked pipeline |
-| A19 | AI alignment proposals | Same protocol methods from a real frozen bridge-engine.exe | Frozen | NOT RUN — existing worker predates the Phase 7 source; rerun after the Milestone 2 rebuild |
+| A19 | AI alignment proposals | Same protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — packaged dispatch/imports execute and return the expected clean missing-API-key error without a live external call |
 | A20 | Resource materialization | translationWordsLinks resource-level `{kt,names,other}/groups/<book>/<term>.json` index (the shape `knowledge_base.py`'s TWL reader actually reads) | Source | PASS — 3 tests; real Titus TWL data produces the correct real file layout, is idempotent, and `TranslationHelpsKnowledgeBase.twl_occurrences()` reads real materialized data end to end through a full import → verse.runChecks flow, not just "the files got written" |
 | A21 | Resource materialization | translationAcademy bundling + `knowledge_base.py`'s TA-reading fix | Source | PASS — 4 tests against a real, freshly-downloaded 2.2MB/728-file `git.door43.org/unfoldingWord/en_ta` v90 tag (not a synthetic fixture): confirms the real nested-directory article shape (`checking/accuracy-check/{title.md,01.md}`), a real article read with the correct human-readable title (not the raw "01" filename stem), a graceful empty result for an unknown slug, and all 13 hardcoded `global_checking_evidence()` identifiers resolving against real content |
 | A22 | AI explain | `ai.explain` (wires `prepare_verse_review`) against real materialized tN/tW/TA evidence, fake HTTP transport (no live API key) | Source | PASS — 2 tests; missing-API-key error, and a real evidence-backed run whose fake check-review response is built from checkIds discovered from the real materialized project data (not guessed), confirming real usage-total accumulation |
-| A23 | AI explain | Same protocol method from a real frozen bridge-engine.exe | Frozen | NOT RUN — existing worker predates the Phase 7 source; rerun after the Milestone 2 rebuild |
+| A23 | AI explain | Same protocol method from a real frozen bridge-engine.exe | Frozen | PASS — packaged dispatch/evidence imports execute and return the expected clean configuration error without a live external call |
 | A24 | Paratext/Logos connectors | `paratext.getState/setReference`, `logos.getState/setReference` protocol wiring — no companion Paratext plugin instance or Logos installation available on this machine | Source | PASS — 4 protocol-level tests plus 4 direct `LogosConnectorClient`↔real `logos_bridge.ps1` integration tests (real subprocess, real `-STA` PowerShell, real newline-delimited JSON exchange, a real "not installed" COM error round-tripping cleanly) — see paratext_plugin/README.md and engine/logos_connector/README.md for what remains genuinely unverified against live Paratext/Logos |
-| A25 | Paratext/Logos connectors | Same protocol methods from a real frozen bridge-engine.exe | Frozen | NOT RUN — existing worker predates the Phase 7 source; rerun after the Milestone 2 rebuild |
+| A25 | Paratext/Logos connectors | Same protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — Paratext returns the expected clean companion-unavailable response; the packaged Logos PowerShell bridge launches and cleanly reports unavailable COM integration |
 | A26 | Paratext companion plugin | `paratext_plugin/TranslationCoreAIBridgePlugin.cs` — a separate .NET project, not part of the Python source tree | Build only | PASS (compile) / NOT RUN (load) — compiles cleanly via the bundled .NET Framework `csc.exe` against Paratext's real installed `PluginInterfaces.dll`/`CorePluginInterfaces.dll` (every interface member used was confirmed by reflecting into those real DLLs). Deployment into `C:\Program Files\Paratext 9\plugins\...` was not performed this session (a protected-system-directory write, blocked by this session's own safety controls) — the plugin has never actually been loaded by a running Paratext instance. See paratext_plugin/README.md for the exact next steps |
 
 ## Import workflows
@@ -76,7 +76,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | E02 | Non-aligned export | Valid USFM is generated and re-importable | PASS |
 | E03 | Footnotes/headings/poetry/milestones | No silent structural loss | PASS — source-template export; explicit fallback without source |
 | E04 | ESFM content | Supported markers preserved or limitation made explicit | PASS — custom markers retained by source-template export |
-| E05 | Windows bundle | Both helper executables are present and runnable | FAIL — present artifacts are stale relative to current source; replace and retest in Milestone 2 |
+| E05 | Windows bundle | Both helper executables are present and runnable | PASS — both Beta 2 helpers are present, version-checked, hash-matched across staging locations, and exercised by the frozen smoke test |
 | E06 | macOS/Linux bundles | Build, permissions and runtime behavior verified | BLOCKED |
 
 ## Manual word alignment
@@ -92,7 +92,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | L07 | Missing original source | Readable import guidance; no invented/downloaded tokens | PASS — source and UI |
 | L08 | RTL source/target | Direction metadata is respected by token panes | PASS — source/UI diagnostics; manual RTL layout NOT RUN |
 | L09 | Restart persistence | Alignment, completion and history survive a new engine instance | PASS — source tests |
-| L10 | Frozen protocol/export/undo | Packaged sidecars perform the real workflow | NOT RUN — rerun against the Milestone 2 current-source workers |
+| L10 | Frozen protocol/export/undo | Packaged sidecars perform the real workflow | PASS — the Beta 2 frozen worker completed many-to-many alignment, completion, aligned export, and undo |
 
 ## Manual desktop and usability checks
 
@@ -122,11 +122,29 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
   against real materialized evidence, and real subprocess-level Paratext/Logos connector
   protocol tests (the Logos ones spawn the actual bundled PowerShell helper).
 - Frontend: `svelte-check` reports 0 errors and 0 warnings; production Vite build succeeds.
-- Frozen workers: real Wildebeest loads, the USFM helper reports duplicate and missing verses,
-  manual many-to-many alignment/export/undo succeeds, and lightweight status calls
-  remain responsive while the job runs.
-- Windows: release executable launches both WebView2 and `bridge-engine`; the NSIS installer
-  `Bridge_0.8.0-beta.1_x64-setup.exe` is produced with both verified worker binaries.
+- Frozen workers: real Wildebeest, Uroman, and Smart Edit Distance load; versification,
+  a planted spelling inconsistency, corpus statistics, AI-proposal/explain packaging,
+  connector error paths, manual many-to-many alignment/export/undo, and USFM duplicate/
+  missing-verse checks pass. Lightweight status calls remain responsive during the job.
+- Windows: the Beta 2 release executable and NSIS installer were produced with both
+  verified worker binaries. The installer is
+  `Bridge_0.8.0-beta.2_x64-setup.exe` (SHA-256
+  `9CC512F8F3BAA18B4CB93A61FA8CB51651038A8D1DEC788D07043700EDBABB03`).
+
+## Beta 2 artifact provenance — 2026-08-25
+
+- Release source: `a7a0747` (`chore(release): bump Bridge to 0.8.0-beta.2`).
+- Desktop executable: ProductVersion `0.8.0-beta.2`, SHA-256
+  `16C0DB7D96BC3B003C323E58FD850AD02BE2761DA7DDD42FF26197F3F688D092`.
+- `bridge-engine.exe`: 21,031,375 bytes, SHA-256
+  `5DD3B2962192AF65E3BC32FCE274018CB0AA9CA6FEA566AF26F550243261D2C6`.
+- `bridge-usfm-checker.exe`: 7,673,124 bytes, SHA-256
+  `C8EB228675EA875E6827E8B92F728D7CE1F72452CE6E40DDBDCB45402CCA8E5E`.
+- Installer: 30,644,707 bytes, ProductVersion `0.8.0-beta.2`, SHA-256
+  `9CC512F8F3BAA18B4CB93A61FA8CB51651038A8D1DEC788D07043700EDBABB03`.
+- The enhanced frozen-worker smoke test passed against the exact release-staged
+  workers. Installing and clicking through this newly produced Beta 2 NSIS artifact
+  remains a manual acceptance step; the 2026-08-21 acceptance below was Beta 1.
 
 ## Windows acceptance test — 2026-08-21
 

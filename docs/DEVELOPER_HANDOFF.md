@@ -1,6 +1,6 @@
 # Developer handoff: Bridge v0.8.0-beta.2
 
-Updated: 2026-08-24
+Updated: 2026-08-25
 
 ## Current release state
 
@@ -22,8 +22,9 @@ gate is `docs/QA_TEST_MATRIX.md`.
   template.
 - Automated source gate: 165 Python tests pass in the maintained Windows/
   Python 3.12.4 environment as of the 2026-08-25 Milestone 1 baseline.
-  Svelte, Rust, frozen-sidecar and NSIS results are recorded in the QA
-  matrix, not assumed here. The former load-sensitive versification
+  Svelte and Rust source gates pass. Beta 2 frozen-sidecar and NSIS results,
+  including exact artifact hashes and the remaining manual installer acceptance,
+  are recorded in the QA matrix. The former load-sensitive versification
   wall-clock bound is now a deterministic concurrency-invariant test.
 - Explicitly deferred: original-source resource downloads and automatic live
   Paratext/Logos synchronization. AI alignment proposals and UAlign-derived
