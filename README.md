@@ -30,7 +30,9 @@ stage.
 
 ### Prerequisites
 
-- **Python 3.11 or newer** for the BridgeEngine sidecar.
+- **Python 3.12** for the maintained BridgeEngine build. The package metadata
+  permits Python 3.11+, but the real Wildebeest dependency does not currently
+  install on Python 3.13.
 - **Node.js 18 or newer** and npm for the Svelte frontend.
 - For the full desktop app, the **Rust toolchain** from
   [rustup.rs](https://rustup.rs/).
@@ -42,13 +44,14 @@ again whenever their dependency files change).
 
 ### 1. Python engine
 
-```bash
+```powershell
 cd engine
-pip install -e ".[dev]"
-pytest tests/ greek_room_engine/tests/ -v
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -c constraints-py312-windows.txt -e ".[dev,wildebeest]"
+.venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v
 ```
 
-Should show **96 passed** in the maintained Python 3.12 development
+Should show **165 passed** in the maintained Windows/Python 3.12 development
 environment. Try `python demo.py` for a live walkthrough
 against a throwaway fixture project — no real translationCore project
 needed.
@@ -125,7 +128,7 @@ release gate.
 - ✅ **Decision persistence** — reopening a project or re-running checks now correctly restores prior Accept/Reject/Ignore state instead of resetting to "open".
 - ✅ **Chapter switching** — the top bar's chapter dropdown actually works now (it didn't before).
 - ✅ **"Run whole book"** — wired to actually load and check every chapter, with per-chapter progress. Store keys are now `chapter:verse` composite (`verseKey()` in `stores.ts`) so multiple chapters' data can coexist without collisions.
-- ✅ **Settings modal, for real** — AI provider pane supports **any OpenAI-Responses-API-compatible endpoint**, not just OpenAI: Provider / Base URL / Model / API key are all freely editable and persist via `settings.get`/`settings.set`. Also made `ai_client.py`'s endpoint configurable (was hardcoded to `api.openai.com`) — though note `ai_client.py` still isn't called by any protocol method yet (that's Phase 7); this is groundwork, not a live AI connection.
+- ✅ **Settings modal, for real** — AI provider pane supports **any OpenAI-Responses-API-compatible endpoint**, not just OpenAI: Provider / Base URL / Model / API key are all freely editable and persist via `settings.get`/`settings.set`. The configured client is used by `alignment.aiPropose` and `ai.explain`; live calls against a real hosted model still require release validation.
 - ✅ **Manual word alignment** — the verse editor supports 1:1, 1:many,
   many:1 and many:many group changes, unalign, completion gating, durable
   per-verse undo/history, conflict protection, restart persistence and
@@ -139,8 +142,10 @@ release gate.
 - Manual alignment needs original-language `topWords` from an imported
   translationCore project or aligned USFM. This release explains that condition;
   it does not download source resources or invent source tokens.
-- AI alignment proposals, UAlign-derived statistics, resource downloads, and
-  live Paratext/Logos synchronization remain later releases.
+- AI alignment proposals are available in the alignment editor. UAlign-derived
+  statistics are implemented at the backend/protocol layer but have no UI yet.
+  Original-language resource downloads and live Paratext/Logos synchronization
+  remain later-release work.
 - "Any API" in Settings means any endpoint speaking the OpenAI Responses API shape — not literally any provider's native request format (e.g. raw Anthropic API has a different schema).
 
 ## Troubleshooting (real issues hit getting this running on Windows)

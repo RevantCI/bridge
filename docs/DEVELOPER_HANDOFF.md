@@ -20,18 +20,15 @@ gate is `docs/QA_TEST_MATRIX.md`.
 - Export/import: nested many-to-many `zaln`/`w` milestones are parsed into tC
   groups and aligned export writes re-importable USFM 3 over the retained source
   template.
-- Automated source gate: 144 Python tests (137 at Phase 5's release
-  milestone, +7 added for Phase 6's alignment corpus-statistics work);
+- Automated source gate: 165 Python tests pass in the maintained Windows/
+  Python 3.12.4 environment as of the 2026-08-25 Milestone 1 baseline.
   Svelte, Rust, frozen-sidecar and NSIS results are recorded in the QA
-  matrix, not assumed here. One pre-existing test,
-  `test_versification_concurrency.py`'s wall-clock GIL regression guard, is
-  known to fail under heavy background CPU load on this machine — confirmed
-  reproducible on unmodified `main`, not a regression from any phase's work;
-  see that section's own notes and the QA matrix for the standing caveat.
-- Explicitly deferred: AI alignment proposals, original-source resource
-  downloads, and live Paratext/Logos synchronization. UAlign-derived corpus
-  statistics (count/probability/PMI/SED-boost) are no longer deferred — see
-  "Alignment corpus statistics — Phase 6 complete" further down.
+  matrix, not assumed here. The former load-sensitive versification
+  wall-clock bound is now a deterministic concurrency-invariant test.
+- Explicitly deferred: original-source resource downloads and automatic live
+  Paratext/Logos synchronization. AI alignment proposals and UAlign-derived
+  corpus statistics (count/probability/PMI/SED-boost) are implemented; see the
+  Phase 6/7 sections further down.
 
 ## Phase roadmap status — read this first before picking up new work
 
@@ -558,8 +555,8 @@ do plain dict lookups (not this scan) and were separately measured safe
 unlocked under the same concurrency — this isn't a "lock everything"
 fix, and don't assume it's free insurance for code added to this module
 later without re-measuring. Guarded by `test_versification_concurrency.py`,
-including a wall-clock regression bound tight enough that the unfixed
-behavior blows through it by 5-10x. Full details in
+which deterministically instruments the expensive matcher boundary and
+asserts that concurrent callers never overlap there. Full details in
 `engine/vendor/greekroom-versification/NOTICE.md`'s finding 4.
 
 **Packaging — a real gap found and fixed, not assumed to be handled by

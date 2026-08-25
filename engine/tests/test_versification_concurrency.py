@@ -16,14 +16,10 @@ so "only one caller at a time" is not a safe assumption to make silently.
 
 2. Performance: detect_schema()'s VersificationMatch scan degrades
    CATASTROPHICALLY, not just proportionally, when run on several threads
-   at once — measured directly (not assumed from general GIL folklore): a
-   single-threaded scan of one schema takes ~0.5s; the same scan run on 16
-   threads simultaneously took ~47s PER THREAD, not the ~8s naive linear
-   scaling would predict. Fixed by serializing the scan with the same lock
-   _ensure_loaded() uses. Without this, a burst of near-simultaneous
-   versification.detect calls (e.g. quickly switching between several
-   just-opened book tabs before each book's cache is warm) would look
-   exactly like the sidecar hanging.
+   at once. Fixed by serializing the scan with the same lock _ensure_loaded()
+   uses. The regression test instruments that expensive boundary and proves
+   only one thread can enter it at a time. This is deterministic across fast
+   and slow machines, unlike the old absolute wall-clock bound.
 
 Both worker scripts run in a genuinely fresh subprocess (not
 importlib.reload() inside the pytest process) so the vendored module's own
@@ -107,63 +103,90 @@ def test_concurrent_first_load_from_multiple_threads_does_not_crash():
         assert back_map["PSA 3:2"] == "PSA 3:1"
 
 
-_DETECT_SCHEMA_TIMING_SCRIPT = textwrap.dedent("""
+_DETECT_SCHEMA_SERIALIZATION_SCRIPT = textwrap.dedent("""
     import json
     import threading
     import time
 
     from tc_ai_bridge import versification as vt
 
+    # Load the genuine module and schema data first, then replace only the
+    # expensive matcher boundary with an instrumented stand-in. We are
+    # testing Bridge's lock here, not vendored matching correctness (covered
+    # by test_versification.py). A short sleep makes an absent lock overlap
+    # reliably without turning machine speed into a test result.
+    vt._ensure_loaded()
+    state_lock = threading.Lock()
+    active = 0
+    max_active = 0
+    match_calls = 0
+
+    class InstrumentedMatch:
+        def __init__(self, corpus, versification, bible):
+            global active, max_active, match_calls
+            with state_lock:
+                active += 1
+                max_active = max(max_active, active)
+                match_calls += 1
+            try:
+                time.sleep(0.02)
+                self.cost = 0
+            finally:
+                with state_lock:
+                    active -= 1
+
+    vt._module.VersificationMatch = InstrumentedMatch
+
     N_THREADS = 8
-    durations = [None] * N_THREADS
+    errors = [None] * N_THREADS
     start_gate = threading.Barrier(N_THREADS)
 
     def call(i):
-        start_gate.wait(timeout=10)
-        t0 = time.monotonic()
-        vt.detect_schema("PSA", {f"3:{n}": f"text {n}" for n in range(1, 10)})
-        durations[i] = time.monotonic() - t0
+        try:
+            start_gate.wait(timeout=10)
+            vt.detect_schema("PSA", {f"3:{n}": f"text {n}" for n in range(1, 10)})
+        except BaseException as exc:  # noqa: BLE001 - report, don't hide
+            errors[i] = f"{type(exc).__name__}: {exc}"
 
     threads = [threading.Thread(target=call, args=(i,)) for i in range(N_THREADS)]
-    t_start = time.monotonic()
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=60)
-    total_wall_time = time.monotonic() - t_start
+        t.join(timeout=10)
 
-    print(json.dumps({"durations": durations, "total_wall_time": total_wall_time}))
+    print(json.dumps({
+        "errors": [error for error in errors if error],
+        "threads_alive": sum(thread.is_alive() for thread in threads),
+        "max_active": max_active,
+        "match_calls": match_calls,
+        "expected_match_calls": N_THREADS * len(vt.SCHEMAS),
+    }))
 """)
 
 
-def test_concurrent_detect_schema_stays_fast_not_catastrophically_slow():
-    """Regression test for the specific GIL-contention bug: before the fix
-    (serializing VersificationMatch's scan with _lock), 16 concurrent
-    detect_schema-style scans took ~47s EACH (not ~8s as naive linear
-    scaling over a single-threaded ~0.5s baseline would predict) — a >90x
-    blowup from real GIL thrashing under many simultaneous pure-Python
-    scans over large verse_id_list data. With the fix, 8 concurrent
-    detect_schema calls (each scanning up to 6 schemas) complete with total
-    wall time in the same ballpark as running them one after another, not
-    an order of magnitude worse. The bound below (30s) has generous margin
-    over the observed ~8-18s fixed behavior while still failing fast if the
-    catastrophic-slowdown regression ever comes back — the unfixed version
-    would blow through it by 5-10x.
+def test_concurrent_detect_schema_serializes_expensive_scan():
+    """Guard the exact fix for the GIL-contention regression.
+
+    An absolute time limit made the previous test depend on CPU speed and
+    background load: a healthy serialized scan takes ~52 seconds for eight
+    callers on the current machine because one call itself takes ~6.2
+    seconds. Instrumenting VersificationMatch proves the required invariant
+    directly — concurrent callers may queue, but their expensive scans must
+    never overlap.
     """
     completed = subprocess.run(
-        [sys.executable, "-c", _DETECT_SCHEMA_TIMING_SCRIPT],
-        cwd=str(ENGINE_ROOT), capture_output=True, text=True, timeout=90,
+        [sys.executable, "-c", _DETECT_SCHEMA_SERIALIZATION_SCRIPT],
+        cwd=str(ENGINE_ROOT), capture_output=True, text=True, timeout=30,
     )
     assert completed.returncode == 0, (
         f"worker subprocess crashed:\nstdout={completed.stdout}\nstderr={completed.stderr}"
     )
     payload = json.loads(completed.stdout.strip().splitlines()[-1])
 
-    assert all(d is not None for d in payload["durations"]), (
-        f"not every thread finished within its own join timeout: {payload['durations']}"
-    )
-    assert payload["total_wall_time"] < 30.0, (
-        f"detect_schema under concurrency took {payload['total_wall_time']:.1f}s total — "
-        f"this is the exact shape of the catastrophic GIL-contention regression "
-        f"this test guards against (per-thread durations: {payload['durations']})"
+    assert payload["errors"] == [], f"concurrent callers raised: {payload['errors']}"
+    assert payload["threads_alive"] == 0, "not every detect_schema caller completed"
+    assert payload["match_calls"] == payload["expected_match_calls"]
+    assert payload["max_active"] == 1, (
+        "VersificationMatch scans overlapped across threads; this restores the "
+        f"catastrophic GIL-contention regression (max active: {payload['max_active']})"
     )

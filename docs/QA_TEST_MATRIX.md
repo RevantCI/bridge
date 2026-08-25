@@ -10,31 +10,31 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 164 passed (144 + 20 new Phase 7 tests: 4 AI-alignment-proposal, 3 TWL resource-index, 4 real-subprocess Logos connector, 4 desktop-connector protocol, 4 translationAcademy knowledge-base, 2 ai.explain) with real Wildebeest 0.9.2, real uroman, and vendored Smart Edit Distance. One pre-existing test (`test_versification_concurrency.py`'s wall-clock GIL regression guard) is known to fail under heavy background CPU load — reproducible on unmodified `main`, not a regression from any phase's work; not release-blocking, see A13's own note |
+| A01 | Backend | Complete Python suite | Source | PASS — 165 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. The former machine-dependent versification wall-clock check was replaced with a deterministic assertion that concurrent callers cannot overlap the expensive scan; matching correctness remains covered against the real vendored schema data |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
-| A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile |
-| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — current-source sidecars and Windows NSIS installer built |
-| A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | PASS — real standalone checker findings |
-| A07 | Protocol | Sidecar remains responsive during a background job | Frozen | PASS — status polled until completion |
+| A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; `cargo test` currently contains 0 Rust unit tests |
+| A05 | Packaging | Build both target-suffixed sidecars | Frozen | FAIL — the staged workers and NSIS installer predate the 2026-08-24 Phase 6/7 source commits; rebuild is the Milestone 2 release gate |
+| A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | NOT RUN — rerun against the Milestone 2 current-source workers |
+| A07 | Protocol | Sidecar remains responsive during a background job | Frozen | NOT RUN — rerun against the Milestone 2 current-source workers |
 | A08 | Security | Settings never serialize plaintext secrets | Source | PASS — regression suite |
 | A09 | Alignment | Manual protocol, conflicts, history, restart and USFM round trip | Source | PASS |
 | A10 | Versification | Detect/orgRef/backVersificationMap against real schema data | Source | PASS — includes real Psalm 3 descriptive-title shift |
-| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — verified against a real PyInstaller build this session |
+| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | NOT RUN — existing worker is stale; rerun after the Milestone 2 rebuild |
 | A12 | Versification | Edge cases: merges, splits, unknown books, verse bridges/segments | Source | PASS — 11 tests against real vendored data |
-| A13 | Versification | Concurrent callers: correctness and a GIL-contention performance regression guard | Source | PASS — fixed a real ~90x slowdown found under 16-thread concurrency. Wall-clock bound is machine-load-sensitive: failed under heavy background CPU use during Phase 6's own test run (2026-08-24, 50.9s vs. the 30s bound); reproducible on unmodified `main`, not a regression — not release-blocking, but worth revisiting with a less load-sensitive bound |
+| A13 | Versification | Concurrent callers: correctness and a GIL-contention regression guard | Source | PASS — a fresh-process test verifies concurrent first-load correctness against real schema data; a deterministic instrumented test verifies the expensive matcher is serialized (`max_active == 1`) without using a machine-dependent deadline |
 | A14 | Names/Transliteration | Whole-book spelling-consistency check against real uroman + vendored Smart Edit Distance | Source | PASS — 15 tests; real Muhammad/Mohamed and Titus/Tituss cases, a real Tamil vowel-sign inconsistency through full verse sentences, a false-positive exclusion (church/churches), and a bigram-blocking performance regression guard |
-| A15 | Names/Transliteration | Same check from a real frozen bridge-engine.exe | Frozen | PASS — verified uroman's ~4.2MB data dir and vendored SED both resolve under sys._MEIPASS; a real planted typo was correctly flagged end to end |
+| A15 | Names/Transliteration | Same check from a real frozen bridge-engine.exe | Frozen | NOT RUN — existing worker is stale; rerun after the Milestone 2 rebuild |
 | A16 | Alignment statistics | Corpus co-occurrence/probability/PMI/SED-boost against real completed alignments and a real multi-book collection | Source | PASS — 7 tests; completed-only filtering, hand-verified PMI/probability math, multi-book aggregation with lazy-sibling skipping, protocol-level summary/forVerse calls, cache invalidation on newly-completing a verse, a real (no-mock) Uroman+SED case, and a 2,000-completed-verse performance measurement (well under a second) |
-| A17 | Alignment statistics | Same protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `scripts/smoke_sidecars.py` extended to complete a real fixture verse then call `alignment.corpusStats.summary`/`forVerse` against the frozen executable; confirmed `versesScanned == 1` and a real jointCount=1/probability=1.0 pair, using no new PyInstaller `datas`/`hiddenimports` entries (reuses the vendor tree and uroman data already bundled for A15) |
+| A17 | Alignment statistics | Same protocol methods from a real frozen bridge-engine.exe | Frozen | FAIL — the staged worker returns `unknown_method` for `alignment.corpusStats.summary`; rebuild and rerun the smoke test in Milestone 2 |
 | A18 | AI alignment proposals | `alignment.aiPropose`/`alignment.aiApplyProposal` against real `compile_link_proposal`/`apply_proposal` logic, fake HTTP transport (no live API key) | Source | PASS — 4 tests; missing-API-key error, an accepted link compiled into a new group with the existing protected group surviving untouched, real AI-usage-totals accumulation confirmed (`settings.record_ai_usage` was dead code before this phase), a cross-link between two different established groups correctly rejected as a conflict rather than silently merged, and apply saving through the normal identity-checked pipeline |
-| A19 | AI alignment proposals | Same protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `scripts/smoke_sidecars.py` extended to call `alignment.aiPropose` (no API key configured, no real network call) against the frozen executable and confirm it fails cleanly with `ai_error` rather than crashing or an unbundled-import `internal_error` — confirms `ai_client.py`/`alignment_engine.py`'s new imports and `alignment_reliability.py` are genuinely bundled, not just importable in source mode. A real live-network call against a real model still not verified (no API key available on this machine) |
+| A19 | AI alignment proposals | Same protocol methods from a real frozen bridge-engine.exe | Frozen | NOT RUN — existing worker predates the Phase 7 source; rerun after the Milestone 2 rebuild |
 | A20 | Resource materialization | translationWordsLinks resource-level `{kt,names,other}/groups/<book>/<term>.json` index (the shape `knowledge_base.py`'s TWL reader actually reads) | Source | PASS — 3 tests; real Titus TWL data produces the correct real file layout, is idempotent, and `TranslationHelpsKnowledgeBase.twl_occurrences()` reads real materialized data end to end through a full import → verse.runChecks flow, not just "the files got written" |
 | A21 | Resource materialization | translationAcademy bundling + `knowledge_base.py`'s TA-reading fix | Source | PASS — 4 tests against a real, freshly-downloaded 2.2MB/728-file `git.door43.org/unfoldingWord/en_ta` v90 tag (not a synthetic fixture): confirms the real nested-directory article shape (`checking/accuracy-check/{title.md,01.md}`), a real article read with the correct human-readable title (not the raw "01" filename stem), a graceful empty result for an unknown slug, and all 13 hardcoded `global_checking_evidence()` identifiers resolving against real content |
 | A22 | AI explain | `ai.explain` (wires `prepare_verse_review`) against real materialized tN/tW/TA evidence, fake HTTP transport (no live API key) | Source | PASS — 2 tests; missing-API-key error, and a real evidence-backed run whose fake check-review response is built from checkIds discovered from the real materialized project data (not guessed), confirming real usage-total accumulation |
-| A23 | AI explain | Same protocol method from a real frozen bridge-engine.exe | Frozen | PASS — `scripts/smoke_sidecars.py` extended; this fixture project has no application-storage resources/ folder of its own, so it legitimately hits `knowledge_base_error` before `ai_client.py`'s own missing-key check — asserts on either clean error code, since both prove the bundle (including the now-bundled translationAcademy tree) is intact rather than crashing |
+| A23 | AI explain | Same protocol method from a real frozen bridge-engine.exe | Frozen | NOT RUN — existing worker predates the Phase 7 source; rerun after the Milestone 2 rebuild |
 | A24 | Paratext/Logos connectors | `paratext.getState/setReference`, `logos.getState/setReference` protocol wiring — no companion Paratext plugin instance or Logos installation available on this machine | Source | PASS — 4 protocol-level tests plus 4 direct `LogosConnectorClient`↔real `logos_bridge.ps1` integration tests (real subprocess, real `-STA` PowerShell, real newline-delimited JSON exchange, a real "not installed" COM error round-tripping cleanly) — see paratext_plugin/README.md and engine/logos_connector/README.md for what remains genuinely unverified against live Paratext/Logos |
-| A25 | Paratext/Logos connectors | Same protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `scripts/smoke_sidecars.py` extended; `paratext.getState` fails cleanly with no companion plugin running, and `logos.getState` genuinely spawns the bundled `logos_bridge.ps1` from under `sys._MEIPASS` (confirming the new `bridge-engine.spec` `logos_connector` datas entry) and gets the real "Logos isn't installed" COM error, not a missing-file/spawn error |
+| A25 | Paratext/Logos connectors | Same protocol methods from a real frozen bridge-engine.exe | Frozen | NOT RUN — existing worker predates the Phase 7 source; rerun after the Milestone 2 rebuild |
 | A26 | Paratext companion plugin | `paratext_plugin/TranslationCoreAIBridgePlugin.cs` — a separate .NET project, not part of the Python source tree | Build only | PASS (compile) / NOT RUN (load) — compiles cleanly via the bundled .NET Framework `csc.exe` against Paratext's real installed `PluginInterfaces.dll`/`CorePluginInterfaces.dll` (every interface member used was confirmed by reflecting into those real DLLs). Deployment into `C:\Program Files\Paratext 9\plugins\...` was not performed this session (a protected-system-directory write, blocked by this session's own safety controls) — the plugin has never actually been loaded by a running Paratext instance. See paratext_plugin/README.md for the exact next steps |
 
 ## Import workflows
@@ -76,7 +76,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | E02 | Non-aligned export | Valid USFM is generated and re-importable | PASS |
 | E03 | Footnotes/headings/poetry/milestones | No silent structural loss | PASS — source-template export; explicit fallback without source |
 | E04 | ESFM content | Supported markers preserved or limitation made explicit | PASS — custom markers retained by source-template export |
-| E05 | Windows bundle | Both helper executables are present and runnable | PASS — hashes match staged artifacts; packaged app launched |
+| E05 | Windows bundle | Both helper executables are present and runnable | FAIL — present artifacts are stale relative to current source; replace and retest in Milestone 2 |
 | E06 | macOS/Linux bundles | Build, permissions and runtime behavior verified | BLOCKED |
 
 ## Manual word alignment
@@ -92,7 +92,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | L07 | Missing original source | Readable import guidance; no invented/downloaded tokens | PASS — source and UI |
 | L08 | RTL source/target | Direction metadata is respected by token panes | PASS — source/UI diagnostics; manual RTL layout NOT RUN |
 | L09 | Restart persistence | Alignment, completion and history survive a new engine instance | PASS — source tests |
-| L10 | Frozen protocol/export/undo | Packaged sidecars perform the real workflow | PASS — release-staged workers |
+| L10 | Frozen protocol/export/undo | Packaged sidecars perform the real workflow | NOT RUN — rerun against the Milestone 2 current-source workers |
 
 ## Manual desktop and usability checks
 
@@ -107,7 +107,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 ## Automated evidence
 
-- Python: 164 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 165 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book

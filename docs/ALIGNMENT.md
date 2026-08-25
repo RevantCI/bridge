@@ -72,6 +72,7 @@ mechanism, not a native semantic alignment feature defined by the USFM standard.
 
 Manual alignment requires source `topWords` already present in an imported
 translationCore project or aligned USFM. This release gives actionable guidance
-when they are unavailable. Downloading original-language resources, AI alignment
-suggestions, UAlign statistics, and live Paratext/Logos synchronization remain
-future work.
+when they are unavailable. Optional AI gap-fill proposals are available in the
+editor, and corpus statistics are available through the backend protocol.
+Downloading original-language resources and live Paratext/Logos synchronization
+remain future work.
