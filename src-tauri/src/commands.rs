@@ -252,6 +252,96 @@ pub async fn verse_edit(
 }
 
 #[tauri::command]
+pub async fn check_list_for_verse(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "check.listForVerse",
+            serde_json::json!({ "chapter": chapter, "verse": verse }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn check_validate_selection(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    tool: String,
+    group_id: String,
+    check_id: String,
+    selections: Value,
+    nothing_to_select: bool,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "check.validateSelection",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "tool": tool,
+                "groupId": group_id, "checkId": check_id,
+                "selections": selections, "nothingToSelect": nothing_to_select,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn check_save_selection(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    tool: String,
+    group_id: String,
+    check_id: String,
+    selections: Value,
+    nothing_to_select: bool,
+    provenance: String,
+    expected_fingerprint: String,
+    metadata: Option<Value>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "check.saveSelection",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "tool": tool,
+                "groupId": group_id, "checkId": check_id,
+                "selections": selections, "nothingToSelect": nothing_to_select,
+                "provenance": provenance, "expectedFingerprint": expected_fingerprint,
+                "metadata": metadata.unwrap_or_else(|| serde_json::json!({})),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn check_clear_selection(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    tool: String,
+    group_id: String,
+    check_id: String,
+    provenance: String,
+    expected_fingerprint: String,
+    metadata: Option<Value>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "check.clearSelection",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "tool": tool,
+                "groupId": group_id, "checkId": check_id,
+                "provenance": provenance, "expectedFingerprint": expected_fingerprint,
+                "metadata": metadata.unwrap_or_else(|| serde_json::json!({})),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn alignment_get(
     sidecar: State<'_, EngineSidecar>,
     chapter: String,

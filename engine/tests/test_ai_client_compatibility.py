@@ -34,7 +34,10 @@ def test_retries_once_without_reasoning_when_provider_explicitly_rejects_it():
             }}).encode('utf-8')
         return 200, _success({'links': []})
 
-    client = OpenAIResponsesClient('test-key', model='non-reasoning-model', transport=transport)
+    # Use a model Bridge expects to support reasoning so this test exercises the
+    # provider-rejection fallback. Known non-reasoning models omit the parameter
+    # proactively and therefore correctly make only one request.
+    client = OpenAIResponsesClient('test-key', model='gpt-5.6', transport=transport)
     result = client._post_structured('instructions', 'input', 'test_schema', {
         'type': 'object', 'properties': {'links': {'type': 'array'}}, 'required': ['links'],
     })

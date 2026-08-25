@@ -318,6 +318,50 @@ export interface VerseData {
   alignmentStatus: AlignmentWorkStatus;
 }
 
+export type NativeCheckTool = "translationNotes" | "translationWords";
+export type CheckSelectionStatus = "pending" | "selected" | "nothing_to_select" | "invalidated";
+export type CheckEvaluationStatus = "not_run" | "running" | "passed" | "issue_open" | "needs_review" | "failed";
+export type CheckSelectionProvenance = "none" | "existing_tc" | "human" | "bridge_ai";
+
+export interface CheckTargetSelection {
+  text: string;
+  occurrence: number;
+  occurrences: number;
+}
+
+export interface NativeCheckReview {
+  chapter: string;
+  verse: string;
+  tool: NativeCheckTool;
+  groupId: string;
+  checkId: string;
+  sourceQuote: string;
+  sourceOccurrence: number | null;
+  occurrenceNote: string;
+  selections: CheckTargetSelection[];
+  nothingToSelect: boolean;
+  invalidated: boolean;
+  stale: boolean;
+  selectionStatus: CheckSelectionStatus;
+  evaluationStatus: CheckEvaluationStatus;
+  provenance: CheckSelectionProvenance;
+  stateFingerprint: string;
+}
+
+export interface CheckSelectionValidation {
+  valid: boolean;
+  errors: string[];
+  selections: CheckTargetSelection[];
+  ranges: Array<{ start: number; end: number }>;
+  stateFingerprint: string;
+}
+
+export interface CheckSelectionMutation {
+  committed: true;
+  review: NativeCheckReview;
+  files: Record<string, string>;
+}
+
 export type CheckJobState =
   | "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
 

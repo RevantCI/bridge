@@ -7,12 +7,12 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from collections import Counter
 
-from .usfm import whitespace_tokens
+from .usfm import strip_usfm, whitespace_tokens
 
 from .models import VerseAlignment
 from .transaction_journal import TransactionJournal
@@ -329,7 +329,15 @@ class TranslationCoreProject:
         indexed = self.checks_for_verse(chapter, verse)
         if self.word_alignment_state(chapter, verse) == 'invalid':
             return 'STALE_AFTER_VERSE_EDIT'
-        if any(self.check_staleness(chapter, verse, str(e.get('contextId',{}).get('checkId',''))) == 'stale' for e in indexed):
+        if any(
+            self.check_staleness(
+                chapter, verse,
+                str(e.get('contextId', {}).get('checkId', '')),
+                str(e.get('contextId', {}).get('tool', '')),
+                str(e.get('contextId', {}).get('groupId', '')),
+            ) == 'stale'
+            for e in indexed
+        ):
             return 'STALE_AFTER_VERSE_EDIT'
         if states.get('invalidated') or any(bool(e.get('invalidated')) for e in indexed):
             return 'STALE_RECHECK_REQUIRED'
@@ -378,7 +386,10 @@ class TranslationCoreProject:
                     bucket['total'] += 1
                     invalid = bool(entry.get('invalidated', False))
                     cid = str(entry.get('contextId',{}).get('checkId',''))
-                    stale = self.check_staleness(ch, vs, cid) == 'stale'
+                    stale = self.check_staleness(
+                        ch, vs, cid, tool,
+                        str(entry.get('contextId', {}).get('groupId', '')),
+                    ) == 'stale'
                     checked = isinstance(entry.get('selections'), list) or bool(entry.get('nothingToSelect', False))
                     if invalid or stale:
                         bucket['invalidated'] += 1
@@ -1015,18 +1026,227 @@ class TranslationCoreProject:
             raise ProjectError('Rollback was incomplete; restore from backup '+str(backup_root)+'\n'+'\n'.join(errors))
 
     def _find_index_entry_path(self, tool: str, group_id: str, check_id: str) -> tuple[Path, list[dict[str, Any]], int]:
-        path = self.index_dir / tool / self.book_id / f'{group_id}.json'
-        if not path.exists():
-            raise ProjectError(f'Missing translationCore index file for {tool}/{group_id}')
-        data = _read_json(path)
-        if not isinstance(data, list):
-            raise ProjectError(f'Invalid translationCore index list: {path}')
-        for i, entry in enumerate(data):
-            if isinstance(entry, dict) and str(entry.get('contextId', {}).get('checkId', '')) == str(check_id):
-                return path, data, i
+        if tool not in ('translationNotes', 'translationWords'):
+            raise ProjectError('Only Translation Notes/Words checks are supported here.')
+        book_dir = self.index_dir / tool / self.book_id
+        candidates: list[Path] = []
+        if book_dir.exists():
+            # Most native tC indexes use groupId.json. Only form that direct path
+            # when every character is filename-safe; otherwise use the bounded scan.
+            if group_id and all(char.isalnum() or char in ('.', '_', '-') for char in group_id):
+                direct = book_dir / f'{group_id}.json'
+                if direct.exists():
+                    candidates.append(direct)
+            candidates.extend(p for p in book_dir.glob('*.json') if p not in candidates)
+        for candidate in candidates:
+            if candidate.name == 'contextId.json':
+                continue
+            try:
+                data = _read_json(candidate)
+            except Exception:
+                continue
+            if not isinstance(data, list):
+                continue
+            for i, entry in enumerate(data):
+                ctx = entry.get('contextId', {}) if isinstance(entry, dict) else {}
+                if (str(ctx.get('checkId', '')) == str(check_id)
+                        and str(ctx.get('groupId', '')) == str(group_id)):
+                    return candidate, data, i
         raise ProjectError(f'Could not find check {check_id} in {tool}/{group_id}')
 
-    def _latest_state_for_check(self, state_type: str, chapter: str | int, verse: str | int, check_id: str) -> dict[str, Any] | None:
+    @staticmethod
+    def _selection_ranges(target_text: str, selected_text: str) -> list[tuple[int, int]]:
+        """Return tC-style, non-overlapping occurrences in the displayed verse text."""
+        ranges: list[tuple[int, int]] = []
+        start = 0
+        while True:
+            index = target_text.find(selected_text, start)
+            if index < 0:
+                return ranges
+            end = index + len(selected_text)
+            ranges.append((index, end))
+            start = end
+
+    def _normalize_check_selections(
+        self,
+        chapter: str | int,
+        verse: str | int,
+        selections: Any,
+        nothing_to_select: bool,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, int]]]:
+        if not isinstance(nothing_to_select, bool):
+            raise ProjectError('nothingToSelect must be a boolean.')
+        if not isinstance(selections, list):
+            raise ProjectError('selections must be a list.')
+        if bool(selections) == bool(nothing_to_select):
+            raise ProjectError('A completed check must have selections or nothingToSelect=true, but not both.')
+
+        target_text = strip_usfm(self.target_verse_text(chapter, verse))
+        normalized: list[dict[str, Any]] = []
+        selected_ranges: list[dict[str, int]] = []
+        identities: set[tuple[str, int, int]] = set()
+        occupied: list[tuple[int, int]] = []
+        for raw in selections:
+            if not isinstance(raw, dict):
+                raise ProjectError('Every target selection must be an object.')
+            text = str(raw.get('text', ''))
+            if not text or text != text.strip():
+                raise ProjectError('Target selection text must be non-empty and may not have outer whitespace.')
+            occurrence = raw.get('occurrence')
+            occurrences = raw.get('occurrences')
+            if (isinstance(occurrence, bool) or not isinstance(occurrence, int)
+                    or isinstance(occurrences, bool) or not isinstance(occurrences, int)):
+                raise ProjectError('Target selection occurrence metadata must use integers.')
+            ranges = self._selection_ranges(target_text, text)
+            actual = len(ranges)
+            if actual == 0:
+                raise ProjectError(f'Target selection {text!r} is not present in the current verse.')
+            if occurrences != actual:
+                raise ProjectError(
+                    f'Target selection {text!r} reports {occurrences} occurrences, but the current verse has {actual}.'
+                )
+            if occurrence < 1 or occurrence > actual:
+                raise ProjectError(
+                    f'Target selection {text!r} occurrence {occurrence} is outside 1..{actual}.'
+                )
+            identity = (text, occurrence, occurrences)
+            if identity in identities:
+                raise ProjectError(f'Duplicate target selection: {text!r} occurrence {occurrence}.')
+            start, end = ranges[occurrence - 1]
+            if any(start < other_end and other_start < end for other_start, other_end in occupied):
+                raise ProjectError('Target selections may not overlap; combine overlapping words into one selection.')
+            identities.add(identity)
+            occupied.append((start, end))
+            normalized.append({'text': text, 'occurrence': occurrence, 'occurrences': occurrences})
+            selected_ranges.append({'start': start, 'end': end})
+        return normalized, selected_ranges
+
+    def _check_provenance(
+        self, chapter: str | int, verse: str | int, check_id: str, entry: dict[str, Any]
+    ) -> str:
+        has_selection = bool(entry.get('selections')) or bool(entry.get('nothingToSelect'))
+        if not has_selection:
+            return 'none'
+        ctx = entry.get('contextId', {}) if isinstance(entry, dict) else {}
+        latest = self._latest_state_for_check(
+            'selections', chapter, verse, check_id,
+            str(ctx.get('tool', '')), str(ctx.get('groupId', '')),
+        )
+        if not latest:
+            return 'existing_tc'
+        return 'bridge_ai' if str(latest.get('username', '')).strip().lower() == 'bridge ai' else 'human'
+
+    def _check_state_fingerprint(
+        self, chapter: str | int, verse: str | int, check_id: str, entry: dict[str, Any]
+    ) -> str:
+        ctx = entry.get('contextId', {}) if isinstance(entry, dict) else {}
+        latest = self._latest_state_for_check(
+            'selections', chapter, verse, check_id,
+            str(ctx.get('tool', '')), str(ctx.get('groupId', '')),
+        ) or {}
+        value = {
+            'selections': entry.get('selections', False),
+            'nothingToSelect': bool(entry.get('nothingToSelect')),
+            'invalidated': bool(entry.get('invalidated')),
+            'verseEdits': bool(entry.get('verseEdits')),
+            'latestSelectionTimestamp': latest.get('modifiedTimestamp', ''),
+            'targetText': self.target_verse_text(chapter, verse),
+        }
+        return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+
+    def _check_review_from_entry(
+        self, chapter: str | int, verse: str | int, tool: str, group_id: str,
+        check_id: str, entry: dict[str, Any],
+    ) -> dict[str, Any]:
+        for label, value in (('chapter', chapter), ('verse', verse)):
+            part = str(value)
+            if not part or part in ('.', '..') or '/' in part or '\\' in part:
+                raise ProjectError(f'Invalid {label} reference.')
+        ctx = copy.deepcopy(entry.get('contextId', {}))
+        ref = ctx.get('reference', {})
+        if str(ref.get('chapter')) != str(chapter) or str(ref.get('verse')) != str(verse):
+            raise ProjectError('Check reference does not match the current verse.')
+        stale = self.check_staleness(chapter, verse, check_id, tool, group_id) == 'stale'
+        invalidated = bool(entry.get('invalidated')) or bool(entry.get('verseEdits')) or stale
+        selections = copy.deepcopy(entry.get('selections')) if isinstance(entry.get('selections'), list) else []
+        nothing_to_select = bool(entry.get('nothingToSelect'))
+        if invalidated:
+            selection_status = 'invalidated'
+        elif selections:
+            selection_status = 'selected'
+        elif nothing_to_select:
+            selection_status = 'nothing_to_select'
+        else:
+            selection_status = 'pending'
+        return {
+            'chapter': str(chapter),
+            'verse': str(verse),
+            'tool': tool,
+            'groupId': str(group_id),
+            'checkId': str(check_id),
+            'sourceQuote': str(ctx.get('quoteString', '')),
+            'sourceOccurrence': ctx.get('occurrence'),
+            'occurrenceNote': str(ctx.get('occurrenceNote', '')),
+            'selections': selections,
+            'nothingToSelect': nothing_to_select,
+            'invalidated': invalidated,
+            'stale': stale,
+            'selectionStatus': selection_status,
+            # 3B.1 does not run AI evaluation. Do not mislabel a native selection as a pass.
+            'evaluationStatus': 'needs_review' if invalidated else 'not_run',
+            'provenance': self._check_provenance(chapter, verse, check_id, entry),
+            'stateFingerprint': self._check_state_fingerprint(chapter, verse, check_id, entry),
+        }
+
+    def check_review(self, chapter: str | int, verse: str | int, tool: str, group_id: str, check_id: str) -> dict[str, Any]:
+        _, data, idx = self._find_index_entry_path(tool, group_id, check_id)
+        return self._check_review_from_entry(
+            chapter, verse, tool, group_id, check_id, data[idx],
+        )
+
+    def check_reviews_for_verse(self, chapter: str | int, verse: str | int) -> list[dict[str, Any]]:
+        reviews = []
+        for entry in self.checks_for_verse(chapter, verse):
+            ctx = entry.get('contextId', {}) if isinstance(entry, dict) else {}
+            tool = str(ctx.get('tool', ''))
+            if tool not in ('translationNotes', 'translationWords'):
+                continue
+            reviews.append(self._check_review_from_entry(
+                chapter, verse, tool, str(ctx.get('groupId', '')),
+                str(ctx.get('checkId', '')), entry,
+            ))
+        return reviews
+
+    def validate_check_selection(
+        self,
+        chapter: str | int,
+        verse: str | int,
+        tool: str,
+        group_id: str,
+        check_id: str,
+        selections: Any,
+        nothing_to_select: bool,
+    ) -> dict[str, Any]:
+        # Resolve the exact native entry first; an invalid identity is a request error, not a validation result.
+        current = self.check_review(chapter, verse, tool, group_id, check_id)
+        try:
+            normalized, ranges = self._normalize_check_selections(
+                chapter, verse, selections, bool(nothing_to_select),
+            )
+        except ProjectError as exc:
+            return {
+                'valid': False, 'errors': [str(exc)], 'selections': [], 'ranges': [],
+                'stateFingerprint': current['stateFingerprint'],
+            }
+        return {
+            'valid': True, 'errors': [], 'selections': normalized, 'ranges': ranges,
+            'stateFingerprint': current['stateFingerprint'],
+        }
+
+    def _latest_state_for_check(
+        self, state_type: str, chapter: str | int, verse: str | int, check_id: str,
+        tool: str = '', group_id: str = '',
+    ) -> dict[str, Any] | None:
         latest = None
         latest_ts = ''
         for path in self._state_files_for_verse(state_type, chapter, verse):
@@ -1034,19 +1254,31 @@ class TranslationCoreProject:
                 d = _read_json(path)
             except Exception:
                 continue
-            if str(d.get('contextId', {}).get('checkId', '')) != str(check_id):
+            ctx = d.get('contextId', {}) if isinstance(d, dict) else {}
+            if str(ctx.get('checkId', '')) != str(check_id):
+                continue
+            if tool and str(ctx.get('tool', '')) != str(tool):
+                continue
+            if group_id and str(ctx.get('groupId', '')) != str(group_id):
                 continue
             ts = str(d.get('modifiedTimestamp') or d.get('timestamp') or path.name)
             if ts >= latest_ts:
                 latest, latest_ts = d, ts
         return latest
 
-    def check_staleness(self, chapter: str | int, verse: str | int, check_id: str) -> str:
+    def check_staleness(
+        self, chapter: str | int, verse: str | int, check_id: str,
+        tool: str = '', group_id: str = '',
+    ) -> str:
         """current | stale | pending using actual tC selection vs verse-edit timestamps."""
-        sel = self._latest_state_for_check('selections', chapter, verse, check_id)
+        sel = self._latest_state_for_check('selections', chapter, verse, check_id, tool, group_id)
         if not sel:
             return 'pending'
         sel_ts = str(sel.get('modifiedTimestamp', ''))
+        edit_ts = self._latest_verse_edit_timestamp(chapter, verse)
+        return 'stale' if edit_ts and sel_ts <= edit_ts else 'current'
+
+    def _latest_verse_edit_timestamp(self, chapter: str | int, verse: str | int) -> str:
         edit_ts = ''
         for path in self._state_files_for_verse('verseEdits', chapter, verse):
             try:
@@ -1054,68 +1286,202 @@ class TranslationCoreProject:
             except Exception:
                 continue
             edit_ts = max(edit_ts, str(d.get('modifiedTimestamp', '')))
-        return 'stale' if edit_ts and sel_ts <= edit_ts else 'current'
+        return edit_ts
 
-    def sync_check_approval(self, chapter: str | int, verse: str | int, tool: str, group_id: str, check_id: str, selections: list[dict[str, Any]], nothing_to_select: bool, username: str = 'AI Bridge Reviewer', gateway_language_code: str = 'en', gateway_language_quote: str = '') -> dict[str, str]:
-        """Write a human-approved TN/TW result using the observed translationCore v8 lifecycle.
-
-        Appends matching selections + invalidated(false) state records and updates the persisted
-        tool index entry. Existing history is never deleted.
-        """
+    def _persist_check_selection(
+        self,
+        chapter: str | int,
+        verse: str | int,
+        tool: str,
+        group_id: str,
+        check_id: str,
+        selections: list[dict[str, Any]],
+        nothing_to_select: bool,
+        provenance: str,
+        expected_fingerprint: str,
+        username: str,
+        gateway_language_code: str = 'en',
+        gateway_language_quote: str = '',
+        audit_metadata: dict[str, Any] | None = None,
+        clear: bool = False,
+    ) -> dict[str, Any]:
         if tool not in ('translationNotes', 'translationWords'):
             raise ProjectError('Only Translation Notes/Words checks can be synchronized here.')
+        if not isinstance(nothing_to_select, bool):
+            raise ProjectError('nothingToSelect must be a boolean.')
+        if not isinstance(audit_metadata, (dict, type(None))):
+            raise ProjectError('metadata must be an object.')
+        if provenance not in ('human', 'bridge_ai'):
+            raise ProjectError('provenance must be human or bridge_ai.')
         path, data, idx = self._find_index_entry_path(tool, group_id, check_id)
         entry = data[idx]
         ctx = copy.deepcopy(entry.get('contextId', {}))
         ref = ctx.get('reference', {})
         if str(ref.get('chapter')) != str(chapter) or str(ref.get('verse')) != str(verse):
             raise ProjectError('Check reference does not match the current verse.')
-        if nothing_to_select and selections:
-            raise ProjectError('nothingToSelect cannot be true when selections are present.')
-        for item in selections:
-            if not isinstance(item, dict) or not str(item.get('text', '')).strip():
-                raise ProjectError('Invalid target selection item.')
-            if int(item.get('occurrence', 0)) < 1 or int(item.get('occurrences', 0)) < 1:
-                raise ProjectError('Invalid target selection occurrence metadata.')
+
+        current_fingerprint = self._check_state_fingerprint(chapter, verse, check_id, entry)
+        if not expected_fingerprint:
+            raise ProjectError('expectedFingerprint is required; reload the check before saving.')
+        if expected_fingerprint != current_fingerprint:
+            raise ProjectError('The check changed on disk after it was loaded. Reload before saving.')
+        current_provenance = self._check_provenance(chapter, verse, check_id, entry)
+        has_current_selection = bool(entry.get('selections')) or bool(entry.get('nothingToSelect'))
+        if provenance == 'bridge_ai' and has_current_selection and current_provenance != 'bridge_ai':
+            raise ProjectError('Bridge AI may not replace an existing translationCore or human selection.')
+
+        if clear:
+            normalized: list[dict[str, Any]] = []
+            nothing_to_select = False
+        else:
+            normalized, _ = self._normalize_check_selections(
+                chapter, verse, selections, bool(nothing_to_select),
+            )
+
         iso, safe = self._timestamp()
+        edit_timestamp = self._latest_verse_edit_timestamp(chapter, verse)
+        if edit_timestamp and iso <= edit_timestamp:
+            try:
+                after_edit = datetime.fromisoformat(edit_timestamp.replace('Z', '+00:00')) + timedelta(milliseconds=1)
+                iso = after_edit.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+                safe = iso.replace(':', '_')
+            except ValueError:
+                # A malformed external timestamp remains safely stale rather than
+                # being guessed current; native write validation still proceeds.
+                pass
         state_root = self.check_dir
-        sel_path = state_root / 'selections' / self.book_id / str(chapter) / str(verse) / f'{safe}.json'
-        inv_path = state_root / 'invalidated' / self.book_id / str(chapter) / str(verse) / f'{safe}.json'
-        tx_paths=[path,sel_path,inv_path]; existed={str(x.resolve()):x.exists() for x in tx_paths}; backup=self._backup_paths(tx_paths, 'checkDataSync')
-        journal_tx=self.journal.begin('checkDataSync',tx_paths); self.journal.mark_writing(journal_tx)
+        suffix = ''
+        counter = 0
+        safe_check_id = ''.join(
+            char if char.isalnum() or char in ('-', '_') else '_' for char in str(check_id)
+        )[:120] or 'check'
+        while True:
+            stem = f'{safe}{suffix}'
+            sel_path = state_root / 'selections' / self.book_id / str(chapter) / str(verse) / f'{stem}.json'
+            inv_path = state_root / 'invalidated' / self.book_id / str(chapter) / str(verse) / f'{stem}.json'
+            audit = self.companion_dir() / 'audit' / self.book_id / str(chapter) / str(verse) / f'{stem}_tc-selection_{safe_check_id}.json'
+            if not sel_path.exists() and not inv_path.exists() and not audit.exists():
+                break
+            counter += 1
+            suffix = f'-{counter}'
+
+        tx_paths = [path, sel_path, inv_path, audit]
+        existed = {str(x.resolve()): x.exists() for x in tx_paths}
+        backup = self._backup_paths(tx_paths, 'checkDataSync')
+        journal_tx = self.journal.begin('checkDataSync', tx_paths)
+        self.journal.mark_writing(journal_tx)
+        native_username = 'Bridge AI' if provenance == 'bridge_ai' else (username.strip() or 'Bridge Reviewer')
         common = {
             'contextId': ctx,
             'modifiedTimestamp': iso,
             'gatewayLanguageCode': gateway_language_code,
             'gatewayLanguageQuote': gateway_language_quote,
-            'username': username,
+            'username': native_username,
         }
-        selection_record = {**common, 'selections': copy.deepcopy(selections), 'nothingToSelect': bool(nothing_to_select)}
+        selection_record = {
+            **common,
+            'selections': copy.deepcopy(normalized),
+            'nothingToSelect': bool(nothing_to_select),
+        }
         invalid_record = {
-            'contextId': ctx, 'username': username, 'invalidated': False,
-            'gatewayLanguageCode': gateway_language_code, 'gatewayLanguageQuote': gateway_language_quote,
+            'contextId': ctx,
+            'username': native_username,
+            'invalidated': False,
+            'gatewayLanguageCode': gateway_language_code,
+            'gatewayLanguageQuote': gateway_language_quote,
             'modifiedTimestamp': iso,
         }
-        # Persist as one recoverable transaction. If any step fails, restore the pre-write project state.
+        audit_record = {
+            'operation': 'tcCheckSelectionClear' if clear else 'tcCheckSelectionSave',
+            'tool': tool,
+            'groupId': group_id,
+            'checkId': check_id,
+            'selections': copy.deepcopy(normalized),
+            'nothingToSelect': bool(nothing_to_select),
+            'provenance': provenance,
+            'username': native_username,
+            'metadata': copy.deepcopy(audit_metadata or {}),
+            'modifiedTimestamp': iso,
+            'app': 'translationCore AI Bridge',
+            'schemaVersion': 1,
+        }
         try:
             _write_json_atomic(sel_path, selection_record)
             _write_json_atomic(inv_path, invalid_record)
-            entry['selections'] = copy.deepcopy(selections)
+            entry['selections'] = copy.deepcopy(normalized) if normalized else False
             entry['nothingToSelect'] = bool(nothing_to_select)
             entry['invalidated'] = False
+            entry['verseEdits'] = False
             data[idx] = entry
             _write_json_atomic(path, data)
-        except Exception as e:
-            try: self._rollback_paths(backup,tx_paths,existed)
+            _write_json_atomic(audit, audit_record)
+            self.journal.commit(journal_tx, {
+                'operation': audit_record['operation'], 'tool': tool, 'checkId': check_id,
+            })
+        except Exception as exc:
+            try:
+                self._rollback_paths(backup, tx_paths, existed)
             finally:
-                try: self.journal.rollback(journal_tx,str(e))
-                except Exception: pass
-            self._index_cache.pop(tool,None); raise
-        self.journal.commit(journal_tx, {'operation':'checkDataSync','tool':tool,'checkId':check_id})
-        self._index_cache.pop(tool, None); self._checks_by_verse_cache = None
-        audit = self.companion_dir() / 'audit' / self.book_id / str(chapter) / str(verse) / f'{safe}_tc-sync_{check_id}.json'
-        _write_json_atomic(audit, {'operation':'tcCheckApprovalSync','tool':tool,'groupId':group_id,'checkId':check_id,'selections':selections,'nothingToSelect':nothing_to_select,'username':username,'modifiedTimestamp':iso})
-        return {'selection': str(sel_path), 'invalidated': str(inv_path), 'index': str(path)}
+                try:
+                    self.journal.rollback(journal_tx, str(exc))
+                except Exception:
+                    pass
+            self.invalidate_index_cache()
+            raise
+        self.invalidate_index_cache()
+        return {
+            'committed': True,
+            'review': self.check_review(chapter, verse, tool, group_id, check_id),
+            'files': {
+                'selection': str(sel_path), 'invalidated': str(inv_path),
+                'index': str(path), 'audit': str(audit), 'backup': str(backup),
+            },
+        }
+
+    def save_check_selection(
+        self,
+        chapter: str | int,
+        verse: str | int,
+        tool: str,
+        group_id: str,
+        check_id: str,
+        selections: list[dict[str, Any]],
+        nothing_to_select: bool,
+        provenance: str,
+        expected_fingerprint: str,
+        username: str = 'Bridge Reviewer',
+        audit_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._persist_check_selection(
+            chapter, verse, tool, group_id, check_id, selections, nothing_to_select,
+            provenance, expected_fingerprint, username, audit_metadata=audit_metadata,
+        )
+
+    def clear_check_selection(
+        self,
+        chapter: str | int,
+        verse: str | int,
+        tool: str,
+        group_id: str,
+        check_id: str,
+        provenance: str,
+        expected_fingerprint: str,
+        username: str = 'Bridge Reviewer',
+        audit_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self._persist_check_selection(
+            chapter, verse, tool, group_id, check_id, [], False, provenance,
+            expected_fingerprint, username, audit_metadata=audit_metadata, clear=True,
+        )
+
+    def sync_check_approval(self, chapter: str | int, verse: str | int, tool: str, group_id: str, check_id: str, selections: list[dict[str, Any]], nothing_to_select: bool, username: str = 'Bridge Reviewer', gateway_language_code: str = 'en', gateway_language_quote: str = '') -> dict[str, Any]:
+        """Backward-compatible human writer; new callers should use save_check_selection."""
+        _, data, idx = self._find_index_entry_path(tool, group_id, check_id)
+        expected = self._check_state_fingerprint(chapter, verse, check_id, data[idx])
+        return self._persist_check_selection(
+            chapter, verse, tool, group_id, check_id, selections, nothing_to_select,
+            'human', expected, username, gateway_language_code, gateway_language_quote,
+        )
 
     def word_alignment_state(self, chapter: str | int, verse: str | int) -> str:
         completed = self.tc_dir / 'tools' / 'wordAlignment' / 'completed' / str(chapter) / f'{verse}.json'

@@ -175,6 +175,11 @@ class Methods:
     VERSE_DECIDE = "verse.decide"
     VERSE_EDIT = "verse.edit"
 
+    CHECK_LIST_FOR_VERSE = "check.listForVerse"
+    CHECK_VALIDATE_SELECTION = "check.validateSelection"
+    CHECK_SAVE_SELECTION = "check.saveSelection"
+    CHECK_CLEAR_SELECTION = "check.clearSelection"
+
     ALIGNMENT_GET = "alignment.get"
     ALIGNMENT_STATUS = "alignment.status"
     ALIGNMENT_REALIGN = "alignment.realign"
@@ -487,6 +492,51 @@ class BridgeEngine:
                 "alignmentStatus": self._alignment_verse_status(self.project, chapter, v),
             }
         return {"chapter": chapter, "verses": out}
+
+    def list_checks_for_verse(self, chapter: str, verse: str) -> dict[str, Any]:
+        self._require_project()
+        with self._checker_lock:
+            self._ensure_resource_indexes(self.project)
+            self.project.invalidate_index_cache()
+            checks = self.project.check_reviews_for_verse(chapter, verse)
+        return {"chapter": str(chapter), "verse": str(verse), "checks": checks}
+
+    def validate_check_selection(
+        self, chapter: str, verse: str, tool: str, group_id: str, check_id: str,
+        selections: Any, nothing_to_select: bool,
+    ) -> dict[str, Any]:
+        self._require_project()
+        with self._checker_lock:
+            return self.project.validate_check_selection(
+                chapter, verse, tool, group_id, check_id, selections, nothing_to_select,
+            )
+
+    def save_check_selection(
+        self, chapter: str, verse: str, tool: str, group_id: str, check_id: str,
+        selections: list[dict[str, Any]], nothing_to_select: bool, provenance: str,
+        expected_fingerprint: str, metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._require_project()
+        with self._checker_lock:
+            return self.project.save_check_selection(
+                chapter, verse, tool, group_id, check_id, selections, nothing_to_select,
+                provenance, expected_fingerprint,
+                username=self.settings.reviewer_name or "Bridge Reviewer",
+                audit_metadata=metadata,
+            )
+
+    def clear_check_selection(
+        self, chapter: str, verse: str, tool: str, group_id: str, check_id: str,
+        provenance: str, expected_fingerprint: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._require_project()
+        with self._checker_lock:
+            return self.project.clear_check_selection(
+                chapter, verse, tool, group_id, check_id, provenance, expected_fingerprint,
+                username=self.settings.reviewer_name or "Bridge Reviewer",
+                audit_metadata=metadata,
+            )
 
     # -- word alignment ---------------------------------------------------
 
@@ -1612,6 +1662,28 @@ class BridgeEngine:
             if m == Methods.VERSE_EDIT:
                 result = self.edit_verse(p["chapter"], p["verse"], p["newText"])
                 return EngineResponse.ok(request.id, result=result)
+            if m == Methods.CHECK_LIST_FOR_VERSE:
+                return EngineResponse.ok(request.id, result=self.list_checks_for_verse(
+                    p["chapter"], p["verse"],
+                ))
+            if m == Methods.CHECK_VALIDATE_SELECTION:
+                return EngineResponse.ok(request.id, result=self.validate_check_selection(
+                    p["chapter"], p["verse"], p["tool"], p["groupId"], p["checkId"],
+                    p.get("selections", []), p.get("nothingToSelect", False),
+                ))
+            if m == Methods.CHECK_SAVE_SELECTION:
+                return EngineResponse.ok(request.id, result=self.save_check_selection(
+                    p["chapter"], p["verse"], p["tool"], p["groupId"], p["checkId"],
+                    p.get("selections", []), p.get("nothingToSelect", False),
+                    p.get("provenance", "human"), p.get("expectedFingerprint", ""),
+                    p.get("metadata"),
+                ))
+            if m == Methods.CHECK_CLEAR_SELECTION:
+                return EngineResponse.ok(request.id, result=self.clear_check_selection(
+                    p["chapter"], p["verse"], p["tool"], p["groupId"], p["checkId"],
+                    p.get("provenance", "human"), p.get("expectedFingerprint", ""),
+                    p.get("metadata"),
+                ))
             if m == Methods.ALIGNMENT_GET:
                 return EngineResponse.ok(
                     request.id, result=self.get_alignment(p["chapter"], p["verse"]),

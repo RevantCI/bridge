@@ -1,7 +1,8 @@
 import type {
   AiExplainResult, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
   AlignmentStatusResponse, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
-  ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
+  CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, NativeCheckReview,
+  NativeCheckTool, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
 } from "../types/finding";
 
 /**
@@ -146,6 +147,41 @@ export const bridge = {
 
   editVerse(chapter: string, verse: string, newText: string): Promise<{ committed: boolean }> {
     return call("verse_edit", { chapter, verse, newText });
+  },
+
+  listChecksForVerse(chapter: string, verse: string): Promise<{ chapter: string; verse: string; checks: NativeCheckReview[] }> {
+    return call("check_list_for_verse", { chapter, verse });
+  },
+
+  validateCheckSelection(
+    chapter: string, verse: string, tool: NativeCheckTool, groupId: string, checkId: string,
+    selections: CheckTargetSelection[], nothingToSelect: boolean,
+  ): Promise<CheckSelectionValidation> {
+    return call("check_validate_selection", {
+      chapter, verse, tool, groupId, checkId, selections, nothingToSelect,
+    });
+  },
+
+  saveCheckSelection(
+    chapter: string, verse: string, tool: NativeCheckTool, groupId: string, checkId: string,
+    selections: CheckTargetSelection[], nothingToSelect: boolean,
+    provenance: "human" | "bridge_ai", expectedFingerprint: string,
+    metadata: Record<string, unknown> = {},
+  ): Promise<CheckSelectionMutation> {
+    return call("check_save_selection", {
+      chapter, verse, tool, groupId, checkId, selections, nothingToSelect,
+      provenance, expectedFingerprint, metadata,
+    });
+  },
+
+  clearCheckSelection(
+    chapter: string, verse: string, tool: NativeCheckTool, groupId: string, checkId: string,
+    provenance: "human" | "bridge_ai", expectedFingerprint: string,
+    metadata: Record<string, unknown> = {},
+  ): Promise<CheckSelectionMutation> {
+    return call("check_clear_selection", {
+      chapter, verse, tool, groupId, checkId, provenance, expectedFingerprint, metadata,
+    });
   },
 
   getAlignment(chapter: string, verse: string): Promise<AlignmentContext> {

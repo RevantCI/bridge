@@ -61,7 +61,18 @@ def exception_first_queue(project) -> list[dict[str,Any]]:
                     elif sev=='medium':medium+=1
             wa=project.word_alignment_state(ch,vs)
             checks=project.checks_for_verse(ch,vs)
-            invalid=sum(1 for e in checks if bool(e.get('invalidated')) or (e.get('selections') not in (False,None) and project.check_staleness(ch,vs,str(e.get('contextId',{}).get('checkId','')))=='stale'))
+            invalid=sum(
+                1 for e in checks
+                if bool(e.get('invalidated')) or (
+                    e.get('selections') not in (False, None)
+                    and project.check_staleness(
+                        ch, vs,
+                        str(e.get('contextId', {}).get('checkId', '')),
+                        str(e.get('contextId', {}).get('tool', '')),
+                        str(e.get('contextId', {}).get('groupId', '')),
+                    ) == 'stale'
+                )
+            )
             discussion=sum(1 for d in project.decisions_for_verse(ch,vs) if d.get('decision')=='needs_discussion')
             review=project.load_review_state(ch,vs) or {}; final_state=str(review.get('status',''))
             if critical or high or cache in ('stale','missing') or invalid or wa=='invalid' or discussion or final_state.startswith('stale'):

@@ -69,7 +69,7 @@ def translationcore_check_issues(project: TranslationCoreProject, chapter: str, 
         selection = entry.get('selections', False)
         nothing = bool(entry.get('nothingToSelect', False))
         invalid = bool(entry.get('invalidated', False))
-        stale = project.check_staleness(chapter, verse, check_id) == 'stale'
+        stale = project.check_staleness(chapter, verse, check_id, tool, group) == 'stale'
         if invalid or stale:
             reason = 'invalidated' if invalid else 'stale after a later Scripture edit'
             issues.append(QAIssue('TC_INVALIDATED' if invalid else 'TC_STALE_AFTER_EDIT', 'high', f'{tool}: recheck required', f'{group} / {check_id} is {reason}.', 'translationCore', check_id, group))
