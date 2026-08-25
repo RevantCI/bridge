@@ -66,7 +66,7 @@ if __name__ == "__main__":
             "status": "accepted", "comment": "demo run",
         })
         print("\nNote: settings.get below reads your REAL machine settings")
-        print("(%LOCALAPPDATA%/.translationcore-ai-bridge/settings.json or")
+        print("(%LOCALAPPDATA%/Bridge/data/settings.json or")
         print("$OPENAI_API_KEY). hasApiKey may show true if either exists —")
         print("that's correct behavior, not a bug.")
         call(engine, "settings.get")
