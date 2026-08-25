@@ -1,4 +1,4 @@
-# Developer handoff: Bridge v0.8.0-beta.4
+# Developer handoff: Bridge v0.8.0-beta.5
 
 Updated: 2026-08-25
 
@@ -18,6 +18,11 @@ gate is `docs/QA_TEST_MATRIX.md`.
   and tC word-alignment completed/invalid/pending markers.
 - Rechecking: each alignment mutation immediately reruns local and Greek Room
   verse checks and refreshes editor state.
+- AI provider compatibility: structured Responses requests first use the
+  configured reasoning effort. If and only if a provider/model returns an
+  explicit HTTP 400 unsupported-`reasoning` error, Bridge retries once without
+  that optional object and records `provider-default`; unrelated 400 errors
+  remain failures.
 - Export/import: nested many-to-many `zaln`/`w` milestones are parsed into tC
   groups and aligned export writes re-importable USFM 3 over the retained source
   template.
@@ -28,7 +33,7 @@ gate is `docs/QA_TEST_MATRIX.md`.
   reproducible generator. Aligned USFM and native tC projects are never
   overwritten; legacy raw-import recovery only fills empty source arrays and
   stops on a resource-version mismatch.
-- Automated source gate: 194 Python tests pass in the maintained Windows/
+- Automated source gate: 197 Python tests pass in the maintained Windows/
   Python 3.12.4 environment as of the 2026-08-25 Milestone 1 baseline.
   Svelte and Rust source gates pass. Beta 2 frozen-sidecar and NSIS results,
   including exact artifact hashes and the remaining manual installer acceptance,

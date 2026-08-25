@@ -57,6 +57,7 @@ class OpenAIResponsesClient:
         self.transport = transport
         self.timeout = timeout
         self.reasoning_effort = reasoning_effort if reasoning_effort in ('none','low','medium','high','xhigh','max') else 'medium'
+        self.last_reasoning_effort: str | None = self.reasoning_effort
         self.last_usage = AIUsage()
         # Bridge Settings lets a person point this at any OpenAI-compatible
         # endpoint (Azure OpenAI, a self-hosted vLLM/LM Studio/Ollama
@@ -89,8 +90,60 @@ class OpenAIResponsesClient:
                     parts.append(content['text'])
         return ''.join(parts)
 
+    def _request_json(
+        self, payload: dict[str, Any], headers: dict[str, str],
+    ) -> tuple[int, dict[str, Any]]:
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        status = 0
+        raw = b''
+        # Retry only transient transport/server failures. Schema/auth/input
+        # errors fail immediately and are handled by the caller.
+        for attempt in range(3):
+            status, raw = self.transport(self.endpoint, headers, body, self.timeout)
+            if status not in (408, 409, 429, 500, 502, 503, 504):
+                break
+            if attempt < 2:
+                time.sleep(1.0 * (2 ** attempt))
+        try:
+            response = json.loads(raw.decode('utf-8'))
+        except Exception as exc:
+            raise AIError(f'OpenAI returned a non-JSON response (HTTP {status}).') from exc
+        if not isinstance(response, dict):
+            raise AIError(f'OpenAI returned an unexpected JSON response (HTTP {status}).')
+        return status, response
+
+    @staticmethod
+    def _reasoning_parameter_unsupported(status: int, response: dict[str, Any]) -> bool:
+        """Recognize only an explicit optional-reasoning compatibility error.
+
+        OpenAI-compatible providers and non-reasoning models may reject the
+        optional Responses API ``reasoning`` object. Do not retry arbitrary
+        input errors: that could conceal a real schema/prompt problem.
+        """
+        if status != 400:
+            return False
+        error = response.get('error')
+        if not isinstance(error, dict):
+            return False
+        parameter = str(error.get('param') or '').strip().lower()
+        code = str(error.get('code') or '').strip().lower()
+        message = str(error.get('message') or '').strip().lower()
+        reasoning_parameter = parameter in {
+            'reasoning', 'reasoning.effort', 'reasoning_effort',
+        }
+        explicitly_unsupported = (
+            code in {'unsupported_parameter', 'unsupported_value'}
+            or 'not supported' in message
+            or 'unsupported parameter' in message
+        )
+        mentions_reasoning = 'reasoning.effort' in message or 'reasoning_effort' in message
+        return explicitly_unsupported and (reasoning_parameter or mentions_reasoning)
+
+    def _effective_reasoning_effort(self) -> str:
+        return self.last_reasoning_effort or 'provider-default'
+
     def _post_structured(self, instructions: str, input_text: str, schema_name: str, schema: dict[str, Any]) -> dict[str, Any]:
-        payload = {
+        payload: dict[str, Any] = {
             'model': self.model,
             'store': False,
             'instructions': instructions,
@@ -108,27 +161,20 @@ class OpenAIResponsesClient:
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
-            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.4',
+            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.5',
         }
-        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-        status = 0
-        raw = b''
-        # Retry only transient transport/server failures. Schema/auth/input errors fail immediately.
-        for attempt in range(3):
-            status, raw = self.transport(self.endpoint, headers, body, self.timeout)
-            if status not in (408, 409, 429, 500, 502, 503, 504):
-                break
-            if attempt < 2:
-                time.sleep(1.0 * (2 ** attempt))
-        try:
-            response = json.loads(raw.decode('utf-8'))
-        except Exception as e:
-            raise AIError(f'OpenAI returned a non-JSON response (HTTP {status}).') from e
+        self.last_reasoning_effort = self.reasoning_effort
+        status, response = self._request_json(payload, headers)
+        if self._reasoning_parameter_unsupported(status, response):
+            fallback_payload = dict(payload)
+            fallback_payload.pop('reasoning', None)
+            status, response = self._request_json(fallback_payload, headers)
+            self.last_reasoning_effort = None
         if status < 200 or status >= 300:
-            err = response.get('error', {}) if isinstance(response, dict) else {}
+            err = response.get('error', {})
             msg = err.get('message') if isinstance(err, dict) else None
             raise AIError(f'OpenAI API error HTTP {status}: {msg or "request failed"}')
-        usage = response.get('usage', {}) if isinstance(response, dict) else {}
+        usage = response.get('usage', {})
         input_details=usage.get('input_tokens_details', {}) if isinstance(usage,dict) else {}
         cached=int(input_details.get('cached_tokens',0) or 0) if isinstance(input_details,dict) else 0
         self.last_usage = AIUsage(
@@ -154,7 +200,7 @@ class OpenAIResponsesClient:
         url = f'{self.models_endpoint}/{urllib.parse.quote(self.model, safe="")}'
         req = urllib.request.Request(url, headers={
             'Authorization': f'Bearer {self.api_key}',
-            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.4',
+            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.5',
         }, method='GET')
         try:
             with urllib.request.urlopen(req, timeout=min(self.timeout, 30.0)) as response:
@@ -549,7 +595,7 @@ class OpenAIResponsesClient:
         saved = project.record_ai_review_result(chapter, verse, {
             'summary': summary,
             'model': self.model,
-            'reasoningEffort': self.reasoning_effort,
+            'reasoningEffort': self._effective_reasoning_effort(),
             'estimatedCostUSD': self.last_cost_usd,
             'dependencySnapshot': dependency_snapshot(project, chapter, verse, knowledge_base, self.model),
             'resourceProvenance': pack.get('resource_provenance', {}),
@@ -559,7 +605,7 @@ class OpenAIResponsesClient:
             'suppressedQaIssues': [x.to_dict() for x in suppressed_issues],
             'languageContext': language.to_dict(),
         })
-        return reviews, issues, summary, {'resource_provenance': pack.get('resource_provenance', {}), 'saved_to': str(saved), 'evidence_catalog': evidence_catalog, 'model': self.model, 'reasoning_effort': self.reasoning_effort, 'estimated_cost_usd': self.last_cost_usd, 'privacy_manifest': self.last_privacy_manifest, 'language_context': language.to_dict(), 'suppressed_qa_count': len(suppressed_issues)}
+        return reviews, issues, summary, {'resource_provenance': pack.get('resource_provenance', {}), 'saved_to': str(saved), 'evidence_catalog': evidence_catalog, 'model': self.model, 'reasoning_effort': self._effective_reasoning_effort(), 'estimated_cost_usd': self.last_cost_usd, 'privacy_manifest': self.last_privacy_manifest, 'language_context': language.to_dict(), 'suppressed_qa_count': len(suppressed_issues)}
 
     def prepare_verse_review(self, project: TranslationCoreProject, chapter: str, verse: str, alignment: VerseAlignment, knowledge_base=None, progress_callback=None) -> tuple[dict[str, Any] | None, VerseAlignment, list[AICheckReview], list[QAIssue], str, dict[str, Any]]:
         """
@@ -599,14 +645,14 @@ class OpenAIResponsesClient:
         meta['total_tokens_for_prepare'] = first_usage + second_usage
         meta['estimated_cost_usd'] = total_cost
         meta['model'] = self.model
-        meta['reasoning_effort'] = self.reasoning_effort
+        meta['reasoning_effort'] = self._effective_reasoning_effort()
         meta['privacy_manifest'] = self.last_privacy_manifest
         if project.review_input_fingerprint(chapter, verse) != start_input_fingerprint:
             raise AIError('Verse/project data changed before AI review could be recorded; stale result was discarded.')
         saved = project.record_ai_review_result(chapter, verse, {
             'summary': summary,
             'model': self.model,
-            'reasoningEffort': self.reasoning_effort,
+            'reasoningEffort': self._effective_reasoning_effort(),
             'estimatedCostUSD': total_cost,
             'dependencySnapshot': dependency_snapshot(project, chapter, verse, knowledge_base, self.model),
             'resourceProvenance': meta.get('resource_provenance', {}),

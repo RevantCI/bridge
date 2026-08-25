@@ -53,7 +53,7 @@ py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v
 ```
 
-Should show **194 passed** in the maintained Windows/Python 3.12 development
+Should show **197 passed** in the maintained Windows/Python 3.12 development
 environment. Try `python demo.py` for a live walkthrough
 against a throwaway fixture project — no real translationCore project
 needed.
@@ -114,7 +114,7 @@ filename examples.
 `npm run tauri dev` starts the frontend development server, compiles the Rust
 shell, launches the sidecar, and opens the Bridge desktop window.
 
-## Current development status: v0.8.0-beta.4 release candidate
+## Current development status: v0.8.0-beta.5 release candidate
 
 The import → check → review → manual-align → export loop is implemented. See
 [`docs/ALIGNMENT.md`](docs/ALIGNMENT.md) for the alignment protocol, persistence

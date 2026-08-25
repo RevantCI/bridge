@@ -10,7 +10,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 194 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes the Milestone 3A resource/import regressions plus project identity, relocation validation, legacy collection grouping, corrupt-registry recovery, collection-aware duplicate detection, endpoint-level block/allow decisions, forget-without-delete, portable-collection regressions, and Paratext tests isolated from any live companion pipe |
+| A01 | Backend | Complete Python suite | Source | PASS — 197 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes the Milestone 3A resource/import and AI reasoning-compatibility regressions plus project identity, relocation validation, legacy collection grouping, corrupt-registry recovery, collection-aware duplicate detection, endpoint-level block/allow decisions, forget-without-delete, portable-collection regressions, and Paratext tests isolated from any live companion pipe |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 1 sidecar-timeout unit test passed |
@@ -36,7 +36,8 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A24 | Paratext/Logos connectors | `paratext.getState/setReference`, `logos.getState/setReference` protocol wiring — no companion Paratext plugin instance or Logos installation available on this machine | Source | PASS — 4 protocol-level tests plus 4 direct `LogosConnectorClient`↔real `logos_bridge.ps1` integration tests (real subprocess, real `-STA` PowerShell, real newline-delimited JSON exchange, a real "not installed" COM error round-tripping cleanly) — see paratext_plugin/README.md and engine/logos_connector/README.md for what remains genuinely unverified against live Paratext/Logos |
 | A25 | Paratext/Logos connectors | Same protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — Paratext returns the expected clean companion-unavailable response; the packaged Logos PowerShell bridge launches and cleanly reports unavailable COM integration |
 | A26 | Paratext companion plugin | `paratext_plugin/TranslationCoreAIBridgePlugin.cs` — a separate .NET project, not part of the Python source tree | Build only | PASS (compile) / NOT RUN (load) — compiles cleanly via the bundled .NET Framework `csc.exe` against Paratext's real installed `PluginInterfaces.dll`/`CorePluginInterfaces.dll` (every interface member used was confirmed by reflecting into those real DLLs). Deployment into `C:\Program Files\Paratext 9\plugins\...` was not performed this session (a protected-system-directory write, blocked by this session's own safety controls) — the plugin has never actually been loaded by a running Paratext instance. See paratext_plugin/README.md for the exact next steps |
-| A27 | Original-language resources | Exact pinned UHB v3.0.0/UGNT v0.34 packs, all 66 books, metadata and artifact hashes, golden Hebrew/Greek tokens, Qere/Ketiv, occurrence and verse-bridge behavior | Source + Frozen | PASS — 42 focused Milestone 3A tests and the 194-test full suite, including anchored provenance-tampering rejection, 39 UHB + 27 UGNT pack loads, and exact totals of 31,103 verses/443,131 tokens; rebuilt frozen worker imported raw Titus and returned the pinned UGNT provenance plus all 17 Titus 1:1 source tokens |
+| A27 | Original-language resources | Exact pinned UHB v3.0.0/UGNT v0.34 packs, all 66 books, metadata and artifact hashes, golden Hebrew/Greek tokens, Qere/Ketiv, occurrence and verse-bridge behavior | Source + Frozen | PASS — 42 focused Milestone 3A tests and the 197-test full suite, including anchored provenance-tampering rejection, 39 UHB + 27 UGNT pack loads, and exact totals of 31,103 verses/443,131 tokens; rebuilt frozen worker imported raw Titus and returned the pinned UGNT provenance plus all 17 Titus 1:1 source tokens |
+| A28 | AI provider compatibility | Model/provider explicitly rejects optional `reasoning.effort` | Source | PASS — retries exactly once without `reasoning`, records `provider-default`, and does not retry unrelated or invalid-value HTTP 400 responses |
 
 ## Import workflows
 
@@ -135,7 +136,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 ## Automated evidence
 
-- Python: 194 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 197 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book
@@ -155,10 +156,25 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
   connector error paths, Project Registry/exact-duplicate reason/count protocol, manual many-to-many
   alignment/export/undo, and USFM duplicate/missing-verse checks pass. Lightweight
   status calls remain responsive during the job.
-- Windows: the Beta 4 release executable and NSIS installer were produced with both
+- Windows: the Beta 5 release executable and NSIS installer were produced with both
   verified worker binaries. The installer is
-  `Bridge_0.8.0-beta.4_x64-setup.exe` (SHA-256
-  `256466811DBD80B9363B04E52B621CDF3E735EBFB1898D1889DD39E98776AC77`).
+  `Bridge_0.8.0-beta.5_x64-setup.exe` (SHA-256
+  `A802DF0326E057F7A15C914EAF9E5366A520C3FCD11B5EE34016566318CE6427`).
+
+## Beta 5 artifact provenance — 2026-08-25
+
+- Release source: Milestone 3A commit `f5d0f28` plus the pending Beta 5 version
+  bump and explicit unsupported-`reasoning.effort` compatibility fallback.
+- Desktop executable: 12,740,096 bytes, ProductVersion `0.8.0-beta.5`, SHA-256
+  `10D6D38E747DCA029289EA5E5045D69D913CAD8189DBC11A56656B946EBFDA3F`.
+- `bridge-engine.exe`: 26,407,792 bytes, SHA-256
+  `21DDB5A13295B09C31BDEDEA71769C8DCBAD755EC4C3A6134FA64BDFCD46A56A`.
+- `bridge-usfm-checker.exe`: 7,673,682 bytes, SHA-256
+  `88FC723E2F9EE5D8C7410A2ECE18591118E3DDC3FD722B1452A8C270C914AF8D`.
+- Installer: 36,097,566 bytes, ProductVersion `0.8.0-beta.5`, SHA-256
+  `A802DF0326E057F7A15C914EAF9E5366A520C3FCD11B5EE34016566318CE6427`.
+- The frozen smoke passed against the exact release-staged workers. All four
+  executables remain `NotSigned`; installed GUI/API acceptance remains manual.
 
 ## Beta 4 artifact provenance — 2026-08-25
 
