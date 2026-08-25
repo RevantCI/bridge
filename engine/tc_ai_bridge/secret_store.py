@@ -202,6 +202,19 @@ class AppSettings:
         self.save_sanitized()
 
     @property
+    def reviewer_mode(self) -> str:
+        value = str(self.data.get('reviewer_mode') or 'basic').strip().lower()
+        return value if value in ('basic', 'advanced') else 'basic'
+
+    @reviewer_mode.setter
+    def reviewer_mode(self, value: str) -> None:
+        normalized = str(value or '').strip().lower()
+        if normalized not in ('basic', 'advanced'):
+            raise ValueError('reviewer_mode must be basic or advanced')
+        self.data['reviewer_mode'] = normalized
+        self.save_sanitized()
+
+    @property
     def paratext_username(self) -> str:
         return str(self.data.get('paratext_username') or '')
 

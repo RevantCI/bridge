@@ -665,6 +665,23 @@ def test_settings_get_has_safe_defaults(tmp_path, monkeypatch):
     result = call(engine, "settings.get")["result"]
     assert result["hasApiKey"] is False
     assert "model" in result
+    assert result["reviewerMode"] == "basic"
+
+
+def test_settings_persists_valid_reviewer_mode_and_rejects_invalid_mode(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from tc_ai_bridge.secret_store import AppSettings
+
+    settings_path = tmp_path / "settings.json"
+    engine = BridgeEngine(settings=AppSettings(path=settings_path))
+    changed = call(engine, "settings.set", {"reviewerMode": "advanced"})
+    assert changed["success"] is True
+    assert changed["result"]["reviewerMode"] == "advanced"
+
+    restarted = BridgeEngine(settings=AppSettings(path=settings_path))
+    assert call(restarted, "settings.get")["result"]["reviewerMode"] == "advanced"
+    invalid = call(restarted, "settings.set", {"reviewerMode": "expert"})
+    assert invalid["success"] is False
 
 
 def test_settings_get_reflects_a_saved_api_key(tmp_path, monkeypatch):

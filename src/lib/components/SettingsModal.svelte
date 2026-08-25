@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
-  import { project } from "../stores";
+  import { project, reviewerMode } from "../stores";
   import type { SettingsData } from "../types/finding";
 
   export let onClose: () => void;
@@ -16,6 +16,7 @@
   let model = "gpt-5.6";
   let apiKey = "";
   let hasApiKey = false;
+  let mode: "basic" | "advanced" = "basic";
 
   const providerPresets: Record<string, string> = {
     openai: "",
@@ -34,6 +35,8 @@
       apiBaseUrl = s.apiBaseUrl || "";
       model = s.model || "gpt-5.6";
       hasApiKey = s.hasApiKey;
+      mode = s.reviewerMode;
+      reviewerMode.set(s.reviewerMode);
     } catch (e) {
       console.error("failed to load settings", e);
     } finally {
@@ -51,10 +54,11 @@
     saving = true;
     saveMessage = "";
     try {
-      const params: Record<string, unknown> = { provider, apiBaseUrl, model };
+      const params: Record<string, unknown> = { provider, apiBaseUrl, model, reviewerMode: mode };
       if (apiKey.trim()) params.apiKey = apiKey.trim();
       const result = await bridge.setSettings(params);
       hasApiKey = result.hasApiKey;
+      reviewerMode.set(result.reviewerMode);
       apiKey = "";
       saveMessage = "Saved.";
     } catch (e) {
@@ -117,8 +121,23 @@
       {:else if activePane === "quality"}
         <h3>Quality engine</h3>
         <p class="desc">Greek Room checks run fully offline and never leave this machine.</p>
+        <div class="field">
+          <div class="field-label">Reviewer experience</div>
+          <label class="mode-option" class:selected={mode === "basic"}>
+            <input type="radio" bind:group={mode} value="basic" />
+            <span><b>Basic</b><small>Streamlined, read-only tN/tW review. Automatic AI review is added in Milestone 3B.3.</small></span>
+          </label>
+          <label class="mode-option" class:selected={mode === "advanced"}>
+            <input type="radio" bind:group={mode} value="advanced" />
+            <span><b>Advanced</b><small>Inspect evidence and edit native translationCore target selections.</small></span>
+          </label>
+        </div>
         <div class="kv"><span>Offline QA engine (Greek Room)</span><span class="on">On</span></div>
         <div class="kv"><span>Local checks (tN / tW / alignment)</span><span class="on">On</span></div>
+        <div class="save-row">
+          <button class="btn primary" on:click={save} disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+          {#if saveMessage}<span class="save-msg">{saveMessage}</span>{/if}
+        </div>
       {:else if activePane === "resources"}
         <h3>Original-language resources</h3>
         <p class="desc">Bridge bundles versioned Hebrew and Greek source-token indexes for offline word alignment.</p>
@@ -162,9 +181,14 @@
   .desc { font-size: 11px; color: var(--text-2); margin: 0 0 16px; }
   .muted { font-size: 12px; color: var(--text-3); }
   .field { margin-bottom: 14px; }
-  .field label { display: block; font-size: 11px; font-weight: 700; color: var(--text-2); margin-bottom: 5px; }
+  .field > label, .field-label { display: block; font-size: 11px; font-weight: 700; color: var(--text-2); margin-bottom: 5px; }
   .field input, .field select { width: 100%; height: 34px; border: 1px solid var(--border); border-radius: 6px; padding: 0 10px; font-size: 12px; color: var(--text); background: var(--surface-2); box-sizing: border-box; }
   .hint { font-size: 10px; color: var(--text-3); margin-top: 4px; }
+  .mode-option { display: flex; align-items: flex-start; gap: 9px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; margin-bottom: 7px; cursor: pointer; background: var(--surface-2); }
+  .mode-option.selected { border-color: var(--accent); background: var(--accent-bg); }
+  .mode-option input { width: auto; height: auto; margin: 2px 0 0; }
+  .mode-option span { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text); }
+  .mode-option small { color: var(--text-2); line-height: 1.35; }
   .save-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
   .btn { font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }

@@ -399,6 +399,7 @@ export interface SettingsData {
   apiBaseUrl: string;
   model: string;
   reviewerName: string;
+  reviewerMode: "basic" | "advanced";
   paratextUsername: string;
   hasApiKey: boolean;
   aiUsage: { tokens: number; estimatedCostUSD: number };

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, currentChapter, showSource, verseKey } from "../stores";
+  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, currentChapter, showSource, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse } from "../stores";
   import { buildSegments } from "../utils/highlight";
 
   export let onSelect: (verse: string) => void;
@@ -36,7 +36,7 @@
     {@const checkStatus = $checkStatusByVerse[key]}
     {@const alignmentStatus = $alignmentStatusByVerse[key] ?? "untouched"}
     {@const openCount = findings.filter((f) => f.status === "open").length}
-    {@const segments = buildSegments($verseTexts[key] ?? "", findings)}
+    {@const segments = buildSegments($verseTexts[key] ?? "", findings, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [])}
     <div
       class="verse"
       data-verse-key={key}
@@ -54,7 +54,7 @@
       <div class="vtext">
         {#each segments as seg}
           {#if seg.className}
-            <mark class={seg.className}>{seg.text}</mark>
+            <mark class={seg.className} title={seg.title}>{seg.text}</mark>
           {:else}
             {seg.text}
           {/if}

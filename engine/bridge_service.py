@@ -67,7 +67,7 @@ from check_jobs import (
     CheckJobSpec,
 )
 
-BRIDGE_VERSION = "0.8.0-beta.5"
+BRIDGE_VERSION = "0.8.0-beta.6"
 
 # tc_ai_bridge's QAIssue.severity strings -> our shared Severity enum
 _SEVERITY_MAP = {
@@ -1578,6 +1578,7 @@ class BridgeEngine:
             "apiBaseUrl": self.settings.api_base_url,
             "model": self.settings.model,
             "reviewerName": self.settings.reviewer_name,
+            "reviewerMode": self.settings.reviewer_mode,
             "paratextUsername": self.settings.paratext_username,
             "hasApiKey": bool(self.settings.get_api_key()),
             "aiUsage": self.settings.get_ai_usage_totals(),
@@ -1594,6 +1595,8 @@ class BridgeEngine:
             self.settings.model = kwargs["model"]
         if "reviewerName" in kwargs:
             self.settings.reviewer_name = kwargs["reviewerName"]
+        if "reviewerMode" in kwargs:
+            self.settings.reviewer_mode = kwargs["reviewerMode"]
         return self.get_settings()
 
     def _require_project(self) -> None:

@@ -11,7 +11,7 @@
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
-    verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState,
+    verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState, reviewerMode,
   } from "./lib/stores";
 
   let opened = false;
@@ -32,6 +32,12 @@
       try {
         await bridge.ping();
         engineStatus = "ready";
+        try {
+          const settings = await bridge.getSettings();
+          reviewerMode.set(settings.reviewerMode);
+        } catch (error) {
+          console.error("Could not load reviewer mode", error);
+        }
         const stopListening = await bridge.onFileDrop(
           (paths) => void handleDroppedPaths(paths),
           (phase) => { draggingOver = phase === "over"; },

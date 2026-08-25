@@ -1,5 +1,5 @@
 import { writable, derived, get } from "svelte/store";
-import type { AlignmentWorkStatus, ProjectInfo, QaFinding } from "./types/finding";
+import type { AiCheckReview, AlignmentWorkStatus, NativeCheckReview, ProjectInfo, QaFinding } from "./types/finding";
 
 export function verseKey(chapter: string, verse: string): string {
   return `${chapter}:${verse}`;
@@ -19,6 +19,9 @@ export const findingsByVerse = writable<Record<string, QaFinding[]>>({});
 export type CheckStatus = "pending" | "succeeded" | "failed" | "cancelled";
 export const checkStatusByVerse = writable<Record<string, CheckStatus>>({});
 export const alignmentStatusByVerse = writable<Record<string, AlignmentWorkStatus>>({});
+export const nativeChecksByVerse = writable<Record<string, NativeCheckReview[]>>({});
+export const aiCheckReviewsByVerse = writable<Record<string, AiCheckReview[]>>({});
+export const reviewerMode = writable<"basic" | "advanced">("basic");
 
 // Which chapters have had their verse text + checks loaded already, so
 // switching back to a chapter you've already visited doesn't re-fetch.
@@ -36,6 +39,8 @@ export function resetBookState(): void {
   findingsByVerse.set({});
   checkStatusByVerse.set({});
   alignmentStatusByVerse.set({});
+  nativeChecksByVerse.set({});
+  aiCheckReviewsByVerse.set({});
   loadedChapters.set({});
   selectedVerse.set(null);
   checkingProgress.set({ running: false, percent: 0, label: "", jobId: "", state: "idle", error: "", scope: "chapter" });

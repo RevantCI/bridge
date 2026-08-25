@@ -1,9 +1,11 @@
 <script lang="ts">
   import { bridge } from "../api/bridgeClient";
   import AlignmentModal from "./AlignmentModal.svelte";
+  import TranslationHelpsReview from "./TranslationHelpsReview.svelte";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
     verseTexts, checkStatusByVerse, alignmentStatusByVerse, checkingProgress, verseKey,
+    aiCheckReviewsByVerse, nativeChecksByVerse,
   } from "../stores";
   import type { AiExplainResult, FindingStatus } from "../types/finding";
 
@@ -91,6 +93,13 @@
   let aiExplainError = "";
   let aiExplainResult: AiExplainResult | null = null;
   let aiExplainKey = "";
+  let translationHelpsReview: TranslationHelpsReview;
+
+  function nativeCheckStateChanged(): void {
+    aiExplainResult = null;
+    aiExplainError = "";
+    aiExplainKey = "";
+  }
 
   $: if (
     editing && !editSaving && $selectedVerse &&
@@ -118,6 +127,9 @@
     try {
       aiExplainResult = await bridge.aiExplainVerse(chapter, verse);
       aiExplainKey = verseKey(chapter, verse);
+      aiCheckReviewsByVerse.update((values) => ({
+        ...values, [aiExplainKey]: aiExplainResult?.checkReviews ?? [],
+      }));
     } catch (e) {
       aiExplainError = e instanceof Error ? e.message : String(e);
     } finally {
@@ -164,7 +176,20 @@
     try {
       await bridge.editVerse(chapter, verse, editText);
       verseTexts.update((t) => ({ ...t, [key]: editText }));
+      aiCheckReviewsByVerse.update((values) => {
+        const next = { ...values };
+        delete next[key];
+        return next;
+      });
+      nativeChecksByVerse.update((values) => {
+        const next = { ...values };
+        delete next[key];
+        return next;
+      });
       alignmentStatusByVerse.update((values) => ({ ...values, [key]: "invalid" }));
+      if ($selectedVerse && verseKey($currentChapter, $selectedVerse) === key) {
+        await translationHelpsReview?.refresh();
+      }
       editing = false;
       recheckingKey = key;
       recheckedKey = "";
@@ -224,6 +249,8 @@
           </div>
         </div>
       {/if}
+
+      <TranslationHelpsReview bind:this={translationHelpsReview} chapter={$currentChapter} verse={$selectedVerse} onStateChanged={nativeCheckStateChanged} />
 
       <div class="section">
         <div class="section-title">
