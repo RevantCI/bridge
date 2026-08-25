@@ -17,9 +17,9 @@ if (-not $PythonCommand) {
     $PythonCommand = if (Test-Path -LiteralPath $venvPython) { $venvPython } else { "python" }
 }
 
-& $PythonCommand -c "import PyInstaller, regex"
+& $PythonCommand -c "import PyInstaller, regex, uroman, wildebeest"
 if ($LASTEXITCODE -ne 0) {
-    throw "The selected Python environment is missing PyInstaller or regex. Run 'pip install -e .[dev]' in engine/ or pass -PythonCommand explicitly."
+    throw "The selected Python environment is missing a release dependency. Run 'pip install -c constraints-py312-windows.txt -e .[dev,wildebeest]' in engine/ or pass -PythonCommand explicitly."
 }
 
 if (-not $TargetTriple) {

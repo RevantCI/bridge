@@ -108,7 +108,7 @@ which mode is actually active.
 | Version | Scope | Status |
 |---|---|---|
 | **v0.7.5** | `GreekRoomEngine` sidecar, stable JSON protocol, `QaFinding` model, Wildebeest (mock fallback). | ✅ Built |
-| **v0.8.0-beta.1** | Real sidecar/UI core loop, fast multi-book import, background QA jobs, persistent decisions and edits, standalone USFM checker, manual word-alignment editor, aligned/non-aligned USFM export. | Release candidate |
+| **v0.8.0-beta.2** | Real sidecar/UI core loop, fast multi-book import, background QA jobs, persistent decisions and edits, standalone USFM checker, manual word-alignment editor, aligned/non-aligned USFM export. | Release candidate |
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
 | v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
 | v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/DEVELOPER_HANDOFF.md's Phase 7 section) |

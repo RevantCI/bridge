@@ -112,7 +112,7 @@ filename examples.
 `npm run tauri dev` starts the frontend development server, compiles the Rust
 shell, launches the sidecar, and opens the Bridge desktop window.
 
-## Current development status: v0.8.0-beta.1 release candidate
+## Current development status: v0.8.0-beta.2 release candidate
 
 The import → check → review → manual-align → export loop is implemented. See
 [`docs/ALIGNMENT.md`](docs/ALIGNMENT.md) for the alignment protocol, persistence
