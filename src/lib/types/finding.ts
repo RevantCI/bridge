@@ -242,6 +242,8 @@ export type DuplicateClassification = "new" | "exactDuplicate" | "possibleDuplic
 
 export interface DuplicateMatch {
   match: "exact" | "possible";
+  reason: "sourceFingerprint" | "bookLanguageBible";
+  groupId: string;
   projectId: string;
   collectionId?: string;
   path: string;
@@ -256,6 +258,13 @@ export interface DuplicateMatch {
 export interface DuplicateAssessment {
   classification: DuplicateClassification;
   matches: DuplicateMatch[];
+  inputBookCount: number;
+  exactBookCount: number;
+  missingExactBookCount: number;
+  possibleBookCount: number;
+  overlapBookCount: number;
+  matchingGroupCount: number;
+  exactMatchGroupId: string;
   sourceFingerprints: Record<string, string>;
   collectionFingerprint: string;
 }

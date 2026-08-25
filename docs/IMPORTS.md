@@ -33,7 +33,16 @@ registry. An exact existing import defaults to **Open existing project**. A new
 copy is possible only through the explicit **Import as a separate copy** action;
 Bridge does not silently merge or overwrite projects. A matching book/language/
 Bible identity without an exact source hash is shown as a possible overlap for
-human review.
+human review and never blocks import. Display names are not duplicate keys.
+
+For multi-book input, exact matches must belong to one registered collection and
+cover every incoming canonical book before Bridge classifies the source as an
+exact duplicate. Exact books scattered across unrelated projects, partial
+collection coverage, changed content, and registry entries whose folders are
+missing remain non-blocking overlaps. The review reports content versus metadata
+reasons, matched-book counts, and the related project or collection before the
+user chooses **Open existing**, **Import as a separate copy**, or **Continue with
+separate import**.
 
 Native file/folder drag-and-drop uses the same read-only preview and duplicate
 decision flow as the pickers, including when another project is already open.

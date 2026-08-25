@@ -51,7 +51,7 @@ py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v
 ```
 
-Should show **173 passed** in the maintained Windows/Python 3.12 development
+Should show **183 passed** in the maintained Windows/Python 3.12 development
 environment. Try `python demo.py` for a live walkthrough
 against a throwaway fixture project — no real translationCore project
 needed.
@@ -126,9 +126,12 @@ release gate.
   and remain visible when a folder is missing so it can be located or forgotten
   without deleting data.
 - ✅ **Duplicate-safe importing** — source fingerprints distinguish exact
-  duplicates from possible book/language/Bible overlaps. Exact duplicates open
-  the existing project by default; creating a separate suffixed copy requires
-  an explicit action. Automatic merge and overwrite are intentionally absent.
+  duplicates from possible book/language/Bible overlaps. The review names the
+  matching project/collection and explains whether content or metadata matched;
+  a display name alone is never a duplicate. A multi-book source is blocked only
+  when one existing collection exactly covers every incoming book. Exact
+  duplicates open the existing project by default; creating a separate suffixed
+  copy requires an explicit action. Automatic merge and overwrite are absent.
 - ✅ **Global native drag-and-drop** — dropping one source file or folder
   anywhere in the desktop window enters the same inspect/preview/duplicate flow
   as the native pickers, even while a project is open.

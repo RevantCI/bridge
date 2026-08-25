@@ -218,7 +218,16 @@ def main() -> int:
             ):
                 raise SystemExit(f"Frozen project registry did not return the opened project: {listed}")
             duplicate = request("project-duplicate", "project.inspectImport", {"path": str(project)})
-            if duplicate.get("result", {}).get("duplicates", {}).get("classification") != "exactDuplicate":
+            assessment = duplicate.get("result", {}).get("duplicates", {})
+            if (
+                assessment.get("classification") != "exactDuplicate"
+                or assessment.get("inputBookCount") != 1
+                or assessment.get("exactBookCount") != 1
+                or assessment.get("missingExactBookCount") != 0
+                or assessment.get("matchingGroupCount") != 1
+                or not assessment.get("exactMatchGroupId", "").startswith("project:")
+                or assessment.get("matches", [{}])[0].get("reason") != "sourceFingerprint"
+            ):
                 raise SystemExit(f"Frozen duplicate classification failed: {duplicate}")
 
             versification_detect = request("versification-detect", "versification.detect", {})

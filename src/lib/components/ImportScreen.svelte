@@ -3,7 +3,7 @@
   import { iso6393 } from "iso-639-3";
   import { bridge } from "../api/bridgeClient";
   import { project } from "../stores";
-  import type { ImportMetadata, ImportPreview, RegisteredProject } from "../types/finding";
+  import type { DuplicateMatch, ImportMetadata, ImportPreview, RegisteredProject } from "../types/finding";
 
   export let onOpened: () => void;
   export let droppedPath = "";
@@ -41,13 +41,44 @@
       ).slice(0, 40)
     : languages.slice(0, 40);
   $: canImport = Boolean(preview && metadata.languageId && metadata.languageName && metadata.projectName && metadata.bibleName);
-  $: exactMatch = preview?.duplicates.matches.find((match) => match.match === "exact" && !match.missing);
+  $: exactMatch = preview?.duplicates.exactMatchGroupId
+    ? preview.duplicates.matches.find((match) =>
+        match.groupId === preview?.duplicates.exactMatchGroupId && match.match === "exact" && !match.missing,
+      )
+    : undefined;
+  $: matchedGroups = groupDuplicateMatches(preview?.duplicates.matches ?? []);
+  $: visibleMatchedGroups = matchedGroups.slice(0, 5);
+  $: hiddenMatchedGroupCount = Math.max(0, matchedGroups.length - visibleMatchedGroups.length);
   $: visibleProjects = projects.filter((item, index) =>
     !item.collectionId || projects.findIndex((candidate) => candidate.collectionId === item.collectionId) === index,
   );
 
   function message(value: unknown): string {
     return value instanceof Error ? value.message : String(value);
+  }
+
+  function groupDuplicateMatches(matches: DuplicateMatch[]) {
+    const groups = new Map<string, {
+      id: string; label: string; path: string; missing: boolean;
+      exactBooks: Set<string>; possibleBooks: Set<string>;
+    }>();
+    for (const match of matches) {
+      let group = groups.get(match.groupId);
+      if (!group) {
+        group = {
+          id: match.groupId,
+          label: match.projectName || match.bibleName || match.bookName || "Existing project",
+          path: match.path,
+          missing: match.missing,
+          exactBooks: new Set<string>(),
+          possibleBooks: new Set<string>(),
+        };
+        groups.set(match.groupId, group);
+      }
+      group.missing = group.missing && match.missing;
+      (match.match === "exact" ? group.exactBooks : group.possibleBooks).add(match.bookId.toUpperCase());
+    }
+    return [...groups.values()];
   }
 
   async function loadProjects() {
@@ -220,8 +251,29 @@
 
       {#if preview.duplicates.classification !== "new"}
         <div class:exact={preview.duplicates.classification === "exactDuplicate"} class="duplicate-notice">
-          <strong>{preview.duplicates.classification === "exactDuplicate" ? "This source is already imported." : "This source overlaps an existing project."}</strong>
-          <span>{preview.duplicates.matches.length} matching {preview.duplicates.matches.length === 1 ? "project" : "projects"} found. Bridge will never overwrite or merge them automatically.</span>
+          {#if preview.duplicates.classification === "exactDuplicate"}
+            <strong>{preview.books.length === 1 ? "This source is already imported." : "This collection is already imported."}</strong>
+            <span>{preview.books.length === 1 ? "Its source contents exactly match an existing project." : `All ${preview.duplicates.inputBookCount} source books exactly match one existing collection.`} This decision is based on file contents, not the book or project name.</span>
+          {:else if preview.duplicates.exactBookCount > 0}
+            <strong>{preview.duplicates.exactBookCount} of {preview.duplicates.inputBookCount} source {preview.duplicates.inputBookCount === 1 ? "book matches" : "books match"} existing content.</strong>
+            <span>No single existing collection contains every incoming book. Import remains available and creates a separate project without overwriting anything.</span>
+          {:else if preview.duplicates.missingExactBookCount > 0}
+            <strong>Matching source content belongs to a project whose folder is missing.</strong>
+            <span>The unavailable registry entry does not block recovery. You can locate the old folder from Project Home or continue with a separate import.</span>
+          {:else}
+            <strong>Possible related project found; source contents are different.</strong>
+            <span>The canonical book and language overlap; supplied Bible/translation metadata also matches. A name alone is never treated as a duplicate, and import remains available.</span>
+          {/if}
+          <div class="duplicate-matches">
+            {#each visibleMatchedGroups as group}
+              <div class="duplicate-match">
+                <span><b>{group.label}</b>{group.missing ? " · folder missing" : ""}</span>
+                <small>{group.exactBooks.size ? `Exact source: ${[...group.exactBooks].join(", ")}` : ""}{group.exactBooks.size && group.possibleBooks.size ? " · " : ""}{group.possibleBooks.size ? `Metadata overlap: ${[...group.possibleBooks].join(", ")}` : ""}</small>
+              </div>
+            {/each}
+            {#if hiddenMatchedGroupCount > 0}<small>+ {hiddenMatchedGroupCount} more related {hiddenMatchedGroupCount === 1 ? "project or collection" : "projects or collections"}</small>{/if}
+          </div>
+          <span>Bridge found {preview.duplicates.matchingGroupCount} related {preview.duplicates.matchingGroupCount === 1 ? "project or collection" : "projects or collections"}; it will never overwrite or merge them automatically.</span>
         </div>
       {/if}
 
@@ -270,7 +322,7 @@
             <button class="separate-button" on:click={() => runImport(true)} disabled={loading || !canImport}>Import as a separate copy</button>
           {:else}
             <button class="import-button" on:click={() => runImport(false)} disabled={loading || !canImport}>
-              {loading ? `Importing ${preview.books.length === 1 ? "book" : `${preview.books.length} books`}…` : `Import ${preview.books.length === 1 ? "book" : `${preview.books.length} books`}`}
+              {loading ? `Importing ${preview.books.length === 1 ? "book" : `${preview.books.length} books`}…` : preview.duplicates.classification === "new" ? `Import ${preview.books.length === 1 ? "book" : `${preview.books.length} books`}` : "Continue with separate import"}
             </button>
           {/if}
           {#if !canImport}<p class="required">Select a language and complete both project names.</p>{/if}
@@ -315,6 +367,10 @@
   .back { margin: 4px 0 0; white-space: nowrap; }
   .duplicate-notice { display: flex; flex-direction: column; gap: 3px; margin-top: 16px; border: 1px solid #e8c268; border-radius: 8px; background: #fff9e9; color: #7a5500; padding: 10px 12px; font-size: 10px; }
   .duplicate-notice.exact { border-color: #e6a9a9; background: #fff2f2; color: #8b2d2d; }
+  .duplicate-matches { display: flex; flex-direction: column; gap: 5px; margin: 4px 0; }
+  .duplicate-match { border-left: 2px solid currentColor; padding-left: 8px; display: flex; flex-direction: column; gap: 1px; }
+  .duplicate-match b { font-weight: 750; }
+  .duplicate-match small { opacity: .86; overflow-wrap: anywhere; }
   .content-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(320px, 1.1fr); gap: 30px; padding-top: 20px; }
   .summary { min-width: 0; }
   .book-list { border: 1px solid var(--border); border-radius: 8px; max-height: 225px; overflow: auto; }

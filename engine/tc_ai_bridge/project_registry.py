@@ -317,7 +317,10 @@ class ProjectRegistry:
         bible_name = str(combined.get("bibleName") or "").strip().casefold()
         matches: list[dict[str, Any]] = []
         exact_books: set[str] = set()
+        missing_exact_books: set[str] = set()
+        possible_books: set[str] = set()
         overlapping_books: set[str] = set()
+        exact_books_by_group: dict[str, set[str]] = {}
         preview_books = {
             str(book.get("bookId") or "").lower()
             for book in preview.get("books", []) if isinstance(book, dict)
@@ -340,10 +343,22 @@ class ProjectRegistry:
             if not exact and not logical:
                 continue
             overlapping_books.add(book_id)
+            group_id = (
+                f"collection:{entry.get('collectionId')}"
+                if entry.get("collectionId")
+                else f"project:{entry.get('projectId')}"
+            )
             if exact and not entry.get("missing", False):
                 exact_books.add(book_id)
+                exact_books_by_group.setdefault(group_id, set()).add(book_id)
+            elif exact:
+                missing_exact_books.add(book_id)
+            elif not exact:
+                possible_books.add(book_id)
             matches.append({
                 "match": "exact" if exact else "possible",
+                "reason": "sourceFingerprint" if exact else "bookLanguageBible",
+                "groupId": group_id,
                 "projectId": entry.get("projectId"),
                 "collectionId": entry.get("collectionId"),
                 "path": entry.get("path"),
@@ -354,7 +369,11 @@ class ProjectRegistry:
                 "lastOpenedAt": entry.get("lastOpenedAt"),
                 "missing": entry.get("missing", False),
             })
-        if preview_books and exact_books == preview_books:
+        exact_match_group_id = next((
+            group_id for group_id, books in exact_books_by_group.items()
+            if books == preview_books
+        ), "")
+        if preview_books and exact_match_group_id:
             classification = "exactDuplicate"
         elif overlapping_books:
             classification = "partialOverlap" if len(preview_books) > 1 else "possibleDuplicate"
@@ -363,6 +382,13 @@ class ProjectRegistry:
         return {
             "classification": classification,
             "matches": matches,
+            "inputBookCount": len(preview_books),
+            "exactBookCount": len(exact_books),
+            "missingExactBookCount": len(missing_exact_books),
+            "possibleBookCount": len(possible_books),
+            "overlapBookCount": len(overlapping_books),
+            "matchingGroupCount": len({match["groupId"] for match in matches}),
+            "exactMatchGroupId": exact_match_group_id,
             "sourceFingerprints": source_by_book,
             "collectionFingerprint": collection_fingerprint(source_by_book),
         }

@@ -10,10 +10,10 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 173 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes project identity, relocation validation, legacy collection grouping, corrupt-registry recovery, exact and metadata-aware possible duplicate detection, forget-without-delete, and portable-collection regressions |
+| A01 | Backend | Complete Python suite | Source | PASS — 183 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes project identity, relocation validation, legacy collection grouping, corrupt-registry recovery, collection-aware exact/partial/metadata/missing-project duplicate detection, endpoint-level block/allow decisions, forget-without-delete, and portable-collection regressions |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
-| A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; `cargo test` currently contains 0 Rust unit tests |
+| A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 1 sidecar-timeout unit test passed |
 | A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 4; the `dist`, Tauri staging, and release-staged copies are byte-identical |
 | A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | PASS — the real standalone checker found both conditions in the packaged Odia fixture |
 | A07 | Protocol | Sidecar remains responsive during a background job | Frozen | PASS — status polling completed the background job while lightweight requests remained responsive |
@@ -57,6 +57,10 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | I14 | Move a registered project and locate it | Stable project identity is retained and the registry path is repaired | PASS — managed rename discovery and external locate regressions |
 | I15 | Move a multi-book collection parent | Every sibling remains switchable through portable relative collection metadata | PASS — schema 2 move/reopen regression; schema 1 absolute paths remain readable |
 | I16 | Inspect a large folder with hundreds of registered book projects | Registry discovery is not repeatedly hashed; request has bounded 180-second headroom | PASS — real 337-entry Project Home discovery measured 5.20s and a real 66-book folder inspection measured 1.58s after the fix; installed Beta 4 GUI retest NOT RUN |
+| I17 | Multi-book source whose exact books are scattered across unrelated projects | Warn with exact coverage but allow a new collection; never treat the unrelated projects as one complete duplicate | PASS — registry and real `project.import` endpoint regressions |
+| I18 | One existing collection exactly covers every incoming source book | Offer that collection and block the default import until separate-copy intent is explicit | PASS — registry and real `project.import` endpoint regressions |
+| I19 | Same display name with different canonical book/content, or same book with different language/Bible metadata | Never classify by display name; metadata overlap remains non-blocking | PASS — canonical-book, content, language, Bible, whitespace, and case regressions |
+| I20 | Exact source belongs only to a missing registered folder | Explain the missing match, allow recovery import, and retain Locate behavior | PASS — missing-path classification regression; installed wording NOT RUN |
 
 ## Desktop core loop
 
@@ -84,6 +88,8 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | P05 | Forget a missing project | Registry entry is removed; files are never deleted | PASS — source regression |
 | P06 | Corrupt registry | Damaged file is quarantined and managed projects are rediscovered | PASS — source regression |
 | P07 | Run the Python suite | Default `BridgeEngine()` instances use isolated temporary app data and cannot pollute the user's Project Home | PASS — autouse isolation fixture; 84 leaked Beta 3 development entries were backed up and removed from the affected machine |
+| P08 | Review exact, partial, metadata-only, and missing-folder matches | Content versus metadata reason, book coverage, related project/collection, and the correct Open/Separate/Continue action are explicit | PASS — backend contract regressions plus clean Svelte diagnostics; installed GUI wording NOT RUN |
+| P09 | Many related registry entries match one preview | Review remains bounded instead of rendering an unbounded list | PASS — UI shows five groups and a remaining-count summary; installed large-library GUI NOT RUN |
 
 ## Export and compatibility
 
@@ -124,7 +130,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 ## Automated evidence
 
-- Python: 173 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 183 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book
@@ -141,25 +147,25 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 - Frontend: `svelte-check` reports 0 errors and 0 warnings; production Vite build succeeds.
 - Frozen workers: real Wildebeest, Uroman, and Smart Edit Distance load; versification,
   a planted spelling inconsistency, corpus statistics, AI-proposal/explain packaging,
-  connector error paths, Project Registry/exact-duplicate protocol, manual many-to-many
+  connector error paths, Project Registry/exact-duplicate reason/count protocol, manual many-to-many
   alignment/export/undo, and USFM duplicate/missing-verse checks pass. Lightweight
   status calls remain responsive during the job.
 - Windows: the Beta 4 release executable and NSIS installer were produced with both
   verified worker binaries. The installer is
   `Bridge_0.8.0-beta.4_x64-setup.exe` (SHA-256
-  `6CEEC85756699CD1EF837F553F457D94DBC3F50C295EBD481B9C3DC02D5E5773`).
+  `256466811DBD80B9363B04E52B621CDF3E735EBFB1898D1889DD39E98776AC77`).
 
 ## Beta 4 artifact provenance — 2026-08-25
 
-- Release source: current Project Home/import-timeout hotfix worktree (commit pending).
-- Desktop executable: 12,738,048 bytes, ProductVersion `0.8.0-beta.4`, SHA-256
-  `AC901355BC51374BB6865801E515A9F75DB41F4A19D23CC7743B4EE11035B241`.
-- `bridge-engine.exe`: 21,044,416 bytes, SHA-256
-  `0D26E9E24945E718D7D37F5D2422E8AECA373C6B35F563303C92415D4C3D523F`.
-- `bridge-usfm-checker.exe`: 7,673,522 bytes, SHA-256
-  `8BDF3FCFE138AC4ECAAC8F2E9030715774366745BEACAC9B5CB649A19F20E863`.
-- Installer: 30,669,520 bytes, ProductVersion `0.8.0-beta.4`, SHA-256
-  `6CEEC85756699CD1EF837F553F457D94DBC3F50C295EBD481B9C3DC02D5E5773`.
+- Release source: current Milestone 2.1 duplicate-classification completion worktree (commit pending).
+- Desktop executable: 12,739,072 bytes, ProductVersion `0.8.0-beta.4`, SHA-256
+  `CC8617CD06C96E0FDAA5BE9B6373733AB304ECEC549AC081EB5726965D39C2BF`.
+- `bridge-engine.exe`: 21,045,827 bytes, SHA-256
+  `769E6B25D735B8334FBB8E8893A2281981C049177C828216A7B2FB9BD26999C9`.
+- `bridge-usfm-checker.exe`: 7,673,749 bytes, SHA-256
+  `91CC1C5E18CDCF0A467DAF3FE6ED79EE553D3E9C39213987FE8CFB35A62A86E1`.
+- Installer: 30,672,848 bytes, ProductVersion `0.8.0-beta.4`, SHA-256
+  `256466811DBD80B9363B04E52B621CDF3E735EBFB1898D1889DD39E98776AC77`.
 - Exact release-staged workers passed the enhanced frozen smoke. The app, workers,
   and installer remain `NotSigned`; installed GUI and native drag-and-drop acceptance
   remain manual release gates.

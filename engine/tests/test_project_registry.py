@@ -1,4 +1,5 @@
 import json
+import hashlib
 import shutil
 from pathlib import Path
 
@@ -16,6 +17,25 @@ def _project(root: Path, name: str = "rut") -> Path:
     }), encoding="utf-8")
     (path / name / "1.json").write_text('{"1": "text"}', encoding="utf-8")
     return path
+
+
+def _preview(root: Path, books: list[tuple[str, str, str]]) -> dict:
+    source = root / "source"
+    source.mkdir(parents=True, exist_ok=True)
+    values = []
+    for book_id, book_name, content in books:
+        path = source / f"{book_id}.usfm"
+        path.write_text(content, encoding="utf-8")
+        values.append({"bookId": book_id, "bookName": book_name, "sourceFile": str(path)})
+    return {"books": values, "metadata": {}}
+
+
+def _fingerprint(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _metadata(language_id: str = "tam", bible_name: str = "Test Bible") -> dict[str, str]:
+    return {"languageId": language_id, "bibleName": bible_name}
 
 
 def test_managed_identity_survives_rename_and_repairs_registry_path(tmp_path):
@@ -90,3 +110,181 @@ def test_legacy_collection_entries_receive_one_stable_group_identity(tmp_path):
     assert len(listed) == 2
     assert listed[0]["collectionId"]
     assert {entry["collectionId"] for entry in listed} == {listed[0]["collectionId"]}
+
+
+def test_exact_single_book_duplicate_reports_content_reason_and_counts(tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
+    project = _project(tmp_path / "managed", "tit")
+    registry.register(project, source_fingerprint=_fingerprint("same source"))
+
+    result = registry.classify(
+        _preview(tmp_path / "incoming", [("tit", "Titus", "same source")]),
+        _metadata(),
+    )
+
+    assert result["classification"] == "exactDuplicate"
+    assert result["exactBookCount"] == result["overlapBookCount"] == 1
+    assert result["missingExactBookCount"] == 0
+    assert result["possibleBookCount"] == 0
+    assert result["matchingGroupCount"] == 1
+    assert result["exactMatchGroupId"].startswith("project:")
+    assert result["matches"][0]["reason"] == "sourceFingerprint"
+
+
+def test_same_book_metadata_with_different_content_is_only_possible(tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
+    project = _project(tmp_path / "managed", "tit")
+    registry.register(project, source_fingerprint=_fingerprint("old source"))
+
+    result = registry.classify(
+        _preview(tmp_path / "incoming", [("tit", "Titus", "new source")]),
+        _metadata(),
+    )
+
+    assert result["classification"] == "possibleDuplicate"
+    assert result["exactBookCount"] == 0
+    assert result["missingExactBookCount"] == 0
+    assert result["possibleBookCount"] == 1
+    assert result["exactMatchGroupId"] == ""
+    assert result["matches"][0]["reason"] == "bookLanguageBible"
+
+
+def test_same_display_name_with_different_canonical_book_is_new(tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
+    project = _project(tmp_path / "managed", "tit")
+    manifest_path = project / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["project"]["name"] = "Shared name"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    registry.register(project, source_fingerprint=_fingerprint("old source"))
+
+    result = registry.classify(
+        _preview(tmp_path / "incoming", [("phm", "Shared name", "new source")]),
+        _metadata(),
+    )
+
+    assert result["classification"] == "new"
+    assert result["matches"] == []
+
+
+def test_metadata_overlap_requires_language_and_supplied_bible_to_match(tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
+    project = _project(tmp_path / "managed", "tit")
+    registry.register(project, source_fingerprint=_fingerprint("old source"))
+    preview = _preview(tmp_path / "incoming", [("tit", "Titus", "new source")])
+
+    assert registry.classify(preview, _metadata(language_id="eng"))["classification"] == "new"
+    assert registry.classify(preview, _metadata(bible_name="Other Bible"))["classification"] == "new"
+    normalized = registry.classify(preview, _metadata(language_id="TAM", bible_name="  test bible "))
+    assert normalized["classification"] == "possibleDuplicate"
+
+
+def test_missing_exact_project_warns_but_does_not_block_reimport(tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
+    project = _project(tmp_path / "managed", "tit")
+    registered = registry.register(project, source_fingerprint=_fingerprint("same source"))
+    moved = tmp_path / "elsewhere" / "tit"
+    moved.parent.mkdir()
+    shutil.move(project, moved)
+
+    result = registry.classify(
+        _preview(tmp_path / "incoming", [("tit", "Titus", "same source")]),
+        _metadata(),
+    )
+
+    assert result["classification"] == "possibleDuplicate"
+    assert result["exactBookCount"] == 0
+    assert result["missingExactBookCount"] == 1
+    assert result["exactMatchGroupId"] == ""
+    assert result["matches"] == [{
+        "match": "exact",
+        "reason": "sourceFingerprint",
+        "groupId": f"project:{registered['projectId']}",
+        "projectId": registered["projectId"],
+        "collectionId": "",
+        "path": str(project.resolve()),
+        "bookId": "tit",
+        "bookName": "TIT",
+        "projectName": "Community review",
+        "bibleName": "Test Bible",
+        "lastOpenedAt": "",
+        "missing": True,
+    }]
+
+
+def test_one_existing_collection_covering_every_book_is_exact_duplicate(tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
+    sources = {"tit": "titus source", "phm": "philemon source"}
+    for book_id, content in sources.items():
+        registry.register(
+            _project(tmp_path / "managed", book_id),
+            source_fingerprint=_fingerprint(content),
+            collection_id="collection-one",
+        )
+
+    result = registry.classify(
+        _preview(tmp_path / "incoming", [
+            ("tit", "Titus", sources["tit"]),
+            ("phm", "Philemon", sources["phm"]),
+        ]),
+        _metadata(),
+    )
+
+    assert result["classification"] == "exactDuplicate"
+    assert result["exactBookCount"] == 2
+    assert result["exactMatchGroupId"] == "collection:collection-one"
+    assert {match["groupId"] for match in result["matches"]} == {"collection:collection-one"}
+
+
+def test_exact_books_scattered_across_projects_do_not_block_collection_import(tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
+    sources = {"tit": "titus source", "phm": "philemon source"}
+    for index, (book_id, content) in enumerate(sources.items()):
+        registry.register(
+            _project(tmp_path / "managed" / str(index), book_id),
+            source_fingerprint=_fingerprint(content),
+        )
+
+    result = registry.classify(
+        _preview(tmp_path / "incoming", [
+            ("tit", "Titus", sources["tit"]),
+            ("phm", "Philemon", sources["phm"]),
+        ]),
+        _metadata(),
+    )
+
+    assert result["classification"] == "partialOverlap"
+    assert result["exactBookCount"] == 2
+    assert result["overlapBookCount"] == 2
+    assert result["matchingGroupCount"] == 2
+    assert result["exactMatchGroupId"] == ""
+
+
+def test_partial_collection_and_metadata_overlap_remain_non_blocking(tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
+    registry.register(
+        _project(tmp_path / "managed", "tit"),
+        source_fingerprint=_fingerprint("titus source"),
+        collection_id="old-collection",
+    )
+    registry.register(
+        _project(tmp_path / "managed", "phm"),
+        source_fingerprint=_fingerprint("old philemon"),
+        collection_id="old-collection",
+    )
+
+    result = registry.classify(
+        _preview(tmp_path / "incoming", [
+            ("tit", "Titus", "titus source"),
+            ("phm", "Philemon", "changed philemon"),
+            ("rut", "Ruth", "new ruth"),
+        ]),
+        _metadata(),
+    )
+
+    assert result["classification"] == "partialOverlap"
+    assert result["inputBookCount"] == 3
+    assert result["exactBookCount"] == 1
+    assert result["possibleBookCount"] == 1
+    assert result["overlapBookCount"] == 2
+    assert result["exactMatchGroupId"] == ""

@@ -1,4 +1,5 @@
 import json
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -301,6 +302,58 @@ def test_changed_source_is_reported_as_possible_overlap_after_metadata_review(tm
     assert initial["duplicates"]["classification"] == "new"
     assert reviewed["duplicates"]["classification"] == "possibleDuplicate"
     assert reviewed["duplicates"]["matches"][0]["match"] == "possible"
+
+
+def test_reimporting_one_complete_collection_is_blocked(tmp_path):
+    source = tmp_path / "Bible"
+    source.mkdir()
+    (source / "57TIT.SFM").write_text(SIMPLE_USFM, encoding="utf-8")
+    (source / "58PHM.SFM").write_text(
+        "\\id PHM\n\\h Philemon\n\\c 1\n\\v 1 Grace to you.\n",
+        encoding="utf-8",
+    )
+    engine = BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
+
+    first = _call(engine, "project.import", {"path": str(source), "metadata": _metadata()})
+    assert first["success"] is True
+    preview = _call(engine, "project.inspectImport", {"path": str(source), "metadata": _metadata()})
+
+    assert preview["result"]["duplicates"]["classification"] == "exactDuplicate"
+    assert preview["result"]["duplicates"]["exactBookCount"] == 2
+    assert preview["result"]["duplicates"]["exactMatchGroupId"].startswith("collection:")
+    blocked = _call(engine, "project.import", {"path": str(source), "metadata": _metadata()})
+    assert blocked["success"] is False
+    assert "already been imported" in blocked["error"]["message"]
+
+
+def test_exact_books_from_separate_projects_do_not_block_collection_import(tmp_path):
+    sources = tmp_path / "single-sources"
+    sources.mkdir()
+    titus = sources / "TIT.usfm"
+    philemon = sources / "PHM.usfm"
+    titus.write_text(SIMPLE_USFM, encoding="utf-8")
+    philemon.write_text(
+        "\\id PHM\n\\h Philemon\n\\c 1\n\\v 1 Grace to you.\n",
+        encoding="utf-8",
+    )
+    engine = BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
+    assert _call(engine, "project.import", {"path": str(titus), "metadata": _metadata()})["success"] is True
+    assert _call(engine, "project.import", {"path": str(philemon), "metadata": _metadata()})["success"] is True
+
+    collection = tmp_path / "collection"
+    collection.mkdir()
+    shutil.copy2(titus, collection / titus.name)
+    shutil.copy2(philemon, collection / philemon.name)
+    preview = _call(engine, "project.inspectImport", {
+        "path": str(collection), "metadata": _metadata(),
+    })["result"]
+
+    assert preview["duplicates"]["classification"] == "partialOverlap"
+    assert preview["duplicates"]["exactBookCount"] == 2
+    assert preview["duplicates"]["matchingGroupCount"] == 2
+    imported = _call(engine, "project.import", {"path": str(collection), "metadata": _metadata()})
+    assert imported["success"] is True
+    assert len(imported["result"]["importedProjects"]) == 2
 
 
 def test_forget_removes_registry_entry_without_deleting_project(tmp_path):
