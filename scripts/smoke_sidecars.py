@@ -179,6 +179,42 @@ def main() -> int:
                     f"{names}"
                 )
 
+            raw_source = Path(temp) / "57-TIT.usfm"
+            raw_source.write_text(
+                "\\id TIT\n\\h Titus\n\\c 1\n\\v 1 Paul, a servant of God.\n",
+                encoding="utf-8",
+            )
+            raw_import = request("original-language-import", "project.import", {
+                "path": str(raw_source),
+                "destinationRoot": str(Path(temp) / "original-language-projects"),
+                "metadata": {
+                    "languageId": "eng",
+                    "languageName": "English",
+                    "languageDirection": "ltr",
+                    "projectName": "Frozen original-language smoke",
+                    "bibleName": "Test Bible",
+                },
+            })
+            original_resource = raw_import.get("result", {}).get("originalLanguageResource", {})
+            if (
+                not raw_import.get("success")
+                or original_resource.get("resourceId") != "ugnt"
+                or original_resource.get("version") != "0.34"
+                or original_resource.get("commit") != "fc95b2b8aad08bb65ab54628ab685413a1139e97"
+            ):
+                raise SystemExit(f"Frozen UGNT resource provenance failed: {raw_import}")
+            raw_alignment = request(
+                "original-language-alignment", "alignment.get", {"chapter": "1", "verse": "1"},
+            )
+            raw_top_tokens = raw_alignment.get("result", {}).get("topTokens", [])
+            if (
+                not raw_alignment.get("success")
+                or not raw_alignment.get("result", {}).get("sourceAvailable")
+                or len(raw_top_tokens) != 17
+                or raw_top_tokens[0].get("word") != "Παῦλος"
+            ):
+                raise SystemExit(f"Frozen UGNT token initialization failed: {raw_alignment}")
+
             if args.import_source:
                 started_at = time.perf_counter()
                 imported = request("import", "project.import", {
@@ -224,9 +260,12 @@ def main() -> int:
                 or assessment.get("inputBookCount") != 1
                 or assessment.get("exactBookCount") != 1
                 or assessment.get("missingExactBookCount") != 0
-                or assessment.get("matchingGroupCount") != 1
+                or assessment.get("matchingGroupCount", 0) < 1
                 or not assessment.get("exactMatchGroupId", "").startswith("project:")
-                or assessment.get("matches", [{}])[0].get("reason") != "sourceFingerprint"
+                or not any(
+                    match.get("match") == "exact" and match.get("reason") == "sourceFingerprint"
+                    for match in assessment.get("matches", [])
+                )
             ):
                 raise SystemExit(f"Frozen duplicate classification failed: {duplicate}")
 
@@ -336,11 +375,15 @@ def main() -> int:
             if ai_explain.get("success") or ai_explain.get("error", {}).get("code") not in ("ai_error", "knowledge_base_error"):
                 raise SystemExit(f"Frozen ai.explain did not fail cleanly: {ai_explain}")
 
-            # No companion Paratext plugin is running in this smoke test — confirms
-            # paratext_connector.py is bundled/importable and fails cleanly rather than
-            # crashing the dispatcher.
-            paratext_state = request("paratext-no-companion", "paratext.getState", {})
-            if paratext_state.get("success") or paratext_state.get("error", {}).get("code") != "paratext_connector_error":
+            # A developer machine may or may not have the companion running.
+            # Either a well-formed live state or the connector's clean unavailable
+            # error proves the frozen import/dispatch path is intact.
+            paratext_state = request("paratext-state", "paratext.getState", {})
+            if paratext_state.get("success"):
+                paratext_result = paratext_state.get("result", {})
+                if not paratext_result.get("connected") or not paratext_result.get("project_id"):
+                    raise SystemExit(f"Frozen paratext.getState returned invalid live state: {paratext_state}")
+            elif paratext_state.get("error", {}).get("code") != "paratext_connector_error":
                 raise SystemExit(f"Frozen paratext.getState did not fail cleanly: {paratext_state}")
 
             # Real, meaningful check: this actually spawns the bundled logos_bridge.ps1
@@ -408,7 +451,8 @@ def main() -> int:
 
     print(
         "Frozen sidecar smoke test passed: real Wildebeest/Uroman loaded; "
-        "versification, names/transliteration, alignment statistics/proposal packaging, "
+        "pinned UGNT source tokens, versification, names/transliteration, "
+        "alignment statistics/proposal packaging, "
         "AI explain packaging, desktop connectors, project registry/duplicate import, "
         "alignment/export/undo, and duplicate/missing-verse checks succeeded."
     )

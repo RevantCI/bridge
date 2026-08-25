@@ -85,6 +85,20 @@ combined into 1:1, 1:many, many:1 or many:many translationCore groups by their
 shared target tokens. Malformed milestones are preserved in the original source
 and left for human review rather than guessed.
 
+For raw Scripture with no alignment milestones, Bridge supplies canonical
+`topWords` from its offline original-language bundle: unfoldingWord Hebrew Bible
+v3.0.0 for the 39 OT books and unfoldingWord Greek New Testament v0.34 for the
+27 NT books. Every source token starts in its own group with no `bottomWords`,
+ready for human alignment. The manifest and `.bridge/import.json` stamp the
+resource ID, owner, version, exact upstream commit, license, token count, and
+missing source verses. Existing aligned USFM is never replaced.
+
+Opening an older Bridge raw import performs an idempotent recovery pass. It is
+eligible only when `.bridge/import.json` explicitly says the source had no
+alignment milestones, and it fills only verses whose source group array is
+exactly empty. Existing translationCore projects, malformed optional metadata,
+non-empty groups, and pinned-version mismatches are left unchanged.
+
 `manifest.json` records the confirmed ISO 639-3 language, language name, text
 direction, Bible/resource identity, book identity, and import provenance. That
 language metadata is immediately used by language-aware local and Greek Room
@@ -113,6 +127,10 @@ versioned checking resources. Bridge follows the same boundary:
   `docs/DEVELOPER_HANDOFF.md` for the full list and how to refresh the bundle.
 - Only English is bundled today. A future non-English or refreshed-English
   resource still needs the online Door43-catalog path, not yet built.
+
+The English tN/tW/TA checking-help bundle above is independent of the Hebrew
+and Greek Scripture token bundle. The latter is selected by canonical book,
+not by the target translation's language.
 
 ## Export behavior
 

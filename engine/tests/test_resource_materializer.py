@@ -57,6 +57,14 @@ def test_ensure_resources_installed_copies_bundled_snapshot_once(tmp_path):
     assert ta_dir.is_dir()
     assert list(ta_dir.iterdir()), "expected at least one bundled translationAcademy version folder"
 
+    uhb = app_resources_root / "hbo" / "bibles" / "uhb" / "v3.0.0_unfoldingWord"
+    ugnt = app_resources_root / "el-x-koine" / "bibles" / "ugnt" / "v0.34_unfoldingWord"
+    for original_language in (uhb, ugnt):
+        assert (original_language / "LICENSE.md").is_file()
+        assert (original_language / "manifest.yaml").is_file()
+        assert (original_language / "NOTICE.md").is_file()
+        assert (original_language / "PROVENANCE.json").is_file()
+
     # Calling again must not touch (or duplicate/overwrite) an already-installed version.
     marker = versions[0] / "tn_TIT.tsv"
     original_bytes = marker.read_bytes()

@@ -72,6 +72,24 @@ def ensure_resources_installed(app_resources_root: Path) -> None:
                 continue
             shutil.copytree(version_dir, dst_version_dir)
 
+    # Keep the same additive, versioned layout translationCore uses for its
+    # original-language Bibles. Bridge's alignment loader reads the immutable
+    # bundled copy and verifies its hashes, while this application-owned copy
+    # makes licenses/provenance discoverable beside the installed tN/tW data
+    # and leaves room for a future explicit resource upgrade workflow.
+    for language_id, bible_id in (('hbo', 'uhb'), ('el-x-koine', 'ugnt')):
+        src_bible_dir = source / language_id / 'bibles' / bible_id
+        if not src_bible_dir.is_dir():
+            continue
+        dst_bible_dir = app_resources_root / language_id / 'bibles' / bible_id
+        for version_dir in src_bible_dir.iterdir():
+            if not version_dir.is_dir():
+                continue
+            dst_version_dir = dst_bible_dir / version_dir.name
+            if dst_version_dir.exists():
+                continue
+            shutil.copytree(version_dir, dst_version_dir)
+
 
 def _latest_version_dir(resources_root: Path, resource: str) -> Path | None:
     resource_dir = resources_root / RESOURCE_LANGUAGE / 'translationHelps' / resource

@@ -1,7 +1,8 @@
 # Manual word alignment
 
 Bridge v0.8.0-beta.4 provides a human-controlled, translationCore-compatible
-word-alignment editor. It never invents original-language tokens and never
+word-alignment editor. For raw Scripture imports it initializes source slots
+from pinned, bundled UHB/UGNT token packs; it never guesses tokens and never
 changes Scripture text as a side effect of alignment work.
 
 ## Data and protocol
@@ -68,11 +69,31 @@ USFM permits user-defined `z` markers and attributes; see the official
 `zaln` is an unfoldingWord interoperability convention layered on that extension
 mechanism, not a native semantic alignment feature defined by the USFM standard.
 
-## Deliberate release boundary
+## Bundled original-language source
 
-Manual alignment requires source `topWords` already present in an imported
-translationCore project or aligned USFM. This release gives actionable guidance
-when they are unavailable. Optional AI gap-fill proposals are available in the
-editor, and corpus statistics are available through the backend protocol.
-Downloading original-language resources and live Paratext/Logos synchronization
-remain future work.
+Raw OT and NT imports receive blank source alignment groups from unfoldingWord
+UHB v3.0.0 and UGNT v0.34 respectively. The packs preserve word, occurrence,
+Strong's, lemma, and morphology fields using translationCore's pinned
+`usfm-js`/`word-aligner` conversion path. Footnotes are excluded from the verse
+body, so a Hebrew Ketiv in the body is retained while its Qere footnote is not
+treated as a second alignable source token. Verse bridges combine canonical
+verses and recalculate occurrence identities across the result.
+
+This initialization is deliberately one-way and conservative:
+
+- aligned USFM and native translationCore source groups remain authoritative;
+- recovery fills only an exactly empty `alignments` array in a known Bridge raw
+  import and leaves every non-empty verse unchanged;
+- a project stamped with a different source-resource version/commit is not
+  silently migrated;
+- every pack is SHA-256 checked before use, and resource version, commit,
+  attribution, license, and provenance are visible in Settings.
+
+The exact upstream commits, file hashes, conversion dependencies, license, and
+change statement are recorded beside each resource in
+`engine/resources/{hbo,el-x-koine}/...`. Regenerate them only with
+`npm run vendor:original-language -- --uhb <checkout> --ugnt <checkout>`;
+the generator rejects checkouts that are not the pinned commits.
+
+Optional AI gap-fill proposals remain human-triggered. Live original-language
+downloads and live Paratext/Logos synchronization remain future work.

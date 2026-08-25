@@ -208,6 +208,20 @@ export interface ProjectInfo {
   tcVersion: string;
   chapters: string[];
   checkTypes: Record<string, number>;
+  originalLanguageResource?: {
+    available: boolean;
+    languageId?: string;
+    resourceId?: string;
+    version?: string;
+    owner?: string;
+    commit?: string;
+    release?: string;
+    license?: string;
+    attribution?: string;
+    projectVersion?: string;
+    versionMismatch?: boolean;
+    message?: string;
+  };
   importedProjects?: ImportedProject[];
 }
 

@@ -1,0 +1,4 @@
+# These vendored resources are hash-verified at runtime. Preserve every byte
+# from the reproducible generator/upstream release on every platform.
+engine/resources/hbo/bibles/uhb/v3.0.0_unfoldingWord/** -text -diff
+engine/resources/el-x-koine/bibles/ugnt/v0.34_unfoldingWord/** -text -diff

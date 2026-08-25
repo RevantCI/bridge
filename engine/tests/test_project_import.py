@@ -8,7 +8,12 @@ import pytest
 import tc_ai_bridge.project_import as project_import
 from bridge_service import BridgeEngine
 from greek_room_engine.protocol import EngineRequest
-from tc_ai_bridge.project_import import import_source, inspect_import, materialize_lazy_project
+from tc_ai_bridge.project_import import (
+    ensure_bridge_original_language,
+    import_source,
+    inspect_import,
+    materialize_lazy_project,
+)
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.tc_project import ProjectError, TranslationCoreProject
 
@@ -73,16 +78,82 @@ def test_import_usfm_creates_tc_compatible_normalized_project(tmp_path):
     assert project.chapters() == ["1", "2"]
     assert project.target_verse_text("1", "1") == "Paul, a servant of God."
     verse = project.load_verse_alignment("1", "1")
-    assert verse.alignments == []
+    assert len(verse.alignments) == 17
+    assert verse.alignments[0].top_words[0].word == "Παῦλος"
+    assert all(group.bottom_words == [] for group in verse.alignments)
     assert [token.word for token in verse.word_bank] == ["Paul", "a", "servant", "of", "God"]
     assert (project_path / "tit.usfm").read_bytes() == source.read_bytes()
 
     manifest = json.loads((project_path / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["resource"]["name"] == "Test Bible"
     assert manifest["bridge_import"]["resourceIndexStatus"] == "required"
+    assert manifest["tc_orig_lang_check_version_wordAlignment"] == "0.34"
+    assert manifest["toolsSelectedOwners"]["wordAlignment"] == "unfoldingWord"
+    assert manifest["bridge_original_language"]["commit"] == "fc95b2b8aad08bb65ab54628ab685413a1139e97"
     provenance = json.loads((project_path / ".bridge" / "import.json").read_text(encoding="utf-8"))
     assert provenance["capabilities"]["translationNotes"] == "requires-resource-index"
     assert provenance["capabilities"]["wordAlignment"] == "ready-for-alignment"
+    assert provenance["alignment"]["generatedSourceTokens"] > 0
+    assert provenance["alignment"]["originalLanguageResource"]["license"] == "CC BY-SA 4.0"
+
+
+def test_backfill_only_changes_empty_bridge_raw_alignment_verses(tmp_path):
+    source = tmp_path / "57-TIT.usfm"
+    source.write_text(SIMPLE_USFM, encoding="utf-8")
+    result = import_source(source, tmp_path / "projects", _metadata())
+    project_path = Path(result["primaryProjectPath"])
+    chapter_path = project_path / ".apps" / "translationCore" / "alignmentData" / "tit" / "1.json"
+    chapter = json.loads(chapter_path.read_text(encoding="utf-8"))
+    preserved = chapter["1"]
+    chapter["2"]["alignments"] = []
+    chapter_path.write_text(json.dumps(chapter, ensure_ascii=False), encoding="utf-8")
+
+    migration = ensure_bridge_original_language(project_path)
+    after = json.loads(chapter_path.read_text(encoding="utf-8"))
+
+    assert migration["changedVerses"] == 1
+    assert after["1"] == preserved
+    assert after["2"]["alignments"]
+    assert ensure_bridge_original_language(project_path)["changedVerses"] == 0
+
+
+def test_backfill_stops_on_pinned_resource_version_mismatch(tmp_path):
+    source = tmp_path / "57-TIT.usfm"
+    source.write_text(SIMPLE_USFM, encoding="utf-8")
+    result = import_source(source, tmp_path / "projects", _metadata())
+    project_path = Path(result["primaryProjectPath"])
+    chapter_path = project_path / ".apps" / "translationCore" / "alignmentData" / "tit" / "1.json"
+    chapter = json.loads(chapter_path.read_text(encoding="utf-8"))
+    chapter["2"]["alignments"] = []
+    chapter_path.write_text(json.dumps(chapter, ensure_ascii=False), encoding="utf-8")
+    manifest_path = project_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["bridge_original_language"]["version"] = "older-version"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    migration = ensure_bridge_original_language(project_path)
+    after = json.loads(chapter_path.read_text(encoding="utf-8"))
+    after_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert migration["versionMismatch"] is True
+    assert migration["changedVerses"] == 0
+    assert after["2"]["alignments"] == []
+    assert after_manifest["bridge_original_language"]["version"] == "older-version"
+
+
+def test_backfill_skips_project_when_optional_import_metadata_is_damaged(tmp_path):
+    source = tmp_path / "57-TIT.usfm"
+    source.write_text(SIMPLE_USFM, encoding="utf-8")
+    result = import_source(source, tmp_path / "projects", _metadata())
+    project_path = Path(result["primaryProjectPath"])
+    import_path = project_path / ".bridge" / "import.json"
+    import_path.write_text("{not valid json", encoding="utf-8")
+
+    migration = ensure_bridge_original_language(project_path)
+
+    assert migration["eligible"] is False
+    assert migration["changedVerses"] == 0
+    assert "Could not read Bridge import metadata" in migration["error"]
 
 
 def test_import_collection_creates_one_book_project_per_usfm(tmp_path):
@@ -193,9 +264,13 @@ def test_basic_usfm3_alignment_is_preserved(tmp_path):
     alignment = project.load_verse_alignment("1", "1")
 
     assert project.target_verse_text("1", "1") == "Paul came."
+    assert len(alignment.alignments) == 1
     assert alignment.alignments[0].top_words[0].word == "Παῦλος"
     assert alignment.alignments[0].bottom_words[0].word == "Paul"
     assert [word.word for word in alignment.word_bank] == ["came"]
+    manifest = json.loads((Path(result["primaryProjectPath"]) / "manifest.json").read_text(encoding="utf-8"))
+    assert "bridge_original_language" not in manifest
+    assert "tc_orig_lang_check_version_wordAlignment" not in manifest
 
 
 @pytest.mark.parametrize("extension", [".tcore", ".tstudio", ".zip"])

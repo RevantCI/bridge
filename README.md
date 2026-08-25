@@ -24,7 +24,9 @@ previews detected books, asks the user to confirm language/Project/Bible details
 and provides an offline searchable ISO 639-3 language catalog. See
 [`docs/IMPORTS.md`](docs/IMPORTS.md) for the normalized project schema, supported
 alignment import, provenance safeguards, and the separate tN/tW resource-indexing
-stage.
+stage. Raw OT/NT imports also receive offline source tokens from exact pinned
+unfoldingWord UHB v3.0.0/UGNT v0.34 bundles; existing aligned projects remain
+authoritative.
 
 ## Getting started
 
@@ -51,7 +53,7 @@ py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v
 ```
 
-Should show **183 passed** in the maintained Windows/Python 3.12 development
+Should show **194 passed** in the maintained Windows/Python 3.12 development
 environment. Try `python demo.py` for a live walkthrough
 against a throwaway fixture project — no real translationCore project
 needed.

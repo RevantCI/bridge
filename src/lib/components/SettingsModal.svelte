@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
+  import { project } from "../stores";
   import type { SettingsData } from "../types/finding";
 
   export let onClose: () => void;
 
-  let activePane: "ai" | "quality" | "security" = "ai";
+  let activePane: "ai" | "quality" | "resources" | "security" = "ai";
   let loading = true;
   let saving = false;
   let saveMessage = "";
@@ -71,6 +72,7 @@
       <div class="nav-title">Settings</div>
       <button class="nav-item" class:active={activePane === "ai"} on:click={() => (activePane = "ai")}>AI provider</button>
       <button class="nav-item" class:active={activePane === "quality"} on:click={() => (activePane = "quality")}>Quality engine</button>
+      <button class="nav-item" class:active={activePane === "resources"} on:click={() => (activePane = "resources")}>Resources & licenses</button>
       <button class="nav-item" class:active={activePane === "security"} on:click={() => (activePane = "security")}>Security</button>
     </div>
 
@@ -117,6 +119,25 @@
         <p class="desc">Greek Room checks run fully offline and never leave this machine.</p>
         <div class="kv"><span>Offline QA engine (Greek Room)</span><span class="on">On</span></div>
         <div class="kv"><span>Local checks (tN / tW / alignment)</span><span class="on">On</span></div>
+      {:else if activePane === "resources"}
+        <h3>Original-language resources</h3>
+        <p class="desc">Bridge bundles versioned Hebrew and Greek source-token indexes for offline word alignment.</p>
+        {#if $project?.originalLanguageResource?.available}
+          {#if $project.originalLanguageResource.versionMismatch}
+            <div class="resource-warning">This project was initialized with a different original-language version. Bridge has not replaced its existing source tokens.</div>
+          {/if}
+          <div class="kv"><span>Current book source</span><span>{$project.originalLanguageResource.resourceId?.toUpperCase()} {$project.originalLanguageResource.version}</span></div>
+          <div class="kv"><span>Language</span><span>{$project.originalLanguageResource.languageId}</span></div>
+          <div class="kv"><span>Publisher</span><span>{$project.originalLanguageResource.owner}</span></div>
+          <div class="kv"><span>License</span><span>{$project.originalLanguageResource.license}</span></div>
+          <div class="resource-note">{$project.originalLanguageResource.attribution}</div>
+          <div class="resource-note">Source commit: {$project.originalLanguageResource.commit}</div>
+          <div class="resource-note">The installer includes the upstream LICENSE.md and manifest.yaml plus Bridge's NOTICE.md and PROVENANCE.json with file hashes and transformation details.</div>
+        {:else if $project}
+          <p class="muted">{$project.originalLanguageResource?.message ?? "No original-language resource is available for this book."}</p>
+        {:else}
+          <p class="muted">Open a project to see whether it uses bundled UHB 3.0.0 or UGNT 0.34.</p>
+        {/if}
       {:else if activePane === "security"}
         <h3>Security & privacy</h3>
         <p class="desc">Project data and Greek Room findings never leave this machine unless you explicitly use AI explain.</p>
@@ -151,4 +172,6 @@
   .save-msg { font-size: 11px; color: var(--success); }
   .kv { display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-bottom: 1px dashed var(--border); }
   .kv .on { color: var(--success); font-weight: 700; }
+  .resource-note { font-size: 10px; line-height: 1.45; color: var(--text-3); margin-top: 10px; overflow-wrap: anywhere; }
+  .resource-warning { font-size: 11px; line-height: 1.4; color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger); border-radius: 6px; padding: 8px; margin-bottom: 10px; }
 </style>

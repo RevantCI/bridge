@@ -10,7 +10,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 183 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes project identity, relocation validation, legacy collection grouping, corrupt-registry recovery, collection-aware exact/partial/metadata/missing-project duplicate detection, endpoint-level block/allow decisions, forget-without-delete, and portable-collection regressions |
+| A01 | Backend | Complete Python suite | Source | PASS — 194 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes the Milestone 3A resource/import regressions plus project identity, relocation validation, legacy collection grouping, corrupt-registry recovery, collection-aware duplicate detection, endpoint-level block/allow decisions, forget-without-delete, portable-collection regressions, and Paratext tests isolated from any live companion pipe |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 1 sidecar-timeout unit test passed |
@@ -36,6 +36,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A24 | Paratext/Logos connectors | `paratext.getState/setReference`, `logos.getState/setReference` protocol wiring — no companion Paratext plugin instance or Logos installation available on this machine | Source | PASS — 4 protocol-level tests plus 4 direct `LogosConnectorClient`↔real `logos_bridge.ps1` integration tests (real subprocess, real `-STA` PowerShell, real newline-delimited JSON exchange, a real "not installed" COM error round-tripping cleanly) — see paratext_plugin/README.md and engine/logos_connector/README.md for what remains genuinely unverified against live Paratext/Logos |
 | A25 | Paratext/Logos connectors | Same protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — Paratext returns the expected clean companion-unavailable response; the packaged Logos PowerShell bridge launches and cleanly reports unavailable COM integration |
 | A26 | Paratext companion plugin | `paratext_plugin/TranslationCoreAIBridgePlugin.cs` — a separate .NET project, not part of the Python source tree | Build only | PASS (compile) / NOT RUN (load) — compiles cleanly via the bundled .NET Framework `csc.exe` against Paratext's real installed `PluginInterfaces.dll`/`CorePluginInterfaces.dll` (every interface member used was confirmed by reflecting into those real DLLs). Deployment into `C:\Program Files\Paratext 9\plugins\...` was not performed this session (a protected-system-directory write, blocked by this session's own safety controls) — the plugin has never actually been loaded by a running Paratext instance. See paratext_plugin/README.md for the exact next steps |
+| A27 | Original-language resources | Exact pinned UHB v3.0.0/UGNT v0.34 packs, all 66 books, metadata and artifact hashes, golden Hebrew/Greek tokens, Qere/Ketiv, occurrence and verse-bridge behavior | Source + Frozen | PASS — 42 focused Milestone 3A tests and the 194-test full suite, including anchored provenance-tampering rejection, 39 UHB + 27 UGNT pack loads, and exact totals of 31,103 verses/443,131 tokens; rebuilt frozen worker imported raw Titus and returned the pinned UGNT provenance plus all 17 Titus 1:1 source tokens |
 
 ## Import workflows
 
@@ -61,6 +62,10 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | I18 | One existing collection exactly covers every incoming source book | Offer that collection and block the default import until separate-copy intent is explicit | PASS — registry and real `project.import` endpoint regressions |
 | I19 | Same display name with different canonical book/content, or same book with different language/Bible metadata | Never classify by display name; metadata overlap remains non-blocking | PASS — canonical-book, content, language, Bible, whitespace, and case regressions |
 | I20 | Exact source belongs only to a missing registered folder | Explain the missing match, allow recovery import, and retain Locate behavior | PASS — missing-path classification regression; installed wording NOT RUN |
+| I21 | Raw OT/NT Scripture import | Initialize one blank source group per canonical UHB/UGNT token, with full lexical attributes and version provenance | PASS — source regressions for Genesis and Titus |
+| I22 | Import aligned USFM or native translationCore project | Preserve its source groups and version state exactly; do not apply the bundled source | PASS — aligned-USFM preservation regression; native tC imports are ineligible for recovery by design |
+| I23 | Reopen an older Bridge raw import | Fill only empty source arrays; preserve non-empty verses; repeated opens are idempotent | PASS — source regression |
+| I24 | Reopen with damaged optional import metadata or a different pinned resource stamp | Open without guessing or rewriting alignments; expose version mismatch when available | PASS — source regressions; installed warning presentation NOT RUN |
 
 ## Desktop core loop
 
@@ -130,7 +135,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 ## Automated evidence
 
-- Python: 183 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 194 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book
@@ -145,7 +150,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
   against real materialized evidence, and real subprocess-level Paratext/Logos connector
   protocol tests (the Logos ones spawn the actual bundled PowerShell helper).
 - Frontend: `svelte-check` reports 0 errors and 0 warnings; production Vite build succeeds.
-- Frozen workers: real Wildebeest, Uroman, and Smart Edit Distance load; versification,
+- Frozen workers: pinned UGNT provenance/Titus tokens, real Wildebeest, Uroman, and Smart Edit Distance load; versification,
   a planted spelling inconsistency, corpus statistics, AI-proposal/explain packaging,
   connector error paths, Project Registry/exact-duplicate reason/count protocol, manual many-to-many
   alignment/export/undo, and USFM duplicate/missing-verse checks pass. Lightweight
@@ -156,6 +161,21 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
   `256466811DBD80B9363B04E52B621CDF3E735EBFB1898D1889DD39E98776AC77`).
 
 ## Beta 4 artifact provenance — 2026-08-25
+
+### Milestone 3A rebuild
+
+- Desktop executable: 12,740,096 bytes, SHA-256
+  `FDF4BFD1ABC3C691422B5A15AA80C2534450B64718969A1DDB6B3D9384FC6ECC`.
+- `bridge-engine.exe`: 26,407,679 bytes, SHA-256
+  `AF04851F3310452F0936CB93FF265600DD3E1C5466CCC1B4621C7A2BE99710D9`.
+- `bridge-usfm-checker.exe`: 7,671,723 bytes, SHA-256
+  `3D274F3ECD999154BAEE565172DEBB2E4DB7C3400FD458592917876F02792E83`.
+- Installer: 36,086,198 bytes, SHA-256
+  `1BCFEEFC7DD970585C2CEF28E1DBFDD752D6F627FC00C9EE633DD7272518DAA8`.
+- The `engine/dist`, Tauri binary staging, and release-staged worker copies are
+  byte-identical. The frozen smoke imported raw Titus and verified the bundled
+  pinned UGNT resource/token path. All four executables remain `NotSigned`;
+  installed-GUI acceptance remains manual.
 
 - Release source: current Milestone 2.1 duplicate-classification completion worktree (commit pending).
 - Desktop executable: 12,739,072 bytes, ProductVersion `0.8.0-beta.4`, SHA-256

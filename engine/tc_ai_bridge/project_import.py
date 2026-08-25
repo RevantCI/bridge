@@ -16,6 +16,12 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from .original_language_resources import (
+    blank_source_alignments,
+    resource_for_book,
+    resource_inventory,
+    source_tokens_for_verse,
+)
 from .tc_project import ProjectError, TranslationCoreProject, _write_json_atomic
 from .usfm import whitespace_tokens
 
@@ -493,6 +499,8 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
     now = datetime.now(timezone.utc).isoformat()
     source_hash = hashlib.sha256(book.source_path.read_bytes()).hexdigest()
 
+    original_resource = resource_for_book(book.book_id)
+    original_resource_info = resource_inventory(book.book_id)
     manifest = {
         "generator": {"name": "Bridge", "build": "0.8.0-beta.4"},
         "target_language": {
@@ -516,17 +524,38 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
         },
         "bridge_project": {"name": metadata["projectName"], "schemaVersion": 1},
     }
+    if original_resource is not None and not book.has_alignment_markers:
+        manifest["tc_orig_lang_check_version_wordAlignment"] = original_resource.version
+        manifest["toolsSelectedOwners"] = {"wordAlignment": original_resource.owner}
+        manifest["bridge_original_language"] = {
+            "schemaVersion": 1,
+            **original_resource.to_dict(),
+            "tokenPackSchema": "bridge-original-language-token-pack/v1",
+        }
     _write_json_atomic(project_root / "manifest.json", manifest)
     (project_root / f"{book.book_id}.usfm").write_bytes(book.source_path.read_bytes())
     _write_json_atomic(project_root / book.book_id / "headers.json", book.headers)
 
     alignment_root = project_root / ".apps" / "translationCore" / "alignmentData" / book.book_id
     unreliable = 0
+    generated_source_tokens = 0
+    missing_source_verses: list[str] = []
     for chapter, verses in book.chapters.items():
         target_chapter: dict[str, str] = {}
         alignment_chapter: dict[str, dict[str, Any]] = {}
         for verse, raw_text in verses.items():
             target_text, alignment, reliable = _verse_alignment(raw_text)
+            # Existing aligned-USFM source milestones are authoritative. Only
+            # raw Scripture imports receive canonical UHB/UGNT blank source
+            # groups, so imported or human-created source data is never
+            # replaced by a bundled resource.
+            if not book.has_alignment_markers:
+                source_tokens = source_tokens_for_verse(book.book_id, chapter, verse)
+                if source_tokens:
+                    alignment["alignments"] = blank_source_alignments(source_tokens)
+                    generated_source_tokens += len(source_tokens)
+                else:
+                    missing_source_verses.append(f"{chapter}:{verse}")
             target_chapter[verse] = target_text
             alignment_chapter[verse] = alignment
             if book.has_alignment_markers and not reliable:
@@ -547,6 +576,10 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
         "alignment": {
             "sourceHadMilestones": book.has_alignment_markers,
             "versesRequiringAlignmentReview": unreliable,
+            "bundledSourceApplied": not book.has_alignment_markers and generated_source_tokens > 0,
+            "generatedSourceTokens": generated_source_tokens,
+            "missingSourceVerses": missing_source_verses,
+            "originalLanguageResource": original_resource_info,
         },
         "capabilities": {
             "translationNotes": "requires-resource-index",
@@ -555,6 +588,124 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
             "localQa": "ready",
         },
     })
+
+
+def ensure_bridge_original_language(project_root: str | Path) -> dict[str, Any]:
+    """Backfill source slots only for known Bridge raw imports.
+
+    Milestone 2 raw imports created alignment chapters with target word banks
+    but no source inventory. This retryable migration recognizes those
+    projects via .bridge/import.json and ``sourceHadMilestones: false``. It
+    fills only verses whose ``alignments`` array is still empty; any imported
+    or human-created group causes that verse to be left byte-for-byte alone.
+    Native translationCore projects and aligned-USFM imports are out of scope.
+    """
+    root = Path(project_root).resolve()
+    import_path = root / ".bridge" / "import.json"
+    manifest_path = root / "manifest.json"
+    if not import_path.is_file() or not manifest_path.is_file():
+        return {"eligible": False, "changedVerses": 0, "generatedSourceTokens": 0}
+    try:
+        import_data = json.loads(import_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(import_data, dict):
+            raise ValueError("expected a JSON object")
+    except (OSError, ValueError) as exc:
+        # This metadata only opts a Bridge raw import into the migration. A
+        # damaged optional record must never make the underlying project
+        # unopenable or tempt us to guess whether its alignments are safe to
+        # alter.
+        return {
+            "eligible": False,
+            "changedVerses": 0,
+            "generatedSourceTokens": 0,
+            "error": f"Could not read Bridge import metadata: {exc}",
+        }
+    original_import_data = copy.deepcopy(import_data)
+    alignment_meta = import_data.get("alignment")
+    if not isinstance(alignment_meta, dict) or alignment_meta.get("sourceHadMilestones") is not False:
+        return {"eligible": False, "changedVerses": 0, "generatedSourceTokens": 0}
+    manifest = _read_json(manifest_path)
+    original_manifest = copy.deepcopy(manifest)
+    project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
+    book_id = str(project.get("id") or "").lower()
+    resource = resource_for_book(book_id)
+    if resource is None:
+        return {"eligible": True, "changedVerses": 0, "generatedSourceTokens": 0}
+    project_resource = manifest.get("bridge_original_language")
+    if isinstance(project_resource, dict) and project_resource:
+        differs = any(
+            str(project_resource.get(key) or "") != expected
+            for key, expected in (
+                ("resourceId", resource.resource_id),
+                ("version", resource.version),
+                ("commit", resource.commit),
+            )
+        )
+        if differs:
+            return {
+                "eligible": True,
+                "changedVerses": 0,
+                "generatedSourceTokens": 0,
+                "versionMismatch": True,
+                "projectResource": project_resource,
+                "installedResource": resource.to_dict(),
+            }
+
+    alignment_root = root / ".apps" / "translationCore" / "alignmentData" / book_id
+    changed_verses = 0
+    available_source_tokens = 0
+    missing: list[str] = []
+    for chapter_path in sorted(alignment_root.glob("*.json")):
+        if not chapter_path.stem.isdigit():
+            continue
+        chapter = _read_json(chapter_path)
+        if not isinstance(chapter, dict):
+            continue
+        chapter_changed = False
+        for verse, raw in chapter.items():
+            if not isinstance(raw, dict):
+                continue
+            tokens = source_tokens_for_verse(book_id, chapter_path.stem, str(verse))
+            if not tokens:
+                missing.append(f"{chapter_path.stem}:{verse}")
+                continue
+            available_source_tokens += len(tokens)
+            if raw.get("alignments") == []:
+                raw["alignments"] = blank_source_alignments(tokens)
+                changed_verses += 1
+                chapter_changed = True
+        if chapter_changed:
+            _write_json_atomic(chapter_path, chapter)
+
+    manifest["tc_orig_lang_check_version_wordAlignment"] = resource.version
+    owners = manifest.get("toolsSelectedOwners")
+    if not isinstance(owners, dict):
+        owners = {}
+        manifest["toolsSelectedOwners"] = owners
+    owners["wordAlignment"] = resource.owner
+    manifest["bridge_original_language"] = {
+        "schemaVersion": 1,
+        **resource.to_dict(),
+        "tokenPackSchema": "bridge-original-language-token-pack/v1",
+    }
+    if manifest != original_manifest:
+        _write_json_atomic(manifest_path, manifest)
+
+    alignment_meta.update({
+        "bundledSourceApplied": changed_verses > 0 or bool(alignment_meta.get("bundledSourceApplied")),
+        "generatedSourceTokens": available_source_tokens,
+        "missingSourceVerses": missing,
+        "originalLanguageResource": resource_inventory(book_id),
+    })
+    if import_data != original_import_data:
+        _write_json_atomic(import_path, import_data)
+    return {
+        "eligible": True,
+        "changedVerses": changed_verses,
+        "generatedSourceTokens": available_source_tokens,
+        "missingSourceVerses": missing,
+        "resource": resource.to_dict(),
+    }
 
 
 def _safe_extract(source: Path, destination: Path) -> None:

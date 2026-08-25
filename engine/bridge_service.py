@@ -35,10 +35,12 @@ from tc_ai_bridge.tc_project import TranslationCoreProject, ProjectError
 from tc_ai_bridge.project_import import (
     apply_resource_materialization,
     collection_projects,
+    ensure_bridge_original_language,
     import_source,
     inspect_import,
     materialize_lazy_project,
 )
+from tc_ai_bridge.original_language_resources import resource_inventory
 from tc_ai_bridge.project_registry import ProjectRegistry, source_fingerprints
 from tc_ai_bridge.local_checks import run_local_qa
 from tc_ai_bridge.alignment_engine import (
@@ -301,6 +303,7 @@ class BridgeEngine:
         self._names_errors_by_book.clear()
         self._corpus_stats_by_book.clear()
         materialize_lazy_project(path)
+        ensure_bridge_original_language(path)
         candidate = TranslationCoreProject(path)
         if project_id:
             existing = self.project_registry.get(project_id)
@@ -347,6 +350,23 @@ class BridgeEngine:
         target = self.project.manifest.get("target_language", {})
         resource = self.project.manifest.get("resource", {})
         bridge_project = self.project.manifest.get("bridge_project", {})
+        original_language = resource_inventory(self.project.book_id)
+        project_original_language = self.project.manifest.get("bridge_original_language", {})
+        project_original_version = str(
+            self.project.manifest.get("tc_orig_lang_check_version_wordAlignment") or ""
+        )
+        original_language.update({
+            "projectVersion": project_original_version,
+            "projectResource": project_original_language,
+            "versionMismatch": bool(
+                isinstance(project_original_language, dict)
+                and project_original_language
+                and (
+                    str(project_original_language.get("version") or "") != str(original_language.get("version") or "")
+                    or str(project_original_language.get("commit") or "") != str(original_language.get("commit") or "")
+                )
+            ),
+        })
         return {
             "path": str(summary.path),
             "bookId": summary.book_id,
@@ -359,6 +379,7 @@ class BridgeEngine:
             "tcVersion": summary.tc_version,
             "chapters": self.project.chapters(),
             "checkTypes": self.project.check_types(),
+            "originalLanguageResource": original_language,
         }
 
     def inspect_project_import(self, path: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:

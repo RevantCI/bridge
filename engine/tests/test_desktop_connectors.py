@@ -1,9 +1,9 @@
 """
 Protocol-level tests for the Phase 7 paratext.*/logos.* methods added to
-bridge_service.py. Neither a real Paratext plugin instance nor a real Logos
-installation is available on this machine, so these confirm the wiring
-(method dispatch, error-code mapping, the Logos persistent-subprocess
-lifecycle) rather than real live-navigation behavior — see
+bridge_service.py. Paratext tests deliberately inject a nonexistent named
+pipe so they never read or navigate a developer's live Paratext session.
+These confirm the wiring (method dispatch, error-code mapping, the Logos
+persistent-subprocess lifecycle) rather than real live-navigation behavior — see
 paratext_plugin/README.md and engine/logos_connector/README.md for what
 remains genuinely unverified end to end.
 """
@@ -11,22 +11,37 @@ import shutil
 
 import pytest
 
+import bridge_service
 from bridge_service import BridgeEngine
 from greek_room_engine.protocol import EngineRequest
+from tc_ai_bridge.paratext_connector import ParatextConnectorClient
 
 
 def call(engine, method, params=None):
     return engine.handle_request(EngineRequest(id="t", method=method, params=params or {})).to_dict()
 
 
-def test_paratext_get_state_fails_cleanly_with_no_companion_plugin_running():
+def _isolate_paratext(monkeypatch):
+    monkeypatch.setattr(
+        bridge_service,
+        "ParatextConnectorClient",
+        lambda: ParatextConnectorClient(
+            pipe_name=r"\\.\pipe\translationCoreAIBridge-pytest-not-running",
+            timeout_ms=1,
+        ),
+    )
+
+
+def test_paratext_get_state_fails_cleanly_with_no_companion_plugin_running(monkeypatch):
+    _isolate_paratext(monkeypatch)
     engine = BridgeEngine()
     result = call(engine, "paratext.getState")
     assert result["success"] is False
     assert result["error"]["code"] == "paratext_connector_error"
 
 
-def test_paratext_set_reference_fails_cleanly_with_no_companion_plugin_running():
+def test_paratext_set_reference_fails_cleanly_with_no_companion_plugin_running(monkeypatch):
+    _isolate_paratext(monkeypatch)
     engine = BridgeEngine()
     result = call(engine, "paratext.setReference", {"reference": "TIT 1:1"})
     assert result["success"] is False

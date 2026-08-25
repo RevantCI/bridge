@@ -4,7 +4,8 @@ Updated: 2026-08-25
 
 ## Current release state
 
-The current working release adds the complete manual word-alignment loop. The
+The current working release adds the complete manual word-alignment loop and
+Milestone 3A's offline original-language source baseline. The
 authoritative design and limitations are in `docs/ALIGNMENT.md`; the release
 gate is `docs/QA_TEST_MATRIX.md`.
 
@@ -20,13 +21,20 @@ gate is `docs/QA_TEST_MATRIX.md`.
 - Export/import: nested many-to-many `zaln`/`w` milestones are parsed into tC
   groups and aligned export writes re-importable USFM 3 over the retained source
   template.
-- Automated source gate: 165 Python tests pass in the maintained Windows/
+- Original-language resources: raw OT/NT imports are initialized from exact,
+  checksum-verified unfoldingWord UHB v3.0.0/UGNT v0.34 packs. All 66 books,
+  31,103 verses, and 443,131 canonical tokens are bundled with CC BY-SA 4.0
+  licenses, attribution, exact upstream commits, source/artifact hashes, and a
+  reproducible generator. Aligned USFM and native tC projects are never
+  overwritten; legacy raw-import recovery only fills empty source arrays and
+  stops on a resource-version mismatch.
+- Automated source gate: 194 Python tests pass in the maintained Windows/
   Python 3.12.4 environment as of the 2026-08-25 Milestone 1 baseline.
   Svelte and Rust source gates pass. Beta 2 frozen-sidecar and NSIS results,
   including exact artifact hashes and the remaining manual installer acceptance,
   are recorded in the QA matrix. The former load-sensitive versification
   wall-clock bound is now a deterministic concurrency-invariant test.
-- Explicitly deferred: original-source resource downloads and automatic live
+- Explicitly deferred: live original-source resource downloads and automatic
   Paratext/Logos synchronization. AI alignment proposals and UAlign-derived
   corpus statistics (count/probability/PMI/SED-boost) are implemented; see the
   Phase 6/7 sections further down.

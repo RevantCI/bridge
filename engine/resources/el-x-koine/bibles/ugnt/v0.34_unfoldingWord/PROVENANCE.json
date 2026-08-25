@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "artifactName": "Bridge Original-Language Token Index",
+  "description": "A compact derivative token index generated from the named original-language resource. It excludes punctuation, ordinary text objects, and footnote words and preserves source surface text, Strong's data, lemma, morphology, and occurrence numbering.",
+  "license": "CC BY-SA 4.0",
+  "attribution": "The original work by unfoldingWord is available from https://git.door43.org/unfoldingWord/el-x-koine_ugnt/releases/tag/v0.34",
+  "source": {
+    "repository": "https://git.door43.org/unfoldingWord/el-x-koine_ugnt.git",
+    "release": "https://git.door43.org/unfoldingWord/el-x-koine_ugnt/releases/tag/v0.34",
+    "tag": "v0.34",
+    "commit": "fc95b2b8aad08bb65ab54628ab685413a1139e97",
+    "languageId": "el-x-koine",
+    "resourceId": "ugnt",
+    "version": "0.34",
+    "owner": "unfoldingWord",
+    "manifestSha256": "3d6130e45c92816715b353391bec62231360de8e579f0678156254f85cbb5539",
+    "licenseSha256": "c5ddc53db325a35e7b023ba1e24c0da21ad9672b50b043c97eb73bd2a17e882e"
+  },
+  "generator": {
+    "script": "scripts/vendor-original-language-resources.mjs",
+    "schema": "bridge-original-language-token-pack/v1",
+    "packages": {
+      "usfm-js": "3.5.0",
+      "word-aligner": "1.1.1"
+    }
+  },
+  "changes": [
+    "Converted USFM 3 books to verse-level source-token indexes.",
+    "Retained only tokens translationCore's word-aligner treats as original-language words.",
+    "Compressed each book independently for offline, lazy loading.",
+    "Did not alter the original manifest.yaml or LICENSE.md included beside this notice."
+  ],
+  "artifacts": {
+    "mat": {
+      "sourceFile": "41-MAT.usfm",
+      "sourceSha256": "d2aa7b76959d261f6156996038591234702697f843b5478e1d2eaa21c9294647",
+      "artifact": "mat.json.gz",
+      "artifactSha256": "85ba6881b50f8889d7f1b978d0c65e001f26dac942b8c7e3f891bbd463beb5cc",
+      "verses": 1071,
+      "tokens": 18383
+    },
+    "mrk": {
+      "sourceFile": "42-MRK.usfm",
+      "sourceSha256": "b44f312add8028e4a2f08fc9f20bbe5ea7776de604e81987ea2fa32b23d189fb",
+      "artifact": "mrk.json.gz",
+      "artifactSha256": "bcec94509b8038b6d216da21bf960f1d596753d3e61bcc44a9fada4d960ffc22",
+      "verses": 678,
+      "tokens": 11320
+    },
+    "luk": {
+      "sourceFile": "43-LUK.usfm",
+      "sourceSha256": "916cc96118a10426b9160379ab52f358ee8bc7cc530b01a6eca0e34c860a7e14",
+      "artifact": "luk.json.gz",
+      "artifactSha256": "71436aa9834d1b992f96363c4a08c04441de3c08de9aa4cf84aa86f8b2b164c4",
+      "verses": 1151,
+      "tokens": 19448
+    },
+    "jhn": {
+      "sourceFile": "44-JHN.usfm",
+      "sourceSha256": "7d81c3f15968b14fb9c0e3e41c9cb2f2f6b7d7af3118bae4eaa4cf33deec7b06",
+      "artifact": "jhn.json.gz",
+      "artifactSha256": "edbe9a4eb05b7f1e7905070a2f26016ca53d05177960d07b073f7fac07030680",
+      "verses": 879,
+      "tokens": 15626
+    },
+    "act": {
+      "sourceFile": "45-ACT.usfm",
+      "sourceSha256": "7df48d718b31effbd4e106867e4723ae978ebad55d43beb10f39cf6a84d2af59",
+      "artifact": "act.json.gz",
+      "artifactSha256": "4a13c6652ae7c3a765f145da1b0a2f1c4a5de5dde1925680aadb63fa21a955ef",
+      "verses": 1007,
+      "tokens": 18488
+    },
+    "rom": {
+      "sourceFile": "46-ROM.usfm",
+      "sourceSha256": "160126f07e1e67665656e94ed7612ab306109af5e469ddf1b32b52f307768f18",
+      "artifact": "rom.json.gz",
+      "artifactSha256": "89fae74cfcef5a452644325b44b5f34a78a77faaa40f004472fdaa8e5e6f6da9",
+      "verses": 433,
+      "tokens": 7116
+    },
+    "1co": {
+      "sourceFile": "47-1CO.usfm",
+      "sourceSha256": "149bb14b916cc8740206b0aca55b3d780b34c858306e8456153a346b76e5d8bd",
+      "artifact": "1co.json.gz",
+      "artifactSha256": "b7e850d2cd9345d4d5eb6a32f274160b04a539230760e190ba35f0e743fa5d17",
+      "verses": 437,
+      "tokens": 6820
+    },
+    "2co": {
+      "sourceFile": "48-2CO.usfm",
+      "sourceSha256": "cbaec01c0cd0f9ca0a99ab176b17ed5a7b7fe58aae73e4b43cdd48f0332cf3f2",
+      "artifact": "2co.json.gz",
+      "artifactSha256": "94a4e9c5376f743e2d7c2e8b13413f343a5e670be2eb5698c010f2b4748d1d15",
+      "verses": 256,
+      "tokens": 4472
+    },
+    "gal": {
+      "sourceFile": "49-GAL.usfm",
+      "sourceSha256": "fc57d4292401426d612fbf8dad6f41b2383fa9ef1d4b21774050590d7ed2ee23",
+      "artifact": "gal.json.gz",
+      "artifactSha256": "7e91f243180d4388d7db0bda5fefc689cda56ed2d65a19e583dcea7b75940cd6",
+      "verses": 149,
+      "tokens": 2226
+    },
+    "eph": {
+      "sourceFile": "50-EPH.usfm",
+      "sourceSha256": "0db217dd9dc81f5f3e72865c1e5cddb80454375f157f6aced5219166477b47a5",
+      "artifact": "eph.json.gz",
+      "artifactSha256": "b9cbf4ee4fb629b9a5ec66742aafe78be1f0a40468859917bab0c04d46687d61",
+      "verses": 155,
+      "tokens": 2416
+    },
+    "php": {
+      "sourceFile": "51-PHP.usfm",
+      "sourceSha256": "faa625ea6664a99567d084f4e6dc0b3746d91f3bf21a96fe526e321cf45886fc",
+      "artifact": "php.json.gz",
+      "artifactSha256": "8ac1e3a9c08cd41ad2eebe97d7a144a529beffa656d6b82b753b2e8ee5bad27a",
+      "verses": 104,
+      "tokens": 1627
+    },
+    "col": {
+      "sourceFile": "52-COL.usfm",
+      "sourceSha256": "6b14a090e413e1d43d49018fe96a2e2f4dd14dd6471b645260857d8733556248",
+      "artifact": "col.json.gz",
+      "artifactSha256": "218fa2ea70b5561d4d9939cce27d54fdfab575b2a6ee149a5907170fae85474e",
+      "verses": 95,
+      "tokens": 1580
+    },
+    "1th": {
+      "sourceFile": "53-1TH.usfm",
+      "sourceSha256": "f47bafa7b503f2a4c56dda485576167f205d7714fd51b202124bb9db866fd759",
+      "artifact": "1th.json.gz",
+      "artifactSha256": "cf9798bdc105dc85344dbee7b17e13226c76d9010b75fe6bf81a1b2036f8ba47",
+      "verses": 89,
+      "tokens": 1477
+    },
+    "2th": {
+      "sourceFile": "54-2TH.usfm",
+      "sourceSha256": "ee08ce98386ab0edfd2409a083ee196019db5aad0de62d1e5fd07e3374f11af2",
+      "artifact": "2th.json.gz",
+      "artifactSha256": "08c7c7e792a55f902d4d93f6554aae214e7092ac2486c302d30d48e6d9af201d",
+      "verses": 47,
+      "tokens": 820
+    },
+    "1ti": {
+      "sourceFile": "55-1TI.usfm",
+      "sourceSha256": "9127a1ce2ad5861e51ce390a30747610d17361ec1c2889a83b28e6f24c5bb268",
+      "artifact": "1ti.json.gz",
+      "artifactSha256": "25f6fdaa207c1c8140e2e43e97748e347e91b9b1a907b670483c85ab9c0f95d6",
+      "verses": 113,
+      "tokens": 1593
+    },
+    "2ti": {
+      "sourceFile": "56-2TI.usfm",
+      "sourceSha256": "23ea65495f80e6238e4925a7be10faf5ce895c7c5b5fc7e391fe582dc7920fb6",
+      "artifact": "2ti.json.gz",
+      "artifactSha256": "a140164541d94f6643f881cffa005ab085896d46faf131681b9b99cdee3315c9",
+      "verses": 83,
+      "tokens": 1235
+    },
+    "tit": {
+      "sourceFile": "57-TIT.usfm",
+      "sourceSha256": "784e775d0e559aae5b8454cc87374cd843eff2318e035a33bb99753d94fc18b6",
+      "artifact": "tit.json.gz",
+      "artifactSha256": "4aedb1c18d59ef08fc92995e7029d1168104d296024eff41113f47d43a5ea065",
+      "verses": 46,
+      "tokens": 659
+    },
+    "phm": {
+      "sourceFile": "58-PHM.usfm",
+      "sourceSha256": "51447b1f6d38fdc645e9ac1cce575316694b549357e1f89cb68a957d66bfe923",
+      "artifact": "phm.json.gz",
+      "artifactSha256": "951797e8548672d487c50c7e3125a57e9826ec6571348e0b70c36d5e41973a9b",
+      "verses": 25,
+      "tokens": 338
+    },
+    "heb": {
+      "sourceFile": "59-HEB.usfm",
+      "sourceSha256": "bd57f1f82946ff638704686d9c2043fd4b13d6c3f8bfb1db2f8134734ce19779",
+      "artifact": "heb.json.gz",
+      "artifactSha256": "36dabdd76e2f94bf693c2a2cb5cfca4d6038299dfaaaff528806a05fc7f82047",
+      "verses": 303,
+      "tokens": 4943
+    },
+    "jas": {
+      "sourceFile": "60-JAS.usfm",
+      "sourceSha256": "c9945c5093e4c40ea12fe59ebd02afd345dbf6819a1155d5d6e00b3e5cc3bf06",
+      "artifact": "jas.json.gz",
+      "artifactSha256": "f705d14f7b9a8555f5721960fd8c754befb5e91cb66c99933f6907eeed81ad6b",
+      "verses": 108,
+      "tokens": 1741
+    },
+    "1pe": {
+      "sourceFile": "61-1PE.usfm",
+      "sourceSha256": "1881a425956d60f63fea48b46c7c650268664195f870ba6e6c8a0cf7f316106f",
+      "artifact": "1pe.json.gz",
+      "artifactSha256": "571763b2e4183cee0ba319c8380e5b1500ac65a2b9ff218a54c1c99b9afd4599",
+      "verses": 105,
+      "tokens": 1676
+    },
+    "2pe": {
+      "sourceFile": "62-2PE.usfm",
+      "sourceSha256": "3dbccff8b7ebafcab2282920f627c7681410888875a229c0238f2e14928e24de",
+      "artifact": "2pe.json.gz",
+      "artifactSha256": "d7b3683f527ea4a01a3efae919b3b7bfc53d563772f8b41c96caf852389a4041",
+      "verses": 61,
+      "tokens": 1100
+    },
+    "1jn": {
+      "sourceFile": "63-1JN.usfm",
+      "sourceSha256": "f15ea719d0bfde270d004d290654c1599fdc2d9292bb8ff9fcd4f1af2d7e2628",
+      "artifact": "1jn.json.gz",
+      "artifactSha256": "8971e92d10bf2f39a407f244f2491d2b4a7702d50e5873964ad8c4243a3ab075",
+      "verses": 105,
+      "tokens": 2137
+    },
+    "2jn": {
+      "sourceFile": "64-2JN.usfm",
+      "sourceSha256": "888938024ad1c59e6aebee75c8c8c2659708e8d2f144d4a8e00fb6874b8a6758",
+      "artifact": "2jn.json.gz",
+      "artifactSha256": "9ac11ff3065e8c512adc499565b7966088697542c2af63f8394723140124655a",
+      "verses": 13,
+      "tokens": 245
+    },
+    "3jn": {
+      "sourceFile": "65-3JN.usfm",
+      "sourceSha256": "2e3754eb0bd6e7d2116badf7307cd384dedc594c192819ac71c9a09cf54d4193",
+      "artifact": "3jn.json.gz",
+      "artifactSha256": "2415d324f88d1eab9462f1d4bfac1f893d72050a270f77444f3ab64ddd372c6e",
+      "verses": 15,
+      "tokens": 219
+    },
+    "jud": {
+      "sourceFile": "66-JUD.usfm",
+      "sourceSha256": "e2fa9ed4756bfc6ee56e58138caa83b55e5d4b2dfa672b7361304151e7800b34",
+      "artifact": "jud.json.gz",
+      "artifactSha256": "d0a2139cbf72621f9e58ce0e496b94c81105655ea614a3de9d5903b1df6ec9aa",
+      "verses": 25,
+      "tokens": 458
+    },
+    "rev": {
+      "sourceFile": "67-REV.usfm",
+      "sourceSha256": "64cc13d55437daa40d686ccfa53579446dd1f867c199a93bf1597889ea03fb59",
+      "artifact": "rev.json.gz",
+      "artifactSha256": "8506b5167a1d4cbe36905b04f7ddfcb91accc09ebdc790e3ac667cbfb5243fb0",
+      "verses": 405,
+      "tokens": 9827
+    }
+  }
+}

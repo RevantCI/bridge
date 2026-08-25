@@ -22,7 +22,10 @@ class TokenRef:
             word=str(data.get('word', '')),
             occurrence=int(data.get('occurrence', 1) or 1),
             occurrences=int(data.get('occurrences', 1) or 1),
-            strong=str(data.get('strong', '') or ''),
+            # translationCore's current legacy writer uses ``strong`` while
+            # older alignmentData used ``strongs``. Its own migration accepts
+            # both, so Bridge must do the same when opening historic projects.
+            strong=str(data.get('strong') or data.get('strongs') or ''),
             lemma=str(data.get('lemma', '') or ''),
             morph=str(data.get('morph', '') or ''),
             type=str(data.get('type', '') or ''),
