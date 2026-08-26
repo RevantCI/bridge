@@ -13,7 +13,7 @@ desktop app (Tauri + Svelte), while keeping the same QA engines
 ([Greek Room](https://github.com/BibleNLP/greek-room)) and translation
 business logic underneath.
 
-**Status:** `v0.8.0-beta.8` — the full import → check → review → align →
+**Status:** `v0.8.0-beta.9` — the full import → check → review → align →
 export loop works end to end. See [Current status](#current-status) below.
 
 ## Who this is for

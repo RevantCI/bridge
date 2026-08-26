@@ -76,7 +76,7 @@ from ai_review_jobs import (
     AIReviewJobSpec,
 )
 
-BRIDGE_VERSION = "0.8.0-beta.8"
+BRIDGE_VERSION = "0.8.0-beta.9"
 
 # tc_ai_bridge's QAIssue.severity strings -> our shared Severity enum
 _SEVERITY_MAP = {

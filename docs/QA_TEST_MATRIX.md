@@ -14,13 +14,13 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 2 sidecar-timeout unit tests passed, including the Beta 7 interactive-timeout guard |
-| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 8; the `dist`, Tauri staging, and release-staged copies are byte-identical |
+| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 9; the `dist`, Tauri staging, and release-staged copies are byte-identical |
 | A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | PASS — the real standalone checker found both conditions in the packaged Odia fixture |
 | A07 | Protocol | Sidecar remains responsive during a background job | Frozen | PASS — status polling completed the background job while lightweight requests remained responsive |
 | A08 | Security | Settings never serialize plaintext secrets | Source | PASS — regression suite |
 | A09 | Alignment | Manual protocol, conflicts, history, restart and USFM round trip | Source | PASS |
 | A10 | Versification | Detect/orgRef/backVersificationMap against real schema data | Source | PASS — includes real Psalm 3 descriptive-title shift |
-| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 8 release-staged worker |
+| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 9 release-staged worker |
 | A12 | Versification | Edge cases: merges, splits, unknown books, verse bridges/segments | Source | PASS — 11 tests against real vendored data |
 | A13 | Versification | Concurrent callers: correctness and a GIL-contention regression guard | Source | PASS — a fresh-process test verifies concurrent first-load correctness against real schema data; a deterministic instrumented test verifies the expensive matcher is serialized (`max_active == 1`) without using a machine-dependent deadline |
 | A14 | Names/Transliteration | Whole-book spelling-consistency check against real uroman + vendored Smart Edit Distance | Source | PASS — 15 tests; real Muhammad/Mohamed and Titus/Tituss cases, a real Tamil vowel-sign inconsistency through full verse sentences, a false-positive exclusion (church/churches), and a bigram-blocking performance regression guard |
@@ -137,13 +137,13 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | M07 | Basic mode: run one-verse AI review and confirm only grounded high-confidence selections are applied | NOT RUN |
 | M08 | Advanced mode: proposals/evidence appear without changing tC state; Apply, Edit, and Clear work | NOT RUN |
 | M09 | Run chapter and whole-book AI review while navigating; Scripture remains responsive and results attach to the correct verse | NOT RUN |
-| M10 | Cancel during a model request, then Retry; current request finishes safely and no cancelled result is auto-applied | NOT RUN |
+| M10 | Cancel during a model request, then Retry; the cancelled result is marked incomplete and Retry resumes only failed/unfinished verses | NOT RUN |
 | M11 | Existing imported/human selection is never overwritten by Basic AI review | NOT RUN |
 | M12 | Edit a reviewed verse and confirm its cached AI result becomes stale/review-required until rerun | NOT RUN |
 
 ## Automated evidence
 
-- Python: 218 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 223 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book
@@ -163,10 +163,29 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
   connector error paths, Project Registry/exact-duplicate reason/count protocol, manual many-to-many
   alignment/export/undo, and USFM duplicate/missing-verse checks pass. Lightweight
   status calls remain responsive during the job.
-- Windows: the Beta 8 release executable and NSIS installer were produced with both
+- Windows: the Beta 9 release executable and NSIS installer were produced with both
   verified worker binaries. The installer is
-  `Bridge_0.8.0-beta.8_x64-setup.exe` (SHA-256
-  `D15F4597DF21F2A530CECD8399EA1887D1066DF120F2D271DB0EF439F1411349`).
+  `Bridge_0.8.0-beta.9_x64-setup.exe` (SHA-256
+  `9FE8A3FAC79A8462BABCAED8C99A9757515DCCD765D154FF55085E1AB1F4E3F8`).
+
+## Beta 9 artifact provenance — 2026-08-26
+
+- Release source: merge commit `4b27e1a` plus the synchronized Beta 9 release
+  version and provenance update; release commit pending.
+- Desktop executable: 13,062,656 bytes, ProductVersion `0.8.0-beta.9`, SHA-256
+  `DB398D349E7E2B302D1490099467D02A312832B8EA01D5933C2B9EDB10E6F1EE`.
+- `bridge-engine.exe`: 26,448,619 bytes, SHA-256
+  `D468344BDCA5AC58CCF55969BEDFF93B9CD7DD20E28C303F7B70490932112096`.
+- `bridge-usfm-checker.exe`: 7,774,839 bytes, SHA-256
+  `0AB824EBCE64AC6560291F08728F907486C243678218B05DB57D4E701835D320`.
+- Installer: 36,279,732 bytes, ProductVersion `0.8.0-beta.9`, SHA-256
+  `9FE8A3FAC79A8462BABCAED8C99A9757515DCCD765D154FF55085E1AB1F4E3F8`.
+- Source gates: 223 Python tests, 2 Rust tests, clean Svelte diagnostics, and
+  production frontend/NSIS builds passed.
+- Frozen smoke: passed real Wildebeest/Uroman, pinned UGNT, versification,
+  names, alignment statistics/proposals, AI packaging imports, connectors,
+  project registry/duplicates, alignment/export/undo, and USFM checks.
+- Signing: `NotSigned` (the expected Windows warning remains).
 
 ## Beta 8 artifact provenance — 2026-08-26
 
