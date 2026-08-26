@@ -116,9 +116,12 @@
       const state = await bridge.paratextGetState();
       if (resolutionKey !== identity(check)) return;
       connectorState = state;
-      connectorMessage = state.connected
-        ? `Destination: ${state.project_name || "active Paratext project"}${state.project_id ? ` · ${state.project_id}` : ""}`
-        : "Paratext is not connected; this handoff will remain safely queued.";
+      const hasProjectIdentity = Boolean(state.connected && state.project_id?.trim());
+      connectorMessage = hasProjectIdentity
+        ? `Destination: ${state.project_name || "Paratext project"} · ${state.project_id}`
+        : state.connected
+          ? "Connected to Paratext, but no active Scripture project was detected. Open and focus the destination project in Paratext; this handoff will remain safely queued."
+          : "Paratext is not connected; this handoff will remain safely queued.";
     } catch (error) {
       if (resolutionKey !== identity(check)) return;
       connectorMessage = `Paratext is unavailable; this handoff will remain safely queued. ${error instanceof Error ? error.message : String(error)}`;
@@ -529,7 +532,7 @@
             <span>Reviewer note</span>
             <textarea bind:value={resolutionReviewerNote} rows="3" placeholder="Message for the Paratext reviewer" />
           </label>
-          <div class="connector-state" class:connected={Boolean(connectorState?.connected)}>{connectorMessage}</div>
+          <div class="connector-state" class:connected={Boolean(connectorState?.connected && connectorState?.project_id?.trim())}>{connectorMessage}</div>
           <p class="resolution-safety">Nothing is sent silently. This explicit action saves an audit record and a Notes 1.1 copy first; unsupported or offline delivery remains retryable.</p>
           {#if resolutionError}<p class="mutation-error">{resolutionError}</p>{/if}
           <div class="editor-actions">

@@ -43,7 +43,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A31 | Edited-verse AI lifecycle | Current AI review → Scripture edit → stale/no cached evaluation → verse AI rerun → current | Source + Frontend | PASS — backend lifecycle regression passes; UI compiles cleanly with an explicit stale warning and one-click **Run AI review again** action |
 | A32 | AI review navigation state | Switch verse, chapter, and project after verse/chapter/book AI jobs; distinguish active background work from reference-specific progress, completion, and errors | Frontend | PASS — 4 focused scope regressions cover exact verse, chapter, project and active-state behavior; Svelte diagnostics are clean and Translation Helps keeps a stable loading surface |
 | A33 | Local development startup | Compile the desktop frontend, start an isolated local preview, and request its index and application bundle | Source + Desktop | PASS — `npm run test:dev-start` verifies the same deterministic build-and-preview path used by `npm run tauri dev`; live WebView DOM inspection confirms the app mount is populated instead of blank |
-| A34 | Issue resolution and Paratext handoff | Persist a resolution, reject target text outside the verse, queue/retry offline without duplicate XML threads, send once only for a matching confirmed live project, and refuse a wrong active project | Source | PASS — 4 focused Milestone 3B.4 regressions; combined connector/resolution suite passes 8 tests |
+| A34 | Issue resolution and Paratext handoff | Persist a resolution, reject target text outside the verse, queue/retry offline without duplicate XML threads, send once only for a matching confirmed live project, and refuse a wrong active project | Source | PASS — 4 focused Milestone 3B.4 regressions; combined connector/resolution suite passes 8 tests, including the installed v0.7.4 companion's `project_notes` capability name |
 
 ## Import workflows
 
@@ -146,10 +146,10 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | M11 | Existing imported/human selection is never overwritten by Basic AI review | NOT RUN |
 | M12 | Edit a reviewed verse; confirm the explicit stale warning appears, use **Run AI review again**, and confirm it clears after success | NOT RUN |
 | M13 | Open a newly imported collection/book for the first time; translation helps show **Preparing** and no `checks.status`/`check.listForVerse` timeout appears | NOT RUN |
-| M14 | Open a tN and a tW finding, choose **Resolve / Paratext**, enter an issue and reviewer note, and save | NOT RUN |
-| M15 | Enter target text that is not an exact substring of the current verse | NOT RUN — save must be rejected without creating a resolution |
-| M16 | Save a handoff while Paratext is closed or the companion lacks `create_note` | NOT RUN — status must say queued, never sent; restart Bridge and confirm it persists |
-| M17 | Retry the same queued handoff repeatedly | NOT RUN — one resolution, one outbox message and one Paratext Notes XML thread only |
+| M14 | Open a tN and a tW finding, choose **Resolve / Paratext**, enter an issue and reviewer note, and save | PASS — user acceptance, both persisted after restart |
+| M15 | Enter target text that is not an exact substring of the current verse | PASS — user acceptance, save rejected |
+| M16 | Save a handoff while Paratext is closed or the companion lacks `create_note` | PASS — user acceptance, queued rather than sent and preserved |
+| M17 | Retry the same queued handoff repeatedly | PASS — user acceptance, no duplicate resolution or Notes thread |
 | M18 | Connect Paratext to a different active project than the confirmed project ID | NOT RUN — Bridge must refuse to send and identify the project mismatch |
 
 ## Automated evidence

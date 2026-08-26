@@ -24,6 +24,11 @@ $paratextDir = 'C:\Program Files\Paratext 9'
 $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $outDir = Join-Path $PSScriptRoot 'build'
 $pluginName = 'TranslationCoreAIBridgePlugin'
+$fullConnector = Join-Path $paratextDir 'plugins\translationCoreAIBridge\translationCoreAIBridge.ptxplg'
+
+if ($Deploy -and (Test-Path -LiteralPath $fullConnector)) {
+    throw "A translationCore AI Bridge connector is already installed at $fullConnector. Both plugins use the same named pipe, so deploying this navigation-only companion beside it would create a conflict. Keep the existing connector or move it out of Paratext's plugins directory first."
+}
 
 if (-not (Test-Path $csc)) {
     throw "csc.exe not found at $csc - this script expects the .NET Framework 4.x compiler bundled with Windows."

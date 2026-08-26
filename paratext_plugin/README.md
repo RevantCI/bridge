@@ -20,13 +20,17 @@ against real code. The named-pipe wire protocol (newline-delimited JSON,
 and carries `ok`/`error`) matches `paratext_connector.py`'s `_exchange()`
 method exactly.
 
-**Not yet verified**: this plugin has never actually been loaded by a running
-Paratext instance. Deploying it requires copying into
+**Live verification update (2026-08-26):** this v1.0 plugin was loaded by
+Paratext 9.5.110.1 and its named-pipe `get_state` response was verified. That
+test also discovered a pre-existing, fuller v0.7.4 connector installed at
+`plugins\translationCoreAIBridge\translationCoreAIBridge.ptxplg`. Both plugins
+use the same named pipe and must never be installed together. The v1.0 plugin
+was moved to a recoverable disabled backup and the full connector was retained.
+`build.ps1 -Deploy` now refuses to deploy v1.0 while that connector exists.
+
+On a machine without another Bridge connector, deployment requires copying to
 `C:\Program Files\Paratext 9\plugins\TranslationCoreAIBridgePlugin\` (a
-protected system directory) - the build was completed and the compiled DLL
-exists at `build/TranslationCoreAIBridgePlugin.dll`, but the actual copy step
-was blocked by this session's own safety controls (writing into `Program
-Files`) rather than run automatically. Whoever deploys it next should:
+protected system directory). The operator should:
 
 1. Close Paratext if it's running (Paratext's own plugin docs: "Paratext must
    not be running when doing these copies").
@@ -34,10 +38,8 @@ Files`) rather than run automatically. Whoever deploys it next should:
 3. Launch Paratext and check `%LOCALAPPDATA%\Paratext95\ParatextLog.log` for
    this plugin loading (or a load failure) - the very first real signal about
    whether the interface assumptions above actually hold at runtime.
-4. Only then trust `get_state`/`set_reference` actually work end to end - a
-   real named-pipe round trip via `paratext_connector.py`'s own
-   `ParatextConnectorClient` is the next real test, not assumed from this
-   plugin compiling cleanly.
+4. Verify `get_state`/`set_reference` end to end with
+   `paratext_connector.py`'s own `ParatextConnectorClient`.
 
 `create_note` is intentionally **not implemented** - it returns a clear
 "not implemented" error over the pipe. Bridge already has a complete, working
@@ -76,8 +78,9 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -Deploy    # build + deploy (
   suite). If it proves out against a real Paratext instance, a scripted
   pipe-client smoke test (analogous to `scripts/smoke_sidecars.py`) would be
   worth adding.
-- The Python side now persists issue-resolution records and calls
-  `ParatextConnectorClient` only when the connector advertises `create_note`
-  and its active project matches the explicitly confirmed project ID. With
-  this companion plugin, handoffs remain safely queued because `create_note`
-  is intentionally unsupported; they are never reported as sent.
+- The Python side now persists issue-resolution records and accepts both the
+  newer `create_note` capability name and the full v0.7.4 connector's
+  `project_notes` capability family. It still requires the active project to
+  match the explicitly confirmed project ID. With this navigation-only v1.0
+  companion, handoffs remain safely queued because note creation is
+  intentionally unsupported; they are never reported as sent.

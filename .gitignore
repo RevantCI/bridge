@@ -18,6 +18,7 @@ engine/*.spec
 # ===== Paratext companion plugin (paratext_plugin/) =====
 # csc.exe build output — a compiled DLL, not source. See paratext_plugin/build.ps1.
 paratext_plugin/build/
+paratext_plugin/disabled-*/
 
 # ===== Rust / Tauri (src-tauri/) =====
 src-tauri/target/

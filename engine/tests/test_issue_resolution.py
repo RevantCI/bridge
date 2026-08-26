@@ -135,7 +135,10 @@ def test_confirmed_matching_project_sends_once_and_preserves_message_identity(
 
     class LiveConnector:
         def get_state(self):
-            return SimpleNamespace(capabilities=["get_state", "create_note"], project_id="ptx-titus")
+            # The installed v0.7.4 Paratext companion advertises the feature
+            # family as project_notes while newer companions may use the wire
+            # action name create_note.
+            return SimpleNamespace(capabilities=["state", "project_notes"], project_id="ptx-titus")
 
         def create_note(self, reference, selected_text, comment, **kwargs):
             calls.append({

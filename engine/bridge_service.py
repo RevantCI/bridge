@@ -1389,7 +1389,8 @@ class BridgeEngine:
         expected_project_id = str(item.get("expectedProjectId") or "").strip()
         try:
             state = ParatextConnectorClient().get_state()
-            if "create_note" not in state.capabilities:
+            capabilities = {str(capability).strip().casefold() for capability in state.capabilities}
+            if not capabilities.intersection({"create_note", "project_notes"}):
                 raise ParatextConnectorError(
                     "The connected Paratext companion does not support live note creation yet; the Notes 1.1 handoff remains safely queued."
                 )
