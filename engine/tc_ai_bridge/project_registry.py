@@ -114,6 +114,7 @@ class ProjectRegistry:
         self.managed_root = Path(managed_root).resolve(strict=False)
         self._data = self._load()
         self._managed_discovered = False
+        self._dirty = False
 
     def _load(self) -> dict[str, Any]:
         if not self.path.is_file():
@@ -135,6 +136,7 @@ class ProjectRegistry:
 
     def _save(self) -> None:
         _write_json_atomic(self.path, self._data)
+        self._dirty = False
 
     def _is_managed(self, path: Path) -> bool:
         try:
@@ -239,19 +241,24 @@ class ProjectRegistry:
             project_id = str(uuid.uuid4())
         if managed:
             created_at = str(identity.get("createdAt") or _utc_now())
-            identity = {
+            new_identity = {
                 "schemaVersion": IDENTITY_SCHEMA_VERSION,
                 "projectId": project_id,
                 "collectionId": collection_id,
                 "sourceFingerprint": source_fingerprint or self._source_fingerprint(project_path, identity),
                 "createdAt": created_at,
             }
-            _write_json_atomic(identity_path, identity)
+            if new_identity != identity:
+                _write_json_atomic(identity_path, new_identity)
+                self._dirty = True
+            identity = new_identity
 
         entry = self._find(path=project_path, project_id=project_id)
-        if entry is None:
+        is_new = entry is None
+        if is_new:
             entry = {"projectId": project_id, "createdAt": _utc_now(), "lastOpenedAt": ""}
             self._data["projects"].append(entry)
+        snapshot = None if is_new else dict(entry)
         metadata = self._project_metadata(project_path)
         entry.update({
             "projectId": project_id,
@@ -265,11 +272,13 @@ class ProjectRegistry:
         })
         if touch:
             entry["lastOpenedAt"] = _utc_now()
+        if is_new or entry != snapshot:
+            self._dirty = True
         if save:
             self._save()
         return dict(entry)
 
-    def list_projects(self, *, refresh_managed: bool = True) -> list[dict[str, Any]]:
+    def list_projects(self, *, refresh_managed: bool = True, collapse_collections: bool = False) -> list[dict[str, Any]]:
         self.managed_root.mkdir(parents=True, exist_ok=True)
         if refresh_managed or not self._managed_discovered:
             for child in self.managed_root.iterdir():
@@ -281,12 +290,53 @@ class ProjectRegistry:
         for entry in self._data["projects"]:
             if not isinstance(entry, dict):
                 continue
-            entry["missing"] = not Path(str(entry.get("path") or "")).exists()
-        self._save()
+            missing = not Path(str(entry.get("path") or "")).exists()
+            if entry.get("missing") != missing:
+                entry["missing"] = missing
+                self._dirty = True
+        if self._dirty:
+            self._save()
         result = [dict(value) for value in self._data["projects"] if isinstance(value, dict)]
         result.sort(key=lambda value: str(value.get("lastOpenedAt") or ""), reverse=True)
         result.sort(key=lambda value: bool(value.get("missing")))
+        return self._collapse_collections(result) if collapse_collections else result
+
+    @staticmethod
+    def _collapse_collections(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Collapse multi-book collections into one representative row.
+
+        ``entries`` is already sorted (non-missing first, most-recently-opened
+        first), so the first entry seen per ``collectionId`` is the right
+        representative to keep.
+        """
+        counts: dict[str, int] = {}
+        representative_index: dict[str, int] = {}
+        result: list[dict[str, Any]] = []
+        for entry in entries:
+            collection_id = str(entry.get("collectionId") or "")
+            if not collection_id:
+                result.append(entry)
+                continue
+            counts[collection_id] = counts.get(collection_id, 0) + 1
+            if collection_id not in representative_index:
+                representative_index[collection_id] = len(result)
+                result.append(entry)
+        for collection_id, index in representative_index.items():
+            result[index]["bookCount"] = counts[collection_id]
         return result
+
+    def group_entries(self, project_id: str) -> list[dict[str, Any]]:
+        """Return the entry for ``project_id`` plus any siblings sharing its collectionId."""
+        target = self._find(project_id=project_id)
+        if target is None:
+            return []
+        collection_id = str(target.get("collectionId") or "")
+        if not collection_id:
+            return [dict(target)]
+        return [
+            dict(entry) for entry in self._data["projects"]
+            if isinstance(entry, dict) and entry.get("collectionId") == collection_id
+        ]
 
     def forget(self, project_id: str) -> bool:
         before = len(self._data["projects"])

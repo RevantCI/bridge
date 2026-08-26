@@ -91,6 +91,19 @@ pub async fn project_forget(
 }
 
 #[tauri::command]
+pub async fn project_delete(
+    sidecar: State<'_, EngineSidecar>,
+    project_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "project.delete",
+            serde_json::json!({ "projectId": project_id }),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn project_scan(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar
         .send_request("project.scan", serde_json::json!({}))

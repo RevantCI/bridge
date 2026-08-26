@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import threading
 from collections import Counter
 from dataclasses import asdict
@@ -159,6 +160,7 @@ class Methods:
     PROJECT_OPEN = "project.open"
     PROJECT_LIST = "project.list"
     PROJECT_FORGET = "project.forget"
+    PROJECT_DELETE = "project.delete"
     PROJECT_SCAN = "project.scan"
     PROJECT_INSPECT_IMPORT = "project.inspectImport"
     PROJECT_IMPORT = "project.import"
@@ -336,12 +338,32 @@ class BridgeEngine:
         return info
 
     def list_projects(self) -> dict[str, Any]:
-        return {"projects": self.project_registry.list_projects()}
+        return {"projects": self.project_registry.list_projects(collapse_collections=True)}
 
     def forget_project(self, project_id: str) -> dict[str, Any]:
         if not project_id:
             raise ProjectError("projectId is required")
         return {"forgotten": self.project_registry.forget(project_id)}
+
+    def delete_project(self, project_id: str) -> dict[str, Any]:
+        if not project_id:
+            raise ProjectError("projectId is required")
+        entry = self.project_registry.get(project_id)
+        if entry is None:
+            raise ProjectError("Project not found")
+        managed = bool(entry.get("managed"))
+        if managed:
+            managed_root = self.project_registry.managed_root
+            for sibling in self.project_registry.group_entries(project_id):
+                sibling_path = Path(str(sibling.get("path") or ""))
+                if not sibling_path.exists():
+                    continue
+                resolved = sibling_path.resolve(strict=False)
+                if resolved != managed_root and managed_root not in resolved.parents:
+                    continue
+                shutil.rmtree(resolved, ignore_errors=True)
+        forgotten = self.project_registry.forget(project_id)
+        return {"deleted": forgotten, "managed": managed}
 
     def _project_info(self) -> dict[str, Any]:
         self._require_project()
@@ -1663,6 +1685,8 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.list_projects())
             if m == Methods.PROJECT_FORGET:
                 return EngineResponse.ok(request.id, result=self.forget_project(p.get("projectId", "")))
+            if m == Methods.PROJECT_DELETE:
+                return EngineResponse.ok(request.id, result=self.delete_project(p.get("projectId", "")))
             if m == Methods.PROJECT_SCAN:
                 return EngineResponse.ok(request.id, result=self.scan_project())
             if m == Methods.PROJECT_INSPECT_IMPORT:

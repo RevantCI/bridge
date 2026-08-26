@@ -49,9 +49,7 @@
   $: matchedGroups = groupDuplicateMatches(preview?.duplicates.matches ?? []);
   $: visibleMatchedGroups = matchedGroups.slice(0, 5);
   $: hiddenMatchedGroupCount = Math.max(0, matchedGroups.length - visibleMatchedGroups.length);
-  $: visibleProjects = projects.filter((item, index) =>
-    !item.collectionId || projects.findIndex((candidate) => candidate.collectionId === item.collectionId) === index,
-  );
+  let confirmingId = "";
 
   function message(value: unknown): string {
     return value instanceof Error ? value.message : String(value);
@@ -119,6 +117,20 @@
     error = null;
     try {
       await bridge.forgetProject(item.projectId);
+      await loadProjects();
+    } catch (value) {
+      error = message(value);
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function deleteProject(item: RegisteredProject) {
+    loading = true;
+    error = null;
+    try {
+      await bridge.deleteProject(item.projectId);
+      confirmingId = "";
       await loadProjects();
     } catch (value) {
       error = message(value);
@@ -204,21 +216,28 @@
       <h1>Your translation projects</h1>
       <p class="intro">Reopen a recent project, import a source, or drop one file or folder anywhere onto this window.</p>
 
-      {#if visibleProjects.length > 0}
+      {#if projects.length > 0}
         <section class="projects" aria-label="Known projects">
-          {#each visibleProjects as item}
+          {#each projects as item}
             <article class:missing={item.missing} class="project-row">
               <div class="book-badge">{item.bookId?.toUpperCase() || "?"}</div>
               <div class="project-copy">
                 <strong>{item.projectName || item.bookName || "Unnamed project"}</strong>
-                <span>{item.collectionId ? `${projects.filter((candidate) => candidate.collectionId === item.collectionId).length}-book collection` : item.bookName}{item.bibleName ? ` · ${item.bibleName}` : ""}{item.targetLanguage ? ` · ${item.targetLanguage}` : ""}</span>
+                <span>{item.collectionId ? `${item.bookCount ?? 1}-book collection` : item.bookName}{item.bibleName ? ` · ${item.bibleName}` : ""}{item.targetLanguage ? ` · ${item.targetLanguage}` : ""}</span>
                 <small title={item.path}>{item.missing ? "Project folder is missing" : item.path}</small>
               </div>
               {#if item.missing}
                 <button class="small-button" on:click={() => locate(item)} disabled={loading}>Locate</button>
                 <button class="small-button danger" on:click={() => forget(item)} disabled={loading}>Forget</button>
+              {:else if confirmingId === item.projectId}
+                <span class="confirm-copy">Delete permanently?</span>
+                <button class="small-button danger" on:click={() => deleteProject(item)} disabled={loading}>Confirm</button>
+                <button class="small-button" on:click={() => (confirmingId = "")} disabled={loading}>Cancel</button>
               {:else}
                 <button class="small-button primary" on:click={() => openPath(item.path, item.projectId)} disabled={loading}>Open</button>
+                {#if item.managed}
+                  <button class="small-button danger" on:click={() => (confirmingId = item.projectId)} disabled={loading}>Delete</button>
+                {/if}
               {/if}
             </article>
           {/each}
@@ -354,6 +373,7 @@
   .small-button { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); padding: 6px 10px; cursor: pointer; font-size: 10px; }
   .small-button.primary { border-color: var(--accent); color: var(--accent); }
   .small-button.danger { color: var(--danger); }
+  .confirm-copy { color: var(--danger); font-size: 10px; font-weight: 650; flex-shrink: 0; }
   .empty { background: var(--surface-2); color: var(--text-2); border-radius: 8px; padding: 14px; font-size: 11px; margin: 0 0 18px; }
   .choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   button { font: inherit; }

@@ -30,6 +30,7 @@ fn main() {
             commands::project_open,
             commands::project_list,
             commands::project_forget,
+            commands::project_delete,
             commands::project_scan,
             commands::project_inspect_import,
             commands::project_import,

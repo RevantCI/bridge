@@ -288,3 +288,62 @@ def test_partial_collection_and_metadata_overlap_remain_non_blocking(tmp_path):
     assert result["possibleBookCount"] == 1
     assert result["overlapBookCount"] == 2
     assert result["exactMatchGroupId"] == ""
+
+
+def test_list_projects_does_not_rewrite_files_when_nothing_changed(tmp_path, monkeypatch):
+    import tc_ai_bridge.project_registry as registry_module
+
+    calls: list[Path] = []
+    original_write = registry_module._write_json_atomic
+
+    def counting_write(path, value):
+        calls.append(path)
+        original_write(path, value)
+
+    monkeypatch.setattr(registry_module, "_write_json_atomic", counting_write)
+
+    managed = tmp_path / "managed"
+    registry = ProjectRegistry(tmp_path / "registry.json", managed)
+    project_path = _project(managed, "rut")
+    registry.register(project_path, touch=True)
+    calls.clear()
+
+    registry.list_projects()
+    registry.list_projects()
+
+    assert calls == [], "re-scanning an unchanged managed project must not rewrite any JSON file"
+
+    # Sanity check the counter isn't simply broken: a real change still writes.
+    registry.register(project_path, touch=True)
+    assert calls, "touching a project should still persist the change"
+
+
+def test_list_projects_collapses_collections_only_when_requested(tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
+    registry.register(_project(tmp_path / "managed", "tit"), collection_id="collection-a")
+    registry.register(_project(tmp_path / "managed", "phm"), collection_id="collection-a")
+    registry.register(_project(tmp_path / "managed", "rut"))
+
+    flat = registry.list_projects()
+    assert len(flat) == 3
+    assert all("bookCount" not in entry for entry in flat)
+
+    collapsed = registry.list_projects(collapse_collections=True)
+    assert len(collapsed) == 2
+    assert any(entry["bookId"] == "rut" and "bookCount" not in entry for entry in collapsed)
+    collection_entry = next(entry for entry in collapsed if entry.get("collectionId") == "collection-a")
+    assert collection_entry["bookCount"] == 2
+
+
+def test_group_entries_returns_collection_siblings(tmp_path):
+    registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
+    tit = registry.register(_project(tmp_path / "managed", "tit"), collection_id="collection-b")
+    registry.register(_project(tmp_path / "managed", "phm"), collection_id="collection-b")
+    solo = registry.register(_project(tmp_path / "managed", "rut"))
+
+    siblings = registry.group_entries(tit["projectId"])
+    assert {entry["bookId"] for entry in siblings} == {"tit", "phm"}
+
+    solo_group = registry.group_entries(solo["projectId"])
+    assert len(solo_group) == 1
+    assert solo_group[0]["bookId"] == "rut"

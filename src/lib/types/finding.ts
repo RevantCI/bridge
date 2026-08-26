@@ -296,6 +296,7 @@ export interface RegisteredProject {
   projectName?: string;
   bibleName?: string;
   lastOpenedAt?: string;
+  bookCount?: number;
 }
 
 export interface ImportedProject {
