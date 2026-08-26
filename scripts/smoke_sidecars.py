@@ -154,7 +154,7 @@ def main() -> int:
             info = request("info", "engine.info", {})
             if not info.get("success"):
                 raise SystemExit(f"Request info failed: {info}")
-            if info.get("result", {}).get("bridgeVersion") != "0.8.0-beta.6":
+            if info.get("result", {}).get("bridgeVersion") != "0.8.0-beta.7":
                 raise SystemExit(f"Frozen engine version is stale or inconsistent: {info}")
             wildebeest = (
                 info.get("result", {})
@@ -416,6 +416,31 @@ def main() -> int:
             if not started.get("success"):
                 raise SystemExit(f"Request start failed: {started}")
             job_id = started["result"]["jobId"]
+
+            review_started = time.monotonic()
+            review = request(
+                "review-while-checking", "check.listForVerse",
+                {"chapter": "1", "verse": "1"}, timeout=5,
+            )
+            review_elapsed = time.monotonic() - review_started
+            review_state = review.get("result", {}).get("state")
+            if (
+                not review.get("success")
+                or review_state not in {"ready", "preparing"}
+                or review_elapsed >= 5
+            ):
+                raise SystemExit(
+                    "Frozen review request blocked the dispatcher during checking: "
+                    f"elapsed={review_elapsed:.2f}s response={review}"
+                )
+            responsive_status = request(
+                "status-after-review", "checks.status", {"jobId": job_id}, timeout=5,
+            )
+            if not responsive_status.get("success"):
+                raise SystemExit(
+                    "Frozen status request was blocked behind translation-help loading: "
+                    f"{responsive_status}"
+                )
 
             snapshot = started["result"]
             deadline = time.monotonic() + 180

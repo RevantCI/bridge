@@ -67,7 +67,7 @@ from check_jobs import (
     CheckJobSpec,
 )
 
-BRIDGE_VERSION = "0.8.0-beta.6"
+BRIDGE_VERSION = "0.8.0-beta.7"
 
 # tc_ai_bridge's QAIssue.severity strings -> our shared Severity enum
 _SEVERITY_MAP = {
@@ -449,6 +449,28 @@ class BridgeEngine:
         materialization = materialize_book_checks(project.path, project.book_id, resources_root)
         apply_resource_materialization(project.path, materialization)
 
+    @staticmethod
+    def _resource_indexes_pending(project: TranslationCoreProject) -> bool:
+        """Return quickly when a raw import still needs its tN/tW indexes.
+
+        Materialization belongs to the background-check preflight.  Interactive
+        review requests must never perform that potentially expensive work on
+        the single stdio dispatcher thread, otherwise every later request
+        (including checks.status/cancel) queues behind it.
+        """
+        import_path = project.path / ".bridge" / "import.json"
+        if not import_path.is_file():
+            return False
+        try:
+            import_data = json.loads(import_path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            return False
+        capabilities = import_data.get("capabilities")
+        return isinstance(capabilities, dict) and any(
+            capabilities.get(tool) == "requires-resource-index"
+            for tool in ("translationNotes", "translationWords")
+        )
+
     def scan_project(self) -> dict[str, Any]:
         if not self.project:
             raise ProjectError("No project open — call project.open first")
@@ -495,11 +517,31 @@ class BridgeEngine:
 
     def list_checks_for_verse(self, chapter: str, verse: str) -> dict[str, Any]:
         self._require_project()
-        with self._checker_lock:
-            self._ensure_resource_indexes(self.project)
+        project = self.project
+        # Never wait behind whole-book USFM/names preparation on the stdio
+        # dispatcher.  A blocking request here prevents even checks.status
+        # and checks.cancel from being read until Rust's 30-second timeout.
+        if self._resource_indexes_pending(project):
+            return {
+                "chapter": str(chapter), "verse": str(verse), "checks": [],
+                "state": "preparing", "retryAfterMs": 750,
+                "message": "Preparing translationNotes and translationWords resources…",
+            }
+        if not self._checker_lock.acquire(blocking=False):
+            return {
+                "chapter": str(chapter), "verse": str(verse), "checks": [],
+                "state": "preparing", "retryAfterMs": 750,
+                "message": "Translation checks are running; review data will appear shortly.",
+            }
+        try:
             self.project.invalidate_index_cache()
             checks = self.project.check_reviews_for_verse(chapter, verse)
-        return {"chapter": str(chapter), "verse": str(verse), "checks": checks}
+        finally:
+            self._checker_lock.release()
+        return {
+            "chapter": str(chapter), "verse": str(verse), "checks": checks,
+            "state": "ready", "retryAfterMs": 0, "message": "",
+        }
 
     def validate_check_selection(
         self, chapter: str, verse: str, tool: str, group_id: str, check_id: str,

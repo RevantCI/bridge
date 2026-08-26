@@ -198,4 +198,13 @@ mod tests {
         assert_eq!(request_timeout_seconds("project.import"), 300);
         assert_eq!(request_timeout_seconds("ping"), 30);
     }
+
+    #[test]
+    fn interactive_check_requests_keep_the_short_timeout() {
+        // Beta 7 fixes dispatcher blocking at its source.  Extending these
+        // timeouts would hide the regression and leave cancel/status unusable.
+        assert_eq!(request_timeout_seconds("checks.status"), 30);
+        assert_eq!(request_timeout_seconds("checks.cancel"), 30);
+        assert_eq!(request_timeout_seconds("check.listForVerse"), 30);
+    }
 }

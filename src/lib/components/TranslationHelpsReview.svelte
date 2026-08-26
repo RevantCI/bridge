@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import {
     aiCheckReviewsByVerse, checkStatusByVerse, findingsByVerse, nativeChecksByVerse,
@@ -15,6 +16,8 @@
   let loadSequence = 0;
   let loading = false;
   let loadError = "";
+  let preparationMessage = "";
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let editingKey = "";
   let rows: CheckTargetSelection[] = [];
   let nothingToSelect = false;
@@ -27,12 +30,18 @@
   $: aiReviews = $aiCheckReviewsByVerse[key] ?? [];
   $: verseText = $verseTexts[key] ?? "";
   $: if (key && key !== requestedKey) {
+    if (retryTimer) clearTimeout(retryTimer);
     requestedKey = key;
     editingKey = "";
     mutationError = "";
     mutationNotice = "";
     void refresh();
   }
+
+  onDestroy(() => {
+    loadSequence += 1;
+    if (retryTimer) clearTimeout(retryTimer);
+  });
 
   function identity(check: NativeCheckReview): string {
     return `${check.tool}:${check.groupId}:${check.checkId}`;
@@ -61,11 +70,25 @@
   export async function refresh(): Promise<void> {
     const refreshKey = verseKey(chapter, verse);
     const sequence = ++loadSequence;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
+    }
     loading = true;
     loadError = "";
+    preparationMessage = "";
     try {
       const result = await bridge.listChecksForVerse(chapter, verse);
       if (sequence !== loadSequence || refreshKey !== key) return;
+      if (result.state === "preparing") {
+        preparationMessage = result.message || "Preparing translation helps…";
+        const delay = Math.max(500, Math.min(result.retryAfterMs || 750, 2000));
+        retryTimer = setTimeout(() => {
+          retryTimer = undefined;
+          if (sequence === loadSequence && refreshKey === key) void refresh();
+        }, delay);
+        return;
+      }
       nativeChecksByVerse.update((values) => ({ ...values, [refreshKey]: result.checks }));
     } catch (error) {
       if (sequence !== loadSequence || refreshKey !== key) return;
@@ -216,10 +239,11 @@
     <div class="basic-notice">Pending checks are not counted as passed. Automatic AI selection will be connected in Milestone 3B.3.</div>
   {/if}
   {#if mutationNotice}<div class="mutation-notice">{mutationNotice}</div>{/if}
+  {#if preparationMessage}<div class="preparing-notice"><span class="spin" /> {preparationMessage}</div>{/if}
   {#if loadError}
     <div class="load-error">Could not load translation helps: {loadError}</div>
     <button class="small-btn" on:click={refresh}>Retry</button>
-  {:else if !loading && checks.length === 0}
+  {:else if !loading && !preparationMessage && checks.length === 0}
     <p class="none">No translationNotes or translationWords checks are available for this verse.</p>
   {/if}
 
@@ -307,9 +331,10 @@
   .loading-label { display: flex; align-items: center; gap: 4px; color: var(--text-3); font-weight: 500; }
   .spin { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--accent-bg); border-top-color: var(--accent); animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .basic-notice, .mutation-notice, .load-error { font-size: 10px; line-height: 1.4; border-radius: 6px; padding: 7px 8px; margin-bottom: 8px; }
+  .basic-notice, .mutation-notice, .preparing-notice, .load-error { font-size: 10px; line-height: 1.4; border-radius: 6px; padding: 7px 8px; margin-bottom: 8px; }
   .basic-notice { color: var(--warning); background: var(--warning-bg); }
   .mutation-notice { color: var(--success); background: var(--success-bg); overflow-wrap: anywhere; }
+  .preparing-notice { display: flex; align-items: center; gap: 6px; color: var(--accent); background: var(--accent-bg); }
   .load-error { color: var(--danger); background: var(--danger-bg); overflow-wrap: anywhere; }
   .native-check { border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; padding: 9px 10px; margin-top: 8px; }
   .native-check.tn { border-left-color: var(--tn); }

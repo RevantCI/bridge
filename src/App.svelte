@@ -24,6 +24,7 @@
   let dropSequence = 0;
   let draggingOver = false;
   let dropError = "";
+  let chapterLoadSequence = 0;
 
   onMount(() => {
     let unlisten: (() => void) | null = null;
@@ -84,10 +85,7 @@
   // and its first verse once `project` points at the book to display.
   async function enterCurrentProject(): Promise<void> {
     const firstChapter = $project?.chapters[0] ?? "1";
-    currentChapter.set(firstChapter);
-    await loadChapter(firstChapter);
-    const verses = $chapterVerseNums[firstChapter] ?? [];
-    selectedVerse.set(verses.length > 0 ? verses[0] : null);
+    await activateChapter(firstChapter);
   }
 
   // Switch to a sibling book from a multi-book import. The sidecar's
@@ -189,7 +187,7 @@
     let snapshot = initial;
     try {
       while (!["succeeded", "failed", "cancelled"].includes(snapshot.state)) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await new Promise((resolve) => setTimeout(resolve, 750));
         if (generation !== monitorGeneration) return;
         snapshot = await bridge.checkStatus(snapshot.jobId);
         if (generation !== monitorGeneration) return;
@@ -231,8 +229,13 @@
     void monitorJob(snapshot, generation);
   }
 
-  async function loadChapter(chapter: string): Promise<void> {
+  async function activateChapter(chapter: string): Promise<void> {
+    const sequence = ++chapterLoadSequence;
+    currentChapter.set(chapter);
     await ensureChapterData(chapter);
+    if (sequence !== chapterLoadSequence || chapter !== $currentChapter) return;
+    const verses = $chapterVerseNums[chapter] ?? [];
+    selectedVerse.set(verses.length > 0 ? verses[0] : null);
     if (!$loadedChapters[chapter] && !activeJobId) {
       await beginChecks("chapter", [chapter]);
     }
@@ -249,7 +252,7 @@
     await bridge.cancelChecks(jobId);
     let snapshot = await bridge.checkStatus(jobId);
     while (!["succeeded", "failed", "cancelled"].includes(snapshot.state)) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 400));
       snapshot = await bridge.checkStatus(jobId);
     }
     monitorGeneration++;
@@ -275,10 +278,7 @@
   }
 
   async function switchChapter(chapter: string) {
-    currentChapter.set(chapter);
-    await loadChapter(chapter);
-    const verses = $chapterVerseNums[chapter] ?? [];
-    selectedVerse.set(verses.length > 0 ? verses[0] : null);
+    await activateChapter(chapter);
   }
 
   async function runWholeBook() {

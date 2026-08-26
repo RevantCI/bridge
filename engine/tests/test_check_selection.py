@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -101,6 +103,58 @@ def test_list_exposes_selection_evaluation_and_provenance_as_separate_axes(check
     assert review["provenance"] == "none"
     assert review["sourceQuote"] == "λόγος"
     assert len(review["stateFingerprint"]) == 64
+
+
+def test_list_returns_preparing_without_blocking_behind_background_checks(check_project, tmp_path):
+    engine = _engine(tmp_path)
+    _open(engine, check_project)
+    acquired = threading.Event()
+    release = threading.Event()
+
+    def hold_checker() -> None:
+        with engine._checker_lock:
+            acquired.set()
+            release.wait(timeout=5)
+
+    holder = threading.Thread(target=hold_checker, daemon=True)
+    holder.start()
+    assert acquired.wait(timeout=1)
+    started = time.monotonic()
+    response = _call(engine, "check.listForVerse", {"chapter": "1", "verse": "1"})
+    elapsed = time.monotonic() - started
+    release.set()
+    holder.join(timeout=1)
+
+    assert response["success"] is True
+    assert response["result"]["state"] == "preparing"
+    assert response["result"]["checks"] == []
+    assert response["result"]["retryAfterMs"] > 0
+    assert elapsed < 0.25
+
+    ready = _call(engine, "check.listForVerse", {"chapter": "1", "verse": "1"})
+    assert ready["result"]["state"] == "ready"
+    assert len(ready["result"]["checks"]) == 2
+
+
+def test_list_does_not_materialize_pending_resources_on_dispatch_thread(check_project, tmp_path, monkeypatch):
+    engine = _engine(tmp_path)
+    _open(engine, check_project)
+    _write_json(check_project / ".bridge" / "import.json", {
+        "capabilities": {
+            "translationNotes": "requires-resource-index",
+            "translationWords": "requires-resource-index",
+        },
+    })
+
+    def forbidden_materialization(_project) -> None:
+        raise AssertionError("interactive list request must not materialize resources")
+
+    monkeypatch.setattr(engine, "_ensure_resource_indexes", forbidden_materialization)
+    response = _call(engine, "check.listForVerse", {"chapter": "1", "verse": "1"})
+
+    assert response["success"] is True
+    assert response["result"]["state"] == "preparing"
+    assert response["result"]["checks"] == []
 
 
 def test_validation_is_read_only_and_checks_repeated_occurrences(check_project, tmp_path):

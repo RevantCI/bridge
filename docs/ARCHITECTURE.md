@@ -113,6 +113,7 @@ which mode is actually active.
 | **v0.8.0-beta.4** | Project inspection timeout/performance hotfix, legacy collection grouping, pytest isolation, and collection-aware duplicate classification with explicit match reasons. | Milestone 2.1 complete; installed GUI acceptance pending |
 | **v0.8.0-beta.5** | Pinned, offline UHB v3.0.0/UGNT v0.34 source-token packs; safe raw-import initialization/recovery; license, attribution, and reproducible provenance. | Milestone 3A complete; installed GUI acceptance pending |
 | **v0.8.0-beta.6** | Dedicated translationNotes/translationWords review with Basic and Advanced modes, inline occurrence-aware highlights, evidence tooltips, and editable tN/tW decisions. | Milestone 3B.2 implementation complete; installed GUI acceptance pending |
+| **v0.8.0-beta.7** | Non-blocking tN/tW review loading during background checks, automatic retry/preparation state, lower status-poll pressure, and stale chapter-load protection. | Beta 6 acceptance hotfix; installed GUI retest pending |
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
 | v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
 | v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/DEVELOPER_HANDOFF.md's Phase 7 section) |

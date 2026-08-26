@@ -348,6 +348,15 @@ export interface NativeCheckReview {
   stateFingerprint: string;
 }
 
+export interface NativeCheckListResponse {
+  chapter: string;
+  verse: string;
+  checks: NativeCheckReview[];
+  state: "ready" | "preparing";
+  retryAfterMs: number;
+  message: string;
+}
+
 export interface CheckSelectionValidation {
   valid: boolean;
   errors: string[];

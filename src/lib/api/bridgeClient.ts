@@ -1,7 +1,7 @@
 import type {
   AiExplainResult, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
   AlignmentStatusResponse, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
-  CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, NativeCheckReview,
+  CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, NativeCheckListResponse,
   NativeCheckTool, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
 } from "../types/finding";
 
@@ -149,7 +149,7 @@ export const bridge = {
     return call("verse_edit", { chapter, verse, newText });
   },
 
-  listChecksForVerse(chapter: string, verse: string): Promise<{ chapter: string; verse: string; checks: NativeCheckReview[] }> {
+  listChecksForVerse(chapter: string, verse: string): Promise<NativeCheckListResponse> {
     return call("check_list_for_verse", { chapter, verse });
   },
 

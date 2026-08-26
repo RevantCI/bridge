@@ -10,17 +10,17 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 211 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes the Milestone 3A resource/import, Milestone 3B settings, and AI reasoning-compatibility regressions plus project identity, relocation validation, legacy collection grouping, corrupt-registry recovery, collection-aware duplicate detection, endpoint-level block/allow decisions, forget-without-delete, portable-collection regressions, and Paratext tests isolated from any live companion pipe |
+| A01 | Backend | Complete Python suite | Source | PASS — 213 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes the Milestone 3A resource/import, Milestone 3B settings, Beta 7 non-blocking review-loading, and AI reasoning-compatibility regressions plus project identity, relocation validation, legacy collection grouping, corrupt-registry recovery, collection-aware duplicate detection, endpoint-level block/allow decisions, forget-without-delete, portable-collection regressions, and Paratext tests isolated from any live companion pipe |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
-| A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 1 sidecar-timeout unit test passed |
-| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 6; the `dist`, Tauri staging, and release-staged copies are byte-identical |
+| A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 2 sidecar-timeout unit tests passed, including the Beta 7 interactive-timeout guard |
+| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 7; the `dist`, Tauri staging, and release-staged copies are byte-identical |
 | A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | PASS — the real standalone checker found both conditions in the packaged Odia fixture |
 | A07 | Protocol | Sidecar remains responsive during a background job | Frozen | PASS — status polling completed the background job while lightweight requests remained responsive |
 | A08 | Security | Settings never serialize plaintext secrets | Source | PASS — regression suite |
 | A09 | Alignment | Manual protocol, conflicts, history, restart and USFM round trip | Source | PASS |
 | A10 | Versification | Detect/orgRef/backVersificationMap against real schema data | Source | PASS — includes real Psalm 3 descriptive-title shift |
-| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 6 release-staged worker |
+| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 7 release-staged worker |
 | A12 | Versification | Edge cases: merges, splits, unknown books, verse bridges/segments | Source | PASS — 11 tests against real vendored data |
 | A13 | Versification | Concurrent callers: correctness and a GIL-contention regression guard | Source | PASS — a fresh-process test verifies concurrent first-load correctness against real schema data; a deterministic instrumented test verifies the expensive matcher is serialized (`max_active == 1`) without using a machine-dependent deadline |
 | A14 | Names/Transliteration | Whole-book spelling-consistency check against real uroman + vendored Smart Edit Distance | Source | PASS — 15 tests; real Muhammad/Mohamed and Titus/Tituss cases, a real Tamil vowel-sign inconsistency through full verse sentences, a false-positive exclusion (church/churches), and a bigram-blocking performance regression guard |
@@ -76,7 +76,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | D02 | Chapter background pass | Real stage/verse progress and findings | PASS — source and frozen process |
 | D03 | Whole-book pass | Every chapter checked once; results remain navigable | PASS — backend job coverage |
 | D04 | Cancel and retry | Unfinished verses are not approved; retry succeeds | PASS — includes cancellation during USFM subprocess |
-| D05 | Switch chapter/book during checking | No stale result is applied to the new selection/project | NOT RUN |
+| D05 | Switch chapter/book during checking | No stale result is applied to the new selection/project | NOT RUN — Beta 6 manual acceptance confirmed correct selection but exposed `check.listForVerse`/`checks.status` timeouts; Beta 7 has source regressions and a non-blocking preparing/retry state, but the installed rapid-switch retest is pending |
 | D06 | Edit verse during/after checking | Transaction is safe and findings are rechecked | PASS — background edit lock plus transaction/E2E coverage |
 | D07 | Accept/reject/ignore then restart | Decisions retain stable IDs and state | PASS — fresh-process E2E |
 | D08 | Sidecar crash/restart | UI reports failure and can recover without app restart | NOT RUN — transport restart path compiles; live kill still manual |
@@ -156,10 +156,28 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
   connector error paths, Project Registry/exact-duplicate reason/count protocol, manual many-to-many
   alignment/export/undo, and USFM duplicate/missing-verse checks pass. Lightweight
   status calls remain responsive during the job.
-- Windows: the Beta 6 release executable and NSIS installer were produced with both
+- Windows: the Beta 7 release executable and NSIS installer were produced with both
   verified worker binaries. The installer is
-  `Bridge_0.8.0-beta.6_x64-setup.exe` (SHA-256
-  `88D8176EB6CEF053CE2C8D5BC6C7969F107A209561A22CF2BF0A94CC2E76B9EB`).
+  `Bridge_0.8.0-beta.7_x64-setup.exe` (SHA-256
+  `D7C0B9A75849D7421881F1768E5F1DE1592297FF1D088948D04537DEA96800E1`).
+
+## Beta 7 artifact provenance — 2026-08-26
+
+- Release source: the current Beta 7 responsiveness-hotfix worktree; commit pending.
+- Desktop executable: 12,931,584 bytes, ProductVersion `0.8.0-beta.7`, SHA-256
+  `639589EE09B47EA662ADF5B9CBE414A111A54976116C1CD3268C56736ED9C1BE`.
+- `bridge-engine.exe`: 26,418,372 bytes, SHA-256
+  `C2B289EB6DADBDF6EA0678FFF411D907A085DEB2392BC1C1CA4BD1281E39640B`.
+- `bridge-usfm-checker.exe`: 7,673,735 bytes, SHA-256
+  `10DDB375469733B7ABF27905B85CCC0BDB6ADE96A78D1DAB644CE9CD2898406F`.
+- Installer: 36,130,801 bytes, ProductVersion `0.8.0-beta.7`, SHA-256
+  `D7C0B9A75849D7421881F1768E5F1DE1592297FF1D088948D04537DEA96800E1`.
+- Source gates: 213 Python tests and 2 Rust tests passed; Svelte diagnostics
+  reported 0 errors and 0 warnings; production frontend and Rust release builds passed.
+- Frozen smoke passed against the exact release-staged workers, including a
+  `check.listForVerse` request during an active background job followed by a responsive
+  `checks.status` call, both within the five-second regression bound. All four executables
+  remain `NotSigned`; installed rapid chapter/book-switching retest is pending.
 
 ## Beta 6 artifact provenance — 2026-08-25
 
