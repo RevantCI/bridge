@@ -5,12 +5,14 @@
     aiCheckReviewsByVerse, checkStatusByVerse, findingsByVerse, nativeChecksByVerse,
     reviewerMode, verseKey, verseTexts,
   } from "../stores";
-  import type { AiCheckReview, CheckTargetSelection, NativeCheckReview } from "../types/finding";
+  import type { AiCheckReview, CheckTargetSelection, NativeCheckListResponse, NativeCheckReview } from "../types/finding";
   import { exactTextRanges } from "../utils/highlight";
 
   export let chapter: string;
   export let verse: string;
   export let onStateChanged: () => void = () => {};
+  export let onRerunAIReview: () => void = () => {};
+  export let aiReviewBusy = false;
 
   let requestedKey = "";
   let loadSequence = 0;
@@ -24,6 +26,7 @@
   let mutationBusy = false;
   let mutationError = "";
   let mutationNotice = "";
+  let aiReviewState: NativeCheckListResponse["aiReviewState"] = "missing";
 
   $: key = verseKey(chapter, verse);
   $: checks = $nativeChecksByVerse[key] ?? [];
@@ -35,6 +38,7 @@
     editingKey = "";
     mutationError = "";
     mutationNotice = "";
+    aiReviewState = "missing";
     void refresh();
   }
 
@@ -91,6 +95,7 @@
       }
       nativeChecksByVerse.update((values) => ({ ...values, [refreshKey]: result.checks }));
       aiCheckReviewsByVerse.update((values) => ({ ...values, [refreshKey]: result.aiReviews ?? [] }));
+      aiReviewState = result.aiReviewState ?? "missing";
     } catch (error) {
       if (sequence !== loadSequence || refreshKey !== key) return;
       loadError = error instanceof Error ? error.message : String(error);
@@ -278,11 +283,25 @@
     {#if loading}<span class="loading-label"><span class="spin" /> loading</span>{/if}
   </div>
 
+  {#if aiReviewState === "stale"}
+    <div class="stale-review-notice" role="status">
+      <div>
+        <b>Verse changed — the previous AI review is stale.</b>
+        <span>Run AI review again before treating this verse as reviewed.</span>
+      </div>
+      <button class="small-btn" on:click={onRerunAIReview} disabled={aiReviewBusy}>Run AI review again</button>
+    </div>
+  {/if}
   {#if $reviewerMode === "basic" && checks.some((check) => check.selectionStatus === "pending")}
     <div class="basic-notice">Run AI review to evaluate these checks. Only high-confidence, evidence-grounded selections are applied automatically; uncertain checks stay pending.</div>
   {/if}
   {#if mutationNotice}<div class="mutation-notice">{mutationNotice}</div>{/if}
   {#if preparationMessage}<div class="preparing-notice"><span class="spin" /> {preparationMessage}</div>{/if}
+  {#if loading && !preparationMessage && checks.length === 0}
+    <div class="loading-placeholder" role="status" aria-label="Loading translation helps">
+      <span /><span /><span />
+    </div>
+  {/if}
   {#if loadError}
     <div class="load-error">Could not load translation helps: {loadError}</div>
     <button class="small-btn" on:click={refresh}>Retry</button>
@@ -372,16 +391,26 @@
 
 <style>
   .section { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+  .translation-helps { min-height: 126px; }
   .section-title { font-size: 11px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .mode-badge { margin-left: auto; text-transform: capitalize; font-size: 9px; padding: 2px 6px; border-radius: 999px; color: var(--accent); background: var(--accent-bg); }
   .loading-label { display: flex; align-items: center; gap: 4px; color: var(--text-3); font-weight: 500; }
   .spin { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--accent-bg); border-top-color: var(--accent); animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .basic-notice, .mutation-notice, .preparing-notice, .load-error { font-size: 10px; line-height: 1.4; border-radius: 6px; padding: 7px 8px; margin-bottom: 8px; }
+  .basic-notice, .mutation-notice, .preparing-notice, .load-error, .stale-review-notice { font-size: 10px; line-height: 1.4; border-radius: 6px; padding: 7px 8px; margin-bottom: 8px; }
   .basic-notice { color: var(--warning); background: var(--warning-bg); }
   .mutation-notice { color: var(--success); background: var(--success-bg); overflow-wrap: anywhere; }
   .preparing-notice { display: flex; align-items: center; gap: 6px; color: var(--accent); background: var(--accent-bg); }
+  .loading-placeholder { min-height: 66px; display: grid; align-content: center; gap: 7px; }
+  .loading-placeholder span { display: block; height: 8px; border-radius: 999px; background: var(--surface-2); animation: loading-pulse 1.2s ease-in-out infinite; }
+  .loading-placeholder span:nth-child(1) { width: 72%; }
+  .loading-placeholder span:nth-child(2) { width: 94%; animation-delay: .12s; }
+  .loading-placeholder span:nth-child(3) { width: 54%; animation-delay: .24s; }
+  @keyframes loading-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
   .load-error { color: var(--danger); background: var(--danger-bg); overflow-wrap: anywhere; }
+  .stale-review-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--warning); background: var(--warning-bg); border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent); }
+  .stale-review-notice div { display: grid; gap: 2px; min-width: 0; }
+  .stale-review-notice button { flex-shrink: 0; background: var(--surface); }
   .native-check { border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; padding: 9px 10px; margin-top: 8px; }
   .native-check.tn { border-left-color: var(--tn); }
   .native-check.tw { border-left-color: var(--tw); }

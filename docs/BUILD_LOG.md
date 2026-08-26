@@ -1,4 +1,4 @@
-# Build log: Bridge v0.8.0-beta.9
+# Build log: Bridge v0.8.0-beta.11
 
 Updated: 2026-08-26
 
@@ -26,6 +26,13 @@ gate is `docs/QA_TEST_MATRIX.md`.
   and tC word-alignment completed/invalid/pending markers.
 - Rechecking: each alignment mutation immediately reruns local and Greek Room
   verse checks and refreshes editor state.
+- AI review navigation: verse progress/results follow only the exact verse,
+  chapter jobs follow only their chapter, and whole-book jobs follow only their
+  project. Active off-reference jobs remain visible as background work without
+  presenting an old result as belonging to the newly selected reference.
+- Translation Helps navigation: an explicit reserved loading surface prevents
+  the panel from collapsing and expanding while a newly selected reference is
+  prepared.
 - AI provider compatibility: structured Responses requests first use the
   configured reasoning effort. If and only if a provider/model returns an
   explicit HTTP 400 unsupported-`reasoning` error, Bridge retries once without
@@ -41,12 +48,13 @@ gate is `docs/QA_TEST_MATRIX.md`.
   reproducible generator. Aligned USFM and native tC projects are never
   overwritten; legacy raw-import recovery only fills empty source arrays and
   stops on a resource-version mismatch.
-- Automated source gate: 197 Python tests pass in the maintained Windows/
-  Python 3.12.4 environment as of the 2026-08-25 Milestone 1 baseline.
-  Svelte and Rust source gates pass. Beta 2 frozen-sidecar and NSIS results,
-  including exact artifact hashes and the remaining manual installer acceptance,
-  are recorded in the QA matrix. The former load-sensitive versification
-  wall-clock bound is now a deterministic concurrency-invariant test.
+- Automated source gate: 224 Python tests pass in the maintained Windows/
+  Python 3.12.4 environment. Four focused frontend navigation-state tests,
+  clean Svelte diagnostics, the production frontend build, and 2 Rust tests
+  also pass. Beta 11 frozen-sidecar and NSIS results, including exact artifact
+  hashes and the remaining installed GUI acceptance, are recorded in the QA
+  matrix. The former load-sensitive versification wall-clock bound is now a
+  deterministic concurrency-invariant test.
 - Explicitly deferred: live original-source resource downloads and automatic
   Paratext/Logos synchronization. AI alignment proposals and UAlign-derived
   corpus statistics (count/probability/PMI/SED-boost) are implemented; see the

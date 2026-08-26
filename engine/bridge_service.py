@@ -78,7 +78,7 @@ from ai_review_jobs import (
     AIReviewJobSpec,
 )
 
-BRIDGE_VERSION = "0.8.0-beta.9"
+BRIDGE_VERSION = "0.8.0-beta.11"
 
 # tc_ai_bridge's QAIssue.severity strings -> our shared Severity enum
 _SEVERITY_MAP = {
@@ -1419,10 +1419,25 @@ class BridgeEngine:
         reopening a project or re-running checks doesn't reset a verse
         you already reviewed back to "open"."""
         self._require_project()
+        project = self.project
+        # ReviewPanel asks for a Greek-Room-only live check as soon as a verse
+        # is selected.  First-time tN/tW/USFM/names preparation can hold the
+        # checker lock for much longer than the desktop's interactive timeout.
+        # Waiting here would block the synchronous stdio dispatcher itself, so
+        # checks.status and check.listForVerse queued behind this request would
+        # time out too.  Greek Room reads only the captured project/verse and
+        # its own adapter; it does not touch tC selection/index state and does
+        # not need the checker lock.
+        needs_checker_lock = any(
+            name in {"local", "tN", "tW", "alignment", "usfm", "names"}
+            for name in checks
+        )
+        if not needs_checker_lock:
+            return self._run_verse_checks_for_project(project, chapter, verse, checks)
         with self._checker_lock:
             if any(name in checks for name in ("local", "tN", "tW")):
-                self._ensure_resource_indexes(self.project)
-            return self._run_verse_checks_for_project(self.project, chapter, verse, checks)
+                self._ensure_resource_indexes(project)
+            return self._run_verse_checks_for_project(project, chapter, verse, checks)
 
     def _run_verse_checks_for_project(
         self,

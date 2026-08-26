@@ -492,6 +492,53 @@ def test_check_job_cancels_during_usfm_preflight(fixture_project, monkeypatch):
     assert cancelled["finishedAt"] is not None
 
 
+def test_live_greek_room_and_status_stay_responsive_during_check_preparation(
+    fixture_project, monkeypatch,
+):
+    """A first-time raw-book preflight holds the tN/tW checker lock.
+
+    ReviewPanel immediately asks for a Greek-Room-only live check.  That request
+    must not queue behind resource/USFM/names preparation on the synchronous
+    stdio dispatcher, otherwise checks.status and check.listForVerse behind it
+    both hit their 30-second desktop timeout.
+    """
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    monkeypatch.setattr(engine.greek_room, "check_verse", lambda **kwargs: [])
+
+    lock_entered = threading.Event()
+    release_lock = threading.Event()
+
+    def hold_checker_lock():
+        with engine._checker_lock:
+            lock_entered.set()
+            release_lock.wait(timeout=2)
+
+    holder = threading.Thread(target=hold_checker_lock, daemon=True)
+    holder.start()
+    assert lock_entered.wait(timeout=1)
+
+    started = call(engine, "checks.start", {
+        "scope": "chapter", "chapters": ["1"], "checks": ["greekroom"],
+    })["result"]
+    started_at = time.monotonic()
+    live = call(engine, "verse.runChecks", {
+        "chapter": "1", "verse": "1", "checks": ["greekroom"],
+    })
+    live_elapsed = time.monotonic() - started_at
+
+    assert live["success"] is True
+    assert live_elapsed < 0.25
+    status = call(engine, "checks.status", {"jobId": started["jobId"]})["result"]
+    assert status["state"] in {"queued", "running"}
+    listed = call(engine, "check.listForVerse", {"chapter": "1", "verse": "1"})["result"]
+    assert listed["state"] == "preparing"
+
+    release_lock.set()
+    holder.join(timeout=1)
+    assert wait_for_job(engine, started["jobId"])["state"] == "succeeded"
+
+
 def test_check_job_rejects_a_second_active_job(fixture_project, monkeypatch):
     engine = BridgeEngine()
     call(engine, "project.open", {"path": str(fixture_project)})

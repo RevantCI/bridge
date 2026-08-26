@@ -3,7 +3,7 @@
 For translators and checkers using Bridge day to day. If you're setting up
 or building the app, see [`DEVELOPER_SETUP.md`](DEVELOPER_SETUP.md) instead.
 
-*Written from the app's current state (`v0.8.0-beta.9`, 2026-08-26).*
+*Written from the app's current state (`v0.8.0-beta.11`, 2026-08-26).*
 
 > **Screenshots:** not included yet — see [Adding screenshots](#adding-screenshots)
 > at the bottom for exactly which screen/file to capture and where to drop
@@ -249,7 +249,8 @@ and each AI result includes its evidence and justification.
   verses while preserving completed current results.
 - Results and selection provenance persist with the project. Imported or human
   selections are not overwritten, and editing a verse makes its prior AI review
-  stale so it must be checked again.
+  stale. Bridge shows an explicit warning; choose **Run AI review again** to
+  replace it with a current evaluation.
 
 ### 6.7 Settings
 
