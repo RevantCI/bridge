@@ -15,13 +15,13 @@ dependencies = [
     # installability problem on any currently-supported Python version
     # (unlike wildebeest-nlp's Python 3.13 compile break), so this is a
     # hard dependency, not an optional extra with a mock fallback. See
-    # docs/DEVELOPER_HANDOFF.md's Phase 5 section for the full
+    # docs/BUILD_LOG.md's Phase 5 section for the full
     # investigation, including a real license-classifier drift (PyPI/
     # upstream both say "Apache", the actual bundled LICENSE.txt is a
     # custom MIT-style license with its own mandatory attribution clause).
     "uroman>=1.3.1.1",
     # "greekroom" left commented — OWL/UAlign not wired up yet (see
-    # docs/DEVELOPER_HANDOFF.md's Phase 4-6 status). USFM, versification,
+    # docs/BUILD_LOG.md's Phase 4-6 status). USFM, versification,
     # and Smart Edit Distance are all vendored separately instead — none
     # of the three is part of the published "greekroom" PyPI package.
     # "greekroom",
@@ -39,7 +39,7 @@ dev = [
 # of its docstrings contains a literal lone-surrogate escape that 3.13
 # newly rejects at compile time (CPython issue #142411); confirmed still
 # broken on upstream's GitHub HEAD too, not just this PyPI release. Works
-# under 3.12. See docs/DEVELOPER_HANDOFF.md for the full investigation.
+# under 3.12. See docs/BUILD_LOG.md for the full investigation.
 # WildebeestAdapter degrades to its mock automatically whether this extra
 # is installed or not, so leaving it uninstalled is always safe.
 wildebeest = [

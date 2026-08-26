@@ -247,7 +247,7 @@ def materialize_translation_words_links_index(book_id: str, app_resources_root: 
     grouped-by-term layout TranslationHelpsKnowledgeBase.twl_occurrences()
     actually reads: translationWordsLinks/<version>/{kt,names,other}/groups/
     <book>/<term>.json — a real gap found while investigating Phase 7's
-    ai.explain prerequisites (see docs/DEVELOPER_HANDOFF.md): this resource
+    ai.explain prerequisites (see docs/BUILD_LOG.md): this resource
     was bundled and materialize_translation_words() already parses the exact
     same TSV, but only into the project-level check-index shape
     (.apps/translationCore/index/translationWords/<book>/<group>.json),
@@ -316,7 +316,7 @@ def materialize_book_checks(project_root: Path, book_id: str, app_resources_root
     Installs the bundled snapshot into application storage first (a no-op
     once already installed). Only covers books the upstream English tN/TWL
     resource has actually released — some Old Testament books are not
-    currently published (see docs/DEVELOPER_HANDOFF.md); those come back
+    currently published (see docs/BUILD_LOG.md); those come back
     with status "unavailable", the same as any other-language import, never
     a fabricated empty "ready".
     """

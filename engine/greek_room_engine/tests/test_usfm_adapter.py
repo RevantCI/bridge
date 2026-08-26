@@ -4,7 +4,7 @@ Tests for UsfmAdapter, which wraps the vendored Greek Room USFM checker
 
 Split into two kinds of coverage:
   - _parse_report unit tests, against real captured report text (not
-    synthetic guesses) — see docs/DEVELOPER_HANDOFF.md for how that text
+    synthetic guesses) — see docs/BUILD_LOG.md for how that text
     was obtained by actually running the checker against real broken USFM.
   - A real subprocess integration test, run against real broken USFM,
     confirming the whole pipeline (subprocess invocation, PYTHONPATH setup

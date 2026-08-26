@@ -124,7 +124,7 @@ versioned checking resources. Bridge follows the same boundary:
   Isaiah, Jeremiah, Ezekiel, Daniel, Amos, Zechariah) are not currently
   released in the upstream English resource; those report capability
   `unavailable` rather than a fabricated `ready` with zero checks. See
-  `docs/DEVELOPER_HANDOFF.md` for the full list and how to refresh the bundle.
+  `docs/BUILD_LOG.md` for the full list and how to refresh the bundle.
 - Only English is bundled today. A future non-English or refreshed-English
   resource still needs the online Door43-catalog path, not yet built.
 

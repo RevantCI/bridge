@@ -1,7 +1,7 @@
 """
 Real (not mocked) integration test between tc_ai_bridge/logos_connector.py's
 LogosConnectorClient and the actual logos_connector/logos_bridge.ps1 helper
-script added in Phase 7 (see docs/DEVELOPER_HANDOFF.md) - the companion that
+script added in Phase 7 (see docs/BUILD_LOG.md) - the companion that
 did not exist anywhere in this repo before this pass.
 
 Logos itself is not installed on this machine (confirmed at the start of this

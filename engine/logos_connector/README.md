@@ -4,7 +4,7 @@
 `LogosConnectorClient` has always expected at
 `logos_connector/logos_bridge.ps1` (see `_default_script_path()`), but which
 did not exist anywhere in this repo before Phase 7 (see
-`docs/DEVELOPER_HANDOFF.md`). It is now real and genuinely exercised by
+`docs/BUILD_LOG.md`). It is now real and genuinely exercised by
 `engine/tests/test_logos_connector.py`.
 
 ## What's verified and what isn't

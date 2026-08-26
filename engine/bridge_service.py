@@ -1277,7 +1277,7 @@ class BridgeEngine:
                         # — it either hasn't started (skipped by the check
                         # above) or runs to completion. Acceptable for now;
                         # revisit if real book-sized timing (see
-                        # docs/DEVELOPER_HANDOFF.md's Phase 5 section) shows
+                        # docs/BUILD_LOG.md's Phase 5 section) shows
                         # this needs the same cooperative-cancel treatment
                         # USFM's subprocess has.
                         self._names_findings_for_book(project)

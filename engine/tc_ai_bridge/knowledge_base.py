@@ -229,7 +229,7 @@ class TranslationHelpsKnowledgeBase:
         "<term>.md" files (that shape is correctly handled by _find_article
         above). Confirmed by downloading and inspecting the real v90 tag
         content directly rather than assumed — see
-        docs/DEVELOPER_HANDOFF.md's Phase 7 section."""
+        docs/BUILD_LOG.md's Phase 7 section."""
         return sorted(p for p in root.rglob(identifier) if p.is_dir() and (p / '01.md').is_file())
 
     def ta_articles(self, group_id: str) -> list[EvidenceItem]:

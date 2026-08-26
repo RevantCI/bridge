@@ -3,7 +3,7 @@
 This directory contains files copied from the `BibleNLP/greek-room` GitHub
 repository, at path `greekroom/greekroom/versification/`, the same repo and
 pinned commit already vendored for the USFM checker
-(`engine/vendor/greekroom-usfm/`). See `docs/DEVELOPER_HANDOFF.md` for the
+(`engine/vendor/greekroom-usfm/`). See `docs/BUILD_LOG.md` for the
 full investigation of what was verified this session and why it's vendored
 this way.
 

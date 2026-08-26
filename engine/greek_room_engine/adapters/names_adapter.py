@@ -13,7 +13,7 @@ Wraps two independent building blocks as one whole-book QA check:
   than a normal dependency. Unlike the USFM checker it's a small,
   pure-stdlib, per-instance class with no class-level shared state, so
   (like ``versification.py``) it's imported directly into bridge-engine,
-  not run as a subprocess. See docs/DEVELOPER_HANDOFF.md's Phase 5 section
+  not run as a subprocess. See docs/BUILD_LOG.md's Phase 5 section
   for the full investigation of both dependencies.
 
 Like ``UsfmAdapter``, this is a WHOLE-BOOK check, not per-verse: consistency
@@ -285,7 +285,7 @@ class NamesAdapter(CheckAdapter):
         overlap — rather than comparing every pair outright — throws away
         the overwhelming majority of unrelated pairs before ever calling
         the expensive function. Reduced the same 3000-token benchmark from
-        133s to well under a second (see docs/DEVELOPER_HANDOFF.md's Phase
+        133s to well under a second (see docs/BUILD_LOG.md's Phase
         5 section for the measured before/after).
         """
         bigram_sets: dict[str, set[str]] = {}

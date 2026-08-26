@@ -211,13 +211,21 @@ catastrophic slowdown only visible under real thread concurrency. This
 applies to this file and to `docs/*.md` too — verify a claim against the
 current code before relying on it for follow-up work.
 
-`docs/DEVELOPER_HANDOFF.md` is the authoritative, continuously-updated
-handoff doc — read its "Phase roadmap status" section first to see what's
-actually done vs. planned before picking up new work; don't assume the
-next task is just the next numbered phase. `docs/ARCHITECTURE.md` has the
-original design rationale (some file paths there are stale — prefer
-`DEVELOPER_HANDOFF.md` and the actual code when they disagree).
-`docs/ALIGNMENT.md` and `docs/IMPORTS.md` document the manual-alignment and
-import subsystems respectively. `docs/QA_TEST_MATRIX.md` is the release
-gate — a feature isn't release-ready because its unit tests pass; check
-the matrix's source/frozen/desktop rows.
+Read `docs/DEVELOPER_GUIDE.md` first — it's the oriented summary of stack
+decisions and the phase roadmap (planned vs. actual outcome per phase), kept
+current. Don't assume the next task is just the next numbered phase; the
+guide's roadmap table shows what's actually done.
+
+`docs/BUILD_LOG.md` (formerly `DEVELOPER_HANDOFF.md`) is the authoritative,
+continuously-updated detailed record underneath that summary — the full
+investigation behind every decision and gotcha (exact root causes, file:line
+references, session-by-session narrative). Read it when the guide's summary
+isn't enough, and **keep appending to it** as work progresses — it's the
+record `DEVELOPER_GUIDE.md` gets distilled from, not a doc to let go stale.
+
+`docs/ARCHITECTURE.md` has the original design rationale (some file paths
+there are stale — prefer `BUILD_LOG.md` and the actual code when they
+disagree). `docs/ALIGNMENT.md` and `docs/IMPORTS.md` document the
+manual-alignment and import subsystems respectively. `docs/QA_TEST_MATRIX.md`
+is the release gate — a feature isn't release-ready because its unit tests
+pass; check the matrix's source/frozen/desktop rows.

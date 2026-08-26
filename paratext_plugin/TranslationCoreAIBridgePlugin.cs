@@ -1,6 +1,6 @@
 // translationCore AI Bridge — Paratext companion plugin.
 //
-// Real blocker closed here (see docs/DEVELOPER_HANDOFF.md's Phase 7 section):
+// Real blocker closed here (see docs/BUILD_LOG.md's Phase 7 section):
 // engine/tc_ai_bridge/paratext_connector.py's ParatextConnectorClient only ever
 // talks to a companion plugin over a Windows named pipe
 // (\\.\pipe\translationCoreAIBridge, newline-delimited JSON, protocol version 1)

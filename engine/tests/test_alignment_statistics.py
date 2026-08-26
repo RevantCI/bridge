@@ -2,7 +2,7 @@
 Tests for Phase 6's UAlign-style corpus statistics
 (tc_ai_bridge/alignment_statistics.py) — real TranslationCoreProject
 fixtures and real Uroman + vendored Smart Edit Distance, not mocks, matching
-this project's own standing practice (see docs/DEVELOPER_HANDOFF.md).
+this project's own standing practice (see docs/BUILD_LOG.md).
 """
 import json
 import time

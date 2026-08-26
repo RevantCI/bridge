@@ -5,7 +5,7 @@ protocol for the first time — that method (and run_full_review/
 run_quality_review it calls) was real, complete, already-implemented code
 from Phases 1-3 with zero protocol wiring and zero test coverage before this
 pass (confirmed by the same grep this project used to find the analogous gap
-in alignment_reliability.py — see docs/DEVELOPER_HANDOFF.md).
+in alignment_reliability.py — see docs/BUILD_LOG.md).
 
 Uses a fake HTTP transport (same BridgeEngine(ai_transport=...) injection
 seam as test_ai_alignment_propose.py) so no real OpenAI-compatible API key

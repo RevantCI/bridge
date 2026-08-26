@@ -1,6 +1,6 @@
 """
 Tests for the Phase 7 translationAcademy bundling + knowledge_base.py fix
-(see docs/DEVELOPER_HANDOFF.md). translationAcademy was never bundled before
+(see docs/BUILD_LOG.md). translationAcademy was never bundled before
 this pass; once it was (a real 2.2MB, 728-file download of the real
 Door43 unfoldingWord/en_ta v90 tag, not a synthetic fixture), reading it
 turned out to hit exactly the same bug class every other vendored/bundled

@@ -43,7 +43,7 @@ bridge-engine                    (PyInstaller-bundled Python sidecar)
 
 The sidecar starts once and stays alive for the whole session — NLP
 resources (Wildebeest corpus properties, Uroman tables, etc.) are loaded
-once, not per call. **Verified 2026-08-21** (see `docs/DEVELOPER_HANDOFF.md`'s
+once, not per call. **Verified 2026-08-21** (see `docs/BUILD_LOG.md`'s
 Phase 5 research breadcrumb): `uroman.Uroman()` construction takes ~1.8-2.1s
 on real hardware to load its full romanization table set, after which
 `romanize_string()` calls measured effectively instant — this recommendation
@@ -116,8 +116,8 @@ which mode is actually active.
 | **v0.8.0-beta.7** | Non-blocking tN/tW review loading during background checks, automatic retry/preparation state, lower status-poll pressure, and stale chapter-load protection. | Beta 6 acceptance hotfix; installed GUI retest pending |
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
 | v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
-| v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/DEVELOPER_HANDOFF.md's Phase 7 section) |
-| v1.0.x | Paratext/Logos live navigation, AI explain, and optional AI + Greek Room synthesis. | Drag-and-drop import and ai.explain ✅ Built (2026-08-24, tested against a fake transport — no real API key available). Paratext/Logos connector plugins now exist and are wired (2026-08-24) but are unverified against a live Paratext/Logos instance — see docs/DEVELOPER_HANDOFF.md's Phase 7 sections for exactly what's confirmed vs. not, and paratext_plugin/README.md + engine/logos_connector/README.md for the remaining steps |
+| v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/BUILD_LOG.md's Phase 7 section) |
+| v1.0.x | Paratext/Logos live navigation, AI explain, and optional AI + Greek Room synthesis. | Drag-and-drop import and ai.explain ✅ Built (2026-08-24, tested against a fake transport — no real API key available). Paratext/Logos connector plugins now exist and are wired (2026-08-24) but are unverified against a live Paratext/Logos instance — see docs/BUILD_LOG.md's Phase 7 sections for exactly what's confirmed vs. not, and paratext_plugin/README.md + engine/logos_connector/README.md for the remaining steps |
 
 ## Phase 1 outcome: BridgeEngine
 
@@ -146,7 +146,7 @@ Not yet wired (real logic exists in `tc_ai_bridge` but no protocol method calls 
 Git service, reporting, terminology/Psalms QA, and `navigation.py`'s
 `NavigationBroker`/`NavigationOwnership` (the Paratext/Logos connector protocol methods above
 are direct pass-through calls — read state, push one reference — not yet wired into an
-automatic background live-sync polling loop; see docs/DEVELOPER_HANDOFF.md's Phase 7
+automatic background live-sync polling loop; see docs/BUILD_LOG.md's Phase 7
 sections for why that's a deliberate scope boundary, not an oversight). These are
 Phase-appropriate follow-ups per the table above, not gaps in the design.
 
@@ -173,7 +173,7 @@ Phase-appropriate follow-ups per the table above, not gaps in the design.
   `LICENSE.txt` is not Apache 2.0 text — it's a custom MIT-style permissive
   license requiring a specific acknowledgment sentence in any publication
   using it. Same classifier-drift pattern as `greekroom`, not a new problem
-  shape. See `docs/DEVELOPER_HANDOFF.md`'s Phase 5 breadcrumb.)
+  shape. See `docs/BUILD_LOG.md`'s Phase 5 breadcrumb.)
 - Real `wildebeest`/`greekroom` pip packages need to be added to
   `engine/pyproject.toml` and the mock fallback in `WildebeestAdapter`
   replaced/validated against real output

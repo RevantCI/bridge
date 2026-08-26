@@ -5,7 +5,7 @@ Tests for NamesAdapter, which wraps two real dependencies:
     (engine/vendor/greekroom-smart-edit-distance/, see NOTICE.md there)
 
 Both are real dependencies, not mocked — see
-docs/DEVELOPER_HANDOFF.md's Phase 5 research breadcrumb for why: unlike
+docs/BUILD_LOG.md's Phase 5 research breadcrumb for why: unlike
 Wildebeest, uroman has no known installability problem on any supported
 Python version, so there's no mock-fallback path to test around.
 """

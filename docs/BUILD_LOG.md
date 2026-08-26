@@ -1,6 +1,14 @@
-# Developer handoff: Bridge v0.8.0-beta.7
+# Build log: Bridge v0.8.0-beta.7
 
 Updated: 2026-08-25
+
+> **Start with [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) instead** for an
+> oriented, up-to-date summary of the stack decisions, phase roadmap, and
+> dependencies. Come here for the full investigation behind a specific
+> decision or gotcha — exact root causes, file:line references, and the
+> session-by-session narrative that the summary distills. This file is the
+> continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
+> first to get oriented.
 
 ## Current release state
 
@@ -182,7 +190,7 @@ src-tauri/
   tauri.conf.json, capabilities/default.json, binaries/, icons/
 
 docs/
-  ARCHITECTURE.md, DEVELOPER_HANDOFF.md (this file), IMPORTS.md
+  ARCHITECTURE.md, DEVELOPER_GUIDE.md, BUILD_LOG.md (this file), IMPORTS.md
 ```
 
 ### Phases 1-3 (done, before this import work)
