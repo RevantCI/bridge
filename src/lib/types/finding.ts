@@ -157,6 +157,7 @@ export interface AiCheckReview {
   source_quote: string;
   proposed_selection_ids: string[];
   proposed_selection_text: string[];
+  proposed_selections: CheckTargetSelection[];
   nothing_to_select: boolean;
   verdict: "pass" | "review" | "problem" | "not_applicable";
   severity: "critical" | "high" | "medium" | "editorial" | "info";
@@ -355,6 +356,10 @@ export interface NativeCheckListResponse {
   state: "ready" | "preparing";
   retryAfterMs: number;
   message: string;
+  aiReviewState: "missing" | "current" | "stale";
+  aiReviews: AiCheckReview[];
+  aiQaIssues: AiQaIssue[];
+  aiSummary: string;
 }
 
 export interface CheckSelectionValidation {
@@ -401,6 +406,65 @@ export interface CheckJobSnapshot {
   error: string | null;
   createdAt: string;
   finishedAt: string | null;
+}
+
+export interface AIReviewJobVerseResult {
+  chapter: string;
+  verse: string;
+  status: "succeeded" | "failed";
+  summary: string;
+  checkReviews: AiCheckReview[];
+  qaIssues: AiQaIssue[];
+  appliedSelections: Array<Record<string, unknown>>;
+  skippedSelections: Array<Record<string, unknown>>;
+  alignmentProposal: AlignmentAiProposal | null;
+  alignmentWasAIProposed: boolean;
+  usage: { totalTokens: number; estimatedCostUSD: number };
+  error: string | null;
+}
+
+export interface AIReviewJobVerseStatus {
+  chapter: string;
+  verse: string;
+  status: "succeeded" | "failed";
+  summary: string;
+  appliedCount: number;
+  skippedCount: number;
+  usage: { totalTokens?: number; estimatedCostUSD?: number };
+  error: string | null;
+}
+
+export interface AIReviewJobSnapshot {
+  jobId: string;
+  scope: "verse" | "chapter" | "book";
+  mode: "basic" | "advanced";
+  projectPath: string;
+  state: CheckJobState;
+  chapters: string[];
+  chapterVerses: Record<string, string[]>;
+  skippedCurrentVerses: number;
+  resumeOf: string;
+  totalVerses: number;
+  completedVerses: number;
+  failedVerses: number;
+  percent: number;
+  currentChapter: string | null;
+  currentVerse: string | null;
+  currentStage: string;
+  results: Record<string, AIReviewJobVerseStatus>;
+  latestResult: { key: string; result: AIReviewJobVerseResult } | null;
+  error: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface AIReviewChapterResponse {
+  chapter: string;
+  reviewsByVerse: Record<string, AiCheckReview[]>;
+  states: Record<string, "missing" | "current" | "stale">;
+  current: number;
+  stale: number;
+  missing: number;
 }
 
 export interface SettingsData {

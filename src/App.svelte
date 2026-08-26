@@ -7,11 +7,12 @@
   import ReviewPanel from "./lib/components/ReviewPanel.svelte";
   import SettingsModal from "./lib/components/SettingsModal.svelte";
   import ExportModal from "./lib/components/ExportModal.svelte";
-  import type { AlignmentWorkStatus, CheckJobSnapshot, QaFinding } from "./lib/types/finding";
+  import type { AiCheckReview, AlignmentWorkStatus, CheckJobSnapshot, QaFinding } from "./lib/types/finding";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
     verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState, reviewerMode,
+    aiCheckReviewsByVerse,
   } from "./lib/stores";
 
   let opened = false;
@@ -132,6 +133,25 @@
     alignmentStatusByVerse.update((existing) => ({ ...existing, ...alignmentStatuses }));
   }
 
+  async function hydrateChapterAIReviews(
+    chapter: string, expectedProjectPath: string, sequence: number,
+  ): Promise<void> {
+    try {
+      const result = await bridge.listAIReviewsForChapter(chapter);
+      if (
+        sequence !== chapterLoadSequence || chapter !== $currentChapter
+        || ($project?.path ?? "") !== expectedProjectPath
+      ) return;
+      const updates: Record<string, AiCheckReview[]> = {};
+      for (const [verse, reviews] of Object.entries(result.reviewsByVerse)) {
+        updates[verseKey(chapter, verse)] = reviews;
+      }
+      aiCheckReviewsByVerse.update((existing) => ({ ...existing, ...updates }));
+    } catch (error) {
+      console.error("Could not restore chapter AI reviews", error);
+    }
+  }
+
   function applyJobSnapshot(snapshot: CheckJobSnapshot): void {
     chapterVerseNums.update((existing) => ({ ...existing, ...snapshot.chapterVerses }));
 
@@ -236,6 +256,7 @@
     if (sequence !== chapterLoadSequence || chapter !== $currentChapter) return;
     const verses = $chapterVerseNums[chapter] ?? [];
     selectedVerse.set(verses.length > 0 ? verses[0] : null);
+    void hydrateChapterAIReviews(chapter, $project?.path ?? "", sequence);
     if (!$loadedChapters[chapter] && !activeJobId) {
       await beginChecks("chapter", [chapter]);
     }

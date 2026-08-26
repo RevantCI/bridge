@@ -303,6 +303,8 @@ class TranslationCoreProject:
         saved = self.load_ai_review_result(chapter, verse)
         if not saved:
             return 'missing'
+        if str(saved.get('batchState') or 'complete') != 'complete':
+            return 'stale'
         saved_fp = str(saved.get('inputFingerprint') or '')
         if not saved_fp:
             return 'stale'
@@ -310,6 +312,19 @@ class TranslationCoreProject:
             return 'current' if saved_fp == self.review_input_fingerprint(chapter, verse) else 'stale'
         except Exception:
             return 'stale'
+
+    def mark_ai_review_incomplete(
+        self, chapter: str | int, verse: str | int, state: str = 'cancelled'
+    ) -> None:
+        """Prevent a cancelled in-flight result from being treated as resumably complete."""
+        p = self.companion_dir() / 'aiReview' / self.book_id / str(chapter) / f'{verse}.json'
+        if not p.exists():
+            return
+        d = _read_json(p)
+        if isinstance(d, dict):
+            d['batchState'] = str(state or 'incomplete')
+            d['batchStateTimestamp'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+            _write_json_atomic(p, d)
 
     @staticmethod
     def _alignment_work_state(alignment: VerseAlignment) -> str:

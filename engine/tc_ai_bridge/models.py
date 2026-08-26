@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -142,6 +143,10 @@ class AICheckReview:
     source_quote: str
     proposed_selection_ids: list[str] = field(default_factory=list)
     proposed_selection_text: list[str] = field(default_factory=list)
+    # Exact translationCore-compatible target references resolved from the
+    # model's opaque token IDs.  Keeping occurrence/occurrences here makes a
+    # repeated word safe to apply without asking the model to reproduce text.
+    proposed_selections: list[dict[str, Any]] = field(default_factory=list)
     nothing_to_select: bool = False
     verdict: str = 'review'  # pass | review | problem | not_applicable
     severity: Severity = 'medium'
@@ -158,6 +163,7 @@ class AICheckReview:
             'source_quote': self.source_quote,
             'proposed_selection_ids': list(self.proposed_selection_ids),
             'proposed_selection_text': list(self.proposed_selection_text),
+            'proposed_selections': copy.deepcopy(self.proposed_selections),
             'nothing_to_select': self.nothing_to_select,
             'verdict': self.verdict,
             'severity': self.severity,

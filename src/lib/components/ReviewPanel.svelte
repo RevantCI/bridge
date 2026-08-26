@@ -1,13 +1,14 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import AlignmentModal from "./AlignmentModal.svelte";
   import TranslationHelpsReview from "./TranslationHelpsReview.svelte";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
     verseTexts, checkStatusByVerse, alignmentStatusByVerse, checkingProgress, verseKey,
-    aiCheckReviewsByVerse, nativeChecksByVerse,
+    aiCheckReviewsByVerse, nativeChecksByVerse, project, reviewerMode,
   } from "../stores";
-  import type { AiExplainResult, FindingStatus } from "../types/finding";
+  import type { AiExplainResult, AIReviewJobSnapshot, FindingStatus } from "../types/finding";
 
   let greekRoomChecking = false;
   let lastCheckedKey = "";
@@ -89,11 +90,22 @@
   let editErrorKey = "";
   let alignmentOpen = false;
   let alignmentKey = "";
-  let aiExplainBusy = false;
   let aiExplainError = "";
   let aiExplainResult: AiExplainResult | null = null;
   let aiExplainKey = "";
+  let aiJob: AIReviewJobSnapshot | null = null;
+  let aiPollTimer: ReturnType<typeof setTimeout> | undefined;
+  let aiPollSequence = 0;
+  let processedAIResults = new Set<string>();
+  let observedProjectPath = "";
+  let aiFailedResults: Array<{ chapter: string; verse: string; error: string | null }> = [];
   let translationHelpsReview: TranslationHelpsReview;
+
+  $: aiFailedResults = aiJob
+    ? Object.values(aiJob.results)
+        .filter((result) => result.status === "failed")
+        .map((result) => ({ chapter: result.chapter, verse: result.verse, error: result.error }))
+    : [];
 
   function nativeCheckStateChanged(): void {
     aiExplainResult = null;
@@ -117,25 +129,127 @@
     aiExplainError = "";
   }
 
-  async function askAiExplain() {
-    if (!$selectedVerse || aiExplainBusy) return;
+  async function hydrateCompletedAIReview(
+    chapter: string, verse: string, expectedProjectPath: string,
+  ): Promise<void> {
+    try {
+      const result = await bridge.listChecksForVerse(chapter, verse);
+      if (result.state !== "ready" || ($project?.path ?? "") !== expectedProjectPath) return;
+      const key = verseKey(chapter, verse);
+      aiCheckReviewsByVerse.update((values) => ({ ...values, [key]: result.aiReviews ?? [] }));
+      nativeChecksByVerse.update((values) => ({ ...values, [key]: result.checks ?? [] }));
+    } catch (error) {
+      console.error(`Could not hydrate completed AI review ${chapter}:${verse}`, error);
+    }
+  }
+
+  function syncAIJobResult(snapshot: AIReviewJobSnapshot): void {
+    for (const [key, resultStatus] of Object.entries(snapshot.results)) {
+      if (resultStatus.status !== "succeeded") continue;
+      const resultIdentity = `${snapshot.jobId}:${key}`;
+      if (!processedAIResults.has(resultIdentity)) {
+        processedAIResults = new Set([...processedAIResults, resultIdentity]);
+        void hydrateCompletedAIReview(
+          resultStatus.chapter, resultStatus.verse, snapshot.projectPath,
+        );
+        if ($selectedVerse && key === verseKey($currentChapter, $selectedVerse)) {
+          void translationHelpsReview?.refresh();
+        }
+      }
+    }
+    const latest = snapshot.latestResult;
+    if (latest?.result.status === "succeeded") {
+      const { key, result } = latest;
+      aiCheckReviewsByVerse.update((values) => ({ ...values, [key]: result.checkReviews ?? [] }));
+      if ($selectedVerse && key === verseKey($currentChapter, $selectedVerse)) {
+        aiExplainKey = key;
+        aiExplainResult = {
+          summary: result.summary,
+          checkReviews: result.checkReviews,
+          qaIssues: result.qaIssues,
+          alignmentProposal: result.alignmentProposal,
+          alignmentWasAIProposed: result.alignmentWasAIProposed,
+          usage: result.usage,
+        };
+      }
+    }
+  }
+
+  async function pollAIJob(jobId: string, sequence: number): Promise<void> {
+    try {
+      const snapshot = await bridge.aiReviewStatus(jobId);
+      if (sequence !== aiPollSequence) return;
+      aiJob = snapshot;
+      syncAIJobResult(snapshot);
+      if (["queued", "running", "cancelling"].includes(snapshot.state)) {
+        aiPollTimer = setTimeout(() => void pollAIJob(jobId, sequence), 650);
+      } else if (snapshot.state === "failed") {
+        aiExplainError = snapshot.error || "AI review failed.";
+      }
+    } catch (error) {
+      if (sequence === aiPollSequence) aiExplainError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  async function startAIReview(scope: "verse" | "chapter" | "book") {
+    if (!$selectedVerse || aiJob && ["queued", "running", "cancelling"].includes(aiJob.state)) return;
     const chapter = $currentChapter;
     const verse = $selectedVerse;
-    aiExplainBusy = true;
+    if (scope !== "verse" && !window.confirm(
+      `Run AI review for this ${scope}? Each verse may use one or two model requests and incur API charges.`,
+    )) return;
     aiExplainError = "";
     aiExplainResult = null;
     try {
-      aiExplainResult = await bridge.aiExplainVerse(chapter, verse);
-      aiExplainKey = verseKey(chapter, verse);
-      aiCheckReviewsByVerse.update((values) => ({
-        ...values, [aiExplainKey]: aiExplainResult?.checkReviews ?? [],
-      }));
+      const snapshot = await bridge.startAIReview(scope, chapter, verse, $reviewerMode);
+      aiJob = snapshot;
+      processedAIResults = new Set();
+      const sequence = ++aiPollSequence;
+      void pollAIJob(snapshot.jobId, sequence);
     } catch (e) {
       aiExplainError = e instanceof Error ? e.message : String(e);
-    } finally {
-      aiExplainBusy = false;
     }
   }
+
+  async function cancelAIReview(): Promise<void> {
+    if (!aiJob || !["queued", "running", "cancelling"].includes(aiJob.state)) return;
+    try {
+      aiJob = await bridge.cancelAIReview(aiJob.jobId);
+    } catch (error) {
+      aiExplainError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  async function retryAIReview(): Promise<void> {
+    if (!aiJob || !["failed", "cancelled"].includes(aiJob.state)) return;
+    aiExplainError = "";
+    try {
+      const snapshot = await bridge.retryAIReview(aiJob.jobId);
+      aiJob = snapshot;
+      processedAIResults = new Set();
+      const sequence = ++aiPollSequence;
+      void pollAIJob(snapshot.jobId, sequence);
+    } catch (error) {
+      aiExplainError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  $: if (($project?.path ?? "") !== observedProjectPath) {
+    if (observedProjectPath && aiJob && ["queued", "running", "cancelling"].includes(aiJob.state)) {
+      void cancelAIReview();
+    }
+    observedProjectPath = $project?.path ?? "";
+    aiJob = null;
+    aiExplainResult = null;
+    aiExplainError = "";
+    aiPollSequence += 1;
+    if (aiPollTimer) clearTimeout(aiPollTimer);
+  }
+
+  onDestroy(() => {
+    aiPollSequence += 1;
+    if (aiPollTimer) clearTimeout(aiPollTimer);
+  });
 
   $: if (
     alignmentOpen && $selectedVerse &&
@@ -249,6 +363,50 @@
           </div>
         </div>
       {/if}
+
+      <div class="section ai-review-controls">
+        <div class="section-title">
+          Automatic AI review
+          <span class="mode-pill">{$reviewerMode}</span>
+        </div>
+        <p class="ai-review-help">
+          {$reviewerMode === "basic"
+            ? "Safe, evidence-grounded selections are applied automatically; uncertain checks remain for review."
+            : "AI prepares evidence and exact-word proposals; you decide what to apply or edit."}
+        </p>
+        <div class="ai-scope-actions">
+          <button on:click={() => startAIReview("verse")} disabled={$checkingProgress.running || Boolean(aiJob && ["queued", "running", "cancelling"].includes(aiJob.state))}>This verse</button>
+          <button on:click={() => startAIReview("chapter")} disabled={$checkingProgress.running || Boolean(aiJob && ["queued", "running", "cancelling"].includes(aiJob.state))}>Chapter</button>
+          <button on:click={() => startAIReview("book")} disabled={$checkingProgress.running || Boolean(aiJob && ["queued", "running", "cancelling"].includes(aiJob.state))}>Whole book</button>
+        </div>
+        {#if aiJob}
+          <div class="ai-job-status" class:failed={aiJob.state === "failed"}>
+            <div><b>{aiJob.state === "succeeded" ? "Complete" : aiJob.currentStage}</b><span>{aiJob.percent}%</span></div>
+            <progress max="100" value={aiJob.percent} />
+            <small>{aiJob.completedVerses}/{aiJob.totalVerses} verses · {aiJob.mode} mode{aiJob.failedVerses ? ` · ${aiJob.failedVerses} failed` : ""}</small>
+            {#if aiJob.skippedCurrentVerses > 0}
+              <small>{aiJob.skippedCurrentVerses} already-current verse(s) preserved and skipped.</small>
+            {/if}
+            {#if aiJob.resumeOf}<small>Resumed from the previous unfinished job.</small>{/if}
+            {#if aiFailedResults.length > 0}
+              <div class="ai-failure-list">
+                {#each aiFailedResults.slice(0, 3) as failure}
+                  <div><b>{failure.chapter}:{failure.verse}</b> — {failure.error || "Unknown AI review error"}</div>
+                {/each}
+                {#if aiFailedResults.length > 3}<div>+ {aiFailedResults.length - 3} more failed verse(s)</div>{/if}
+              </div>
+            {/if}
+            <div class="ai-job-actions">
+              {#if ["queued", "running", "cancelling"].includes(aiJob.state)}
+                <button on:click={cancelAIReview} disabled={aiJob.state === "cancelling"}>{aiJob.state === "cancelling" ? "Cancelling…" : "Cancel"}</button>
+              {:else if ["failed", "cancelled"].includes(aiJob.state)}
+                <button on:click={retryAIReview}>Retry</button>
+              {/if}
+            </div>
+          </div>
+        {/if}
+        {#if aiExplainError}<p class="ai-control-error">{aiExplainError}</p>{/if}
+      </div>
 
       <TranslationHelpsReview bind:this={translationHelpsReview} chapter={$currentChapter} verse={$selectedVerse} onStateChanged={nativeCheckStateChanged} />
 
@@ -372,10 +530,10 @@
       >✎ Edit verse</button>
       <button
         class="ai-explain-btn"
-        on:click={askAiExplain}
-        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey) || aiExplainBusy}
-        title="Ask AI to prepare evidence-backed check reviews for this verse"
-      >{aiExplainBusy ? "Asking AI…" : "🤖 Explain with AI"}</button>
+        on:click={() => startAIReview("verse")}
+        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey) || Boolean(aiJob && ["queued", "running", "cancelling"].includes(aiJob.state))}
+        title="Run an evidence-grounded AI review for this verse in the background"
+      >🤖 AI review</button>
     </div>
   {:else}
     <div class="empty-panel">Select a verse to review its findings.</div>
@@ -437,4 +595,18 @@
   .ai-summary { font-size: 12px; color: var(--text); line-height: 1.5; margin: 0 0 10px; }
   .ai-error { font-size: 12px; color: var(--danger); line-height: 1.5; margin: 0; }
   .ai-suggestion { font-size: 11px; color: var(--accent); margin: -4px 0 8px; }
+  .ai-review-controls { border-color: var(--accent); }
+  .mode-pill { margin-left: auto; text-transform: capitalize; font-size: 9px; padding: 2px 7px; border-radius: 999px; color: var(--accent); background: var(--accent-bg); }
+  .ai-review-help { font-size: 10px; line-height: 1.45; color: var(--text-2); margin: 0 0 8px; }
+  .ai-scope-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
+  .ai-scope-actions button, .ai-job-actions button { padding: 6px; font-size: 10px; font-weight: 700; border-radius: 6px; border: 1px solid var(--border-strong); color: var(--accent); background: var(--surface); cursor: pointer; }
+  .ai-scope-actions button:disabled, .ai-job-actions button:disabled { opacity: .55; cursor: not-allowed; }
+  .ai-job-status { margin-top: 9px; padding: 8px; border-radius: 7px; color: var(--accent); background: var(--accent-bg); }
+  .ai-job-status.failed { color: var(--danger); background: var(--danger-bg); }
+  .ai-job-status > div:first-child { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; }
+  .ai-job-status progress { width: 100%; height: 6px; margin: 5px 0; accent-color: var(--accent); }
+  .ai-job-status small { display: block; font-size: 9px; color: var(--text-3); }
+  .ai-failure-list { margin-top: 7px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
+  .ai-job-actions { margin-top: 6px; }
+  .ai-control-error { margin: 8px 0 0; font-size: 10px; line-height: 1.4; color: var(--danger); overflow-wrap: anywhere; }
 </style>

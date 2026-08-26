@@ -178,7 +178,7 @@ class OpenAIResponsesClient:
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
-            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.7',
+            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.8',
         }
         self.last_reasoning_effort = self.reasoning_effort
         status, response = self._request_json(payload, headers)
@@ -217,7 +217,7 @@ class OpenAIResponsesClient:
         url = f'{self.models_endpoint}/{urllib.parse.quote(self.model, safe="")}'
         req = urllib.request.Request(url, headers={
             'Authorization': f'Bearer {self.api_key}',
-            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.7',
+            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.8',
         }, method='GET')
         try:
             with urllib.request.urlopen(req, timeout=min(self.timeout, 30.0)) as response:
@@ -558,10 +558,23 @@ class OpenAIResponsesClient:
             if nothing and ids:
                 raise AIError('AI check review returned both selection_ids and nothing_to_select=true.')
             texts = [inv.bottom_ids[x].word for x in ids]
-            evs = [evidence_catalog[x] for x in item.get('evidence_ids', []) if x in evidence_catalog]
+            selections = [
+                {
+                    'text': inv.bottom_ids[x].word,
+                    'occurrence': inv.bottom_ids[x].occurrence,
+                    'occurrences': inv.bottom_ids[x].occurrences,
+                }
+                for x in ids
+            ]
+            evidence_ids = [str(x) for x in item.get('evidence_ids', [])]
+            unknown_evidence = [x for x in evidence_ids if x not in evidence_catalog]
+            if unknown_evidence:
+                raise AIError(f'AI check review referenced unknown evidence ID(s): {", ".join(unknown_evidence)}')
+            evs = [evidence_catalog[x] for x in evidence_ids]
             reviews.append(AICheckReview(
                 tool=str(item.get('tool','')), group_id=str(item.get('group_id','')), check_id=str(item.get('check_id','')),
                 source_quote=str(item.get('source_quote','')), proposed_selection_ids=ids, proposed_selection_text=texts,
+                proposed_selections=selections,
                 nothing_to_select=nothing, verdict=str(item.get('verdict','review')), severity=item.get('severity','medium'),
                 rationale=str(item.get('rationale','')), suggested_correction=str(item.get('suggested_correction','')),
                 confidence=float(item.get('confidence',0) or 0), evidence_used=evs,
@@ -575,6 +588,15 @@ class OpenAIResponsesClient:
             raise AIError(f'AI full review returned unknown translationCore check(s): {", ".join(extras[:8])}')
         if len(returned_ids) != len(set(returned_ids)):
             raise AIError('AI full review duplicated a translationCore check result.')
+        for review in reviews:
+            expected = expected_map.get(review.check_id)
+            if expected and (
+                review.tool != str(expected.get('tool') or '')
+                or review.group_id != str(expected.get('groupId') or '')
+            ):
+                raise AIError(
+                    f'AI full review changed the native identity of check {review.check_id}.'
+                )
         missing = sorted(set(expected_map) - set(returned_ids))
         for check_id in missing:
             c = expected_map[check_id]
@@ -589,7 +611,11 @@ class OpenAIResponsesClient:
 
         issues: list[QAIssue] = []
         for item in result.get('qa_issues', []):
-            evs=[evidence_catalog[x] for x in item.get('evidence_ids', []) if x in evidence_catalog]
+            evidence_ids = [str(x) for x in item.get('evidence_ids', [])]
+            unknown_evidence = [x for x in evidence_ids if x not in evidence_catalog]
+            if unknown_evidence:
+                raise AIError(f'AI QA issue referenced unknown evidence ID(s): {", ".join(unknown_evidence)}')
+            evs=[evidence_catalog[x] for x in evidence_ids]
             evidence_text='\n'.join(f"• {e.get('title','Evidence')}: {str(e.get('content',''))[:900]}" for e in evs)
             detail=str(item.get('detail','')).strip()
             if evidence_text:

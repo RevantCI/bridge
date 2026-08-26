@@ -1,5 +1,5 @@
 import type {
-  AiExplainResult, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
+  AiExplainResult, AIReviewChapterResponse, AIReviewJobSnapshot, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
   AlignmentStatusResponse, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
   CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, NativeCheckListResponse,
   NativeCheckTool, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
@@ -245,6 +245,29 @@ export const bridge = {
   /** Read-only AI preparation of a verse's checks — nothing is written to project files. */
   aiExplainVerse(chapter: string, verse: string): Promise<AiExplainResult> {
     return call("ai_explain", { chapter, verse });
+  },
+
+  startAIReview(
+    scope: "verse" | "chapter" | "book", chapter: string, verse: string,
+    mode: "basic" | "advanced",
+  ): Promise<AIReviewJobSnapshot> {
+    return call("ai_review_start", { scope, chapter, verse, mode });
+  },
+
+  aiReviewStatus(jobId: string): Promise<AIReviewJobSnapshot> {
+    return call("ai_review_status", { jobId });
+  },
+
+  cancelAIReview(jobId: string): Promise<AIReviewJobSnapshot> {
+    return call("ai_review_cancel", { jobId });
+  },
+
+  retryAIReview(jobId: string): Promise<AIReviewJobSnapshot> {
+    return call("ai_review_retry", { jobId });
+  },
+
+  listAIReviewsForChapter(chapter: string): Promise<AIReviewChapterResponse> {
+    return call("ai_review_list_chapter", { chapter });
   },
 
   paratextGetState(): Promise<DesktopConnectorState> {

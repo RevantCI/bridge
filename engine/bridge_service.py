@@ -15,6 +15,7 @@ only wrapped. See docs/ARCHITECTURE.md for the reasoning.
 from __future__ import annotations
 
 import atexit
+import copy
 import hashlib
 import json
 import os
@@ -66,8 +67,15 @@ from check_jobs import (
     CheckJobNotFound,
     CheckJobSpec,
 )
+from ai_review_jobs import (
+    AIReviewJobConflict,
+    AIReviewJobError,
+    AIReviewJobManager,
+    AIReviewJobNotFound,
+    AIReviewJobSpec,
+)
 
-BRIDGE_VERSION = "0.8.0-beta.7"
+BRIDGE_VERSION = "0.8.0-beta.8"
 
 # tc_ai_bridge's QAIssue.severity strings -> our shared Severity enum
 _SEVERITY_MAP = {
@@ -207,6 +215,11 @@ class Methods:
     ALIGNMENT_AI_APPLY_PROPOSAL = "alignment.aiApplyProposal"
 
     AI_EXPLAIN_VERSE = "ai.explain"
+    AI_REVIEW_START = "ai.review.start"
+    AI_REVIEW_STATUS = "ai.review.status"
+    AI_REVIEW_CANCEL = "ai.review.cancel"
+    AI_REVIEW_RETRY = "ai.review.retry"
+    AI_REVIEW_LIST_CHAPTER = "ai.review.listForChapter"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -267,6 +280,7 @@ class BridgeEngine:
         self._checker_lock = threading.RLock()
         self._import_lock = threading.Lock()
         self._check_jobs = CheckJobManager()
+        self._ai_review_jobs = AIReviewJobManager()
         # AppSettings() with no path defaults to a real, persistent location
         # (%LOCALAPPDATA%/Bridge/data/settings.json on Windows — a subfolder
         # of the NSIS install dir, not the dir itself, so an uninstall can't
@@ -536,11 +550,32 @@ class BridgeEngine:
         try:
             self.project.invalidate_index_cache()
             checks = self.project.check_reviews_for_verse(chapter, verse)
+            ai_review_state = self.project.ai_review_cache_status(chapter, verse)
+            cached_ai = self.project.load_ai_review_result(chapter, verse) if ai_review_state == "current" else None
+            ai_reviews = list((cached_ai or {}).get("checkReviews") or [])
+            ai_by_identity = {
+                (str(item.get("tool") or ""), str(item.get("check_id") or "")): item
+                for item in ai_reviews if isinstance(item, dict)
+            }
+            evaluation = {
+                "pass": "passed", "not_applicable": "passed",
+                "problem": "issue_open", "review": "needs_review",
+            }
+            for check in checks:
+                ai_item = ai_by_identity.get((str(check.get("tool") or ""), str(check.get("checkId") or "")))
+                if ai_item:
+                    check["evaluationStatus"] = evaluation.get(str(ai_item.get("verdict") or ""), "needs_review")
+                elif ai_review_state == "stale":
+                    check["evaluationStatus"] = "needs_review"
         finally:
             self._checker_lock.release()
         return {
             "chapter": str(chapter), "verse": str(verse), "checks": checks,
             "state": "ready", "retryAfterMs": 0, "message": "",
+            "aiReviewState": ai_review_state,
+            "aiReviews": ai_reviews,
+            "aiQaIssues": list((cached_ai or {}).get("qaIssues") or []),
+            "aiSummary": str((cached_ai or {}).get("summary") or ""),
         }
 
     def validate_check_selection(
@@ -560,12 +595,15 @@ class BridgeEngine:
     ) -> dict[str, Any]:
         self._require_project()
         with self._checker_lock:
-            return self.project.save_check_selection(
+            result = self.project.save_check_selection(
                 chapter, verse, tool, group_id, check_id, selections, nothing_to_select,
                 provenance, expected_fingerprint,
                 username=self.settings.reviewer_name or "Bridge Reviewer",
                 audit_metadata=metadata,
             )
+            if provenance == "bridge_ai":
+                self.project.rebase_ai_review_fingerprint(chapter, verse)
+            return result
 
     def clear_check_selection(
         self, chapter: str, verse: str, tool: str, group_id: str, check_id: str,
@@ -928,6 +966,230 @@ class BridgeEngine:
                 "totalTokens": int(meta.get("total_tokens_for_prepare", 0) or 0),
                 "estimatedCostUSD": round(float(meta.get("estimated_cost_usd", 0.0) or 0.0), 6),
             },
+        }
+
+    @staticmethod
+    def _safe_ai_selection_reason(review: Any) -> str:
+        """Return an empty string only when a model proposal is safe to auto-apply.
+
+        Structured-output validation proves shape and token identity.  This second,
+        deterministic policy gate proves that the conclusion is decisive, grounded,
+        and complete enough for Basic mode.  The native persistence layer remains the
+        final authority and independently blocks overwriting imported/human choices.
+        """
+        if review.verdict not in {"pass", "problem", "not_applicable"}:
+            return "AI verdict requires human review"
+        if float(review.confidence or 0.0) < 0.82:
+            return "AI confidence is below the 82% automatic-selection threshold"
+        if not review.evidence_used:
+            return "No bundled evidence was cited"
+        if review.verdict == "not_applicable" and not review.nothing_to_select:
+            return "Not-applicable verdict must explicitly select nothing"
+        if review.nothing_to_select:
+            return "" if not review.proposed_selections else "Proposal contradicts nothing-to-select"
+        if not review.proposed_selections:
+            return "No exact target selection was proposed"
+        return ""
+
+    def _apply_basic_ai_selections(
+        self,
+        project: TranslationCoreProject,
+        chapter: str,
+        verse: str,
+        reviews: list[Any],
+        *,
+        model: str,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        applied: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for review in reviews:
+            reason = self._safe_ai_selection_reason(review)
+            identity = {
+                "tool": review.tool, "groupId": review.group_id, "checkId": review.check_id,
+            }
+            if reason:
+                skipped.append({**identity, "reason": reason})
+                continue
+            try:
+                with self._checker_lock:
+                    validation = project.validate_check_selection(
+                        chapter, verse, review.tool, review.group_id, review.check_id,
+                        review.proposed_selections, review.nothing_to_select,
+                    )
+                    if not validation.get("valid"):
+                        skipped.append({
+                            **identity,
+                            "reason": " ".join(validation.get("errors") or ["Selection validation failed"]),
+                        })
+                        continue
+                    mutation = project.save_check_selection(
+                        chapter, verse, review.tool, review.group_id, review.check_id,
+                        validation.get("selections") or [], review.nothing_to_select,
+                        "bridge_ai", str(validation.get("stateFingerprint") or ""),
+                        username="Bridge AI",
+                        audit_metadata={
+                            "interface": "basic", "model": model,
+                            "confidence": review.confidence, "verdict": review.verdict,
+                            "evidenceGrounded": True,
+                        },
+                    )
+                applied.append({**identity, "review": mutation.get("review")})
+            except ProjectError as exc:
+                # Protected imported/human choices and concurrent changes are a safe
+                # per-check skip, not a reason to lose every other verse result.
+                skipped.append({**identity, "reason": str(exc)})
+        if applied:
+            with self._checker_lock:
+                project.rebase_ai_review_fingerprint(chapter, verse)
+        return applied, skipped
+
+    def _run_ai_review_for_project(
+        self,
+        project: TranslationCoreProject,
+        chapter: str,
+        verse: str,
+        mode: str,
+        progress_callback: Callable[[int, str], None],
+        cancel_event: threading.Event,
+    ) -> dict[str, Any]:
+        if cancel_event.is_set():
+            raise AIError("AI review cancelled before the verse started.")
+        with self._checker_lock:
+            self._ensure_resource_indexes(project)
+        client = self._ai_client()
+        alignment = project.load_verse_alignment(chapter, verse)
+        proposal, _, reviews, issues, summary, meta = client.prepare_verse_review(
+            project, chapter, verse, alignment, progress_callback=progress_callback,
+        )
+        total_tokens = int(meta.get("total_tokens_for_prepare", 0) or 0)
+        cost = float(meta.get("estimated_cost_usd", 0.0) or 0.0)
+        self.settings.record_ai_usage(total_tokens, cost)
+        if cancel_event.is_set():
+            project.mark_ai_review_incomplete(chapter, verse, "cancelled")
+            raise AIError("AI review cancelled; the completed model result was not automatically applied.")
+        applied: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        if mode == "basic":
+            progress_callback(94, "Applying safe evidence-grounded selections")
+            applied, skipped = self._apply_basic_ai_selections(
+                project, chapter, verse, reviews, model=str(meta.get("model") or client.model),
+            )
+        progress_callback(100, "Verse AI review complete")
+        return {
+            "summary": summary,
+            "checkReviews": [item.to_dict() for item in reviews],
+            "qaIssues": [item.to_dict() for item in issues],
+            "alignmentProposal": proposal,
+            "alignmentWasAIProposed": bool(proposal is not None),
+            "appliedSelections": applied,
+            "skippedSelections": skipped,
+            "usage": {"totalTokens": total_tokens, "estimatedCostUSD": round(cost, 6)},
+        }
+
+    def _start_ai_review_spec(
+        self, project: TranslationCoreProject, spec: AIReviewJobSpec,
+    ) -> dict[str, Any]:
+        # Fail immediately with the familiar settings error instead of starting a
+        # background job whose first verse can only fail for a missing API key.
+        self._ai_client()
+        return self._ai_review_jobs.start(
+            spec,
+            run_verse=lambda ch, vs, reviewer_mode, progress, cancel: self._run_ai_review_for_project(
+                project, ch, vs, reviewer_mode, progress, cancel,
+            ),
+        )
+
+    def start_ai_review_job(
+        self, scope: str, chapter: str = "", verse: str = "", mode: str = "",
+    ) -> dict[str, Any]:
+        self._require_project()
+        project = self.project
+        resolved_mode = str(mode or self.settings.reviewer_mode or "basic").lower()
+        available = project.chapters()
+        if scope == "book":
+            chapters = available
+        else:
+            if not chapter or str(chapter) not in available:
+                raise ProjectError(f"Chapter {chapter or '?'} does not exist in this project.")
+            chapters = [str(chapter)]
+        requested = {
+            item: [value for value in project.verses(item) if value != "front"]
+            for item in chapters
+        }
+        if scope == "verse":
+            if not verse or str(verse) not in requested[str(chapter)]:
+                raise ProjectError(f"Verse {chapter}:{verse or '?'} does not exist in this project.")
+            chapter_verses = {str(chapter): [str(verse)]}
+            skipped_current = 0
+        else:
+            # Chapter/book buttons are resumable by default. Already-current cached
+            # reviews are real completed work and should not consume API calls again.
+            chapter_verses = {
+                ch: [vs for vs in values if project.ai_review_cache_status(ch, vs) != "current"]
+                for ch, values in requested.items()
+            }
+            skipped_current = sum(len(values) for values in requested.values()) - sum(
+                len(values) for values in chapter_verses.values()
+            )
+        spec = AIReviewJobSpec(
+            scope=scope, mode=resolved_mode, project_path=str(project.path),
+            chapters=tuple(chapters), chapter_verses=chapter_verses,
+            skipped_current=skipped_current,
+        )
+        return self._start_ai_review_spec(project, spec)
+
+    def ai_review_job_status(self, job_id: str = "") -> dict[str, Any]:
+        return self._ai_review_jobs.status(job_id)
+
+    def cancel_ai_review_job(self, job_id: str = "") -> dict[str, Any]:
+        return self._ai_review_jobs.cancel(job_id)
+
+    def retry_ai_review_job(self, job_id: str) -> dict[str, Any]:
+        self._require_project()
+        spec = self._ai_review_jobs.spec_for_retry(job_id)
+        if str(self.project.path) != spec.project_path:
+            raise ProjectError("Reopen the original project before retrying this AI review job.")
+        return self._start_ai_review_spec(self.project, spec)
+
+    @staticmethod
+    def _compact_ai_review(item: dict[str, Any]) -> dict[str, Any]:
+        compact = copy.deepcopy(item)
+        compact["evidence_used"] = [
+            {
+                key: copy.deepcopy(evidence.get(key))
+                for key in ("kind", "title", "identifier", "version", "provider", "authoritative")
+                if evidence.get(key) not in (None, "")
+            }
+            for evidence in list(item.get("evidence_used") or []) if isinstance(evidence, dict)
+        ]
+        return compact
+
+    def list_ai_reviews_for_chapter(self, chapter: str) -> dict[str, Any]:
+        """Restore compact current reviews for chapter-wide inline highlighting."""
+        self._require_project()
+        if str(chapter) not in self.project.chapters():
+            raise ProjectError(f"Chapter {chapter} does not exist in this project.")
+        reviews_by_verse: dict[str, list[dict[str, Any]]] = {}
+        states: dict[str, str] = {}
+        for verse in self.project.verses(chapter):
+            if verse == "front":
+                continue
+            state = self.project.ai_review_cache_status(chapter, verse)
+            states[str(verse)] = state
+            if state != "current":
+                continue
+            saved = self.project.load_ai_review_result(chapter, verse) or {}
+            reviews_by_verse[str(verse)] = [
+                self._compact_ai_review(item)
+                for item in list(saved.get("checkReviews") or []) if isinstance(item, dict)
+            ]
+        return {
+            "chapter": str(chapter),
+            "reviewsByVerse": reviews_by_verse,
+            "states": states,
+            "current": sum(1 for state in states.values() if state == "current"),
+            "stale": sum(1 for state in states.values() if state == "stale"),
+            "missing": sum(1 for state in states.values() if state == "missing"),
         }
 
     # -- live desktop connectors (Paratext/Logos) --------------------------
@@ -1799,6 +2061,27 @@ class BridgeEngine:
                 ))
             if m == Methods.AI_EXPLAIN_VERSE:
                 return EngineResponse.ok(request.id, result=self.explain_verse(p["chapter"], p["verse"]))
+            if m == Methods.AI_REVIEW_START:
+                return EngineResponse.ok(request.id, result=self.start_ai_review_job(
+                    p.get("scope", "verse"), p.get("chapter", ""), p.get("verse", ""),
+                    p.get("mode", ""),
+                ))
+            if m == Methods.AI_REVIEW_STATUS:
+                return EngineResponse.ok(
+                    request.id, result=self.ai_review_job_status(p.get("jobId", "")),
+                )
+            if m == Methods.AI_REVIEW_CANCEL:
+                return EngineResponse.ok(
+                    request.id, result=self.cancel_ai_review_job(p.get("jobId", "")),
+                )
+            if m == Methods.AI_REVIEW_RETRY:
+                return EngineResponse.ok(
+                    request.id, result=self.retry_ai_review_job(p["jobId"]),
+                )
+            if m == Methods.AI_REVIEW_LIST_CHAPTER:
+                return EngineResponse.ok(
+                    request.id, result=self.list_ai_reviews_for_chapter(p["chapter"]),
+                )
             if m == Methods.PARATEXT_GET_STATE:
                 return EngineResponse.ok(request.id, result=self.paratext_get_state())
             if m == Methods.PARATEXT_SET_REFERENCE:
@@ -1835,5 +2118,11 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "job_conflict", str(exc))
         except CheckJobError as exc:
             return EngineResponse.fail(request.id, "job_error", str(exc))
+        except AIReviewJobNotFound as exc:
+            return EngineResponse.fail(request.id, "ai_job_not_found", str(exc))
+        except AIReviewJobConflict as exc:
+            return EngineResponse.fail(request.id, "ai_job_conflict", str(exc))
+        except AIReviewJobError as exc:
+            return EngineResponse.fail(request.id, "ai_job_error", str(exc))
         except Exception as exc:  # noqa: BLE001 - protocol boundary must never crash the sidecar
             return EngineResponse.fail(request.id, "internal_error", str(exc))

@@ -90,6 +90,7 @@
         return;
       }
       nativeChecksByVerse.update((values) => ({ ...values, [refreshKey]: result.checks }));
+      aiCheckReviewsByVerse.update((values) => ({ ...values, [refreshKey]: result.aiReviews ?? [] }));
     } catch (error) {
       if (sequence !== loadSequence || refreshKey !== key) return;
       loadError = error instanceof Error ? error.message : String(error);
@@ -226,6 +227,48 @@
       mutationBusy = false;
     }
   }
+
+  async function applyAiProposal(check: NativeCheckReview, aiReview: AiCheckReview): Promise<void> {
+    if (mutationBusy) return;
+    mutationBusy = true;
+    mutationError = "";
+    mutationNotice = "";
+    const operationChapter = chapter;
+    const operationVerse = verse;
+    const operationKey = verseKey(operationChapter, operationVerse);
+    try {
+      const validation = await bridge.validateCheckSelection(
+        operationChapter, operationVerse, check.tool, check.groupId, check.checkId,
+        aiReview.proposed_selections ?? [], aiReview.nothing_to_select,
+      );
+      if (!validation.valid) {
+        mutationError = validation.errors.join(" ");
+        return;
+      }
+      await bridge.saveCheckSelection(
+        operationChapter, operationVerse, check.tool, check.groupId, check.checkId,
+        validation.selections, aiReview.nothing_to_select, "bridge_ai", validation.stateFingerprint,
+        {
+          interface: "advanced-ai-proposal", confidence: aiReview.confidence,
+          verdict: aiReview.verdict, evidenceGrounded: aiReview.evidence_used.length > 0,
+        },
+      );
+      await refresh();
+      if (key === operationKey) {
+        mutationNotice = `${toolLabel(check)} AI proposal applied. You can still edit or clear it.`;
+        onStateChanged();
+      }
+      try {
+        await refreshLocalFindings(operationChapter, operationVerse, operationKey);
+      } catch (error) {
+        mutationNotice = `AI proposal applied, but local findings could not refresh: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    } catch (error) {
+      if (key === operationKey) mutationError = error instanceof Error ? error.message : String(error);
+    } finally {
+      mutationBusy = false;
+    }
+  }
 </script>
 
 <div class="section translation-helps">
@@ -236,7 +279,7 @@
   </div>
 
   {#if $reviewerMode === "basic" && checks.some((check) => check.selectionStatus === "pending")}
-    <div class="basic-notice">Pending checks are not counted as passed. Automatic AI selection will be connected in Milestone 3B.3.</div>
+    <div class="basic-notice">Run AI review to evaluate these checks. Only high-confidence, evidence-grounded selections are applied automatically; uncertain checks stay pending.</div>
   {/if}
   {#if mutationNotice}<div class="mutation-notice">{mutationNotice}</div>{/if}
   {#if preparationMessage}<div class="preparing-notice"><span class="spin" /> {preparationMessage}</div>{/if}
@@ -313,6 +356,9 @@
           </div>
         {:else}
           <div class="advanced-actions">
+            {#if aiReview && ((aiReview.proposed_selections ?? []).length > 0 || aiReview.nothing_to_select)}
+              <button class="small-btn ai-apply" on:click={() => applyAiProposal(check, aiReview)} disabled={mutationBusy}>Apply AI proposal</button>
+            {/if}
             <button class="small-btn" on:click={() => startEditing(check)}>Edit selection</button>
             {#if check.selectionStatus !== "pending"}
               <button class="small-btn danger" on:click={() => clearSelection(check)} disabled={mutationBusy}>Clear</button>
@@ -366,6 +412,7 @@
   .small-btn, .save-btn, .icon-btn { border-radius: 5px; cursor: pointer; font-size: 10px; }
   .small-btn { padding: 5px 8px; color: var(--text-2); background: var(--surface); border: 1px solid var(--border-strong); }
   .small-btn.danger { color: var(--danger); }
+  .small-btn.ai-apply { color: var(--accent); border-color: var(--accent); }
   .save-btn { padding: 6px 9px; border: 0; color: white; background: var(--accent); font-weight: 700; }
   .small-btn:disabled, .save-btn:disabled { opacity: .55; cursor: not-allowed; }
   .selection-editor { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 8px; }

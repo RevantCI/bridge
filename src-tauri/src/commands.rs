@@ -548,6 +548,70 @@ pub async fn ai_explain(
 }
 
 #[tauri::command]
+pub async fn ai_review_start(
+    sidecar: State<'_, EngineSidecar>,
+    scope: String,
+    chapter: Option<String>,
+    verse: Option<String>,
+    mode: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "ai.review.start",
+            serde_json::json!({
+                "scope": scope,
+                "chapter": chapter.unwrap_or_default(),
+                "verse": verse.unwrap_or_default(),
+                "mode": mode.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn ai_review_status(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("ai.review.status", serde_json::json!({ "jobId": job_id }))
+        .await
+}
+
+#[tauri::command]
+pub async fn ai_review_cancel(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("ai.review.cancel", serde_json::json!({ "jobId": job_id }))
+        .await
+}
+
+#[tauri::command]
+pub async fn ai_review_retry(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("ai.review.retry", serde_json::json!({ "jobId": job_id }))
+        .await
+}
+
+#[tauri::command]
+pub async fn ai_review_list_chapter(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "ai.review.listForChapter",
+            serde_json::json!({ "chapter": chapter }),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn paratext_get_state(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar
         .send_request("paratext.getState", serde_json::json!({}))

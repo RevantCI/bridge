@@ -11,9 +11,10 @@ Three-way division of responsibility, never blurred:
 - **AI** says: "Here is what it may mean in this passage."
 - **Human** says: "This is what the translation should be."
 
-Findings are never auto-applied to project files. Everything funnels through
-a `QaFinding` with an explicit human-review `status` (open → accepted /
-rejected / ignored / fixed / needs_discussion).
+AI findings never rewrite Scripture or alignment. Everything funnels through
+an explicit review state. In Basic mode, Bridge may synchronize an exact tC
+tN/tW target selection only after deterministic token-identity, evidence, and
+confidence gates pass; it cannot replace an imported or human selection.
 
 ## Stack decision: Tauri (not Electron, not Python+Tkinter)
 
@@ -113,7 +114,8 @@ which mode is actually active.
 | **v0.8.0-beta.4** | Project inspection timeout/performance hotfix, legacy collection grouping, pytest isolation, and collection-aware duplicate classification with explicit match reasons. | Milestone 2.1 complete; installed GUI acceptance pending |
 | **v0.8.0-beta.5** | Pinned, offline UHB v3.0.0/UGNT v0.34 source-token packs; safe raw-import initialization/recovery; license, attribution, and reproducible provenance. | Milestone 3A complete; installed GUI acceptance pending |
 | **v0.8.0-beta.6** | Dedicated translationNotes/translationWords review with Basic and Advanced modes, inline occurrence-aware highlights, evidence tooltips, and editable tN/tW decisions. | Milestone 3B.2 implementation complete; installed GUI acceptance pending |
-| **v0.8.0-beta.7** | Non-blocking tN/tW review loading during background checks, automatic retry/preparation state, lower status-poll pressure, and stale chapter-load protection. | Beta 6 acceptance hotfix; installed GUI retest pending |
+| **v0.8.0-beta.7** | Non-blocking tN/tW review loading during background checks, automatic retry/preparation state, lower status-poll pressure, and stale chapter-load protection. | Beta 6 acceptance hotfix; installed GUI retest passed 2026-08-26 |
+| **v0.8.0-beta.8** | Schema-constrained, evidence-grounded tN/tW AI review; cancellable verse/chapter/book processing; conservative Basic-mode synchronization; editable Advanced-mode proposals; current/stale persisted AI evaluations. | Milestone 3B.3 source complete; live-provider and installed GUI acceptance pending |
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
 | v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
 | v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/DEVELOPER_HANDOFF.md's Phase 7 section) |
@@ -138,7 +140,8 @@ Protocol methods implemented so far: `ping`, `engine.info`, `project.open`,
 `chapter.verseData`, `checks.start/status/cancel/retry`, `verse.get/runChecks/decide/edit`,
 `alignment.get/status/realign/unalign/save/complete/undo/backups/restore`,
 `alignment.corpusStats.summary/forVerse`, `alignment.aiPropose/aiApplyProposal`,
-`ai.explain`, `paratext.getState/setReference`, `logos.getState/setReference`,
+`ai.explain`, `ai.review.start/status/cancel/retry`,
+`paratext.getState/setReference`, `logos.getState/setReference`,
 `versification.detect/orgRef/backVersificationMap`,
 `settings.get/set`, `export.aligned`, and `export.nonAligned`.
 

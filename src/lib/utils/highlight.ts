@@ -83,21 +83,30 @@ export function buildSegments(
     }
   }
 
-  // AI proposal text has no occurrence metadata yet. Highlight only an exact,
-  // unique match; repeated text remains in the card instead of guessing a span.
+  // New AI reviews carry exact translationCore occurrence metadata. Older cached
+  // reviews fall back to unique-text matching rather than guessing a repeated span.
   for (const review of aiReviews) {
     const className = review.tool === "translationNotes" ? "m-tn" : "m-tw";
-    for (const proposedText of review.proposed_selection_text) {
-      const ranges = exactTextRanges(text, proposedText);
-      if (ranges.length === 1) {
-        const evidence = review.evidence_used
-          .map((item) => String(item.title ?? item.identifier ?? item.kind ?? ""))
-          .filter(Boolean)
-          .join(", ");
-        spans.push({
-          ...ranges[0], id: review.check_id, className,
-          title: [`AI proposal: ${review.rationale}`, evidence ? `Evidence: ${evidence}` : ""].filter(Boolean).join("\n"),
-        });
+    const evidence = review.evidence_used
+      .map((item) => String(item.title ?? item.identifier ?? item.kind ?? ""))
+      .filter(Boolean)
+      .join(", ");
+    const title = [`AI proposal: ${review.rationale}`, evidence ? `Evidence: ${evidence}` : ""]
+      .filter(Boolean).join("\n");
+    if ((review.proposed_selections ?? []).length > 0) {
+      for (const selection of review.proposed_selections) {
+        const ranges = exactTextRanges(text, selection.text);
+        const range = ranges[selection.occurrence - 1];
+        if (range && ranges.length === selection.occurrences) {
+          spans.push({ ...range, id: review.check_id, className, title });
+        }
+      }
+    } else {
+      for (const proposedText of review.proposed_selection_text) {
+        const ranges = exactTextRanges(text, proposedText);
+        if (ranges.length === 1) {
+          spans.push({ ...ranges[0], id: review.check_id, className, title });
+        }
       }
     }
   }

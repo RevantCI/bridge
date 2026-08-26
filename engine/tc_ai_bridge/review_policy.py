@@ -64,7 +64,13 @@ def gate_ai_issues(issues: Iterable[QAIssue]) -> tuple[list[QAIssue], list[QAIss
 def gate_check_reviews(reviews: Iterable[AICheckReview]) -> list[AICheckReview]:
     out: list[AICheckReview] = []
     for original in reviews:
-        r = replace(original, evidence_used=list(original.evidence_used), proposed_selection_ids=list(original.proposed_selection_ids), proposed_selection_text=list(original.proposed_selection_text))
+        r = replace(
+            original,
+            evidence_used=list(original.evidence_used),
+            proposed_selection_ids=list(original.proposed_selection_ids),
+            proposed_selection_text=list(original.proposed_selection_text),
+            proposed_selections=[dict(item) for item in original.proposed_selections],
+        )
         conf = float(r.confidence or 0.0)
         evidence_count = len(r.evidence_used)
         if r.verdict in ('pass', 'problem') and conf < 0.64:
