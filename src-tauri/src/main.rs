@@ -29,6 +29,7 @@ fn main() {
             commands::pick_import_file,
             commands::project_open,
             commands::project_list,
+            commands::project_list_book_progress,
             commands::project_forget,
             commands::project_delete,
             commands::project_scan,

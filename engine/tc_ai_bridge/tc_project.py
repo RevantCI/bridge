@@ -1680,6 +1680,92 @@ class TranslationCoreProject:
                 except Exception: pass
         return out
 
+    def timestamp_iso(self) -> str:
+        """Public wrapper so bridge_service can stamp a rollup entry with the
+        same timestamp format used everywhere else in this file."""
+        return self._timestamp()[0]
+
+    # -- whole-book QA-check content-hash cache ------------------------------
+    #
+    # _usfm_findings_for_book/_names_findings_for_book (bridge_service.py) are
+    # whole-book passes, not per-verse, so they don't fit the qaDecisions
+    # shape above. Cached on disk here, keyed by a content hash of exactly
+    # what each check consumes, so an unchanged reopen can skip the
+    # subprocess/scan while a real content change still invalidates it.
+
+    def check_cache_path(self) -> Path:
+        return self.companion_dir() / 'checkCache.json'
+
+    def load_check_cache(self) -> dict[str, Any]:
+        p = self.check_cache_path()
+        if not p.exists():
+            return {'schemaVersion': 1}
+        try:
+            data = _read_json(p)
+        except Exception:
+            return {'schemaVersion': 1}
+        return data if isinstance(data, dict) else {'schemaVersion': 1}
+
+    def save_check_cache_section(self, section: str, content_hash: str, findings: list[dict[str, Any]]) -> Path:
+        p = self.check_cache_path()
+        data = self.load_check_cache()
+        data['schemaVersion'] = 1
+        data[section] = {
+            'contentHash': content_hash,
+            'computedAt': self._timestamp()[0],
+            'findings': findings,
+        }
+        _write_json_atomic(p, data)
+        return p
+
+    # -- per-book progress rollup --------------------------------------------
+    #
+    # Incrementally-updated summary of human-review and AI-check progress,
+    # read by the project dashboard. Never rebuilt by a full rescan of
+    # qaDecisions/checkCache on every read — callers update just the one
+    # chapter/verse that changed (see bridge_service.py's decide_verse and
+    # check-job completion hook).
+
+    def progress_rollup_path(self) -> Path:
+        return self.path / '.bridge' / 'progress.json'
+
+    def load_progress_rollup(self) -> dict[str, Any]:
+        p = self.progress_rollup_path()
+        data: dict[str, Any] | None = None
+        if p.exists():
+            try:
+                loaded = _read_json(p)
+                if isinstance(loaded, dict):
+                    data = loaded
+            except Exception:
+                data = None
+        if data is None:
+            data = {'schemaVersion': 1, 'bookId': self.book_id, 'updatedAt': None, 'chapters': {}, 'totals': {}}
+        data.setdefault('schemaVersion', 1)
+        data.setdefault('bookId', self.book_id)
+        data.setdefault('chapters', {})
+        data.setdefault('totals', {})
+        return data
+
+    def save_progress_rollup(self, data: dict[str, Any]) -> Path:
+        p = self.progress_rollup_path()
+        data['updatedAt'] = self._timestamp()[0]
+        _write_json_atomic(p, data)
+        return p
+
+
+def read_progress_rollup(project_root: str | Path) -> dict[str, Any] | None:
+    """Peek at a sibling book's progress rollup without constructing a full
+    TranslationCoreProject (which requires a valid manifest.json) — used by
+    the dashboard to summarize collection siblings that may still be lazy."""
+    p = Path(project_root).resolve() / '.bridge' / 'progress.json'
+    if not p.is_file():
+        return None
+    try:
+        data = _read_json(p)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 class TranslationCoreRoot:

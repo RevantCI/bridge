@@ -1,6 +1,6 @@
 import type {
   AiExplainResult, AIReviewChapterResponse, AIReviewJobSnapshot, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
-  AlignmentStatusResponse, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
+  AlignmentStatusResponse, BookProgressEntry, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
   CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, LexiconEntryResponse, NativeCheckListResponse,
   NativeCheckTool, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
 } from "../types/finding";
@@ -86,6 +86,10 @@ export const bridge = {
 
   listProjects(): Promise<{ projects: RegisteredProject[] }> {
     return call("project_list");
+  },
+
+  listBookProgress(): Promise<{ books: BookProgressEntry[] }> {
+    return call("project_list_book_progress");
   },
 
   forgetProject(projectId: string): Promise<{ forgotten: boolean }> {

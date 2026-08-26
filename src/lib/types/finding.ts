@@ -329,6 +329,28 @@ export interface ImportedProject {
   lazy?: boolean;
 }
 
+/** Flattened `totals` block from a book's .bridge/progress.json rollup. */
+export interface BookProgressSummary {
+  chapterCount: number;
+  checkedChapterCount: number;
+  verseCount: number;
+  checkedVerseCount: number;
+  reviewedVerseCount: number;
+  findingCount: number;
+  approvedFindingCount: number;
+  updatedAt: string | null;
+}
+
+export interface BookProgressEntry {
+  path: string;
+  bookId: string;
+  bookName: string;
+  lazy: boolean;
+  missing: boolean;
+  /** null = lazy sibling never opened, or a materialized book never checked yet. */
+  progress: BookProgressSummary | null;
+}
+
 export interface VerseData {
   chapter: string;
   verse: string;

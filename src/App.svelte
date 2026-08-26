@@ -7,7 +7,8 @@
   import ReviewPanel from "./lib/components/ReviewPanel.svelte";
   import SettingsModal from "./lib/components/SettingsModal.svelte";
   import ExportModal from "./lib/components/ExportModal.svelte";
-  import type { AiCheckReview, AlignmentWorkStatus, CheckJobSnapshot, QaFinding } from "./lib/types/finding";
+  import ProjectDashboard from "./lib/components/ProjectDashboard.svelte";
+  import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, QaFinding } from "./lib/types/finding";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
@@ -26,6 +27,10 @@
   let draggingOver = false;
   let dropError = "";
   let chapterLoadSequence = 0;
+  let showingDashboard = false;
+  let bookProgress: BookProgressEntry[] = [];
+  let dashboardLoading = false;
+  let dashboardError = "";
 
   onMount(() => {
     let unlisten: (() => void) | null = null;
@@ -79,7 +84,38 @@
 
   async function handleOpened() {
     opened = true;
-    await enterCurrentProject();
+    showingDashboard = true;
+    void loadDashboard();
+  }
+
+  async function loadDashboard(): Promise<void> {
+    dashboardLoading = true;
+    dashboardError = "";
+    try {
+      bookProgress = (await bridge.listBookProgress()).books;
+    } catch (error) {
+      dashboardError = error instanceof Error ? error.message : String(error);
+    } finally {
+      dashboardLoading = false;
+    }
+  }
+
+  function openDashboard(): void {
+    showingDashboard = true;
+    void loadDashboard();
+  }
+
+  async function enterBookFromDashboard(path: string): Promise<void> {
+    // switchBook() no-ops when path === $project.path, which is exactly the
+    // first-open interstitial case (enterCurrentProject was never called
+    // yet) — so the already-open primary book's own row needs this instead.
+    if ($project && path === $project.path) {
+      showingDashboard = false;
+      if (!$loadedChapters[$currentChapter]) await enterCurrentProject();
+      return;
+    }
+    await switchBook(path);
+    showingDashboard = false;
   }
 
   // Shared by initial open and book switching: land on the first chapter
@@ -347,6 +383,7 @@
     onGotoVerse={gotoVerse}
     onChapterChange={switchChapter}
     onBookChange={switchBook}
+    onOpenDashboard={openDashboard}
     exportEnabled={$project !== null}
     bookSwitching={Boolean(openingBook)}
   />
@@ -384,34 +421,44 @@
     </div>
   {/if}
 
-  <div class="body">
-    <div class="editor-col">
-      <div class="editor-toolbar">
-        <span>Chapter {$currentChapter} of {$project?.chapters.length ?? "?"}</span>
-        <button class="whole-book-btn" on:click={runWholeBook} disabled={Boolean(activeJobId)}>
-          {$checkingProgress.scope === "book" && $checkingProgress.running ? "Running…" : "Run whole book"}
-        </button>
-        <span class="grow" />
-        <span title="Word-alignment status for this chapter">
-          Alignment: {alignmentChapterSummary.complete} complete · {alignmentChapterSummary.partial} partial
-          {#if alignmentChapterSummary.invalid} · {alignmentChapterSummary.invalid} invalid{/if}
-        </span>
-        <span>{bookSummary.approvedChapters}/{bookSummary.totalChapters} chapters approved</span>
+  {#if showingDashboard}
+    <ProjectDashboard
+      books={bookProgress}
+      loading={dashboardLoading}
+      error={dashboardError}
+      onSelectBook={enterBookFromDashboard}
+      onRetry={loadDashboard}
+    />
+  {:else}
+    <div class="body">
+      <div class="editor-col">
+        <div class="editor-toolbar">
+          <span>Chapter {$currentChapter} of {$project?.chapters.length ?? "?"}</span>
+          <button class="whole-book-btn" on:click={runWholeBook} disabled={Boolean(activeJobId)}>
+            {$checkingProgress.scope === "book" && $checkingProgress.running ? "Running…" : "Run whole book"}
+          </button>
+          <span class="grow" />
+          <span title="Word-alignment status for this chapter">
+            Alignment: {alignmentChapterSummary.complete} complete · {alignmentChapterSummary.partial} partial
+            {#if alignmentChapterSummary.invalid} · {alignmentChapterSummary.invalid} invalid{/if}
+          </span>
+          <span>{bookSummary.approvedChapters}/{bookSummary.totalChapters} chapters approved</span>
+        </div>
+        <VerseList onSelect={selectVerse} />
       </div>
-      <VerseList onSelect={selectVerse} />
+      <ReviewPanel />
     </div>
-    <ReviewPanel />
-  </div>
 
-  <div class="statusbar">
-    {#if $project}
-      <span>Project: <b>{$project.bookName}</b></span>
-      <span>Chapter: <b>{$currentChapter}</b></span>
-      <span style="color:var(--success);">✓ Approved: {$approvedCount}/{$verseNums.length}</span>
-    {/if}
-    <span class="grow" />
-    <span>Engine: {engineStatus}</span>
-  </div>
+    <div class="statusbar">
+      {#if $project}
+        <span>Project: <b>{$project.bookName}</b></span>
+        <span>Chapter: <b>{$currentChapter}</b></span>
+        <span style="color:var(--success);">✓ Approved: {$approvedCount}/{$verseNums.length}</span>
+      {/if}
+      <span class="grow" />
+      <span>Engine: {engineStatus}</span>
+    </div>
+  {/if}
 
   {#if $settingsOpen}
     <SettingsModal onClose={() => settingsOpen.set(false)} />

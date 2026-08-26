@@ -647,6 +647,131 @@ def test_usfm_checker_failure_is_protocol_error_and_cached(fixture_project):
     assert call_count == 1
 
 
+def test_usfm_findings_are_cached_on_disk_across_project_reopen(fixture_project):
+    """Reopening a project (e.g. after an app restart) must not re-run the
+    USFM subprocess when the underlying source file hasn't changed — the
+    in-memory-only cache this replaced was cleared on every open_project()
+    call, which is exactly what made Genesis slow on every reopen."""
+    from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    call_count = 0
+
+    def fake_check_book_usfm(*, project_id, book_id, usfm_text, cancel_event=None):
+        nonlocal call_count
+        call_count += 1
+        return [QaFinding(
+            project_id=project_id, book=book_id, chapter=1, verse=1,
+            engine="usfm", check_type="usfm.fake_issue",
+            category=FindingCategory.STRUCTURE, severity=Severity.HIGH,
+            explanation="fake finding for the disk-cache test",
+        )]
+
+    engine.greek_room.check_book_usfm = fake_check_book_usfm
+
+    first = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+    assert call_count == 1
+
+    call(engine, "project.open", {"path": str(fixture_project)})
+    second = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+
+    assert call_count == 1, "USFM check should be reused from the on-disk cache after reopen"
+    assert any(f["check_type"] == "usfm.fake_issue" for f in first["findings"])
+    assert any(f["check_type"] == "usfm.fake_issue" for f in second["findings"])
+
+
+def test_usfm_disk_cache_invalidated_when_source_changes(fixture_project):
+    """A real content change (e.g. a re-import over the same directory) must
+    still force a fresh run, not silently reuse stale findings forever."""
+    from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    call_count = 0
+
+    def fake_check_book_usfm(*, project_id, book_id, usfm_text, cancel_event=None):
+        nonlocal call_count
+        call_count += 1
+        return [QaFinding(
+            project_id=project_id, book=book_id, chapter=1, verse=1,
+            engine="usfm", check_type="usfm.fake_issue",
+            category=FindingCategory.STRUCTURE, severity=Severity.HIGH,
+            explanation="fake finding for the disk-cache test",
+        )]
+
+    engine.greek_room.check_book_usfm = fake_check_book_usfm
+
+    call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+    assert call_count == 1
+
+    usfm_path = fixture_project / "rut.usfm"
+    usfm_path.write_text(usfm_path.read_text(encoding="utf-8") + "\\v 2 Extra verse.\n", encoding="utf-8")
+
+    call(engine, "project.open", {"path": str(fixture_project)})
+    call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+
+    assert call_count == 2, "a changed source file must invalidate the disk cache"
+
+
+def test_names_findings_are_cached_on_disk_across_project_reopen(fixture_project):
+    """Same disk-cache behavior as USFM, for the names/spelling scan."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    call_count = 0
+
+    def fake_check_book_names(*, project_id, book_id, lang_code, token_occurrences):
+        nonlocal call_count
+        call_count += 1
+        return []
+
+    engine.greek_room.check_book_names = fake_check_book_names
+
+    call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+    assert call_count == 1
+
+    call(engine, "project.open", {"path": str(fixture_project)})
+    call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+
+    assert call_count == 1, "names check should be reused from the on-disk cache after reopen"
+
+
+def test_names_disk_cache_invalidated_by_verse_edit(fixture_project):
+    """Unlike USFM (keyed to the untouched original source file), the names
+    cache is keyed to current verse text, so an edit must invalidate it —
+    this is a real behavior improvement over the old always-recompute
+    approach, not just a cache: today's blind recompute-on-every-reopen
+    never distinguished 'content changed' from 'nothing changed'."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    call_count = 0
+
+    def fake_check_book_names(*, project_id, book_id, lang_code, token_occurrences):
+        nonlocal call_count
+        call_count += 1
+        return []
+
+    engine.greek_room.check_book_names = fake_check_book_names
+
+    call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+    assert call_count == 1
+
+    call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "changed text"})
+    call(engine, "project.open", {"path": str(fixture_project)})
+    call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+
+    assert call_count == 2, "an edited verse must invalidate the names disk cache"
+
+    call(engine, "project.open", {"path": str(fixture_project)})
+    call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+
+    assert call_count == 2, "a no-op reopen after the edit should stay cached"
+
+
 def test_usfm_finding_for_missing_verse_surfaces_on_first_existing_verse(fixture_project):
     """The UI cannot request a missing verse, so chapter-level structural
     findings must be attached to an existing display slot."""
@@ -863,6 +988,122 @@ def test_decision_persists_across_repeated_check_runs(fixture_project):
     assert after_restart[0]["id"] == finding_id
     assert after_restart[0]["status"] == "accepted"
     assert after_restart[0]["human_comment"] == "reviewed"
+
+
+def test_decide_verse_updates_progress_rollup_incrementally(fixture_project):
+    """verse.decide should update the book's .bridge/progress.json rollup
+    in place — not by rescanning qaDecisions — and flipping a decision's
+    status must not double-count the same finding."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    call(engine, "verse.decide", {
+        "chapter": "1", "verse": "1", "findingId": "fake-finding",
+        "status": "accepted", "comment": "",
+    })
+
+    rollup = engine.project.load_progress_rollup()
+    totals = rollup["totals"]
+    assert totals["findingCount"] == 1
+    assert totals["approvedFindingCount"] == 1
+    assert totals["reviewedVerseCount"] == 1
+    assert rollup["chapters"]["1"]["verses"]["1"]["findings"]["fake-finding"] == "accepted"
+
+    call(engine, "verse.decide", {
+        "chapter": "1", "verse": "1", "findingId": "fake-finding",
+        "status": "rejected", "comment": "",
+    })
+
+    rollup = engine.project.load_progress_rollup()
+    totals = rollup["totals"]
+    assert totals["findingCount"] == 1, "flipping a decision must not double-count the finding"
+    assert totals["approvedFindingCount"] == 1
+    assert rollup["chapters"]["1"]["verses"]["1"]["findings"]["fake-finding"] == "rejected"
+
+
+def test_check_job_populates_only_its_own_chapters_in_rollup(fixture_project):
+    """A chapter-scope job must leave other chapters' rollup state alone —
+    the rollup shouldn't be able to falsely claim an untouched chapter is
+    AI-checked."""
+    (fixture_project / "rut" / "2.json").write_text(json.dumps({
+        "1": "இரண்டாம் அதிகாரம்.",
+    }, ensure_ascii=False), encoding="utf-8")
+    alignment_dir = fixture_project / ".apps" / "translationCore" / "alignmentData" / "rut"
+    (alignment_dir / "2.json").write_text(json.dumps({
+        "1": {"alignments": [], "wordBank": [{
+            "word": "இரண்டாம்", "occurrence": 1, "occurrences": 1,
+        }]},
+    }, ensure_ascii=False), encoding="utf-8")
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    started = call(engine, "checks.start", {
+        "scope": "chapter", "chapters": ["1"], "checks": ["greekroom"],
+    })["result"]
+    wait_for_job(engine, started["jobId"])
+
+    rollup = engine.project.load_progress_rollup()
+    assert rollup["chapters"]["1"]["aiChecked"] is True
+    assert "2" not in rollup["chapters"]
+    assert rollup["totals"]["checkedChapterCount"] == 1
+    assert rollup["totals"]["chapterCount"] == 2
+
+
+def test_failed_check_job_does_not_mark_chapter_ai_checked(fixture_project, monkeypatch):
+    """A job with a failed verse must not claim the chapter is AI-checked —
+    the dashboard would otherwise show false coverage."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    def failing_verse_checks(project, chapter, verse, checks):
+        raise RuntimeError("simulated verse-check failure")
+
+    monkeypatch.setattr(engine, "_run_verse_checks_for_project", failing_verse_checks)
+
+    started = call(engine, "checks.start", {
+        "scope": "chapter", "chapters": ["1"], "checks": ["greekroom"],
+    })["result"]
+    finished = wait_for_job(engine, started["jobId"])
+    assert finished["state"] == "failed"
+
+    rollup = engine.project.load_progress_rollup()
+    assert "1" not in rollup.get("chapters", {})
+
+
+def test_list_book_progress_does_not_materialize_lazy_siblings(tmp_path, fixture_project):
+    """The dashboard must be able to summarize a collection without forcing
+    every lazy sibling to normalize just to compute stats."""
+    primary_dir = fixture_project
+    lazy_dir = tmp_path / "gen"
+    (lazy_dir / ".bridge").mkdir(parents=True)
+    (lazy_dir / ".bridge" / "lazy-import.json").write_text(json.dumps({
+        "bookId": "GEN", "bookName": "Genesis",
+    }), encoding="utf-8")
+
+    (primary_dir / ".bridge").mkdir(parents=True, exist_ok=True)
+    (primary_dir / ".bridge" / "collection.json").write_text(json.dumps({
+        "projects": [
+            {"directoryName": "rut", "bookId": "RUT", "bookName": "Ruth"},
+            {"directoryName": "gen", "bookId": "GEN", "bookName": "Genesis"},
+        ],
+    }), encoding="utf-8")
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(primary_dir)})
+    call(engine, "verse.decide", {
+        "chapter": "1", "verse": "1", "findingId": "fake-finding",
+        "status": "accepted", "comment": "",
+    })
+
+    result = call(engine, "project.listBookProgress")["result"]
+    by_book = {b["bookId"]: b for b in result["books"]}
+
+    assert by_book["GEN"]["lazy"] is True
+    assert by_book["GEN"]["progress"] is None
+    assert not (lazy_dir / "manifest.json").exists(), "lazy sibling must not be materialized just to list progress"
+
+    assert by_book["RUT"]["lazy"] is False
+    assert by_book["RUT"]["progress"]["findingCount"] == 1
 
 
 def test_settings_supports_any_provider_not_just_openai(tmp_path, monkeypatch):

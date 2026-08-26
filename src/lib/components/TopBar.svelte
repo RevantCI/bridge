@@ -7,6 +7,7 @@
   export let onGotoVerse: (verse: string) => void;
   export let onChapterChange: (chapter: string) => void;
   export let onBookChange: (path: string) => void;
+  export let onOpenDashboard: () => void;
   export let exportEnabled: boolean;
   export let bookSwitching = false;
 
@@ -49,6 +50,7 @@
         <option>{$project.bookName}</option>
       </select>
     {/if}
+    <button class="btn ghost" on:click={onOpenDashboard}>Dashboard</button>
     <select class="select" style="width:72px;" value={$currentChapter} on:change={handleChapterSelect}>
       {#each $project.chapters as ch}
         <option value={ch}>Ch {ch}</option>

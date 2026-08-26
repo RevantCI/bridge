@@ -33,7 +33,7 @@ from greek_room_engine.adapters.names_adapter import NamesCheckError
 from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity, FindingStatus
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
-from tc_ai_bridge.tc_project import TranslationCoreProject, ProjectError
+from tc_ai_bridge.tc_project import TranslationCoreProject, ProjectError, read_progress_rollup
 from tc_ai_bridge.project_import import (
     apply_resource_materialization,
     collection_projects,
@@ -169,6 +169,7 @@ class Methods:
 
     PROJECT_OPEN = "project.open"
     PROJECT_LIST = "project.list"
+    PROJECT_LIST_BOOK_PROGRESS = "project.listBookProgress"
     PROJECT_FORGET = "project.forget"
     PROJECT_DELETE = "project.delete"
     PROJECT_SCAN = "project.scan"
@@ -357,6 +358,35 @@ class BridgeEngine:
 
     def list_projects(self) -> dict[str, Any]:
         return {"projects": self.project_registry.list_projects(collapse_collections=True)}
+
+    def list_book_progress(self) -> dict[str, Any]:
+        """Progress rollups for every book in the currently open collection,
+        for the project dashboard. Lazy siblings are never materialized just
+        to compute stats — their progress comes back null and the frontend
+        renders a distinct 'not yet opened' state."""
+        self._require_project()
+        siblings = collection_projects(str(self.project.path))
+        if not siblings:
+            siblings = [{
+                "path": str(self.project.path), "bookId": self.project.book_id,
+                "bookName": self.project.summary.book_name, "lazy": False,
+            }]
+        books: list[dict[str, Any]] = []
+        for entry in siblings:
+            path = Path(str(entry.get("path") or ""))
+            lazy = bool(entry.get("lazy"))
+            progress = None
+            missing = not path.is_dir()
+            if not lazy and not missing:
+                rollup = read_progress_rollup(path)
+                if rollup is not None:
+                    progress = {**rollup.get("totals", {}), "updatedAt": rollup.get("updatedAt")}
+            books.append({
+                "path": str(path), "bookId": str(entry.get("bookId") or ""),
+                "bookName": str(entry.get("bookName") or ""), "lazy": lazy,
+                "missing": missing, "progress": progress,
+            })
+        return {"books": books}
 
     def forget_project(self, project_id: str) -> dict[str, Any]:
         if not project_id:
@@ -1324,6 +1354,12 @@ class BridgeEngine:
             except OSError:
                 usfm_text = ""
             if usfm_text:
+                content_hash = hashlib.sha256(usfm_text.encode("utf-8")).hexdigest()
+                cached_section = project.load_check_cache().get("usfm") or {}
+                if cached_section.get("contentHash") == content_hash:
+                    findings = [QaFinding.from_dict(d) for d in cached_section.get("findings", [])]
+                    self._usfm_findings_by_book[book_key] = findings
+                    return findings
                 try:
                     findings = self.greek_room.check_book_usfm(
                         project_id=str(project.summary.path),
@@ -1347,6 +1383,12 @@ class BridgeEngine:
                         chapter=str(f.chapter), verse=str(f.verse), engine=f.engine,
                         check_type=f.check_type, disambiguator=f.explanation,
                     )
+                # Persist after id stabilization so a cache hit hands back
+                # the same stable ids a fresh run would — required for prior
+                # decisions (keyed by finding id) to keep matching.
+                project.save_check_cache_section(
+                    "usfm", content_hash, [f.to_dict() for f in findings],
+                )
         self._usfm_findings_by_book[book_key] = findings
         return findings
 
@@ -1374,8 +1416,18 @@ class BridgeEngine:
         if cached_error is not None:
             raise NamesCheckError(cached_error)
 
+        text_map = self._book_verse_text_map(project)
+        content_hash = hashlib.sha256(
+            "\n".join(f"{k}={v}" for k, v in sorted(text_map.items())).encode("utf-8")
+        ).hexdigest()
+        cached_section = project.load_check_cache().get("names") or {}
+        if cached_section.get("contentHash") == content_hash:
+            findings = [QaFinding.from_dict(d) for d in cached_section.get("findings", [])]
+            self._names_findings_by_book[book_key] = findings
+            return findings
+
         token_occurrences: dict[str, list[tuple[str, str]]] = {}
-        for ref, text in self._book_verse_text_map(project).items():
+        for ref, text in text_map.items():
             chapter, _, verse = ref.partition(":")
             for token in whitespace_tokens(text):
                 token_occurrences.setdefault(token, []).append((chapter, verse))
@@ -1404,6 +1456,13 @@ class BridgeEngine:
                 chapter=str(f.chapter), verse=str(f.verse), engine=f.engine,
                 check_type=f.check_type, disambiguator=disambiguator,
             )
+        # Persist after id stabilization (see USFM above — same reasoning).
+        # The hash is over current verse text, so an edit_verse call between
+        # opens correctly invalidates this on the next reopen, unlike the
+        # in-memory cache this replaces which never distinguished the two.
+        project.save_check_cache_section(
+            "names", content_hash, [f.to_dict() for f in findings],
+        )
         self._names_findings_by_book[book_key] = findings
         return findings
 
@@ -1603,7 +1662,45 @@ class BridgeEngine:
 
         return self._check_jobs.start(
             spec, run_stage=run_stage, preflight=preflight,
+            on_complete=lambda job: self._on_check_job_complete(project, job),
         )
+
+    def _on_check_job_complete(self, project: TranslationCoreProject, job: Any) -> None:
+        """Rebuilds the progress rollup's entries for exactly the chapters
+        this job covered — chapters it didn't touch are left alone. Only a
+        succeeded job (no failed verses) updates anything; a failed/cancelled
+        job must not claim a chapter is AI-checked when it isn't. Best-effort,
+        same reasoning as _apply_decision_to_progress: never let this surface
+        as a check-job failure to the UI."""
+        if job.state != "succeeded":
+            return
+        try:
+            by_chapter: dict[str, dict[str, dict[str, str]]] = {}
+            for result in job.results.values():
+                chapter = result.get("chapter")
+                verse = result.get("verse")
+                if chapter is None or verse is None or chapter not in job.spec.chapters:
+                    continue
+                verse_findings = {
+                    str(f["id"]): str(f.get("status", FindingStatus.OPEN.value))
+                    for f in (result.get("findings") or []) if f.get("id")
+                }
+                by_chapter.setdefault(str(chapter), {})[str(verse)] = verse_findings
+
+            rollup = project.load_progress_rollup()
+            chapters_dict = rollup.setdefault("chapters", {})
+            now = project.timestamp_iso()
+            for chapter, verses_map in by_chapter.items():
+                chapters_dict[chapter] = {
+                    "verseCount": len(project.verses(chapter)),
+                    "aiChecked": True,
+                    "aiCheckedAt": now,
+                    "verses": {v: {"findings": f} for v, f in verses_map.items()},
+                }
+            self._recompute_progress_totals(project, rollup)
+            project.save_progress_rollup(rollup)
+        except Exception:
+            pass
 
     def check_job_status(self, job_id: str = "") -> dict[str, Any]:
         return self._check_jobs.status(job_id)
@@ -1628,8 +1725,67 @@ class BridgeEngine:
         path = self.project.record_qa_decision(
             chapter, verse, issue_key=finding_id, decision=status, note=comment,
         )
+        self._apply_decision_to_progress(self.project, chapter, verse, finding_id, status)
         return {"chapter": chapter, "verse": verse, "findingId": finding_id,
                 "status": status, "recordedAt": str(path)}
+
+    def _apply_decision_to_progress(
+        self, project: TranslationCoreProject, chapter: str, verse: str,
+        finding_id: str, status: str,
+    ) -> None:
+        """Incrementally updates the book's progress rollup for one decision
+        — reads/updates/writes one small file, never rescans qaDecisions on
+        disk. Best-effort: a rollup bookkeeping failure must never surface as
+        a decide_verse failure, since the actual decision is already safely
+        recorded via record_qa_decision above."""
+        try:
+            rollup = project.load_progress_rollup()
+            chapters = rollup.setdefault("chapters", {})
+            chapter_key = str(chapter)
+            chapter_entry = chapters.setdefault(chapter_key, {
+                "verseCount": len(project.verses(chapter_key)) if chapter_key in project.chapters() else 0,
+                "aiChecked": False, "aiCheckedAt": None, "verses": {},
+            })
+            verse_entry = chapter_entry.setdefault("verses", {}).setdefault(str(verse), {"findings": {}})
+            verse_entry["findings"][str(finding_id)] = str(status)
+            self._recompute_progress_totals(project, rollup)
+            project.save_progress_rollup(rollup)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _recompute_progress_totals(project: TranslationCoreProject, rollup: dict[str, Any]) -> None:
+        chapters_dict = rollup.get("chapters", {})
+        all_chapters = project.chapters()
+        checked_chapter_count = 0
+        checked_verse_count = 0
+        reviewed_verse_count = 0
+        finding_count = 0
+        approved_finding_count = 0
+        for chapter_entry in chapters_dict.values():
+            if chapter_entry.get("aiChecked"):
+                checked_chapter_count += 1
+                checked_verse_count += int(chapter_entry.get("verseCount") or 0)
+            for verse_entry in chapter_entry.get("verses", {}).values():
+                findings = verse_entry.get("findings", {})
+                finding_count += len(findings)
+                verse_reviewed = bool(findings)
+                for status in findings.values():
+                    if status == FindingStatus.OPEN.value:
+                        verse_reviewed = False
+                    else:
+                        approved_finding_count += 1
+                if verse_reviewed:
+                    reviewed_verse_count += 1
+        rollup["totals"] = {
+            "chapterCount": len(all_chapters),
+            "checkedChapterCount": checked_chapter_count,
+            "verseCount": sum(len(project.verses(ch)) for ch in all_chapters),
+            "checkedVerseCount": checked_verse_count,
+            "reviewedVerseCount": reviewed_verse_count,
+            "findingCount": finding_count,
+            "approvedFindingCount": approved_finding_count,
+        }
 
     def edit_verse(self, chapter: str, verse: str, new_text: str) -> dict[str, Any]:
         """Human-authorized scripture edit.
@@ -2001,6 +2157,8 @@ class BridgeEngine:
                 ))
             if m == Methods.PROJECT_LIST:
                 return EngineResponse.ok(request.id, result=self.list_projects())
+            if m == Methods.PROJECT_LIST_BOOK_PROGRESS:
+                return EngineResponse.ok(request.id, result=self.list_book_progress())
             if m == Methods.PROJECT_FORGET:
                 return EngineResponse.ok(request.id, result=self.forget_project(p.get("projectId", "")))
             if m == Methods.PROJECT_DELETE:

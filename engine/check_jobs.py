@@ -112,6 +112,7 @@ class CheckJobManager:
         *,
         run_stage: RunStage,
         preflight: Optional[Preflight] = None,
+        on_complete: Optional[Callable[["_CheckJob"], None]] = None,
     ) -> dict[str, Any]:
         with self._lock:
             active = self._jobs.get(self._active_job_id or "")
@@ -123,7 +124,7 @@ class CheckJobManager:
 
         thread = threading.Thread(
             target=self._run,
-            args=(job, run_stage, preflight),
+            args=(job, run_stage, preflight, on_complete),
             name=f"bridge-check-{job.id[:8]}",
             daemon=True,
         )
@@ -171,7 +172,32 @@ class CheckJobManager:
             stages.append(("QA", ["greekroom"]))
         return stages
 
-    def _run(self, job: _CheckJob, run_stage: RunStage, preflight: Optional[Preflight]) -> None:
+    @staticmethod
+    def _fire_on_complete(job: _CheckJob, on_complete: Optional[Callable[["_CheckJob"], None]]) -> None:
+        # Called for the succeeded/failed terminal states, with job.lock
+        # already held, in the same critical section that sets job.state —
+        # snapshot()/status() also take job.lock, so this ordering is what
+        # guarantees a status poll can never observe "succeeded" before this
+        # has actually run. (Not called on cancellation: on_complete's own
+        # logic only ever acts on job.state == "succeeded", so there's
+        # nothing to do there.) Never let a rollup-write failure surface as
+        # a check-job failure.
+        if on_complete is not None:
+            try:
+                on_complete(job)
+            except Exception:
+                pass
+
+    def _run(
+        self, job: _CheckJob, run_stage: RunStage, preflight: Optional[Preflight],
+        on_complete: Optional[Callable[["_CheckJob"], None]] = None,
+    ) -> None:
+        self._run_impl(job, run_stage, preflight, on_complete)
+
+    def _run_impl(
+        self, job: _CheckJob, run_stage: RunStage, preflight: Optional[Preflight],
+        on_complete: Optional[Callable[["_CheckJob"], None]] = None,
+    ) -> None:
         stages = self._stages(job.spec.checks)
         verse_count = sum(len(v) for v in job.spec.chapter_verses.values())
         with job.lock:
@@ -230,6 +256,7 @@ class CheckJobManager:
                 job.current_chapter = None
                 job.current_verse = None
                 job.finished_at = _now()
+                self._fire_on_complete(job, on_complete)
         except Exception as exc:
             if self._cancelled(job):
                 return
@@ -238,6 +265,7 @@ class CheckJobManager:
                 job.error = str(exc)
                 job.current_stage = "Checking failed"
                 job.finished_at = _now()
+                self._fire_on_complete(job, on_complete)
 
     @staticmethod
     def _cancelled(job: _CheckJob) -> bool:

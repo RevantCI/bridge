@@ -78,6 +78,13 @@ pub async fn project_list(sidecar: State<'_, EngineSidecar>) -> Result<Value, St
 }
 
 #[tauri::command]
+pub async fn project_list_book_progress(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+    sidecar
+        .send_request("project.listBookProgress", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
 pub async fn project_forget(
     sidecar: State<'_, EngineSidecar>,
     project_id: String,
