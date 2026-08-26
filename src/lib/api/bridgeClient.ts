@@ -92,6 +92,10 @@ export const bridge = {
     return call("project_forget", { projectId });
   },
 
+  deleteProject(projectId: string): Promise<{ deleted: boolean; managed: boolean }> {
+    return call("project_delete", { projectId });
+  },
+
   scanProject(): Promise<{ chapters: string[]; checkTypes: Record<string, number>; indexTools: Record<string, number> }> {
     return call("project_scan");
   },

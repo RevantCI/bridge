@@ -3,7 +3,7 @@ Real-engine coverage for WildebeestAdapter, using the actual wildebeest-nlp
 package rather than the fallback mock.
 
 Skipped automatically wherever wildebeest-nlp isn't installed (a fresh
-clone, most CI environments, or Python 3.13 — see docs/DEVELOPER_HANDOFF.md
+clone, most CI environments, or Python 3.13 — see docs/BUILD_LOG.md
 for why 3.13 currently can't install it at all). The rest of the test suite
 must stay green without this optional dependency; only this file requires it.
 """

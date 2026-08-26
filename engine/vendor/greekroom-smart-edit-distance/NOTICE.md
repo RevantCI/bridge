@@ -6,7 +6,7 @@ PyPI under any name** (`smart-edit-distance`, `smart_edit_distance` — both
 checked, neither exists) and is not part of the published `greekroom`
 PyPI package either (that package, confirmed by inspecting the installed
 wheel while investigating the USFM checker, only ships `owl` and
-`gr_utilities`). See `docs/DEVELOPER_HANDOFF.md`'s Phase 5 research
+`gr_utilities`). See `docs/BUILD_LOG.md`'s Phase 5 research
 breadcrumb for the full investigation.
 
 ## Provenance

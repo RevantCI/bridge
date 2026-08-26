@@ -945,3 +945,47 @@ def test_export_aligned_usfm_round_trips_nested_many_to_many_alignment(fixture_p
     assert len(round_trip.alignments[0].top_words) == 2
     assert len(round_trip.alignments[0].bottom_words) == 5
     assert round_trip.word_bank == []
+
+
+def _make_managed_book(managed_root: Path, book_id: str) -> Path:
+    path = managed_root / book_id
+    (path / book_id).mkdir(parents=True)
+    (path / "manifest.json").write_text(json.dumps({
+        "project": {"id": book_id, "name": book_id.upper()},
+        "target_language": {"id": "tam", "name": "Tamil"},
+    }), encoding="utf-8")
+    (path / book_id / "1.json").write_text('{"1": "text"}', encoding="utf-8")
+    return path
+
+
+def test_delete_project_removes_a_managed_collection_from_disk_and_registry(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from tc_ai_bridge.secret_store import AppSettings
+    engine = BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
+
+    tit_path = _make_managed_book(engine.project_root, "tit")
+    phm_path = _make_managed_book(engine.project_root, "phm")
+    tit_entry = engine.project_registry.register(tit_path, collection_id="collection-x")
+    engine.project_registry.register(phm_path, collection_id="collection-x")
+
+    result = call(engine, "project.delete", {"projectId": tit_entry["projectId"]})["result"]
+
+    assert result == {"deleted": True, "managed": True}
+    assert not tit_path.exists()
+    assert not phm_path.exists()
+    assert call(engine, "project.list")["result"]["projects"] == []
+
+
+def test_delete_project_never_removes_files_for_an_unmanaged_project(tmp_path, monkeypatch, fixture_project):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from tc_ai_bridge.secret_store import AppSettings
+    engine = BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
+
+    registered = engine.project_registry.register(fixture_project)
+    assert registered["managed"] is False
+
+    result = call(engine, "project.delete", {"projectId": registered["projectId"]})["result"]
+
+    assert result == {"deleted": True, "managed": False}
+    assert fixture_project.exists()
+    assert call(engine, "project.list")["result"]["projects"] == []

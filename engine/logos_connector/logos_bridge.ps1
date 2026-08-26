@@ -1,6 +1,6 @@
 # translationCore AI Bridge - Logos COM automation helper.
 #
-# Real blocker closed here (see docs/DEVELOPER_HANDOFF.md's Phase 7 section):
+# Real blocker closed here (see docs/BUILD_LOG.md's Phase 7 section):
 # tc_ai_bridge/logos_connector.py's LogosConnectorClient spawns exactly this
 # script with `powershell -STA -File logos_bridge.ps1` and talks to it over
 # its own stdin/stdout as one JSON object per line (see that file's

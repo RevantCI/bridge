@@ -48,7 +48,7 @@ except Exception as exc:
     # docstrings contains a literal lone-surrogate escape (\uDC80-\uDCFF,
     # used as prose describing surrogateescape handling), which Python 3.13
     # newly rejects in docstrings (see CPython issue #142411). See
-    # docs/DEVELOPER_HANDOFF.md for the full investigation and options.
+    # docs/BUILD_LOG.md for the full investigation and options.
     wb_ana = None
     _WILDEBEEST_AVAILABLE = False
     print(f"[wildebeest] real engine unavailable ({exc!r}), using mock fallback",
@@ -102,7 +102,7 @@ class WildebeestAdapter(CheckAdapter):
         which writes an aggregate report grouped by category, not a flat
         per-position issue list (verified directly against wildebeest-nlp
         0.9.2, since its own docs don't describe this — see
-        docs/DEVELOPER_HANDOFF.md for the investigation).
+        docs/BUILD_LOG.md for the investigation).
 
         Only a subset of that report's top-level keys represent an actual
         problem for a single short verse; most of the rest (letter-script

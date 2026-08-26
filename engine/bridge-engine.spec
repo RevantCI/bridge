@@ -28,7 +28,7 @@ a = Analysis(
     # directory resolved relative to its installed package location
     # (Path(__file__).parent / "data") — invisible to PyInstaller's static
     # analysis either way, so both must be listed explicitly. Verified
-    # against a real PyInstaller build (see docs/DEVELOPER_HANDOFF.md's
+    # against a real PyInstaller build (see docs/BUILD_LOG.md's
     # Phase 5 section): the frozen bridge-engine.exe correctly resolves
     # both under sys._MEIPASS and produces real names.* findings.
     datas=[

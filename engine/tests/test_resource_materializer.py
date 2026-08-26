@@ -52,7 +52,7 @@ def test_ensure_resources_installed_copies_bundled_snapshot_once(tmp_path):
     assert (versions[0] / "tn_TIT.tsv").is_file()
 
     # translationAcademy was NOT in this function's resource list before Phase 7
-    # (see docs/DEVELOPER_HANDOFF.md) — a real gap, not an oversight in this test.
+    # (see docs/BUILD_LOG.md) — a real gap, not an oversight in this test.
     ta_dir = app_resources_root / "en" / "translationHelps" / "translationAcademy"
     assert ta_dir.is_dir()
     assert list(ta_dir.iterdir()), "expected at least one bundled translationAcademy version folder"
@@ -147,7 +147,7 @@ def test_raw_import_defers_real_tn_tw_until_checks_and_then_surfaces_them(tmp_pa
 
 def test_materialize_translation_words_links_index_produces_resource_level_groups(tmp_path):
     """The real gap found while investigating Phase 7's ai.explain prerequisite (see
-    docs/DEVELOPER_HANDOFF.md): knowledge_base.py's TWL reader expects a DIFFERENT,
+    docs/BUILD_LOG.md): knowledge_base.py's TWL reader expects a DIFFERENT,
     resource-level layout than materialize_book_checks() alone ever produced."""
     resources_root = tmp_path / "resources"
     ensure_resources_installed(resources_root)

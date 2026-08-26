@@ -3,7 +3,7 @@
 This directory contains files copied from the `BibleNLP/greek-room` GitHub
 repository, at path `greekroom/greekroom/usfm/`. **This is not published on
 PyPI** — only `greekroom`'s `owl` and `gr_utilities` submodules are; `usfm`
-exists only in the source tree. See `docs/DEVELOPER_HANDOFF.md` for the full
+exists only in the source tree. See `docs/BUILD_LOG.md` for the full
 investigation of why this is vendored rather than a normal pip dependency,
 and the long-term costs/practices agreed before doing so.
 
@@ -53,7 +53,7 @@ on the next sync.
 
 `greekroom/greekroom/wildebeest/` also exists only in the source tree, not on
 PyPI (Bridge uses the real `wildebeest-nlp` PyPI package instead — see
-`docs/DEVELOPER_HANDOFF.md`'s Wildebeest section).
+`docs/BUILD_LOG.md`'s Wildebeest section).
 
 `greekroom/greekroom/versification/` **was** out of scope when this note was
 originally written; it has since been vendored separately at

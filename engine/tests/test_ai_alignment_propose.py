@@ -5,7 +5,7 @@ Tests for Phase 7's AI alignment-proposal wiring
 tc_ai_bridge/ai_client.py's propose_alignment() and
 tc_ai_bridge/alignment_reliability.py's compile_link_proposal() were real,
 already-implemented scaffolding before this phase — see
-docs/DEVELOPER_HANDOFF.md's Phase 7 section — but nothing in the protocol
+docs/BUILD_LOG.md's Phase 7 section — but nothing in the protocol
 called them and neither had any test coverage. These tests exercise the new
 protocol methods end to end through BridgeEngine.handle_request, using a
 fake HTTP transport (the same Transport dependency-injection seam

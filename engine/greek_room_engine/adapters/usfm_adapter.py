@@ -5,7 +5,7 @@ Wraps the vendored Greek Room USFM checker (engine/vendor/greekroom-usfm/,
 see NOTICE.md there for provenance/license/pinned commit) as a subprocess,
 not an import — that tool is a 4,000-line CLI/report generator, not a
 library, and isn't published on PyPI at all (unlike Wildebeest). See
-docs/DEVELOPER_HANDOFF.md for the full investigation of why this is
+docs/BUILD_LOG.md for the full investigation of why this is
 vendored rather than a normal dependency.
 
 Unlike WildebeestAdapter, this operates on a WHOLE BOOK at once, not a
@@ -102,7 +102,7 @@ _SEVERITY_MAP = {
 }
 
 # Three location-reference shapes the real tool's .txt report actually uses
-# (verified against real output, not guessed — see docs/DEVELOPER_HANDOFF.md):
+# (verified against real output, not guessed — see docs/BUILD_LOG.md):
 #   "TIT 2:2: <line text>"                        -> book, chapter, verse given
 #   "book.usfm l.7 (TIT 1): Duplicate verse ... 1" -> book, chapter given, no verse
 #   "book.usfm (TIT 1): Missing verse: 2"          -> book, chapter given, no verse

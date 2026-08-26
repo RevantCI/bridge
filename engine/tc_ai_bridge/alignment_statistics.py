@@ -1,7 +1,7 @@
 """
 UAlign-style corpus statistics over Bridge's own human-approved alignments.
 
-See docs/DEVELOPER_HANDOFF.md's Phase 6 section for the full investigation
+See docs/BUILD_LOG.md's Phase 6 section for the full investigation
 this module is built on. Summary: "UAlign" is real, unpublished vendored-repo
 code — ``utilities/ualign.py`` in the same pinned ``BibleNLP/greek-room``
 commit (``18ddcf0e6c03fa2774b73b21186115d712e4cba9``) already used for the
@@ -132,7 +132,7 @@ def _ensure_uroman():
     is out of scope here. The accepted cost is a second ~1.8-2.1s Uroman
     table load if a session uses both features in the same process — a
     bounded, one-time cost, not a recurring one; see
-    docs/DEVELOPER_HANDOFF.md's Phase 6 section for the explicit tradeoff.
+    docs/BUILD_LOG.md's Phase 6 section for the explicit tradeoff.
     """
     global _uroman, _uroman_unavailable
     if _uroman is not None or _uroman_unavailable:
