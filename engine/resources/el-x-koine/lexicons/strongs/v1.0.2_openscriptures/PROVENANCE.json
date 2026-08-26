@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "artifactName": "Bridge Strong's Lexicon (el-x-koine)",
+  "description": "A compact derivative of Open Scriptures' Strong's Dictionary JSON, keyed by Strong's number. Retains lemma, transliteration, pronunciation (Hebrew only), derivation, the Strong's-def gloss, and the KJV-def usage note for every entry.",
+  "license": "CC-BY-SA (Open Scriptures); underlying 1890s Strong's Concordance text is public domain",
+  "attribution": "Open Scriptures' Strong's Dictionaries of Hebrew and Greek, https://github.com/openscriptures/strongs",
+  "source": {
+    "repository": "https://github.com/openscriptures/strongs.git",
+    "release": "https://github.com/openscriptures/strongs",
+    "commit": "0acd2f251c2d35ff8db2dece4e0593979d3ac223",
+    "languageId": "el-x-koine",
+    "resourceId": "strongs",
+    "version": "1.0.2",
+    "owner": "Open Scriptures",
+    "sourceFile": "greek/strongs-greek-dictionary.js",
+    "sourceSha256": "0e37d2ad341f628bab70f0f06731200e8f84dc39185061134ecabc9c2c43d100"
+  },
+  "generator": {
+    "script": "scripts/vendor-strongs-lexicon.mjs",
+    "schema": "bridge-strongs-lexicon/v1"
+  },
+  "changes": [
+    "Extracted the greek/strongs-greek-dictionary.js CommonJS module's data object.",
+    "Renamed fields to a stable schema (lemma/translit/pron/derivation/meaning/usage) shared across both languages.",
+    "No placeholder-token normalization was needed for the Greek usage notes.",
+    "Compressed the whole per-language dictionary into one gzip artifact (lookup is by Strong's number, not by book/verse, so no per-book split is needed)."
+  ],
+  "artifacts": {
+    "entries": {
+      "artifact": "entries.json.gz",
+      "artifactSha256": "8152b45db56a6a22c453a78c7824f14e241ebc6f2b332de119b9e9243f5763c6",
+      "entries": 5523
+    }
+  }
+}

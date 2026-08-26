@@ -369,6 +369,20 @@ pub async fn alignment_get(
 }
 
 #[tauri::command]
+pub async fn lexicon_get_entry(
+    sidecar: State<'_, EngineSidecar>,
+    strong: String,
+    morph: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "lexicon.getEntry",
+            serde_json::json!({ "strong": strong, "morph": morph }),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn alignment_status(
     sidecar: State<'_, EngineSidecar>,
     chapter: Option<String>,

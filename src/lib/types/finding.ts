@@ -66,6 +66,23 @@ export interface AlignmentToken extends TokenRef {
   id: string;
 }
 
+export interface LexiconSegment {
+  strong: string | null;
+  morphLabel: string | null;
+  partOfSpeech: string | null;
+  lemma: string | null;
+  translit: string | null;
+  pron: string | null;
+  meaning: string | null;
+  usage: string | null;
+  source: string | null;
+}
+
+export interface LexiconEntryResponse {
+  languageId: string | null;
+  segments: LexiconSegment[];
+}
+
 export interface AlignmentGroupView {
   id: string;
   topIds: string[];

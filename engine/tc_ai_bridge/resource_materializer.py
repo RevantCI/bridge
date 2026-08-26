@@ -90,6 +90,14 @@ def ensure_resources_installed(app_resources_root: Path) -> None:
                 continue
             shutil.copytree(version_dir, dst_version_dir)
 
+    # Deliberately NOT mirrored here for the Strong's lexicon: unlike the
+    # bible token packs above, lexicon_resources.py always reads straight
+    # from the bundled/source location (see its own bundled_resources_root())
+    # regardless of what's installed here, so copying it into app storage on
+    # every book's first materialization would only add I/O to an already
+    # borderline-slow synchronous, single-threaded call path for no
+    # functional benefit — it isn't a place worth spending that budget.
+
 
 def _latest_version_dir(resources_root: Path, resource: str) -> Path | None:
     resource_dir = resources_root / RESOURCE_LANGUAGE / 'translationHelps' / resource

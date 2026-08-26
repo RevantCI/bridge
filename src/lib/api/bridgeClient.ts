@@ -1,7 +1,7 @@
 import type {
   AiExplainResult, AIReviewChapterResponse, AIReviewJobSnapshot, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
   AlignmentStatusResponse, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
-  CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, NativeCheckListResponse,
+  CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, LexiconEntryResponse, NativeCheckListResponse,
   NativeCheckTool, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
 } from "../types/finding";
 
@@ -190,6 +190,10 @@ export const bridge = {
 
   getAlignment(chapter: string, verse: string): Promise<AlignmentContext> {
     return call("alignment_get", { chapter, verse });
+  },
+
+  getLexiconEntry(strong: string, morph: string): Promise<LexiconEntryResponse> {
+    return call("lexicon_get_entry", { strong, morph });
   },
 
   alignmentStatus(chapter?: string): Promise<AlignmentStatusResponse> {

@@ -76,6 +76,25 @@ def test_ping_and_info_work_without_a_project():
     assert "greekRoom" in info
 
 
+def test_lexicon_get_entry_works_without_an_open_project():
+    engine = BridgeEngine()
+    result = call(engine, "lexicon.getEntry", {"strong": "H776", "morph": "He,Ncbsa"})["result"]
+
+    assert result["languageId"] == "hbo"
+    assert len(result["segments"]) == 1
+    assert result["segments"][0]["lemma"] == "אֶרֶץ"
+    assert result["segments"][0]["morphLabel"] == "Noun, Common, Both genders, Singular, Absolute"
+
+
+def test_lexicon_get_entry_splits_compound_prefix_and_lexeme():
+    engine = BridgeEngine()
+    result = call(engine, "lexicon.getEntry", {"strong": "d:H0776", "morph": "He,Td:Ncbsa"})["result"]
+
+    assert [s["strong"] for s in result["segments"]] == ["d", "H0776"]
+    assert result["segments"][0]["meaning"] == "Definite article (the)"
+    assert result["segments"][1]["lemma"] == "אֶרֶץ"
+
+
 def test_open_real_fixture_project(fixture_project):
     engine = BridgeEngine()
     result = call(engine, "project.open", {"path": str(fixture_project)})

@@ -43,6 +43,8 @@ from tc_ai_bridge.project_import import (
     materialize_lazy_project,
 )
 from tc_ai_bridge.original_language_resources import resource_inventory
+from tc_ai_bridge.lexicon_resources import lexicon_entry_for_strong, HEBREW_PREFIX_LABELS
+from tc_ai_bridge.morphology_codes import decode_morph
 from tc_ai_bridge.project_registry import ProjectRegistry, source_fingerprints
 from tc_ai_bridge.local_checks import run_local_qa
 from tc_ai_bridge.alignment_engine import (
@@ -199,6 +201,8 @@ class Methods:
     ALIGNMENT_UNDO = "alignment.undo"
     ALIGNMENT_BACKUPS = "alignment.backups"
     ALIGNMENT_RESTORE = "alignment.restore"
+
+    LEXICON_GET_ENTRY = "lexicon.getEntry"
 
     SETTINGS_GET = "settings.get"
     SETTINGS_SET = "settings.set"
@@ -790,6 +794,43 @@ class BridgeEngine:
 
     def get_alignment(self, chapter: str, verse: str) -> dict[str, Any]:
         return self._alignment_context(chapter, verse)
+
+    def get_lexicon_entry(self, strong: str, morph: str) -> dict[str, Any]:
+        """Look up lexicon glosses + decoded morphology for one source token.
+
+        `strong` and `morph` come straight off an AlignmentToken; both may be
+        compound (colon-joined) when the surface word is a lexeme plus a
+        Hebrew proclitic prefix (e.g. strong "b:H7225", morph "He,R:Ncfsa") —
+        this decodes and looks up each morpheme segment independently.
+        """
+        language_id, morph_segments = decode_morph(morph)
+        strong_parts = [part for part in str(strong or "").split(":") if part]
+
+        segment_count = max(len(strong_parts), len(morph_segments), 1)
+        segments: list[dict[str, Any]] = []
+        for index in range(segment_count):
+            strong_part = strong_parts[index] if index < len(strong_parts) else ""
+            morph_segment = morph_segments[index] if index < len(morph_segments) else None
+            entry = (
+                lexicon_entry_for_strong(strong_part, language_id)
+                if strong_part and language_id else None
+            )
+            prefix_label = (
+                HEBREW_PREFIX_LABELS.get(strong_part)
+                if not entry and language_id == "hbo" else None
+            )
+            segments.append({
+                "strong": strong_part or None,
+                "morphLabel": morph_segment.label if morph_segment else None,
+                "partOfSpeech": morph_segment.part_of_speech if morph_segment else None,
+                "lemma": entry.get("lemma") if entry else None,
+                "translit": entry.get("translit") if entry else None,
+                "pron": entry.get("pron") if entry else None,
+                "meaning": (entry.get("meaning") if entry else None) or prefix_label,
+                "usage": entry.get("usage") if entry else None,
+                "source": entry.get("derivation") if entry else None,
+            })
+        return {"languageId": language_id, "segments": segments}
 
     @staticmethod
     def _tokens_for_ids(
@@ -2018,6 +2059,10 @@ class BridgeEngine:
             if m == Methods.ALIGNMENT_GET:
                 return EngineResponse.ok(
                     request.id, result=self.get_alignment(p["chapter"], p["verse"]),
+                )
+            if m == Methods.LEXICON_GET_ENTRY:
+                return EngineResponse.ok(
+                    request.id, result=self.get_lexicon_entry(p.get("strong", ""), p.get("morph", "")),
                 )
             if m == Methods.ALIGNMENT_STATUS:
                 return EngineResponse.ok(

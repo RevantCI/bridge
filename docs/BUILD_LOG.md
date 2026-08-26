@@ -1,6 +1,6 @@
 # Build log: Bridge v0.8.0-beta.9
 
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 > **Start with [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) instead** for an
 > oriented, up-to-date summary of the stack decisions, phase roadmap, and
@@ -51,6 +51,14 @@ gate is `docs/QA_TEST_MATRIX.md`.
   Paratext/Logos synchronization. AI alignment proposals and UAlign-derived
   corpus statistics (count/probability/PMI/SED-boost) are implemented; see the
   Phase 6/7 sections further down.
+- Word-info lexicon popup: clicking a source token in the alignment modal
+  opens a popup with decoded morphology and a Strong's dictionary gloss
+  (lemma, transliteration, Meaning/Usage/Source), matching translationCore's
+  own word-details popup. New vendored resource (`openscriptures/strongs`,
+  public domain) plus a `lexicon.getEntry` protocol method. See "Alignment
+  word-info lexicon popup" further down for the full detail, including two
+  real bugs found and fixed in the same pass (one a genuine regression, one
+  pre-existing).
 
 ## Phase roadmap status — read this first before picking up new work
 
@@ -1853,4 +1861,185 @@ it has since been committed. Files involved in this import work were:
 
 `src-tauri/Cargo.toml` and `vite.config.ts` were also modified in the broader
 working session and are part of the same commit.
+
+## Alignment word-info lexicon popup (2026-08-26)
+
+**What it does:** clicking the small "i" button on a source (Hebrew/Greek)
+token in the Word Alignment modal opens a popup with that word's decoded
+morphology and a Strong's dictionary gloss — lemma, transliteration,
+pronunciation, Meaning, Usage, and Source (etymology) — the same information
+translationCore's own word-details popup shows. Compound tokens (a lexeme
+fused with a Hebrew proclitic prefix, e.g. the "the" in "the earth") show one
+popup with a segment per morpheme rather than needing any change to how
+tokens are split.
+
+### Data source: `openscriptures/strongs`, not UHAL/UGL
+
+The user's reference screenshot's exact phrasing ("Meaning: the 'earth'
+(at large...)", "Usage: × common, country...", "Source: from an unused
+root...") turned out to be verbatim classic Strong's Dictionary text, not
+unfoldingWord's UHAL/UGL (which write numbered-sense prose entries — a
+different shape entirely). The real match, confirmed by cloning the repo and
+reading the actual data rather than trusting a description of it (same rule
+as every other vendored dependency in this project): `openscriptures/strongs`
+(github.com/openscriptures/strongs, commit `0acd2f251c2d35ff8db2dece4e0593979d3ac223`).
+Its `hebrew/strongs-hebrew-dictionary.js` and `greek/strongs-greek-dictionary.js`
+are plain CommonJS modules exporting a Strong's-number-keyed object —
+`require()`-able directly from the vendoring script, no XML parsing needed.
+8,674 Hebrew + 5,523 Greek entries. License: each file's own header states
+"Copyright 2009/2010, Open Scriptures. CC-BY-SA" (no version number given);
+the underlying 1890s Strong's Concordance text itself is public domain.
+
+New vendor script: `scripts/vendor-strongs-lexicon.mjs`, same shape as
+`vendor-original-language-resources.mjs` — takes `--checkout <path>`, verifies
+the pinned commit, emits one gzipped JSON index per language under
+`engine/resources/{hbo,el-x-koine}/lexicons/strongs/v1.0.2_openscriptures/`
+with the same `NOTICE.md`/`PROVENANCE.json`/`index.json` convention as the
+UHB/UGNT packs.
+
+### Real data quirks found (not assumed) while wiring up lookups
+
+- Hebrew Strong's numbers on tokens are inconsistently zero-padded (`H0430`
+  vs `H7225`) and sometimes carry an OSHB-only trailing homonym letter not
+  present in classic Strong's numbering (`H1254a` for ברא in Genesis 1:1).
+- Greek (UGNT) Strong's numbers always carry one extra trailing "variant"
+  digit beyond the 4-digit base that classic Strong's numbering doesn't have
+  (`G23160` → base `G2316`).
+- Compound tokens use a colon-joined `strong`/`morph` pair per morpheme
+  (e.g. strong `"d:H0776"`, morph `"He,Td:Ncbsa"` for "the earth") — the
+  prefix side (`b`/`c`/`d`/`k`/`l`/`m`) has no Strong's number of its own.
+  Confirmed which letter means what by cross-checking ~30 real verses
+  (Genesis 1-2, Psalm 119, Deuteronomy 6) against their paired morph codes,
+  not guessed — see `HEBREW_PREFIX_LABELS` in `lexicon_resources.py`.
+
+All three are handled by `_normalize_strong()`/compound-splitting in
+`engine/tc_ai_bridge/lexicon_resources.py` before the dictionary lookup.
+
+### Morphology decoding
+
+`engine/tc_ai_bridge/morphology_codes.py` decodes the raw codes already
+present on every source token into readable labels:
+
+- **Hebrew** (`He,Ncmsa` etc.): the OpenScriptures Hebrew Bible (OSHB)
+  parsing scheme, doc-verified against
+  `github.com/openscriptures/morphhb/blob/master/parsing/HebrewMorphologyCodes.html`.
+- **Greek** (`Gr,V,IAA3,,S,` etc.): **no locatable specification document** —
+  repeated lookups against door43/GitHub for UGNT's own morphology docs found
+  nothing. The mapping was instead reverse-engineered by cross-checking every
+  real UGNT token in John 3:16 and Titus 1:1 (both unambiguous, well-known
+  grammar) against their known parsing, field position by field position.
+  Only codes actually confirmed that way are mapped; anything unrecognized
+  falls back to showing the raw code rather than guessing — see the module's
+  own docstring for the full reasoning.
+
+### New protocol method: `lexicon.getEntry`
+
+`Methods.LEXICON_GET_ENTRY = "lexicon.getEntry"` (`bridge_service.py`), takes
+`{strong, morph}` off the `AlignmentToken` the frontend already has — no
+`languageId` param needed; `decode_morph()` reads the `"He,"`/`"Gr,"` prefix
+itself. Returns `{languageId, segments: [...]}`, one segment per
+colon-separated morpheme, each with `strong`/`morphLabel`/`partOfSpeech`/
+`lemma`/`translit`/`pron`/`meaning`/`usage`/`source` (all nullable — a
+segment with no lexicon hit still gets its decoded morphology, and non-numeric
+Hebrew prefixes get a label from `HEBREW_PREFIX_LABELS` instead). Wired
+straight through: `commands.rs`'s `lexicon_get_entry` → `main.rs` invoke list
+→ `bridgeClient.ts`'s `getLexiconEntry()` → new `LexiconPopup.svelte`.
+
+### Two real bugs found and fixed in the same pass
+
+**1. A genuine regression, caught from the user's live bug report, not from
+a test.** The first version of this work also added a copy step to
+`resource_materializer.py`'s `ensure_resources_installed()`, mirroring the
+existing UHB/UGNT copy loop, to make the new lexicon's license/provenance
+discoverable in app storage. After shipping it, opening a KJV Genesis project
+threw `sidecar request 'checks.status' timed out` and `check.listForVerse`
+timed out too. Root cause, traced end to end (not guessed):
+`materialize_book_checks()` — which parses Genesis's entire English tN/tW
+TSVs (5,758 + 5,640 checks, 442 file writes) — already ran synchronously
+inside a `with self._checker_lock:` block on a background thread, and was
+**already** taking ~15-19s cold (confirmed by `git stash`-ing just the
+`resource_materializer.py` change and re-timing: 18.9s baseline vs. 26.2s
+with the added copy step). `checks.status`/`check.listForVerse` are
+hard-coded to a 30s timeout specifically so they *never* wait on that lock
+(see `sidecar.rs`'s `interactive_check_requests_keep_the_short_timeout`
+test and `list_checks_for_verse()`'s non-blocking lock acquire) — but with
+one Python process and the GIL, sustained CPU/IO-heavy work on the
+background job thread can still starve the main stdio dispatcher's ability
+to read and answer the next request in time. The added copy step (~7s more)
+was enough to tip an already-borderline first-time cost over that 30s
+budget. **Fix:** removed the copy step entirely — it turned out to be
+unnecessary anyway, since `lexicon_resources.py` always reads straight from
+the bundled/source resources directory (same pattern as
+`original_language_resources.py`), never from the app-storage copy. Re-timed
+after the fix: back to ~15-17s, matching the pre-existing baseline.
+
+**2. A CSS bug, then a second CSS bug it exposed.** The user reported the
+popup had an unwanted horizontal scrollbar. Cause: `LexiconPopup.svelte`'s
+`<dl>` grid and the header's `<span class="headword">` are flex/grid items
+that default to `min-width: auto`, which for an unbreakable Hebrew word (no
+spaces to wrap on) means "don't shrink below this word's full width" — wider
+content pushed the whole 440px popup wider, so `overflow: auto` added a
+horizontal scrollbar to compensate. Fixed with `min-width: 0` +
+`overflow-wrap: anywhere` on the grid/flex items, `minmax(0, 1fr)` on the
+grid track, and `overflow-x: hidden` on the popup itself. That fix then
+exposed a **second, latent** bug: the header's `"WORD DETAILS"` eyebrow used
+`flex: 0 0 100%` to force itself onto its own row, but `header` never
+actually had `flex-wrap: wrap` — it had only ever *looked* like two rows
+because the resulting horizontal overflow was visible. Once overflow was
+clipped instead of scrolled, the eyebrow's now-enforced full-width claim
+squeezed the headword down to near-zero width (rendering one Hebrew letter
+per line) and pushed the close button out of the visible/clickable area.
+Real fix: add `flex-wrap: wrap` to `header` so the eyebrow genuinely wraps to
+its own row, leaving the second row's full width for the headword and close
+button.
+
+### Files touched
+
+New: `scripts/vendor-strongs-lexicon.mjs`,
+`engine/tc_ai_bridge/lexicon_resources.py`,
+`engine/tc_ai_bridge/morphology_codes.py`,
+`engine/tests/test_lexicon_resources.py`,
+`engine/tests/test_morphology_codes.py`,
+`src/lib/components/LexiconPopup.svelte`,
+`engine/resources/{hbo,el-x-koine}/lexicons/strongs/v1.0.2_openscriptures/`
+(vendored data + NOTICE.md/PROVENANCE.json/index.json).
+
+Modified: `engine/bridge_service.py` (new method + dispatch branch),
+`engine/tc_ai_bridge/resource_materializer.py` (net no-op after the fix above
+— comment explains why the lexicon is deliberately *not* mirrored into app
+storage), `engine/tests/test_bridge_service.py`,
+`src-tauri/src/commands.rs`, `src-tauri/src/main.rs`,
+`src/lib/api/bridgeClient.ts`, `src/lib/types/finding.ts`,
+`src/lib/components/AlignmentModal.svelte` (per-token info button, wired to
+the popup; existing selection behavior untouched).
+
+### Verified
+
+- `pytest tests/ greek_room_engine/tests/ -q` — 240 passed, no regressions;
+  new lexicon/morphology tests cross-check decoder output against real
+  vendored data (Genesis 1:1, Titus 1:1, John 3:16), not synthetic fixtures.
+- `npm run check` — 0 errors, 0 warnings. `npm run build` — succeeds.
+- **Not verified:** `cargo check`/`cargo tauri dev` — this checkout has no
+  built sidecar binaries (`build-sidecars.ps1` not yet run this session), a
+  pre-existing environment gap unrelated to this work. The new Rust command
+  is a direct structural copy of the existing `alignment_get` command.
+
+### Still open
+
+- The pre-existing ~15-19s synchronous first-time cost of
+  `materialize_book_checks()` for a large book (confirmed independent of
+  this work, see bug #1 above) is close enough to the 30s
+  `checks.status`/`check.listForVerse` timeout that it can plausibly still
+  time out occasionally on a slower disk, with no lexicon-popup code
+  involved at all. The code's own comments describe the intended design as
+  never blocking the dispatcher this way; worth a dedicated pass — likely
+  moving `_ensure_resource_indexes()` off any synchronous call path
+  (`run_verse_checks`, `saveEdit`'s `["local", "greekroom"]` call) the same
+  way `list_checks_for_verse()` already avoids blocking.
+- `LexiconPopup.svelte` has no client-side caching — refetches on every open.
+  Fine given the tiny payload and Python-side `lru_cache`; revisit only if
+  it's ever visibly slow.
+- Greek morphology decoding covers every code actually observed in testing,
+  not necessarily every code that exists in UGNT — unrecognized codes fall
+  back to the raw string rather than a wrong label, by design.
 

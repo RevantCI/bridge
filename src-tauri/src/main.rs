@@ -57,6 +57,7 @@ fn main() {
             commands::alignment_undo,
             commands::alignment_backups,
             commands::alignment_restore,
+            commands::lexicon_get_entry,
             commands::alignment_ai_propose,
             commands::alignment_ai_apply_proposal,
             commands::ai_explain,

@@ -6,12 +6,14 @@
     verseKey,
   } from "../stores";
   import type { AlignmentAiProposal, AlignmentContext, AlignmentToken } from "../types/finding";
+  import LexiconPopup from "./LexiconPopup.svelte";
 
   export let chapter: string;
   export let verse: string;
   export let onClose: () => void;
 
   let context: AlignmentContext | null = null;
+  let lexiconToken: AlignmentToken | null = null;
   let loading = true;
   let busy = false;
   let error = "";
@@ -172,7 +174,7 @@
   }
 </script>
 
-<svelte:window on:keydown={(event) => event.key === "Escape" && !busy && onClose()} />
+<svelte:window on:keydown={(event) => event.key === "Escape" && !busy && !lexiconToken && onClose()} />
 
 <div class="overlay" role="presentation">
   <section class="modal" role="dialog" aria-modal="true" aria-label={`Word alignment ${chapter}:${verse}`}>
@@ -220,16 +222,25 @@
           </div>
           <div class="tokens" dir={context.sourceDirection}>
             {#each context.topTokens as item}
-              <button
-                class="token source"
-                class:selected={selectedTop.includes(item.id)}
-                on:click={() => (selectedTop = toggle(selectedTop, item.id))}
-                disabled={busy || !context.sourceAvailable}
-                title={[item.lemma, item.strong, item.morph].filter(Boolean).join(" · ")}
-              >
-                <span>{label(item)}</span>
-                {#if item.lemma}<small>{item.lemma}</small>{/if}
-              </button>
+              <div class="token-wrap">
+                <button
+                  class="token source"
+                  class:selected={selectedTop.includes(item.id)}
+                  on:click={() => (selectedTop = toggle(selectedTop, item.id))}
+                  disabled={busy || !context.sourceAvailable}
+                  title={[item.lemma, item.strong, item.morph].filter(Boolean).join(" · ")}
+                >
+                  <span>{label(item)}</span>
+                  {#if item.lemma}<small>{item.lemma}</small>{/if}
+                </button>
+                {#if item.strong || item.morph}
+                  <button
+                    class="info"
+                    on:click|stopPropagation={() => (lexiconToken = item)}
+                    aria-label={`Word details for ${item.word}`}
+                  ><span aria-hidden="true">i</span></button>
+                {/if}
+              </div>
             {:else}
               <p class="empty">No source tokens are present in this verse.</p>
             {/each}
@@ -349,6 +360,14 @@
   </section>
 </div>
 
+{#if lexiconToken}
+  <LexiconPopup
+    token={lexiconToken}
+    direction={context?.sourceDirection ?? "rtl"}
+    onClose={() => (lexiconToken = null)}
+  />
+{/if}
+
 <style>
   .overlay { position: fixed; inset: 0; z-index: 50; background: rgba(15, 20, 26, .58); display: grid; place-items: center; padding: 24px; }
   .modal { width: min(1040px, 100%); max-height: calc(100vh - 48px); overflow: auto; background: var(--surface); border-radius: 16px; box-shadow: 0 24px 80px rgba(0,0,0,.24); padding: 20px; color: var(--text); }
@@ -385,6 +404,17 @@
   .token.unaligned { border-style: dashed; background: var(--warning-bg); }
   .token.selected { color: white; background: var(--accent); border-color: var(--accent); }
   .token.selected small { color: rgba(255,255,255,.8); }
+  .token-wrap { position: relative; display: inline-flex; }
+  .token-wrap .info {
+    position: absolute; top: -8px; right: -8px; width: 18px; height: 18px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%; background: var(--surface); color: var(--text-2);
+  }
+  .token-wrap .info span {
+    font-family: Georgia, "Times New Roman", serif; font-style: italic; font-weight: 700;
+    font-size: 12px; line-height: 1; transform: translateY(-0.5px);
+  }
+  .token-wrap .info:hover { color: var(--accent); border-color: var(--accent); }
   .primary-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; }
   button.primary, button.complete { background: var(--accent); border-color: var(--accent); color: white; font-weight: 700; }
   .ai-proposal { border: 1px solid var(--accent); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: var(--accent-bg); }
