@@ -3,6 +3,7 @@
   import { bridge } from "../api/bridgeClient";
   import AlignmentModal from "./AlignmentModal.svelte";
   import TranslationHelpsReview from "./TranslationHelpsReview.svelte";
+  import { aiJobAppliesToReference, isAIReviewJobActive } from "../utils/aiJobScope";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
     verseTexts, checkStatusByVerse, alignmentStatusByVerse, checkingProgress, verseKey,
@@ -91,9 +92,15 @@
   let alignmentOpen = false;
   let alignmentKey = "";
   let aiExplainError = "";
+  let aiExplainErrorJobId = "";
+  let aiExplainErrorReference = "";
   let aiExplainResult: AiExplainResult | null = null;
   let aiExplainKey = "";
   let aiJob: AIReviewJobSnapshot | null = null;
+  let visibleAIJob: AIReviewJobSnapshot | null = null;
+  let aiJobBusy = false;
+  let currentReviewReference = "";
+  let visibleAIExplainError = "";
   let aiPollTimer: ReturnType<typeof setTimeout> | undefined;
   let aiPollSequence = 0;
   let processedAIResults = new Set<string>();
@@ -101,8 +108,18 @@
   let aiFailedResults: Array<{ chapter: string; verse: string; error: string | null }> = [];
   let translationHelpsReview: TranslationHelpsReview;
 
-  $: aiFailedResults = aiJob
-    ? Object.values(aiJob.results)
+  $: currentReviewReference = `${$project?.path ?? ""}::${$selectedVerse ? verseKey($currentChapter, $selectedVerse) : ""}`;
+  $: aiJobBusy = isAIReviewJobActive(aiJob);
+  $: visibleAIJob = aiJob && $selectedVerse && aiJobAppliesToReference(
+    aiJob, $project?.path ?? "", $currentChapter, $selectedVerse,
+  ) ? aiJob : null;
+  $: visibleAIExplainError = aiExplainError && (
+    aiExplainErrorJobId
+      ? visibleAIJob?.jobId === aiExplainErrorJobId
+      : aiExplainErrorReference === currentReviewReference
+  ) ? aiExplainError : "";
+  $: aiFailedResults = visibleAIJob
+    ? Object.values(visibleAIJob.results)
         .filter((result) => result.status === "failed")
         .map((result) => ({ chapter: result.chapter, verse: result.verse, error: result.error }))
     : [];
@@ -110,6 +127,8 @@
   function nativeCheckStateChanged(): void {
     aiExplainResult = null;
     aiExplainError = "";
+    aiExplainErrorJobId = "";
+    aiExplainErrorReference = "";
     aiExplainKey = "";
   }
 
@@ -163,6 +182,9 @@
       aiCheckReviewsByVerse.update((values) => ({ ...values, [key]: result.checkReviews ?? [] }));
       if ($selectedVerse && key === verseKey($currentChapter, $selectedVerse)) {
         aiExplainKey = key;
+        aiExplainError = "";
+        aiExplainErrorJobId = "";
+        aiExplainErrorReference = "";
         aiExplainResult = {
           summary: result.summary,
           checkReviews: result.checkReviews,
@@ -185,20 +207,29 @@
         aiPollTimer = setTimeout(() => void pollAIJob(jobId, sequence), 650);
       } else if (snapshot.state === "failed") {
         aiExplainError = snapshot.error || "AI review failed.";
+        aiExplainErrorJobId = snapshot.jobId;
+        aiExplainErrorReference = "";
       }
     } catch (error) {
-      if (sequence === aiPollSequence) aiExplainError = error instanceof Error ? error.message : String(error);
+      if (sequence === aiPollSequence) {
+        aiExplainError = error instanceof Error ? error.message : String(error);
+        aiExplainErrorJobId = jobId;
+        aiExplainErrorReference = "";
+      }
     }
   }
 
   async function startAIReview(scope: "verse" | "chapter" | "book") {
-    if (!$selectedVerse || aiJob && ["queued", "running", "cancelling"].includes(aiJob.state)) return;
+    if (!$selectedVerse || aiJobBusy) return;
     const chapter = $currentChapter;
     const verse = $selectedVerse;
+    const requestedReference = currentReviewReference;
     if (scope !== "verse" && !window.confirm(
       `Run AI review for this ${scope}? Each verse may use one or two model requests and incur API charges.`,
     )) return;
     aiExplainError = "";
+    aiExplainErrorJobId = "";
+    aiExplainErrorReference = "";
     aiExplainResult = null;
     try {
       const snapshot = await bridge.startAIReview(scope, chapter, verse, $reviewerMode);
@@ -208,6 +239,8 @@
       void pollAIJob(snapshot.jobId, sequence);
     } catch (e) {
       aiExplainError = e instanceof Error ? e.message : String(e);
+      aiExplainErrorJobId = "";
+      aiExplainErrorReference = requestedReference;
     }
   }
 
@@ -217,12 +250,16 @@
       aiJob = await bridge.cancelAIReview(aiJob.jobId);
     } catch (error) {
       aiExplainError = error instanceof Error ? error.message : String(error);
+      aiExplainErrorJobId = aiJob?.jobId ?? "";
+      aiExplainErrorReference = "";
     }
   }
 
   async function retryAIReview(): Promise<void> {
     if (!aiJob || !["failed", "cancelled"].includes(aiJob.state)) return;
     aiExplainError = "";
+    aiExplainErrorJobId = "";
+    aiExplainErrorReference = "";
     try {
       const snapshot = await bridge.retryAIReview(aiJob.jobId);
       aiJob = snapshot;
@@ -231,6 +268,8 @@
       void pollAIJob(snapshot.jobId, sequence);
     } catch (error) {
       aiExplainError = error instanceof Error ? error.message : String(error);
+      aiExplainErrorJobId = aiJob?.jobId ?? "";
+      aiExplainErrorReference = "";
     }
   }
 
@@ -242,6 +281,8 @@
     aiJob = null;
     aiExplainResult = null;
     aiExplainError = "";
+    aiExplainErrorJobId = "";
+    aiExplainErrorReference = "";
     aiPollSequence += 1;
     if (aiPollTimer) clearTimeout(aiPollTimer);
   }
@@ -375,19 +416,19 @@
             : "AI prepares evidence and exact-word proposals; you decide what to apply or edit."}
         </p>
         <div class="ai-scope-actions">
-          <button on:click={() => startAIReview("verse")} disabled={$checkingProgress.running || Boolean(aiJob && ["queued", "running", "cancelling"].includes(aiJob.state))}>This verse</button>
-          <button on:click={() => startAIReview("chapter")} disabled={$checkingProgress.running || Boolean(aiJob && ["queued", "running", "cancelling"].includes(aiJob.state))}>Chapter</button>
-          <button on:click={() => startAIReview("book")} disabled={$checkingProgress.running || Boolean(aiJob && ["queued", "running", "cancelling"].includes(aiJob.state))}>Whole book</button>
+          <button on:click={() => startAIReview("verse")} disabled={$checkingProgress.running || aiJobBusy}>This verse</button>
+          <button on:click={() => startAIReview("chapter")} disabled={$checkingProgress.running || aiJobBusy}>Chapter</button>
+          <button on:click={() => startAIReview("book")} disabled={$checkingProgress.running || aiJobBusy}>Whole book</button>
         </div>
-        {#if aiJob}
-          <div class="ai-job-status" class:failed={aiJob.state === "failed"}>
-            <div><b>{aiJob.state === "succeeded" ? "Complete" : aiJob.currentStage}</b><span>{aiJob.percent}%</span></div>
-            <progress max="100" value={aiJob.percent} />
-            <small>{aiJob.completedVerses}/{aiJob.totalVerses} verses · {aiJob.mode} mode{aiJob.failedVerses ? ` · ${aiJob.failedVerses} failed` : ""}</small>
-            {#if aiJob.skippedCurrentVerses > 0}
-              <small>{aiJob.skippedCurrentVerses} already-current verse(s) preserved and skipped.</small>
+        {#if visibleAIJob}
+          <div class="ai-job-status" class:failed={visibleAIJob.state === "failed"}>
+            <div><b>{visibleAIJob.state === "succeeded" ? "Complete" : visibleAIJob.currentStage}</b><span>{visibleAIJob.percent}%</span></div>
+            <progress max="100" value={visibleAIJob.percent} />
+            <small>{visibleAIJob.completedVerses}/{visibleAIJob.totalVerses} verses · {visibleAIJob.mode} mode{visibleAIJob.failedVerses ? ` · ${visibleAIJob.failedVerses} failed` : ""}</small>
+            {#if visibleAIJob.skippedCurrentVerses > 0}
+              <small>{visibleAIJob.skippedCurrentVerses} already-current verse(s) preserved and skipped.</small>
             {/if}
-            {#if aiJob.resumeOf}<small>Resumed from the previous unfinished job.</small>{/if}
+            {#if visibleAIJob.resumeOf}<small>Resumed from the previous unfinished job.</small>{/if}
             {#if aiFailedResults.length > 0}
               <div class="ai-failure-list">
                 {#each aiFailedResults.slice(0, 3) as failure}
@@ -397,15 +438,19 @@
               </div>
             {/if}
             <div class="ai-job-actions">
-              {#if ["queued", "running", "cancelling"].includes(aiJob.state)}
-                <button on:click={cancelAIReview} disabled={aiJob.state === "cancelling"}>{aiJob.state === "cancelling" ? "Cancelling…" : "Cancel"}</button>
-              {:else if ["failed", "cancelled"].includes(aiJob.state)}
+              {#if ["queued", "running", "cancelling"].includes(visibleAIJob.state)}
+                <button on:click={cancelAIReview} disabled={visibleAIJob.state === "cancelling"}>{visibleAIJob.state === "cancelling" ? "Cancelling…" : "Cancel"}</button>
+              {:else if ["failed", "cancelled"].includes(visibleAIJob.state)}
                 <button on:click={retryAIReview}>Retry</button>
               {/if}
             </div>
           </div>
+        {:else if aiJobBusy}
+          <div class="ai-job-background" role="status">
+            An AI review is continuing in the background for another reference. Return to its starting reference to view progress or cancel it.
+          </div>
         {/if}
-        {#if aiExplainError}<p class="ai-control-error">{aiExplainError}</p>{/if}
+        {#if visibleAIExplainError}<p class="ai-control-error">{visibleAIExplainError}</p>{/if}
       </div>
 
       <TranslationHelpsReview
@@ -414,7 +459,7 @@
         verse={$selectedVerse}
         onStateChanged={nativeCheckStateChanged}
         onRerunAIReview={() => void startAIReview("verse")}
-        aiReviewBusy={$checkingProgress.running || Boolean(aiJob && ["queued", "running", "cancelling"].includes(aiJob.state))}
+        aiReviewBusy={$checkingProgress.running || aiJobBusy}
       />
 
       <div class="section">
@@ -483,10 +528,10 @@
         {/each}
       </div>
 
-      {#if aiExplainError}
+      {#if visibleAIExplainError}
         <div class="section ai-explain-section">
           <div class="section-title">AI explanation</div>
-          <p class="ai-error">{aiExplainError}</p>
+          <p class="ai-error">{visibleAIExplainError}</p>
         </div>
       {:else if aiExplainResult}
         <div class="section ai-explain-section">
@@ -538,7 +583,7 @@
       <button
         class="ai-explain-btn"
         on:click={() => startAIReview("verse")}
-        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey) || Boolean(aiJob && ["queued", "running", "cancelling"].includes(aiJob.state))}
+        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey) || aiJobBusy}
         title="Run an evidence-grounded AI review for this verse in the background"
       >🤖 AI review</button>
     </div>
@@ -615,5 +660,6 @@
   .ai-job-status small { display: block; font-size: 9px; color: var(--text-3); }
   .ai-failure-list { margin-top: 7px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
   .ai-job-actions { margin-top: 6px; }
+  .ai-job-background { margin-top: 9px; padding: 8px; border-radius: 7px; font-size: 9px; line-height: 1.4; color: var(--text-2); background: var(--surface-2); }
   .ai-control-error { margin: 8px 0 0; font-size: 10px; line-height: 1.4; color: var(--danger); overflow-wrap: anywhere; }
 </style>

@@ -297,6 +297,11 @@
   {/if}
   {#if mutationNotice}<div class="mutation-notice">{mutationNotice}</div>{/if}
   {#if preparationMessage}<div class="preparing-notice"><span class="spin" /> {preparationMessage}</div>{/if}
+  {#if loading && !preparationMessage && checks.length === 0}
+    <div class="loading-placeholder" role="status" aria-label="Loading translation helps">
+      <span /><span /><span />
+    </div>
+  {/if}
   {#if loadError}
     <div class="load-error">Could not load translation helps: {loadError}</div>
     <button class="small-btn" on:click={refresh}>Retry</button>
@@ -386,6 +391,7 @@
 
 <style>
   .section { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+  .translation-helps { min-height: 126px; }
   .section-title { font-size: 11px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .mode-badge { margin-left: auto; text-transform: capitalize; font-size: 9px; padding: 2px 6px; border-radius: 999px; color: var(--accent); background: var(--accent-bg); }
   .loading-label { display: flex; align-items: center; gap: 4px; color: var(--text-3); font-weight: 500; }
@@ -395,6 +401,12 @@
   .basic-notice { color: var(--warning); background: var(--warning-bg); }
   .mutation-notice { color: var(--success); background: var(--success-bg); overflow-wrap: anywhere; }
   .preparing-notice { display: flex; align-items: center; gap: 6px; color: var(--accent); background: var(--accent-bg); }
+  .loading-placeholder { min-height: 66px; display: grid; align-content: center; gap: 7px; }
+  .loading-placeholder span { display: block; height: 8px; border-radius: 999px; background: var(--surface-2); animation: loading-pulse 1.2s ease-in-out infinite; }
+  .loading-placeholder span:nth-child(1) { width: 72%; }
+  .loading-placeholder span:nth-child(2) { width: 94%; animation-delay: .12s; }
+  .loading-placeholder span:nth-child(3) { width: 54%; animation-delay: .24s; }
+  @keyframes loading-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
   .load-error { color: var(--danger); background: var(--danger-bg); overflow-wrap: anywhere; }
   .stale-review-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--warning); background: var(--warning-bg); border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent); }
   .stale-review-notice div { display: grid; gap: 2px; min-width: 0; }

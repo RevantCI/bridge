@@ -13,7 +13,7 @@ desktop app (Tauri + Svelte), while keeping the same QA engines
 ([Greek Room](https://github.com/BibleNLP/greek-room)) and translation
 business logic underneath.
 
-**Status:** `v0.8.0-beta.10` — the full import → check → review → align →
+**Status:** `v0.8.0-beta.11` — the full import → check → review → align →
 export loop works end to end. See [Current status](#current-status) below.
 
 ## Who this is for
@@ -41,6 +41,7 @@ py -3.12 -m venv .venv
 # 2. Full desktop app (needs Rust + MSVC build tools, see Developer Setup)
 cd ..
 npm install
+npm run test:ui-state
 .\scripts\build-sidecars.ps1
 npm run tauri dev
 ```
