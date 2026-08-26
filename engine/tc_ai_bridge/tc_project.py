@@ -587,7 +587,7 @@ class TranslationCoreProject:
     def _legacy_paratext_commentlist_path(self) -> Path:
         return self.companion_dir() / 'paratextNotes' / f'{self.book_id}.comments.xml'
 
-    def record_paratext_note(self, chapter: str | int, verse: str | int, text: str, username: str = 'AI Bridge Reviewer', selected_text: str = '', note_type: str = '', metadata: dict[str, Any] | None = None, assigned_user: str = '', reply_to_user: str = '', ext_user: str = EXTERNAL_NOTE_SOURCE) -> Path:
+    def record_paratext_note(self, chapter: str | int, verse: str | int, text: str, username: str = 'AI Bridge Reviewer', selected_text: str = '', note_type: str = '', metadata: dict[str, Any] | None = None, assigned_user: str = '', reply_to_user: str = '', ext_user: str = EXTERNAL_NOTE_SOURCE, thread_id: str = '') -> Path:
         """Record an API-ready Paratext Notes 1.1 project note.
 
         ``username`` is stored as the best-known Paratext author hint in the companion XML. Live
@@ -616,6 +616,7 @@ class TranslationCoreProject:
                 verse_text=self.target_verse_text(chapter, verse), comment_text=text, reviewer=username,
                 selected_text=selected_text, language=self._target_language_code(), note_type=str((metadata or {}).get('paratextThreadType') or ''),
                 assigned_user=assigned_user, reply_to_user=reply_to_user, metadata=metadata, ext_user=ext_user,
+                thread_id=thread_id or None,
             )
             check = validate_notes_11(out)
             self.journal.commit(tx, {'operation': 'paratextNotes11', 'threadId': thread_id, 'threads': check['threads'], 'comments': check['comments']})
@@ -651,6 +652,149 @@ class TranslationCoreProject:
         payload = {'version': 1, 'items': dict((data or {}).get('items') or {})}
         _write_json_atomic(path, payload)
         return path
+
+    def _issue_resolution_path(self, chapter: str | int, verse: str | int, resolution_id: str) -> Path:
+        rid = str(resolution_id or '').strip().lower()
+        if len(rid) != 32 or any(ch not in '0123456789abcdef' for ch in rid):
+            raise ProjectError('Invalid issue resolution ID.')
+        return self.companion_dir() / 'issueResolutions' / self.book_id / str(chapter) / str(verse) / f'{rid}.json'
+
+    def _issue_resolution_id(
+        self, chapter: str | int, verse: str | int, tool: str, group_id: str, check_id: str,
+    ) -> str:
+        identity = '\u241f'.join((self.book_id, str(chapter), str(verse), str(tool), str(group_id), str(check_id)))
+        return hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]
+
+    def load_issue_resolution(
+        self, chapter: str | int, verse: str | int, resolution_id: str,
+    ) -> dict[str, Any]:
+        path = self._issue_resolution_path(chapter, verse, resolution_id)
+        if not path.exists():
+            raise ProjectError('Issue resolution was not found for this verse.')
+        data = _read_json(path)
+        if not isinstance(data, dict) or str(data.get('resolutionId') or '') != str(resolution_id):
+            raise ProjectError('Issue resolution data is invalid.')
+        return data
+
+    def list_issue_resolutions(self, chapter: str | int, verse: str | int) -> list[dict[str, Any]]:
+        root = self.companion_dir() / 'issueResolutions' / self.book_id / str(chapter) / str(verse)
+        if not root.exists():
+            return []
+        out: list[dict[str, Any]] = []
+        for path in sorted(root.glob('*.json')):
+            try:
+                data = _read_json(path)
+            except Exception:
+                continue
+            if isinstance(data, dict):
+                out.append(data)
+        return sorted(out, key=lambda item: str(item.get('updatedAt') or ''), reverse=True)
+
+    def save_issue_resolution(
+        self,
+        chapter: str | int,
+        verse: str | int,
+        tool: str,
+        group_id: str,
+        check_id: str,
+        expected_fingerprint: str,
+        *,
+        selected_text: str = '',
+        issue_summary: str = '',
+        reviewer_note: str = '',
+        proposed_correction: str = '',
+        evidence: list[Any] | None = None,
+        username: str = 'Bridge Reviewer',
+    ) -> dict[str, Any]:
+        """Create/update one human-owned resolution record for a native tN/tW check."""
+        current = self.check_review(chapter, verse, tool, group_id, check_id)
+        if not expected_fingerprint or expected_fingerprint != current['stateFingerprint']:
+            raise ProjectError('The translation check changed after it was opened. Reload before recording its resolution.')
+        summary = str(issue_summary or '').strip()
+        note = str(reviewer_note or '').strip()
+        selected = str(selected_text or '').strip()
+        correction = str(proposed_correction or '').strip()
+        if not summary:
+            raise ProjectError('Describe the translation issue before creating a resolution.')
+        if not note:
+            raise ProjectError('Add a reviewer note before handing the issue to Paratext.')
+        if selected and not self._selection_ranges(self.target_verse_text(chapter, verse), selected):
+            raise ProjectError('The selected target text is not present in the current verse.')
+        clean_evidence: list[Any] = []
+        for item in list(evidence or [])[:25]:
+            if isinstance(item, dict):
+                clean_evidence.append(copy.deepcopy(item))
+            elif str(item or '').strip():
+                clean_evidence.append(str(item).strip())
+        resolution_id = self._issue_resolution_id(chapter, verse, tool, group_id, check_id)
+        path = self._issue_resolution_path(chapter, verse, resolution_id)
+        existing: dict[str, Any] = {}
+        if path.exists():
+            value = _read_json(path)
+            if isinstance(value, dict):
+                existing = value
+        now, _ = self._timestamp()
+        history = list(existing.get('history') or [])
+        history.append({
+            'event': 'updated' if existing else 'created',
+            'at': now,
+            'by': str(username or 'Bridge Reviewer'),
+            'inputFingerprint': self.review_input_fingerprint(chapter, verse),
+        })
+        old_handoff = existing.get('paratext') if isinstance(existing.get('paratext'), dict) else {}
+        content_signature = hashlib.sha256(json.dumps({
+            'selectedText': selected, 'issueSummary': summary, 'reviewerNote': note,
+            'proposedCorrection': correction, 'evidence': clean_evidence,
+        }, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
+        paratext = copy.deepcopy(old_handoff)
+        if str(paratext.get('contentSignature') or '') != content_signature:
+            paratext = {
+                'status': 'not_queued', 'messageId': '', 'attempts': 0,
+                'lastError': '', 'sentAt': '', 'remoteId': '',
+                'contentSignature': content_signature,
+            }
+        record = {
+            'schemaVersion': 1,
+            'resolutionId': resolution_id,
+            'bookId': self.book_id,
+            'chapter': str(chapter),
+            'verse': str(verse),
+            'reference': f'{self.book_id.upper()} {chapter}:{verse}',
+            'check': {
+                'tool': str(tool), 'groupId': str(group_id), 'checkId': str(check_id),
+                'sourceQuote': current.get('sourceQuote', ''),
+                'sourceOccurrence': current.get('sourceOccurrence'),
+                'stateFingerprint': current['stateFingerprint'],
+            },
+            'selectedText': selected,
+            'issueSummary': summary,
+            'reviewerNote': note,
+            'proposedCorrection': correction,
+            'evidence': clean_evidence,
+            'status': str(existing.get('status') or 'open'),
+            'recheck': copy.deepcopy(existing.get('recheck') or {'status': 'not_run'}),
+            'paratext': paratext,
+            'createdAt': str(existing.get('createdAt') or now),
+            'updatedAt': now,
+            'history': history[-100:],
+        }
+        _write_json_atomic(path, record)
+        return record
+
+    def update_issue_resolution_paratext(
+        self, chapter: str | int, verse: str | int, resolution_id: str,
+        handoff: dict[str, Any], event: str,
+    ) -> dict[str, Any]:
+        path = self._issue_resolution_path(chapter, verse, resolution_id)
+        record = self.load_issue_resolution(chapter, verse, resolution_id)
+        now, _ = self._timestamp()
+        record['paratext'] = copy.deepcopy(handoff)
+        record['updatedAt'] = now
+        history = list(record.get('history') or [])
+        history.append({'event': str(event), 'at': now, 'messageId': str(handoff.get('messageId') or '')})
+        record['history'] = history[-100:]
+        _write_json_atomic(path, record)
+        return record
 
     def comments_for_check(self, chapter: str | int, verse: str | int, check_id: str) -> list[dict[str, Any]]:
         out=[]

@@ -3,6 +3,7 @@ import type {
   AlignmentStatusResponse, BookProgressEntry, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
   CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, LexiconEntryResponse, NativeCheckListResponse,
   NativeCheckTool, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
+  IssueResolutionHandoffResult, IssueResolutionListResponse, IssueResolutionRecord,
 } from "../types/finding";
 
 /**
@@ -190,6 +191,41 @@ export const bridge = {
     return call("check_clear_selection", {
       chapter, verse, tool, groupId, checkId, provenance, expectedFingerprint, metadata,
     });
+  },
+
+  listIssueResolutions(chapter: string, verse: string): Promise<IssueResolutionListResponse> {
+    return call("issue_resolution_list", { chapter, verse });
+  },
+
+  saveIssueResolution(
+    chapter: string, verse: string,
+    check: { tool: NativeCheckTool; groupId: string; checkId: string; expectedFingerprint: string },
+    values: {
+      selectedText: string;
+      issueSummary: string;
+      reviewerNote: string;
+      proposedCorrection: string;
+      evidence: Array<Record<string, unknown> | string>;
+    },
+  ): Promise<IssueResolutionRecord> {
+    return call("issue_resolution_save", {
+      chapter, verse, tool: check.tool, groupId: check.groupId, checkId: check.checkId,
+      expectedFingerprint: check.expectedFingerprint, ...values,
+    });
+  },
+
+  queueIssueResolutionForParatext(
+    chapter: string, verse: string, resolutionId: string, expectedProjectId = "",
+  ): Promise<IssueResolutionHandoffResult> {
+    return call("issue_resolution_queue_paratext", {
+      chapter, verse, resolutionId, expectedProjectId,
+    });
+  },
+
+  retryIssueResolutionParatext(
+    chapter: string, verse: string, resolutionId: string,
+  ): Promise<IssueResolutionHandoffResult> {
+    return call("issue_resolution_retry_paratext", { chapter, verse, resolutionId });
   },
 
   getAlignment(chapter: string, verse: string): Promise<AlignmentContext> {

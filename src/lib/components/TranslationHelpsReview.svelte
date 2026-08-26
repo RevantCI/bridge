@@ -5,7 +5,10 @@
     aiCheckReviewsByVerse, checkStatusByVerse, findingsByVerse, nativeChecksByVerse,
     reviewerMode, verseKey, verseTexts,
   } from "../stores";
-  import type { AiCheckReview, CheckTargetSelection, NativeCheckListResponse, NativeCheckReview } from "../types/finding";
+  import type {
+    AiCheckReview, CheckTargetSelection, DesktopConnectorState, IssueResolutionRecord,
+    NativeCheckListResponse, NativeCheckReview,
+  } from "../types/finding";
   import { exactTextRanges } from "../utils/highlight";
 
   export let chapter: string;
@@ -27,6 +30,17 @@
   let mutationError = "";
   let mutationNotice = "";
   let aiReviewState: NativeCheckListResponse["aiReviewState"] = "missing";
+  let resolutions: IssueResolutionRecord[] = [];
+  let resolutionLoadSequence = 0;
+  let resolutionKey = "";
+  let resolutionSelectedText = "";
+  let resolutionIssueSummary = "";
+  let resolutionReviewerNote = "";
+  let resolutionCorrection = "";
+  let resolutionBusy = false;
+  let resolutionError = "";
+  let connectorState: DesktopConnectorState | null = null;
+  let connectorMessage = "";
 
   $: key = verseKey(chapter, verse);
   $: checks = $nativeChecksByVerse[key] ?? [];
@@ -39,11 +53,16 @@
     mutationError = "";
     mutationNotice = "";
     aiReviewState = "missing";
+    resolutionKey = "";
+    resolutionError = "";
+    connectorState = null;
+    void refreshResolutions();
     void refresh();
   }
 
   onDestroy(() => {
     loadSequence += 1;
+    resolutionLoadSequence += 1;
     if (retryTimer) clearTimeout(retryTimer);
   });
 
@@ -53,6 +72,110 @@
 
   function aiReviewFor(check: NativeCheckReview): AiCheckReview | undefined {
     return aiReviews.find((item) => item.tool === check.tool && item.check_id === check.checkId);
+  }
+
+  function resolutionFor(check: NativeCheckReview): IssueResolutionRecord | undefined {
+    return resolutions.find((item) => (
+      item.check.tool === check.tool
+      && item.check.groupId === check.groupId
+      && item.check.checkId === check.checkId
+    ));
+  }
+
+  async function refreshResolutions(): Promise<void> {
+    const operationKey = verseKey(chapter, verse);
+    const sequence = ++resolutionLoadSequence;
+    try {
+      const result = await bridge.listIssueResolutions(chapter, verse);
+      if (sequence === resolutionLoadSequence && operationKey === key) resolutions = result.items;
+    } catch (error) {
+      if (sequence === resolutionLoadSequence && operationKey === key) {
+        console.error("Could not restore issue resolutions", error);
+        resolutions = [];
+      }
+    }
+  }
+
+  async function startResolution(check: NativeCheckReview, aiReview?: AiCheckReview): Promise<void> {
+    const existing = resolutionFor(check);
+    resolutionKey = identity(check);
+    resolutionSelectedText = existing?.selectedText
+      || check.selections[0]?.text
+      || aiReview?.proposed_selections?.[0]?.text
+      || "";
+    resolutionIssueSummary = existing?.issueSummary
+      || aiReview?.rationale
+      || check.occurrenceNote
+      || `${toolLabel(check)} requires review.`;
+    resolutionReviewerNote = existing?.reviewerNote || "";
+    resolutionCorrection = existing?.proposedCorrection || aiReview?.suggested_correction || "";
+    resolutionError = "";
+    connectorState = null;
+    connectorMessage = "Checking the local Paratext connection…";
+    try {
+      const state = await bridge.paratextGetState();
+      if (resolutionKey !== identity(check)) return;
+      connectorState = state;
+      connectorMessage = state.connected
+        ? `Destination: ${state.project_name || "active Paratext project"}${state.project_id ? ` · ${state.project_id}` : ""}`
+        : "Paratext is not connected; this handoff will remain safely queued.";
+    } catch (error) {
+      if (resolutionKey !== identity(check)) return;
+      connectorMessage = `Paratext is unavailable; this handoff will remain safely queued. ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  function cancelResolution(): void {
+    if (resolutionBusy) return;
+    resolutionKey = "";
+    resolutionError = "";
+  }
+
+  async function saveAndQueueResolution(check: NativeCheckReview, aiReview?: AiCheckReview): Promise<void> {
+    if (resolutionBusy) return;
+    resolutionBusy = true;
+    resolutionError = "";
+    try {
+      const record = await bridge.saveIssueResolution(chapter, verse, {
+        tool: check.tool, groupId: check.groupId, checkId: check.checkId,
+        expectedFingerprint: check.stateFingerprint,
+      }, {
+        selectedText: resolutionSelectedText.trim(),
+        issueSummary: resolutionIssueSummary.trim(),
+        reviewerNote: resolutionReviewerNote.trim(),
+        proposedCorrection: resolutionCorrection.trim(),
+        evidence: aiReview?.evidence_used ?? [],
+      });
+      const result = await bridge.queueIssueResolutionForParatext(
+        chapter, verse, record.resolutionId, String(connectorState?.project_id ?? ""),
+      );
+      await refreshResolutions();
+      mutationNotice = result.handoff.status === "sent"
+        ? "Issue resolution saved and sent to Paratext."
+        : `Issue resolution saved in the Paratext outbox. ${result.handoff.lastError || "Retry when Paratext is available."}`;
+      resolutionKey = "";
+    } catch (error) {
+      resolutionError = error instanceof Error ? error.message : String(error);
+    } finally {
+      resolutionBusy = false;
+    }
+  }
+
+  async function retryResolution(record: IssueResolutionRecord): Promise<void> {
+    if (resolutionBusy) return;
+    resolutionBusy = true;
+    mutationError = "";
+    try {
+      const result = await bridge.retryIssueResolutionParatext(chapter, verse, record.resolutionId);
+      await refreshResolutions();
+      mutationNotice = result.handoff.status === "sent"
+        ? "Queued issue was sent to Paratext."
+        : `Paratext handoff remains queued. ${result.handoff.lastError}`;
+    } catch (error) {
+      mutationError = error instanceof Error ? error.message : String(error);
+    } finally {
+      resolutionBusy = false;
+    }
   }
 
   function toolLabel(check: NativeCheckReview): string {
@@ -296,6 +419,7 @@
     <div class="basic-notice">Run AI review to evaluate these checks. Only high-confidence, evidence-grounded selections are applied automatically; uncertain checks stay pending.</div>
   {/if}
   {#if mutationNotice}<div class="mutation-notice">{mutationNotice}</div>{/if}
+  {#if mutationError}<div class="load-error">{mutationError}</div>{/if}
   {#if preparationMessage}<div class="preparing-notice"><span class="spin" /> {preparationMessage}</div>{/if}
   {#if loading && !preparationMessage && checks.length === 0}
     <div class="loading-placeholder" role="status" aria-label="Loading translation helps">
@@ -311,6 +435,7 @@
 
   {#each checks as check (identity(check))}
     {@const aiReview = aiReviewFor(check)}
+    {@const resolution = resolutionFor(check)}
     <article class="native-check" class:tn={check.tool === "translationNotes"} class:tw={check.tool === "translationWords"} class:invalid={check.invalidated}>
       <div class="check-heading">
         <span class="tool-dot" />
@@ -367,7 +492,6 @@
               {/each}
               <button class="small-btn" on:click={() => (rows = [...rows, { text: "", occurrence: 1, occurrences: 0 }])}>+ Add another selection</button>
             {/if}
-            {#if mutationError}<p class="mutation-error">{mutationError}</p>{/if}
             <div class="editor-actions">
               <button class="save-btn" on:click={() => saveSelection(check)} disabled={mutationBusy}>{mutationBusy ? "Saving…" : "Validate & save"}</button>
               <button class="small-btn" on:click={cancelEditing} disabled={mutationBusy}>Cancel</button>
@@ -384,6 +508,53 @@
             {/if}
           </div>
         {/if}
+      {/if}
+
+      {#if resolutionKey === identity(check)}
+        <div class="resolution-editor">
+          <div class="resolution-title">Issue resolution and Paratext handoff</div>
+          <label>
+            <span>Exact target word or phrase <small>(optional)</small></span>
+            <input bind:value={resolutionSelectedText} placeholder="Text from the current verse" />
+          </label>
+          <label>
+            <span>Issue</span>
+            <textarea bind:value={resolutionIssueSummary} rows="3" placeholder="Describe the translation issue" />
+          </label>
+          <label>
+            <span>Proposed correction <small>(optional)</small></span>
+            <input bind:value={resolutionCorrection} placeholder="Suggested wording or action" />
+          </label>
+          <label>
+            <span>Reviewer note</span>
+            <textarea bind:value={resolutionReviewerNote} rows="3" placeholder="Message for the Paratext reviewer" />
+          </label>
+          <div class="connector-state" class:connected={Boolean(connectorState?.connected)}>{connectorMessage}</div>
+          <p class="resolution-safety">Nothing is sent silently. This explicit action saves an audit record and a Notes 1.1 copy first; unsupported or offline delivery remains retryable.</p>
+          {#if resolutionError}<p class="mutation-error">{resolutionError}</p>{/if}
+          <div class="editor-actions">
+            <button
+              class="save-btn"
+              on:click={() => saveAndQueueResolution(check, aiReview)}
+              disabled={resolutionBusy || !resolutionIssueSummary.trim() || !resolutionReviewerNote.trim()}
+            >{resolutionBusy ? "Saving…" : "Save & hand off"}</button>
+            <button class="small-btn" on:click={cancelResolution} disabled={resolutionBusy}>Cancel</button>
+          </div>
+        </div>
+      {:else}
+        <div class="resolution-actions">
+          <button class="small-btn resolution-btn" on:click={() => startResolution(check, aiReview)}>
+            {resolution ? "Update resolution" : "Resolve / Paratext"}
+          </button>
+          {#if resolution}
+            <span class="handoff-status {resolution.paratext.status}">
+              {resolution.paratext.status === "sent" ? "Sent to Paratext" : resolution.paratext.status === "queued" ? "Paratext queued" : "Resolution saved"}
+            </span>
+            {#if resolution.paratext.status === "queued"}
+              <button class="small-btn" on:click={() => retryResolution(resolution)} disabled={resolutionBusy}>Retry handoff</button>
+            {/if}
+          {/if}
+        </div>
       {/if}
     </article>
   {/each}
@@ -452,5 +623,18 @@
   .match-count.missing { color: var(--danger); }
   .icon-btn { height: 27px; border: 1px solid var(--border); color: var(--text-3); background: var(--surface-2); }
   .mutation-error { color: var(--danger); font-size: 10px; line-height: 1.4; margin: 7px 0 0; }
+  .resolution-editor { margin-top: 9px; border-top: 1px dashed var(--border); padding-top: 9px; display: grid; gap: 7px; }
+  .resolution-title { font-size: 10px; font-weight: 750; color: var(--text); }
+  .resolution-editor label { display: grid; gap: 4px; font-size: 10px; font-weight: 650; color: var(--text-2); }
+  .resolution-editor label small { color: var(--text-3); font-weight: 400; }
+  .resolution-editor input, .resolution-editor textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 5px; padding: 6px 7px; font: inherit; font-size: 10px; color: var(--text); background: var(--surface); resize: vertical; }
+  .connector-state { font-size: 9px; line-height: 1.4; padding: 6px 7px; border-radius: 5px; color: var(--warning); background: var(--warning-bg); overflow-wrap: anywhere; }
+  .connector-state.connected { color: var(--success); background: var(--success-bg); }
+  .resolution-safety { margin: 0; font-size: 9px; line-height: 1.4; color: var(--text-3); }
+  .resolution-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  .small-btn.resolution-btn { color: var(--accent); border-color: var(--accent); }
+  .handoff-status { font-size: 9px; padding: 3px 6px; border-radius: 999px; color: var(--text-2); background: var(--surface-2); }
+  .handoff-status.queued { color: var(--warning); background: var(--warning-bg); }
+  .handoff-status.sent { color: var(--success); background: var(--success-bg); }
   .none { font-size: 11px; color: var(--text-3); }
 </style>

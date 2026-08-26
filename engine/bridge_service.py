@@ -24,6 +24,7 @@ import shutil
 import threading
 from collections import Counter
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -230,6 +231,11 @@ class Methods:
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
+
+    ISSUE_RESOLUTION_LIST = "issueResolution.list"
+    ISSUE_RESOLUTION_SAVE = "issueResolution.save"
+    ISSUE_RESOLUTION_QUEUE_PARATEXT = "issueResolution.queueParatext"
+    ISSUE_RESOLUTION_RETRY_PARATEXT = "issueResolution.retryParatext"
 
     LOGOS_GET_STATE = "logos.getState"
     LOGOS_SET_REFERENCE = "logos.setReference"
@@ -1304,6 +1310,162 @@ class BridgeEngine:
     def paratext_set_reference(self, reference: str, origin_id: str = "") -> dict[str, Any]:
         return ParatextConnectorClient().set_reference(reference, origin_id)
 
+    # -- issue resolution + explicit Paratext handoff --------------------
+
+    def list_issue_resolutions(self, chapter: str, verse: str) -> dict[str, Any]:
+        self._require_project()
+        items = self.project.list_issue_resolutions(chapter, verse)
+        return {
+            "chapter": str(chapter), "verse": str(verse), "items": items,
+            "queued": sum(1 for item in items if (item.get("paratext") or {}).get("status") == "queued"),
+            "sent": sum(1 for item in items if (item.get("paratext") or {}).get("status") == "sent"),
+        }
+
+    def save_issue_resolution(
+        self, chapter: str, verse: str, tool: str, group_id: str, check_id: str,
+        expected_fingerprint: str, selected_text: str = "", issue_summary: str = "",
+        reviewer_note: str = "", proposed_correction: str = "",
+        evidence: Optional[list[Any]] = None,
+    ) -> dict[str, Any]:
+        self._require_project()
+        with self._checker_lock:
+            return self.project.save_issue_resolution(
+                chapter, verse, tool, group_id, check_id, expected_fingerprint,
+                selected_text=selected_text, issue_summary=issue_summary,
+                reviewer_note=reviewer_note, proposed_correction=proposed_correction,
+                evidence=evidence or [],
+                username=self.settings.reviewer_name or "Bridge Reviewer",
+            )
+
+    @staticmethod
+    def _issue_handoff_comment(record: dict[str, Any]) -> str:
+        check = record.get("check") if isinstance(record.get("check"), dict) else {}
+        tool = "Translation Note" if check.get("tool") == "translationNotes" else "Translation Word"
+        parts = [
+            f"Bridge {tool} review for {record.get('reference', '')}",
+            f"Issue: {record.get('issueSummary', '')}",
+        ]
+        correction = str(record.get("proposedCorrection") or "").strip()
+        if correction:
+            parts.append(f"Proposed correction: {correction}")
+        evidence = list(record.get("evidence") or [])
+        if evidence:
+            labels = []
+            for item in evidence[:10]:
+                if isinstance(item, dict):
+                    labels.append(str(item.get("title") or item.get("identifier") or item.get("kind") or "Evidence"))
+                else:
+                    labels.append(str(item))
+            parts.append("Evidence: " + "; ".join(x for x in labels if x))
+        parts.append(f"Reviewer note: {record.get('reviewerNote', '')}")
+        return "\n\n".join(parts)
+
+    def _save_handoff_item(
+        self, chapter: str, verse: str, resolution_id: str,
+        item: dict[str, Any], event: str,
+    ) -> dict[str, Any]:
+        state = self.project.load_paratext_note_sync_state()
+        items = dict(state.get("items") or {})
+        items[str(item["messageId"])] = item
+        state["items"] = items
+        self.project.save_paratext_note_sync_state(state)
+        return self.project.update_issue_resolution_paratext(
+            chapter, verse, resolution_id,
+            {
+                "status": item["status"], "messageId": item["messageId"],
+                "attempts": item["attempts"], "lastError": item.get("lastError", ""),
+                "sentAt": item.get("sentAt", ""), "remoteId": item.get("remoteId", ""),
+                "contentSignature": item["contentSignature"],
+                "expectedProjectId": item.get("expectedProjectId", ""),
+            },
+            event,
+        )
+
+    def _attempt_issue_handoff(
+        self, chapter: str, verse: str, resolution_id: str, item: dict[str, Any],
+    ) -> dict[str, Any]:
+        item = dict(item)
+        item["attempts"] = int(item.get("attempts") or 0) + 1
+        expected_project_id = str(item.get("expectedProjectId") or "").strip()
+        try:
+            state = ParatextConnectorClient().get_state()
+            if "create_note" not in state.capabilities:
+                raise ParatextConnectorError(
+                    "The connected Paratext companion does not support live note creation yet; the Notes 1.1 handoff remains safely queued."
+                )
+            if not expected_project_id:
+                raise ParatextConnectorError(
+                    "Confirm the destination Paratext project before sending this note."
+                )
+            if state.project_id.casefold() != expected_project_id.casefold():
+                raise ParatextConnectorError(
+                    "The active Paratext project does not match the project confirmed for this handoff."
+                )
+            payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+            response = ParatextConnectorClient().create_note(
+                str(payload.get("reference") or ""), str(payload.get("selectedText") or ""),
+                str(payload.get("comment") or ""), project_id=expected_project_id,
+                message_id=str(item.get("messageId") or ""),
+            )
+            item["status"] = "sent"
+            item["lastError"] = ""
+            item["sentAt"] = datetime.now(timezone.utc).isoformat()
+            item["remoteId"] = str(response.get("note_id") or response.get("thread_id") or "")
+            record = self._save_handoff_item(chapter, verse, resolution_id, item, "paratext_sent")
+        except ParatextConnectorError as exc:
+            item["status"] = "queued"
+            item["lastError"] = str(exc)
+            record = self._save_handoff_item(chapter, verse, resolution_id, item, "paratext_queued")
+        return {"record": record, "handoff": item}
+
+    def queue_issue_resolution_for_paratext(
+        self, chapter: str, verse: str, resolution_id: str, expected_project_id: str = "",
+    ) -> dict[str, Any]:
+        self._require_project()
+        record = self.project.load_issue_resolution(chapter, verse, resolution_id)
+        comment = self._issue_handoff_comment(record)
+        signature = str((record.get("paratext") or {}).get("contentSignature") or "")
+        message_id = f"bridge-{resolution_id}-{signature[:12]}"
+        sync = self.project.load_paratext_note_sync_state()
+        existing = (sync.get("items") or {}).get(message_id)
+        if isinstance(existing, dict) and existing.get("status") == "sent":
+            return {"record": record, "handoff": existing}
+        note_path = self.project.record_paratext_note(
+            chapter, verse, comment,
+            username=self.settings.reviewer_name or "Bridge Reviewer",
+            selected_text=str(record.get("selectedText") or ""),
+            metadata={"resolutionId": resolution_id, "paratextThreadType": "BridgeTranslationIssue"},
+            thread_id=message_id,
+        )
+        item = dict(existing) if isinstance(existing, dict) else {
+            "messageId": message_id, "resolutionId": resolution_id,
+            "createdAt": datetime.now(timezone.utc).isoformat(), "attempts": 0,
+        }
+        item.update({
+            "status": "queued", "contentSignature": signature,
+            "expectedProjectId": str(expected_project_id or item.get("expectedProjectId") or ""),
+            "notePath": str(note_path),
+            "payload": {
+                "reference": record["reference"], "selectedText": record.get("selectedText", ""),
+                "comment": comment,
+            },
+        })
+        self._save_handoff_item(chapter, verse, resolution_id, item, "paratext_queued")
+        return self._attempt_issue_handoff(chapter, verse, resolution_id, item)
+
+    def retry_issue_resolution_paratext(
+        self, chapter: str, verse: str, resolution_id: str,
+    ) -> dict[str, Any]:
+        self._require_project()
+        record = self.project.load_issue_resolution(chapter, verse, resolution_id)
+        message_id = str((record.get("paratext") or {}).get("messageId") or "")
+        item = (self.project.load_paratext_note_sync_state().get("items") or {}).get(message_id)
+        if not message_id or not isinstance(item, dict):
+            raise ProjectError('This issue has not been queued for Paratext yet.')
+        if item.get("status") == "sent":
+            return {"record": record, "handoff": item}
+        return self._attempt_issue_handoff(chapter, verse, resolution_id, item)
+
     def _logos_client_instance(self) -> LogosConnectorClient:
         if self._logos_client is None:
             self._logos_client = LogosConnectorClient()
@@ -2324,6 +2486,25 @@ class BridgeEngine:
                 return EngineResponse.ok(
                     request.id, result=self.list_ai_reviews_for_chapter(p["chapter"]),
                 )
+            if m == Methods.ISSUE_RESOLUTION_LIST:
+                return EngineResponse.ok(
+                    request.id, result=self.list_issue_resolutions(p["chapter"], p["verse"]),
+                )
+            if m == Methods.ISSUE_RESOLUTION_SAVE:
+                return EngineResponse.ok(request.id, result=self.save_issue_resolution(
+                    p["chapter"], p["verse"], p["tool"], p["groupId"], p["checkId"],
+                    p.get("expectedFingerprint", ""), p.get("selectedText", ""),
+                    p.get("issueSummary", ""), p.get("reviewerNote", ""),
+                    p.get("proposedCorrection", ""), p.get("evidence", []),
+                ))
+            if m == Methods.ISSUE_RESOLUTION_QUEUE_PARATEXT:
+                return EngineResponse.ok(request.id, result=self.queue_issue_resolution_for_paratext(
+                    p["chapter"], p["verse"], p["resolutionId"], p.get("expectedProjectId", ""),
+                ))
+            if m == Methods.ISSUE_RESOLUTION_RETRY_PARATEXT:
+                return EngineResponse.ok(request.id, result=self.retry_issue_resolution_paratext(
+                    p["chapter"], p["verse"], p["resolutionId"],
+                ))
             if m == Methods.PARATEXT_GET_STATE:
                 return EngineResponse.ok(request.id, result=self.paratext_get_state())
             if m == Methods.PARATEXT_SET_REFERENCE:

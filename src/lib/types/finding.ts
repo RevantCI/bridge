@@ -208,6 +208,10 @@ export interface DesktopConnectorState {
   connected: boolean;
   detected?: boolean;
   reference?: string;
+  project_id?: string;
+  project_name?: string;
+  user?: string;
+  capabilities?: string[];
   [key: string]: unknown;
 }
 
@@ -414,6 +418,67 @@ export interface CheckSelectionMutation {
   committed: true;
   review: NativeCheckReview;
   files: Record<string, string>;
+}
+
+export type ParatextHandoffStatus = "not_queued" | "queued" | "sent";
+
+export interface IssueResolutionRecord {
+  schemaVersion: 1;
+  resolutionId: string;
+  bookId: string;
+  chapter: string;
+  verse: string;
+  reference: string;
+  check: {
+    tool: NativeCheckTool;
+    groupId: string;
+    checkId: string;
+    sourceQuote: string;
+    sourceOccurrence: number | null;
+    stateFingerprint: string;
+  };
+  selectedText: string;
+  issueSummary: string;
+  reviewerNote: string;
+  proposedCorrection: string;
+  evidence: Array<Record<string, unknown> | string>;
+  status: "open" | "resolved" | "reflagged";
+  recheck: { status: string; [key: string]: unknown };
+  paratext: {
+    status: ParatextHandoffStatus;
+    messageId: string;
+    attempts: number;
+    lastError: string;
+    sentAt: string;
+    remoteId: string;
+    contentSignature: string;
+    expectedProjectId?: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+  history: Array<Record<string, unknown>>;
+}
+
+export interface IssueResolutionListResponse {
+  chapter: string;
+  verse: string;
+  items: IssueResolutionRecord[];
+  queued: number;
+  sent: number;
+}
+
+export interface IssueResolutionHandoffResult {
+  record: IssueResolutionRecord;
+  handoff: {
+    messageId: string;
+    resolutionId: string;
+    status: "queued" | "sent";
+    attempts: number;
+    lastError: string;
+    sentAt?: string;
+    remoteId?: string;
+    expectedProjectId?: string;
+  };
 }
 
 export type CheckJobState =

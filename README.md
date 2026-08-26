@@ -36,15 +36,51 @@ export loop works end to end. See [Current status](#current-status) below.
 cd engine
 py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pip install -c constraints-py312-windows.txt -e ".[dev,wildebeest]"
-.venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v   # expect 224 passed
+.venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v   # expect 253 passed
 
 # 2. Full desktop app (needs Rust + MSVC build tools, see Developer Setup)
 cd ..
 npm install
+npm run test:dev-start
 npm run test:ui-state
 .\scripts\build-sidecars.ps1
 npm run tauri dev
 ```
+
+## Run locally on Windows
+
+If this checkout has already been set up, open PowerShell in the repository
+root and run:
+
+```powershell
+npm run tauri dev
+```
+
+Tauri first builds the frontend and serves it from a local Vite preview,
+compiles the Rust development shell when needed, launches the bundled Python
+sidecars, and opens the Bridge desktop window. This deterministic preview path
+avoids a Windows WebView/Vite on-demand Svelte compiler runaway that otherwise
+produces a white window. Keep the terminal open while using Bridge; press
+`Ctrl+C` in that terminal to stop the development app.
+
+For a new checkout, complete the **Quick start** above first. Re-run
+`.\scripts\build-sidecars.ps1` whenever Python engine code or bundled engine
+resources change. Frontend-only Svelte/CSS changes do not require rebuilding
+the sidecars, but they do require restarting `npm run tauri dev` so the local
+frontend bundle is rebuilt.
+
+If local startup fails, verify these files exist before retrying:
+
+```text
+engine/.venv/Scripts/python.exe
+src-tauri/binaries/bridge-engine-x86_64-pc-windows-msvc.exe
+src-tauri/binaries/bridge-usfm-checker-x86_64-pc-windows-msvc.exe
+```
+
+If the Tauri window opens blank, stop the development process and run
+`npm run test:dev-start`. This smoke test performs the same production-style
+frontend compile used by the local desktop launcher, starts an isolated preview
+server, and verifies that both the index and application bundle are available.
 
 Full prerequisites, platform notes, and troubleshooting:
 **[docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md)**.
@@ -63,7 +99,20 @@ docs/             User manual, developer setup, architecture, roadmap, import/al
 ## Current status
 
 The import → check → review → manual-align → export loop is implemented and
-verified against real translationCore projects. See:
+verified against real translationCore projects. Beta 11 installed acceptance
+confirmed upgrade/project preservation, reference-scoped AI review state,
+persisted tN/tW results, protected human/imported selections, stale-review
+reruns, chapter/book processing, alignment, and export. A small amount of
+Translation Helps navigation jitter remains as non-blocking UX follow-up work.
+
+Milestone 3B.4 is now in progress. Its first vertical slice lets a reviewer turn
+a tN/tW finding into a persisted issue-resolution record, attach an exact target
+word or phrase, correction, evidence and reviewer note, and explicitly queue a
+Paratext Notes handoff. The queue is crash-safe and idempotent. The current
+companion plugin does not yet implement live `create_note`, so Bridge truthfully
+shows such handoffs as queued until a capable connector for the confirmed
+Paratext project is available.
+See:
 
 - [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) for what's usable today, in
   plain language.

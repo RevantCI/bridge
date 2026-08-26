@@ -125,7 +125,7 @@
           <div class="field-label">Reviewer experience</div>
           <label class="mode-option" class:selected={mode === "basic"}>
             <input type="radio" bind:group={mode} value="basic" />
-            <span><b>Basic</b><small>Streamlined, read-only tN/tW review. Automatic AI review is added in Milestone 3B.3.</small></span>
+            <span><b>Basic</b><small>Streamlined tN/tW review with conservative automatic AI selections and explicit issue handoff.</small></span>
           </label>
           <label class="mode-option" class:selected={mode === "advanced"}>
             <input type="radio" bind:group={mode} value="advanced" />

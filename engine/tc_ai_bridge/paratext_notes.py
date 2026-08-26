@@ -150,6 +150,11 @@ def append_paratext_note(
     selected, start, before, after = _selection_context(snapshot, selected_text)
     tid = str(thread_id or uuid.uuid4().hex)
     root = load_or_create_notes_11(p)
+    # A retry may occur after the Notes XML was committed but before the
+    # companion outbox state was saved. Reusing the deterministic message ID
+    # must not create a second Paratext thread.
+    if any(str(thread.attrib.get('id') or '') == tid for thread in root.findall('thread')):
+        return p, tid
     thread_attrs = {'id': tid}
     if note_type:
         thread_attrs['type'] = str(note_type)

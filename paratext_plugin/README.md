@@ -76,6 +76,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -Deploy    # build + deploy (
   suite). If it proves out against a real Paratext instance, a scripted
   pipe-client smoke test (analogous to `scripts/smoke_sidecars.py`) would be
   worth adding.
-- The Python side (`bridge_service.py`) still has zero protocol methods
-  calling `ParatextConnectorClient` - this plugin only unblocks that work,
-  it doesn't complete it.
+- The Python side now persists issue-resolution records and calls
+  `ParatextConnectorClient` only when the connector advertises `create_note`
+  and its active project matches the explicitly confirmed project ID. With
+  this companion plugin, handoffs remain safely queued because `create_note`
+  is intentionally unsupported; they are never reported as sent.

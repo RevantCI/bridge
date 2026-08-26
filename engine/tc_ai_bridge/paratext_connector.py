@@ -130,6 +130,7 @@ class ParatextConnectorClient:
         project_id: str = '',
         before_context: str = '',
         after_context: str = '',
+        message_id: str = '',
     ) -> dict[str, Any]:
         return self._exchange('create_note', {
             'reference': reference,
@@ -139,5 +140,6 @@ class ParatextConnectorClient:
             'project_id': project_id,
             'before_context': before_context,
             'after_context': after_context,
+            'message_id': message_id,
             'external_author': 'AI Suggestion',
         })

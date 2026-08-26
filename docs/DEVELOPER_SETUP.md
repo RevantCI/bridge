@@ -42,18 +42,20 @@ Sanity-check the stdio protocol directly:
 echo '{"id":"1","method":"ping","params":{}}' | python main.py
 ```
 
-## 2. Frontend only (browser dev server, no Tauri)
+## 2. Frontend only (local preview, no Tauri)
 
 ```powershell
 npm install
-npm run build     # should be 0 errors
-npm run dev        # localhost:1420
+npm run build          # should be 0 errors
+npm run dev            # rebuild, then preview on localhost:1420
 ```
 
 This starts only the frontend UI. Without Tauri there's no sidecar process,
-so `bridge.ping()` and other engine-backed calls will fail — expected. Use
-this mode for pure frontend/UI work; use section 3 for anything that needs
-the real engine.
+so `bridge.ping()` and other engine-backed calls will fail — expected. The
+preview intentionally uses a production-style compile because on-demand Svelte
+development transforms can run away under Windows WebView2 and leave the app
+blank. Restart the command after frontend edits. Use section 3 for anything
+that needs the real engine.
 
 ## 3. Full desktop app
 
@@ -68,8 +70,9 @@ npm install
 npm run tauri dev
 ```
 
-`npm run tauri dev` starts the frontend dev server, compiles the Rust shell,
-launches the sidecar, and opens the Bridge desktop window.
+`npm run tauri dev` builds and starts the deterministic frontend preview,
+compiles the Rust shell, launches the sidecar, and opens the Bridge desktop
+window. Restart it after Svelte/TypeScript/CSS edits.
 
 `build-sidecars.ps1` produces **two** target-suffixed executables — both
 required:

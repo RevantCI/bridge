@@ -10,7 +10,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 224 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes Milestone 3B.3 structured/background AI review, resumable AI batches and persisted chapter hydration, first-open live-review responsiveness, Milestone 3A resource/import, AI provider-compatibility regressions, project management, collection grouping/deletion, and isolated Paratext tests |
+| A01 | Backend | Complete Python suite | Source | PASS — 253 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes Milestone 3B.3 structured/background AI review, resumable AI batches and persisted chapter hydration, first-open live-review responsiveness, Milestone 3A resource/import, AI provider-compatibility regressions, project management, collection grouping/deletion, and Milestone 3B.4 issue-resolution/Paratext handoff tests |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 2 sidecar-timeout unit tests passed, including the Beta 7 interactive-timeout guard |
@@ -42,6 +42,8 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A30 | First-open review responsiveness | Hold the translation-help preparation lock, then issue the desktop request order `verse.runChecks(greekroom)` → `checks.status` → `check.listForVerse` | Source + Frozen | PASS — deterministic source regression failed at 2.0s before the fix and now stays below 0.25s; frozen Beta 11 smoke also completes the live check, list and status sequence within the five-second interactive bound |
 | A31 | Edited-verse AI lifecycle | Current AI review → Scripture edit → stale/no cached evaluation → verse AI rerun → current | Source + Frontend | PASS — backend lifecycle regression passes; UI compiles cleanly with an explicit stale warning and one-click **Run AI review again** action |
 | A32 | AI review navigation state | Switch verse, chapter, and project after verse/chapter/book AI jobs; distinguish active background work from reference-specific progress, completion, and errors | Frontend | PASS — 4 focused scope regressions cover exact verse, chapter, project and active-state behavior; Svelte diagnostics are clean and Translation Helps keeps a stable loading surface |
+| A33 | Local development startup | Compile the desktop frontend, start an isolated local preview, and request its index and application bundle | Source + Desktop | PASS — `npm run test:dev-start` verifies the same deterministic build-and-preview path used by `npm run tauri dev`; live WebView DOM inspection confirms the app mount is populated instead of blank |
+| A34 | Issue resolution and Paratext handoff | Persist a resolution, reject target text outside the verse, queue/retry offline without duplicate XML threads, send once only for a matching confirmed live project, and refuse a wrong active project | Source | PASS — 4 focused Milestone 3B.4 regressions; combined connector/resolution suite passes 8 tests |
 
 ## Import workflows
 
@@ -144,10 +146,15 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | M11 | Existing imported/human selection is never overwritten by Basic AI review | NOT RUN |
 | M12 | Edit a reviewed verse; confirm the explicit stale warning appears, use **Run AI review again**, and confirm it clears after success | NOT RUN |
 | M13 | Open a newly imported collection/book for the first time; translation helps show **Preparing** and no `checks.status`/`check.listForVerse` timeout appears | NOT RUN |
+| M14 | Open a tN and a tW finding, choose **Resolve / Paratext**, enter an issue and reviewer note, and save | NOT RUN |
+| M15 | Enter target text that is not an exact substring of the current verse | NOT RUN — save must be rejected without creating a resolution |
+| M16 | Save a handoff while Paratext is closed or the companion lacks `create_note` | NOT RUN — status must say queued, never sent; restart Bridge and confirm it persists |
+| M17 | Retry the same queued handoff repeatedly | NOT RUN — one resolution, one outbox message and one Paratext Notes XML thread only |
+| M18 | Connect Paratext to a different active project than the confirmed project ID | NOT RUN — Bridge must refuse to send and identify the project mismatch |
 
 ## Automated evidence
 
-- Python: 224 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 253 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book

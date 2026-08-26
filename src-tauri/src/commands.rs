@@ -78,7 +78,9 @@ pub async fn project_list(sidecar: State<'_, EngineSidecar>) -> Result<Value, St
 }
 
 #[tauri::command]
-pub async fn project_list_book_progress(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+pub async fn project_list_book_progress(
+    sidecar: State<'_, EngineSidecar>,
+) -> Result<Value, String> {
     sidecar
         .send_request("project.listBookProgress", serde_json::json!({}))
         .await
@@ -356,6 +358,86 @@ pub async fn check_clear_selection(
                 "groupId": group_id, "checkId": check_id,
                 "provenance": provenance, "expectedFingerprint": expected_fingerprint,
                 "metadata": metadata.unwrap_or_else(|| serde_json::json!({})),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn issue_resolution_list(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "issueResolution.list",
+            serde_json::json!({ "chapter": chapter, "verse": verse }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn issue_resolution_save(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    tool: String,
+    group_id: String,
+    check_id: String,
+    expected_fingerprint: String,
+    selected_text: String,
+    issue_summary: String,
+    reviewer_note: String,
+    proposed_correction: String,
+    evidence: Value,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "issueResolution.save",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "tool": tool,
+                "groupId": group_id, "checkId": check_id,
+                "expectedFingerprint": expected_fingerprint,
+                "selectedText": selected_text, "issueSummary": issue_summary,
+                "reviewerNote": reviewer_note, "proposedCorrection": proposed_correction,
+                "evidence": evidence,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn issue_resolution_queue_paratext(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    resolution_id: String,
+    expected_project_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "issueResolution.queueParatext",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "resolutionId": resolution_id,
+                "expectedProjectId": expected_project_id.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn issue_resolution_retry_paratext(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    resolution_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "issueResolution.retryParatext",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse, "resolutionId": resolution_id,
             }),
         )
         .await

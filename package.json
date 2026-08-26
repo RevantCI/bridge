@@ -4,9 +4,10 @@
   "version": "0.8.0-beta.11",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev_desktop.mjs",
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test:dev-start": "node scripts/smoke_vite_dev.mjs",
     "test:ui-state": "node --test scripts/tests/aiJobScope.test.ts",
     "vendor:original-language": "node scripts/vendor-original-language-resources.mjs",
     "preview": "vite preview",
