@@ -10,17 +10,17 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 223 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes Milestone 3B.3 structured/background AI review, resumable AI batches and persisted chapter hydration, Milestone 3A resource/import, Beta 7 non-blocking review loading, AI provider-compatibility regressions, project management, collection grouping/deletion, and isolated Paratext tests |
+| A01 | Backend | Complete Python suite | Source | PASS — 224 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes Milestone 3B.3 structured/background AI review, resumable AI batches and persisted chapter hydration, first-open live-review responsiveness, Milestone 3A resource/import, AI provider-compatibility regressions, project management, collection grouping/deletion, and isolated Paratext tests |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 2 sidecar-timeout unit tests passed, including the Beta 7 interactive-timeout guard |
-| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 9; the `dist`, Tauri staging, and release-staged copies are byte-identical |
+| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 10; the `dist`, Tauri staging, and release-staged copies are byte-identical |
 | A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | PASS — the real standalone checker found both conditions in the packaged Odia fixture |
 | A07 | Protocol | Sidecar remains responsive during a background job | Frozen | PASS — status polling completed the background job while lightweight requests remained responsive |
 | A08 | Security | Settings never serialize plaintext secrets | Source | PASS — regression suite |
 | A09 | Alignment | Manual protocol, conflicts, history, restart and USFM round trip | Source | PASS |
 | A10 | Versification | Detect/orgRef/backVersificationMap against real schema data | Source | PASS — includes real Psalm 3 descriptive-title shift |
-| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 9 release-staged worker |
+| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 10 release-staged worker |
 | A12 | Versification | Edge cases: merges, splits, unknown books, verse bridges/segments | Source | PASS — 11 tests against real vendored data |
 | A13 | Versification | Concurrent callers: correctness and a GIL-contention regression guard | Source | PASS — a fresh-process test verifies concurrent first-load correctness against real schema data; a deterministic instrumented test verifies the expensive matcher is serialized (`max_active == 1`) without using a machine-dependent deadline |
 | A14 | Names/Transliteration | Whole-book spelling-consistency check against real uroman + vendored Smart Edit Distance | Source | PASS — 15 tests; real Muhammad/Mohamed and Titus/Tituss cases, a real Tamil vowel-sign inconsistency through full verse sentences, a false-positive exclusion (church/churches), and a bigram-blocking performance regression guard |
@@ -39,6 +39,8 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A27 | Original-language resources | Exact pinned UHB v3.0.0/UGNT v0.34 packs, all 66 books, metadata and artifact hashes, golden Hebrew/Greek tokens, Qere/Ketiv, occurrence and verse-bridge behavior | Source + Frozen | PASS — 42 focused Milestone 3A tests and the 211-test full suite, including anchored provenance-tampering rejection, 39 UHB + 27 UGNT pack loads, and exact totals of 31,103 verses/443,131 tokens; rebuilt frozen worker imported raw Titus and returned the pinned UGNT provenance plus all 17 Titus 1:1 source tokens |
 | A28 | AI provider compatibility | Model/provider explicitly rejects optional `reasoning.effort` | Source | PASS — retries exactly once without `reasoning`, records `provider-default`, and does not retry unrelated or invalid-value HTTP 400 responses |
 | A29 | Automatic tN/tW AI review | Strict structured contract, exact target-token occurrence resolution, evidence gate, Advanced proposal-only behavior, Basic safe application, persisted current evaluation, cancellation/retry, compact whole-book status, and human-selection protection | Source | PASS — 7 focused tests, including fake-transport runs against real materialized Titus tN/tW/TA data; no live API call |
+| A30 | First-open review responsiveness | Hold the translation-help preparation lock, then issue the desktop request order `verse.runChecks(greekroom)` → `checks.status` → `check.listForVerse` | Source + Frozen | PASS — deterministic source regression failed at 2.0s before the fix and now stays below 0.25s; frozen Beta 10 smoke also completes the live check, list and status sequence within the five-second interactive bound |
+| A31 | Edited-verse AI lifecycle | Current AI review → Scripture edit → stale/no cached evaluation → verse AI rerun → current | Source + Frontend | PASS — backend lifecycle regression passes; UI compiles cleanly with an explicit stale warning and one-click **Run AI review again** action |
 
 ## Import workflows
 
@@ -139,11 +141,12 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | M09 | Run chapter and whole-book AI review while navigating; Scripture remains responsive and results attach to the correct verse | NOT RUN |
 | M10 | Cancel during a model request, then Retry; the cancelled result is marked incomplete and Retry resumes only failed/unfinished verses | NOT RUN |
 | M11 | Existing imported/human selection is never overwritten by Basic AI review | NOT RUN |
-| M12 | Edit a reviewed verse and confirm its cached AI result becomes stale/review-required until rerun | NOT RUN |
+| M12 | Edit a reviewed verse; confirm the explicit stale warning appears, use **Run AI review again**, and confirm it clears after success | NOT RUN |
+| M13 | Open a newly imported collection/book for the first time; translation helps show **Preparing** and no `checks.status`/`check.listForVerse` timeout appears | NOT RUN |
 
 ## Automated evidence
 
-- Python: 223 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 224 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book
@@ -161,12 +164,33 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 - Frozen workers: pinned UGNT provenance/Titus tokens, real Wildebeest, Uroman, and Smart Edit Distance load; versification,
   a planted spelling inconsistency, corpus statistics, AI-proposal/explain packaging,
   connector error paths, Project Registry/exact-duplicate reason/count protocol, manual many-to-many
-  alignment/export/undo, and USFM duplicate/missing-verse checks pass. Lightweight
-  status calls remain responsive during the job.
-- Windows: the Beta 9 release executable and NSIS installer were produced with both
+  alignment/export/undo, and USFM duplicate/missing-verse checks pass. A live
+  Greek-Room-only review, translation-help list and status calls remain responsive
+  in the desktop's first-open request order during the job.
+- Windows: the Beta 10 release executable and NSIS installer were produced with both
   verified worker binaries. The installer is
-  `Bridge_0.8.0-beta.9_x64-setup.exe` (SHA-256
-  `9FE8A3FAC79A8462BABCAED8C99A9757515DCCD765D154FF55085E1AB1F4E3F8`).
+  `Bridge_0.8.0-beta.10_x64-setup.exe` (SHA-256
+  `EFFFD91FBB43EFF4D2C7274F3759CFBDBE2DACE2B22B23E71E7E468702CC0A63`).
+
+## Beta 10 artifact provenance — 2026-08-26
+
+- Release source: Beta 10 first-open responsiveness and stale-review UX
+  worktree based on commit `6656724`; release commit pending.
+- Desktop executable: 13,063,168 bytes, ProductVersion `0.8.0-beta.10`, SHA-256
+  `8CE4B94F2B99C31EC55896EDCC70550DCFAEF78C6A545F57FC4D2BF54C006D7C`.
+- `bridge-engine.exe`: 26,449,028 bytes, SHA-256
+  `DF0240A17DF2E05CBA378EA450C7B8016C7F2FA72CF341601F397D2ED33DCEE6`.
+- `bridge-usfm-checker.exe`: 7,775,608 bytes, SHA-256
+  `A44638F0A447E72015183DE43BBF9FB1F496C21BC05FA959243B01006CEED113`.
+- Installer: 36,282,719 bytes, ProductVersion `0.8.0-beta.10`, SHA-256
+  `EFFFD91FBB43EFF4D2C7274F3759CFBDBE2DACE2B22B23E71E7E468702CC0A63`.
+- Source gates: 224 Python tests, 2 Rust tests, clean Svelte diagnostics, and
+  production frontend/NSIS builds passed.
+- Frozen smoke: passed real Wildebeest/Uroman, pinned UGNT, versification,
+  names, alignment statistics/proposals, AI packaging imports, connectors,
+  project registry/duplicates, first-open live-review responsiveness,
+  alignment/export/undo, and USFM checks.
+- Signing: `NotSigned` (the expected Windows warning remains).
 
 ## Beta 9 artifact provenance — 2026-08-26
 

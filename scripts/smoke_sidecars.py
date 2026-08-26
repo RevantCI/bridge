@@ -154,7 +154,7 @@ def main() -> int:
             info = request("info", "engine.info", {})
             if not info.get("success"):
                 raise SystemExit(f"Request info failed: {info}")
-            if info.get("result", {}).get("bridgeVersion") != "0.8.0-beta.9":
+            if info.get("result", {}).get("bridgeVersion") != "0.8.0-beta.10":
                 raise SystemExit(f"Frozen engine version is stale or inconsistent: {info}")
             wildebeest = (
                 info.get("result", {})
@@ -417,6 +417,24 @@ def main() -> int:
                 raise SystemExit(f"Request start failed: {started}")
             job_id = started["result"]["jobId"]
 
+            # Reproduce the desktop's first-open request order. ReviewPanel sends
+            # a Greek-Room-only live check immediately after checks.start; if that
+            # request waits for the tN/tW/USFM/names preparation lock, the
+            # synchronous stdio loop cannot even read status/list requests behind
+            # it. The deterministic source test holds that lock explicitly; this
+            # frozen gate proves the release binary contains the non-blocking path.
+            live_started = time.monotonic()
+            live_review = request(
+                "live-greek-room-while-checking", "verse.runChecks",
+                {"chapter": "1", "verse": "1", "checks": ["greekroom"]}, timeout=5,
+            )
+            live_elapsed = time.monotonic() - live_started
+            if not live_review.get("success") or live_elapsed >= 5:
+                raise SystemExit(
+                    "Frozen live Greek Room request blocked the dispatcher during preparation: "
+                    f"elapsed={live_elapsed:.2f}s response={live_review}"
+                )
+
             review_started = time.monotonic()
             review = request(
                 "review-while-checking", "check.listForVerse",
@@ -479,7 +497,8 @@ def main() -> int:
         "pinned UGNT source tokens, versification, names/transliteration, "
         "alignment statistics/proposal packaging, "
         "AI explain packaging, desktop connectors, project registry/duplicate import, "
-        "alignment/export/undo, and duplicate/missing-verse checks succeeded."
+        "first-open live-review responsiveness, alignment/export/undo, and "
+        "duplicate/missing-verse checks succeeded."
     )
     return 0
 

@@ -1,6 +1,6 @@
 # Manual word alignment
 
-Bridge v0.8.0-beta.9 provides a human-controlled, translationCore-compatible
+Bridge v0.8.0-beta.10 provides a human-controlled, translationCore-compatible
 word-alignment editor. For raw Scripture imports it initializes source slots
 from pinned, bundled UHB/UGNT token packs; it never guesses tokens and never
 changes Scripture text as a side effect of alignment work.

@@ -408,7 +408,14 @@
         {#if aiExplainError}<p class="ai-control-error">{aiExplainError}</p>{/if}
       </div>
 
-      <TranslationHelpsReview bind:this={translationHelpsReview} chapter={$currentChapter} verse={$selectedVerse} onStateChanged={nativeCheckStateChanged} />
+      <TranslationHelpsReview
+        bind:this={translationHelpsReview}
+        chapter={$currentChapter}
+        verse={$selectedVerse}
+        onStateChanged={nativeCheckStateChanged}
+        onRerunAIReview={() => void startAIReview("verse")}
+        aiReviewBusy={$checkingProgress.running || Boolean(aiJob && ["queued", "running", "cancelling"].includes(aiJob.state))}
+      />
 
       <div class="section">
         <div class="section-title">

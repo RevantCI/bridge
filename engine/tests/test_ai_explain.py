@@ -232,6 +232,24 @@ def test_advanced_background_review_keeps_proposals_uncommitted(imported_titus_p
     assert resumed_snapshot["totalVerses"] == 0
     assert resumed_snapshot["skippedCurrentVerses"] == 1
 
+    original_text = engine.project.target_verse_text("1", "1")
+    edited = call(engine, "verse.edit", {
+        "chapter": "1", "verse": "1", "newText": f"{original_text} Updated.",
+    })
+    assert edited["success"] is True
+    stale = call(engine, "check.listForVerse", {"chapter": "1", "verse": "1"})["result"]
+    assert stale["aiReviewState"] == "stale"
+    assert stale["aiReviews"] == []
+    assert all(item["evaluationStatus"] == "needs_review" for item in stale["checks"])
+
+    rerun = call(engine, "ai.review.start", {
+        "scope": "verse", "chapter": "1", "verse": "1", "mode": "advanced",
+    })
+    rerun_snapshot = _wait_for_ai_job(engine, rerun["result"]["jobId"])
+    assert rerun_snapshot["state"] == "succeeded"
+    current_again = call(engine, "check.listForVerse", {"chapter": "1", "verse": "1"})["result"]
+    assert current_again["aiReviewState"] == "current"
+
 
 def test_basic_background_review_applies_only_grounded_safe_selections(imported_titus_project, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

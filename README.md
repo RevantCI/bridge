@@ -13,7 +13,7 @@ desktop app (Tauri + Svelte), while keeping the same QA engines
 ([Greek Room](https://github.com/BibleNLP/greek-room)) and translation
 business logic underneath.
 
-**Status:** `v0.8.0-beta.9` — the full import → check → review → align →
+**Status:** `v0.8.0-beta.10` — the full import → check → review → align →
 export loop works end to end. See [Current status](#current-status) below.
 
 ## Who this is for
@@ -36,7 +36,7 @@ export loop works end to end. See [Current status](#current-status) below.
 cd engine
 py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pip install -c constraints-py312-windows.txt -e ".[dev,wildebeest]"
-.venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v   # expect 223 passed
+.venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v   # expect 224 passed
 
 # 2. Full desktop app (needs Rust + MSVC build tools, see Developer Setup)
 cd ..
