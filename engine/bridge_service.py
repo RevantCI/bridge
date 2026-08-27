@@ -1152,38 +1152,62 @@ class BridgeEngine:
         cancel_event: threading.Event,
     ) -> dict[str, Any]:
         if cancel_event.is_set():
-            raise AIError("AI review cancelled before the verse started.")
-        with self._checker_lock:
-            self._ensure_resource_indexes(project)
-        client = self._ai_client()
-        alignment = project.load_verse_alignment(chapter, verse)
-        proposal, _, reviews, issues, summary, meta = client.prepare_verse_review(
-            project, chapter, verse, alignment, progress_callback=progress_callback,
-        )
-        total_tokens = int(meta.get("total_tokens_for_prepare", 0) or 0)
-        cost = float(meta.get("estimated_cost_usd", 0.0) or 0.0)
-        self.settings.record_ai_usage(total_tokens, cost)
-        if cancel_event.is_set():
-            project.mark_ai_review_incomplete(chapter, verse, "cancelled")
-            raise AIError("AI review cancelled; the completed model result was not automatically applied.")
-        applied: list[dict[str, Any]] = []
-        skipped: list[dict[str, Any]] = []
-        if mode == "basic":
-            progress_callback(94, "Applying safe evidence-grounded selections")
-            applied, skipped = self._apply_basic_ai_selections(
-                project, chapter, verse, reviews, model=str(meta.get("model") or client.model),
+            project.mark_issue_resolutions_recheck(
+                chapter, verse, "cancelled", reason="AI review was cancelled before this verse started.",
             )
-        progress_callback(100, "Verse AI review complete")
-        return {
-            "summary": summary,
-            "checkReviews": [item.to_dict() for item in reviews],
-            "qaIssues": [item.to_dict() for item in issues],
-            "alignmentProposal": proposal,
-            "alignmentWasAIProposed": bool(proposal is not None),
-            "appliedSelections": applied,
-            "skippedSelections": skipped,
-            "usage": {"totalTokens": total_tokens, "estimatedCostUSD": round(cost, 6)},
-        }
+            raise AIError("AI review cancelled before the verse started.")
+        project.mark_issue_resolutions_recheck(
+            chapter, verse, "running", reason="Automatic AI recheck started.",
+        )
+        try:
+            with self._checker_lock:
+                self._ensure_resource_indexes(project)
+            client = self._ai_client()
+            alignment = project.load_verse_alignment(chapter, verse)
+            proposal, _, reviews, issues, summary, meta = client.prepare_verse_review(
+                project, chapter, verse, alignment, progress_callback=progress_callback,
+            )
+            total_tokens = int(meta.get("total_tokens_for_prepare", 0) or 0)
+            cost = float(meta.get("estimated_cost_usd", 0.0) or 0.0)
+            self.settings.record_ai_usage(total_tokens, cost)
+            if cancel_event.is_set():
+                project.mark_ai_review_incomplete(chapter, verse, "cancelled")
+                project.mark_issue_resolutions_recheck(
+                    chapter, verse, "cancelled",
+                    reason="AI review was cancelled; no lifecycle conclusion was accepted.",
+                )
+                raise AIError("AI review cancelled; the completed model result was not automatically applied.")
+            applied: list[dict[str, Any]] = []
+            skipped: list[dict[str, Any]] = []
+            if mode == "basic":
+                progress_callback(94, "Applying safe evidence-grounded selections")
+                applied, skipped = self._apply_basic_ai_selections(
+                    project, chapter, verse, reviews, model=str(meta.get("model") or client.model),
+                )
+            review_dicts = [item.to_dict() for item in reviews]
+            lifecycle = project.reconcile_issue_resolutions_after_ai_review(
+                chapter, verse, review_dicts,
+                model=str(meta.get("model") or client.model), summary=summary,
+            )
+            progress_callback(100, "Verse AI review complete")
+            return {
+                "summary": summary,
+                "checkReviews": review_dicts,
+                "qaIssues": [item.to_dict() for item in issues],
+                "alignmentProposal": proposal,
+                "alignmentWasAIProposed": bool(proposal is not None),
+                "appliedSelections": applied,
+                "skippedSelections": skipped,
+                "resolutionLifecycle": lifecycle,
+                "usage": {"totalTokens": total_tokens, "estimatedCostUSD": round(cost, 6)},
+            }
+        except Exception as exc:
+            if not cancel_event.is_set():
+                project.mark_issue_resolutions_recheck(
+                    chapter, verse, "failed",
+                    reason="Automatic AI recheck failed.", error=str(exc),
+                )
+            raise
 
     def _start_ai_review_spec(
         self, project: TranslationCoreProject, spec: AIReviewJobSpec,
@@ -1319,6 +1343,8 @@ class BridgeEngine:
             "chapter": str(chapter), "verse": str(verse), "items": items,
             "queued": sum(1 for item in items if (item.get("paratext") or {}).get("status") == "queued"),
             "sent": sum(1 for item in items if (item.get("paratext") or {}).get("status") == "sent"),
+            "resolved": sum(1 for item in items if item.get("status") == "resolved"),
+            "reflagged": sum(1 for item in items if item.get("status") == "reflagged"),
         }
 
     def save_issue_resolution(
@@ -1964,7 +1990,15 @@ class BridgeEngine:
         Nothing here reinvents that; it only calls it."""
         self._require_project()
         result = self.project.apply_scripture_edit(chapter, verse, new_text)
-        return {"committed": True, "chapter": chapter, "verse": verse, **result}
+        resolutions = self.project.list_issue_resolutions(chapter, verse)
+        return {
+            "committed": True, "chapter": chapter, "verse": verse,
+            "issueResolutionsNeedingRecheck": sum(
+                1 for item in resolutions
+                if str((item.get("recheck") or {}).get("status") or "") == "stale"
+            ),
+            **result,
+        }
 
     # -- export -------------------------------------------------------------
     #

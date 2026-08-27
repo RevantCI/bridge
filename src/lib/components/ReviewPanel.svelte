@@ -205,10 +205,17 @@
       syncAIJobResult(snapshot);
       if (["queued", "running", "cancelling"].includes(snapshot.state)) {
         aiPollTimer = setTimeout(() => void pollAIJob(jobId, sequence), 650);
-      } else if (snapshot.state === "failed") {
-        aiExplainError = snapshot.error || "AI review failed.";
-        aiExplainErrorJobId = snapshot.jobId;
-        aiExplainErrorReference = "";
+      } else {
+        if ($selectedVerse && aiJobAppliesToReference(
+          snapshot, $project?.path ?? "", $currentChapter, $selectedVerse,
+        )) {
+          void translationHelpsReview?.refresh();
+        }
+        if (snapshot.state === "failed") {
+          aiExplainError = snapshot.error || "AI review failed.";
+          aiExplainErrorJobId = snapshot.jobId;
+          aiExplainErrorReference = "";
+        }
       }
     } catch (error) {
       if (sequence === aiPollSequence) {
@@ -219,11 +226,13 @@
     }
   }
 
-  async function startAIReview(scope: "verse" | "chapter" | "book") {
-    if (!$selectedVerse || aiJobBusy) return;
-    const chapter = $currentChapter;
-    const verse = $selectedVerse;
-    const requestedReference = currentReviewReference;
+  async function startAIReview(
+    scope: "verse" | "chapter" | "book",
+    chapter: string = $currentChapter,
+    verse: string = $selectedVerse ?? "",
+  ) {
+    if (!verse || aiJobBusy) return;
+    const requestedReference = `${$project?.path ?? ""}::${verseKey(chapter, verse)}`;
     if (scope !== "verse" && !window.confirm(
       `Run AI review for this ${scope}? Each verse may use one or two model requests and incur API charges.`,
     )) return;
@@ -329,7 +338,7 @@
     editError = null;
     editSaving = true;
     try {
-      await bridge.editVerse(chapter, verse, editText);
+      const editResult = await bridge.editVerse(chapter, verse, editText);
       verseTexts.update((t) => ({ ...t, [key]: editText }));
       aiCheckReviewsByVerse.update((values) => {
         const next = { ...values };
@@ -355,6 +364,12 @@
       checkStatusByVerse.update((map) => ({ ...map, [key]: "succeeded" }));
       recheckingKey = "";
       recheckedKey = key;
+      if (editResult.issueResolutionsNeedingRecheck > 0) {
+        // A saved issue can only close against the edited text. Start the
+        // evidence-grounded verse review automatically; failures remain visibly
+        // stale/retryable and never restore the previous resolved state.
+        await startAIReview("verse", chapter, verse);
+      }
       window.setTimeout(() => {
         if (recheckedKey === key) recheckedKey = "";
       }, 3500);

@@ -422,6 +422,24 @@ export interface CheckSelectionMutation {
 
 export type ParatextHandoffStatus = "not_queued" | "queued" | "sent";
 
+export interface IssueResolutionRecheck {
+  status: "not_run" | "stale" | "running" | "resolved" | "reflagged" | "needs_review" | "failed" | "cancelled";
+  attempt?: number;
+  verdict?: "pass" | "problem" | "review" | "not_applicable";
+  confidence?: number;
+  rationale?: string;
+  suggestedCorrection?: string;
+  evidence?: Array<Record<string, unknown>>;
+  model?: string;
+  summary?: string;
+  inputFingerprint?: string;
+  reason?: string;
+  error?: string;
+  startedAt?: string;
+  staleAt?: string;
+  completedAt?: string;
+}
+
 export interface IssueResolutionRecord {
   schemaVersion: 1;
   resolutionId: string;
@@ -443,7 +461,7 @@ export interface IssueResolutionRecord {
   proposedCorrection: string;
   evidence: Array<Record<string, unknown> | string>;
   status: "open" | "resolved" | "reflagged";
-  recheck: { status: string; [key: string]: unknown };
+  recheck: IssueResolutionRecheck;
   paratext: {
     status: ParatextHandoffStatus;
     messageId: string;
@@ -465,6 +483,8 @@ export interface IssueResolutionListResponse {
   items: IssueResolutionRecord[];
   queued: number;
   sent: number;
+  resolved: number;
+  reflagged: number;
 }
 
 export interface IssueResolutionHandoffResult {

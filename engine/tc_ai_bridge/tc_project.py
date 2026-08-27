@@ -796,6 +796,150 @@ class TranslationCoreProject:
         _write_json_atomic(path, record)
         return record
 
+    def _record_issue_resolution_lifecycle_audit(
+        self, record: dict[str, Any], event: dict[str, Any],
+    ) -> None:
+        """Keep lifecycle events append-only even when the record history is compacted."""
+        _, safe = self._timestamp()
+        event_name = ''.join(
+            ch if ch.isalnum() or ch in ('-', '_') else '_'
+            for ch in str(event.get('event') or 'recheck')
+        )[:60]
+        audit = (
+            self.companion_dir() / 'audit' / self.book_id
+            / str(record.get('chapter') or '') / str(record.get('verse') or '')
+            / f"{safe}_{record.get('resolutionId', 'resolution')}_{event_name}.json"
+        )
+        _write_json_atomic(audit, {
+            'schemaVersion': 1,
+            'resolutionId': record.get('resolutionId'),
+            'reference': record.get('reference'),
+            **copy.deepcopy(event),
+        })
+
+    def mark_issue_resolutions_recheck(
+        self, chapter: str | int, verse: str | int, state: str, *,
+        reason: str = '', error: str = '',
+    ) -> list[dict[str, Any]]:
+        """Move every saved issue on a verse through a durable recheck state."""
+        allowed = {'stale', 'running', 'failed', 'cancelled'}
+        normalized = str(state or '').strip().lower()
+        if normalized not in allowed:
+            raise ProjectError(f'Unsupported issue-resolution recheck state: {state}')
+        records = self.list_issue_resolutions(chapter, verse)
+        updated: list[dict[str, Any]] = []
+        for record in records:
+            now, _ = self._timestamp()
+            previous_status = str(record.get('status') or 'open')
+            previous_recheck = record.get('recheck') if isinstance(record.get('recheck'), dict) else {}
+            attempt = int(previous_recheck.get('attempt') or 0)
+            if normalized == 'running':
+                attempt += 1
+            recheck = copy.deepcopy(previous_recheck)
+            recheck.update({
+                'status': normalized,
+                'attempt': attempt,
+                'inputFingerprint': self.review_input_fingerprint(chapter, verse),
+                'reason': str(reason or recheck.get('reason') or ''),
+                'error': str(error or ''),
+            })
+            if normalized == 'running':
+                recheck['startedAt'] = now
+                recheck['completedAt'] = ''
+            elif normalized in {'failed', 'cancelled'}:
+                recheck['completedAt'] = now
+            if normalized == 'stale':
+                # A prior pass cannot remain authoritative after Scripture changes.
+                record['status'] = 'open'
+                recheck['staleAt'] = now
+            elif normalized in {'failed', 'cancelled'} and previous_status == 'resolved':
+                record['status'] = 'open'
+            record['recheck'] = recheck
+            record['updatedAt'] = now
+            event = {
+                'event': f'recheck_{normalized}', 'at': now,
+                'previousStatus': previous_status,
+                'inputFingerprint': recheck['inputFingerprint'],
+                'reason': recheck.get('reason', ''), 'error': recheck.get('error', ''),
+            }
+            history = list(record.get('history') or [])
+            history.append(copy.deepcopy(event))
+            record['history'] = history[-100:]
+            _write_json_atomic(
+                self._issue_resolution_path(chapter, verse, str(record['resolutionId'])), record,
+            )
+            self._record_issue_resolution_lifecycle_audit(record, event)
+            updated.append(record)
+        return updated
+
+    def reconcile_issue_resolutions_after_ai_review(
+        self, chapter: str | int, verse: str | int, reviews: list[dict[str, Any]], *,
+        model: str = '', summary: str = '',
+    ) -> list[dict[str, Any]]:
+        """Resolve or reflag saved issues from a completed, current AI review."""
+        by_identity = {
+            (
+                str(item.get('tool') or ''), str(item.get('group_id') or ''),
+                str(item.get('check_id') or ''),
+            ): item
+            for item in list(reviews or []) if isinstance(item, dict)
+        }
+        updated: list[dict[str, Any]] = []
+        for record in self.list_issue_resolutions(chapter, verse):
+            check = record.get('check') if isinstance(record.get('check'), dict) else {}
+            review = by_identity.get((
+                str(check.get('tool') or ''), str(check.get('groupId') or ''),
+                str(check.get('checkId') or ''),
+            ))
+            verdict = str((review or {}).get('verdict') or 'review').lower()
+            confidence = float((review or {}).get('confidence') or 0.0)
+            evidence = copy.deepcopy(list((review or {}).get('evidence_used') or []))
+            safely_grounded_pass = verdict in {'pass', 'not_applicable'} and confidence >= 0.82 and bool(evidence)
+            safely_grounded_problem = verdict == 'problem' and confidence >= 0.70 and bool(evidence)
+            if safely_grounded_pass:
+                status, recheck_status, event_name = 'resolved', 'resolved', 'recheck_resolved'
+            elif safely_grounded_problem:
+                status, recheck_status, event_name = 'reflagged', 'reflagged', 'recheck_reflagged'
+            else:
+                status, recheck_status, event_name = 'open', 'needs_review', 'recheck_needs_review'
+            now, _ = self._timestamp()
+            previous_status = str(record.get('status') or 'open')
+            previous_recheck = record.get('recheck') if isinstance(record.get('recheck'), dict) else {}
+            recheck = {
+                'status': recheck_status,
+                'attempt': max(1, int(previous_recheck.get('attempt') or 0)),
+                'verdict': verdict,
+                'confidence': confidence,
+                'rationale': str((review or {}).get('rationale') or (
+                    'The completed AI review did not return this check; human review is required.'
+                )),
+                'suggestedCorrection': str((review or {}).get('suggested_correction') or ''),
+                'evidence': evidence,
+                'model': str(model or ''),
+                'summary': str(summary or ''),
+                'inputFingerprint': self.review_input_fingerprint(chapter, verse),
+                'startedAt': str(previous_recheck.get('startedAt') or ''),
+                'completedAt': now,
+                'error': '',
+            }
+            record['status'] = status
+            record['recheck'] = recheck
+            record['updatedAt'] = now
+            event = {
+                'event': event_name, 'at': now, 'previousStatus': previous_status,
+                'status': status, 'verdict': verdict, 'confidence': recheck['confidence'],
+                'inputFingerprint': recheck['inputFingerprint'], 'model': recheck['model'],
+            }
+            history = list(record.get('history') or [])
+            history.append(copy.deepcopy(event))
+            record['history'] = history[-100:]
+            _write_json_atomic(
+                self._issue_resolution_path(chapter, verse, str(record['resolutionId'])), record,
+            )
+            self._record_issue_resolution_lifecycle_audit(record, event)
+            updated.append(record)
+        return updated
+
     def comments_for_check(self, chapter: str | int, verse: str | int, check_id: str) -> list[dict[str, Any]]:
         out=[]
         for item in self.check_state_for_verse(chapter,verse).get('comments',[]):
@@ -1797,6 +1941,10 @@ class TranslationCoreProject:
             review = self.load_review_state(chapter, verse)
             if review and str(review.get('status', '')).lower() in ('approved','human_approved'):
                 self.record_review_state(chapter, verse, 'stale_after_verse_edit', note='Scripture text changed; final approval requires recheck.')
+            self.mark_issue_resolutions_recheck(
+                chapter, verse, 'stale',
+                reason='Scripture text changed; the saved issue resolution requires a new AI review.',
+            )
             audit = self.companion_dir() / 'audit' / self.book_id / str(chapter) / str(verse) / f'{safe}_scripture-edit.json'
             _write_json_atomic(audit, {'operation':'scriptureEdit','verseBefore':old_text,'verseAfter':new_text,'tags':list(tags or ['meaning']),'username':username,'backup':str(backup),'modifiedTimestamp':iso})
         except Exception:

@@ -10,7 +10,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 253 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes Milestone 3B.3 structured/background AI review, resumable AI batches and persisted chapter hydration, first-open live-review responsiveness, Milestone 3A resource/import, AI provider-compatibility regressions, project management, collection grouping/deletion, and Milestone 3B.4 issue-resolution/Paratext handoff tests |
+| A01 | Backend | Complete Python suite | Source | PASS — 257 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes Milestone 3B.3 structured/background AI review, resumable AI batches and persisted chapter hydration, first-open live-review responsiveness, Milestone 3A resource/import, AI provider compatibility, project management, collection grouping/deletion, and Milestone 3B.4 Paratext handoff plus automatic resolution-lifecycle tests |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 2 sidecar-timeout unit tests passed, including the Beta 7 interactive-timeout guard |
@@ -44,6 +44,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A32 | AI review navigation state | Switch verse, chapter, and project after verse/chapter/book AI jobs; distinguish active background work from reference-specific progress, completion, and errors | Frontend | PASS — 4 focused scope regressions cover exact verse, chapter, project and active-state behavior; Svelte diagnostics are clean and Translation Helps keeps a stable loading surface |
 | A33 | Local development startup | Compile the desktop frontend, start an isolated local preview, and request its index and application bundle | Source + Desktop | PASS — `npm run test:dev-start` verifies the same deterministic build-and-preview path used by `npm run tauri dev`; live WebView DOM inspection confirms the app mount is populated instead of blank |
 | A34 | Issue resolution and Paratext handoff | Persist a resolution, reject target text outside the verse, queue/retry offline without duplicate XML threads, send once only for a matching confirmed live project, and refuse a wrong active project | Source | PASS — 4 focused Milestone 3B.4 regressions; combined connector/resolution suite passes 8 tests, including the installed v0.7.4 companion's `project_notes` capability name |
+| A35 | Automatic issue-resolution lifecycle | Edit a verse with a saved issue, invalidate any prior pass, automatically recheck, resolve on grounded pass/not-applicable, reflag on problem, retain uncertainty/failure for human review, persist evidence and append-only audit | Source + Frontend | PASS — 8 focused resolution regressions, including refusal to auto-close an ungrounded/low-confidence pass; Svelte diagnostics clean; automatic review starts only when the edited verse has saved resolutions |
 
 ## Import workflows
 
@@ -151,6 +152,8 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | M16 | Save a handoff while Paratext is closed or the companion lacks `create_note` | PASS — user acceptance, queued rather than sent and preserved |
 | M17 | Retry the same queued handoff repeatedly | PASS — user acceptance, no duplicate resolution or Notes thread |
 | M18 | Connect Paratext to a different active project than the confirmed project ID | NOT RUN — Bridge must refuse to send and identify the project mismatch |
+| M19 | Edit a verse with a saved resolution; confirm AI recheck starts automatically and the card becomes **Resolved after recheck** or **Issue remains after recheck** with rationale | NOT RUN |
+| M20 | Cancel or fail the automatic recheck, restart Bridge, and confirm the stale/failed retryable state and previous Paratext sent status both persist | NOT RUN |
 
 ## Automated evidence
 

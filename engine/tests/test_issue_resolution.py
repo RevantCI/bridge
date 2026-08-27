@@ -192,3 +192,115 @@ def test_active_project_mismatch_never_sends(resolution_project, tmp_path, monke
     assert result["success"] is True
     assert result["result"]["handoff"]["status"] == "queued"
     assert "does not match" in result["result"]["handoff"]["lastError"]
+
+
+def test_scripture_edit_marks_resolution_stale_and_requests_automatic_recheck(
+    resolution_project, tmp_path,
+):
+    engine = _engine(tmp_path, resolution_project)
+    saved = _save(engine, _check(engine))
+
+    edited = _call(engine, "verse.edit", {
+        "chapter": "1", "verse": "1", "newText": "alpha beta delta",
+    })
+
+    assert edited["success"] is True
+    assert edited["result"]["issueResolutionsNeedingRecheck"] == 1
+    record = _call(engine, "issueResolution.list", {
+        "chapter": "1", "verse": "1",
+    })["result"]["items"][0]
+    assert record["resolutionId"] == saved["resolutionId"]
+    assert record["status"] == "open"
+    assert record["recheck"]["status"] == "stale"
+    assert record["recheck"]["inputFingerprint"]
+    assert record["history"][-1]["event"] == "recheck_stale"
+
+
+def test_completed_ai_recheck_resolves_and_persists_grounded_result(
+    resolution_project, tmp_path,
+):
+    engine = _engine(tmp_path, resolution_project)
+    saved = _save(engine, _check(engine))
+    engine.project.mark_issue_resolutions_recheck(
+        "1", "1", "running", reason="Automatic AI recheck started.",
+    )
+
+    updated = engine.project.reconcile_issue_resolutions_after_ai_review(
+        "1", "1", [{
+            "tool": "translationNotes", "group_id": "figs-metaphor", "check_id": "tn-1",
+            "verdict": "pass", "confidence": 0.94,
+            "rationale": "The revised wording communicates the metaphor naturally.",
+            "suggested_correction": "", "evidence_used": [{
+                "title": "Translation Academy", "identifier": "figs-metaphor",
+            }],
+        }], model="review-model", summary="The correction addresses the issue.",
+    )
+
+    assert updated[0]["status"] == "resolved"
+    assert updated[0]["recheck"]["status"] == "resolved"
+    assert updated[0]["recheck"]["verdict"] == "pass"
+    assert updated[0]["recheck"]["confidence"] == pytest.approx(0.94)
+    assert updated[0]["recheck"]["evidence"][0]["identifier"] == "figs-metaphor"
+    restarted = _engine(tmp_path / "restart", resolution_project)
+    restored = _call(restarted, "issueResolution.list", {
+        "chapter": "1", "verse": "1",
+    })["result"]
+    assert restored["resolved"] == 1
+    assert restored["items"][0]["resolutionId"] == saved["resolutionId"]
+    assert restored["items"][0]["recheck"]["model"] == "review-model"
+
+
+def test_problem_reflags_and_failed_retry_never_restores_a_previous_pass(
+    resolution_project, tmp_path,
+):
+    engine = _engine(tmp_path, resolution_project)
+    _save(engine, _check(engine))
+    engine.project.mark_issue_resolutions_recheck("1", "1", "running")
+    reflagged = engine.project.reconcile_issue_resolutions_after_ai_review(
+        "1", "1", [{
+            "tool": "translationNotes", "group_id": "figs-metaphor", "check_id": "tn-1",
+            "verdict": "problem", "confidence": 0.91,
+            "rationale": "The same literal metaphor remains.", "evidence_used": [{
+                "title": "Translation Academy", "identifier": "figs-metaphor",
+            }],
+        }], model="review-model",
+    )[0]
+    assert reflagged["status"] == "reflagged"
+    assert reflagged["recheck"]["status"] == "reflagged"
+
+    engine.project.mark_issue_resolutions_recheck("1", "1", "stale", reason="Verse changed")
+    engine.project.mark_issue_resolutions_recheck("1", "1", "running")
+    failed = engine.project.mark_issue_resolutions_recheck(
+        "1", "1", "failed", reason="Automatic AI recheck failed.", error="Provider unavailable",
+    )[0]
+    assert failed["status"] == "open"
+    assert failed["recheck"]["status"] == "failed"
+    assert failed["recheck"]["error"] == "Provider unavailable"
+    audit_root = resolution_project / ".apps" / "translationCoreAI" / "audit" / "tit" / "1" / "1"
+    events = [
+        json.loads(path.read_text(encoding="utf-8"))["event"]
+        for path in audit_root.glob("*_recheck_*.json")
+    ]
+    assert "recheck_reflagged" in events
+    assert "recheck_failed" in events
+
+
+def test_ungrounded_or_low_confidence_pass_cannot_close_a_resolution(
+    resolution_project, tmp_path,
+):
+    engine = _engine(tmp_path, resolution_project)
+    _save(engine, _check(engine))
+    engine.project.mark_issue_resolutions_recheck("1", "1", "running")
+
+    result = engine.project.reconcile_issue_resolutions_after_ai_review(
+        "1", "1", [{
+            "tool": "translationNotes", "group_id": "figs-metaphor", "check_id": "tn-1",
+            "verdict": "pass", "confidence": 0.79,
+            "rationale": "The wording may be acceptable, but evidence is insufficient.",
+            "evidence_used": [],
+        }], model="review-model",
+    )[0]
+
+    assert result["status"] == "open"
+    assert result["recheck"]["status"] == "needs_review"
+    assert result["recheck"]["verdict"] == "pass"

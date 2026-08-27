@@ -154,7 +154,10 @@ export const bridge = {
     return call("verse_decide", { chapter, verse, findingId, status, comment });
   },
 
-  editVerse(chapter: string, verse: string, newText: string): Promise<{ committed: boolean }> {
+  editVerse(chapter: string, verse: string, newText: string): Promise<{
+    committed: boolean;
+    issueResolutionsNeedingRecheck: number;
+  }> {
     return call("verse_edit", { chapter, verse, newText });
   },
 

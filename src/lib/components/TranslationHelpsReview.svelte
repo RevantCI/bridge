@@ -201,6 +201,19 @@
     return check.selectionStatus.charAt(0).toUpperCase() + check.selectionStatus.slice(1);
   }
 
+  function resolutionLifecycleLabel(record: IssueResolutionRecord): string {
+    switch (record.recheck.status) {
+      case "stale": return "Correction needs recheck";
+      case "running": return "Rechecking correction";
+      case "resolved": return "Resolved after recheck";
+      case "reflagged": return "Issue remains after recheck";
+      case "needs_review": return "Recheck needs human review";
+      case "failed": return "Recheck failed";
+      case "cancelled": return "Recheck cancelled";
+      default: return record.status === "resolved" ? "Resolved" : "Resolution recorded";
+    }
+  }
+
   function evidenceLabel(item: Record<string, unknown>): string {
     const title = String(item.title ?? item.identifier ?? item.kind ?? "Evidence");
     const version = String(item.version ?? "");
@@ -560,14 +573,30 @@
             {resolution ? "Update resolution" : "Resolve / Paratext"}
           </button>
           {#if resolution}
+            <span class="lifecycle-status {resolution.recheck.status}">
+              {resolutionLifecycleLabel(resolution)}
+            </span>
             <span class="handoff-status {resolution.paratext.status}">
               {resolution.paratext.status === "sent" ? "Sent to Paratext" : resolution.paratext.status === "queued" ? "Paratext queued" : "Resolution saved"}
             </span>
             {#if resolution.paratext.status === "queued"}
               <button class="small-btn" on:click={() => retryResolution(resolution)} disabled={resolutionBusy}>Retry handoff</button>
             {/if}
+            {#if ["stale", "failed", "cancelled", "reflagged", "needs_review"].includes(resolution.recheck.status)}
+              <button class="small-btn" on:click={onRerunAIReview} disabled={aiReviewBusy}>Run AI recheck</button>
+            {/if}
           {/if}
         </div>
+        {#if resolution && resolution.recheck.status !== "not_run"}
+          <div class="lifecycle-detail {resolution.recheck.status}" role="status">
+            {#if resolution.recheck.rationale}<p>{resolution.recheck.rationale}</p>{/if}
+            {#if resolution.recheck.reason && !resolution.recheck.rationale}<p>{resolution.recheck.reason}</p>{/if}
+            {#if resolution.recheck.error}<p>{resolution.recheck.error}</p>{/if}
+            {#if resolution.recheck.verdict}
+              <small>AI verdict: {resolution.recheck.verdict.replaceAll("_", " ")}{resolution.recheck.confidence !== undefined ? ` · ${Math.round(resolution.recheck.confidence * 100)}% confidence` : ""}</small>
+            {/if}
+          </div>
+        {/if}
       {/if}
     </article>
   {/each}
@@ -649,5 +678,13 @@
   .handoff-status { font-size: 9px; padding: 3px 6px; border-radius: 999px; color: var(--text-2); background: var(--surface-2); }
   .handoff-status.queued { color: var(--warning); background: var(--warning-bg); }
   .handoff-status.sent { color: var(--success); background: var(--success-bg); }
+  .lifecycle-status { font-size: 9px; padding: 3px 6px; border-radius: 999px; color: var(--text-2); background: var(--surface-2); }
+  .lifecycle-status.resolved { color: var(--success); background: var(--success-bg); }
+  .lifecycle-status.stale, .lifecycle-status.running { color: var(--warning); background: var(--warning-bg); }
+  .lifecycle-status.reflagged, .lifecycle-status.failed { color: var(--danger); background: var(--danger-bg); }
+  .lifecycle-detail { margin-top: 6px; padding: 6px 7px; border-radius: 5px; font-size: 9px; line-height: 1.4; color: var(--text-2); background: var(--surface-2); }
+  .lifecycle-detail.resolved { color: var(--success); background: var(--success-bg); }
+  .lifecycle-detail.reflagged, .lifecycle-detail.failed { color: var(--danger); background: var(--danger-bg); }
+  .lifecycle-detail p { margin: 0 0 3px; }
   .none { font-size: 11px; color: var(--text-3); }
 </style>

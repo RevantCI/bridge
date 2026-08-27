@@ -251,6 +251,15 @@ and each AI result includes its evidence and justification.
   selections are not overwritten, and editing a verse makes its prior AI review
   stale. Bridge shows an explicit warning; choose **Run AI review again** to
   replace it with a current evaluation.
+- **Resolve / Paratext** records the exact issue, proposed correction, evidence,
+  and reviewer note before sending a Project Note. Offline handoffs remain
+  queued and retryable; Bridge sends only to the explicitly confirmed active
+  Paratext project.
+- When you edit a verse that has a saved resolution, Bridge automatically starts
+  a new evidence-grounded verse review. A pass closes it as **Resolved after
+  recheck**; a remaining problem becomes **Issue remains after recheck**.
+  Uncertain, cancelled, or failed reviews remain open and retryable. The result,
+  evidence, confidence, and lifecycle audit persist after restart.
 
 ### 6.7 Settings
 
