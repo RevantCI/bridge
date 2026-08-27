@@ -96,6 +96,13 @@
     }
   }
 
+  function replaceResolution(record: IssueResolutionRecord): void {
+    resolutions = [
+      ...resolutions.filter((item) => item.resolutionId !== record.resolutionId),
+      record,
+    ];
+  }
+
   async function startResolution(check: NativeCheckReview, aiReview?: AiCheckReview): Promise<void> {
     const existing = resolutionFor(check);
     resolutionKey = identity(check);
@@ -152,7 +159,10 @@
       const result = await bridge.queueIssueResolutionForParatext(
         chapter, verse, record.resolutionId, String(connectorState?.project_id ?? ""),
       );
-      await refreshResolutions();
+      // The queue call returns the record after the live handoff attempt. Use
+      // that authoritative snapshot so a slower list request cannot repaint a
+      // successfully sent item as queued.
+      replaceResolution(result.record);
       mutationNotice = result.handoff.status === "sent"
         ? "Issue resolution saved and sent to Paratext."
         : `Issue resolution saved in the Paratext outbox. ${result.handoff.lastError || "Retry when Paratext is available."}`;
@@ -170,7 +180,7 @@
     mutationError = "";
     try {
       const result = await bridge.retryIssueResolutionParatext(chapter, verse, record.resolutionId);
-      await refreshResolutions();
+      replaceResolution(result.record);
       mutationNotice = result.handoff.status === "sent"
         ? "Queued issue was sent to Paratext."
         : `Paratext handoff remains queued. ${result.handoff.lastError}`;

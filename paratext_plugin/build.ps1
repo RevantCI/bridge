@@ -1,4 +1,4 @@
-# Builds TranslationCoreAIBridgePlugin.cs into a Paratext plugin using the
+# Builds the source-controlled Paratext connector into a plugin using the
 # C# compiler bundled with the .NET Framework (no Visual Studio / modern .NET
 # SDK / NuGet required - confirmed available at this path on the dev machine
 # this was built on; csc.exe ships with every Windows install that has .NET
@@ -23,11 +23,10 @@ $ErrorActionPreference = 'Stop'
 $paratextDir = 'C:\Program Files\Paratext 9'
 $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $outDir = Join-Path $PSScriptRoot 'build'
-$pluginName = 'TranslationCoreAIBridgePlugin'
-$fullConnector = Join-Path $paratextDir 'plugins\translationCoreAIBridge\translationCoreAIBridge.ptxplg'
+$pluginName = 'translationCoreAIBridge'
 
-if ($Deploy -and (Test-Path -LiteralPath $fullConnector)) {
-    throw "A translationCore AI Bridge connector is already installed at $fullConnector. Both plugins use the same named pipe, so deploying this navigation-only companion beside it would create a conflict. Keep the existing connector or move it out of Paratext's plugins directory first."
+if ($Deploy -and (Get-Process Paratext -ErrorAction SilentlyContinue)) {
+    throw 'Close Paratext before deploying the connector so its loaded plugin is never overwritten in place.'
 }
 
 if (-not (Test-Path $csc)) {
@@ -49,7 +48,12 @@ $references = @(
     'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\netstandard.dll'
 ) -join ','
 
-& $csc /nologo /target:library /platform:anycpu /out:$outDll /reference:$references (Join-Path $PSScriptRoot "$pluginName.cs")
+$sources = @(
+    (Join-Path $PSScriptRoot 'AiBridgeConnectorPlugin.cs'),
+    (Join-Path $PSScriptRoot 'NamedPipeBridgeServer.cs'),
+    (Join-Path $PSScriptRoot 'BridgeProtocol.cs')
+)
+& $csc /nologo /target:library /platform:anycpu /out:$outDll /reference:$references $sources
 if ($LASTEXITCODE -ne 0) {
     throw "csc.exe build failed with exit code $LASTEXITCODE"
 }

@@ -161,6 +161,13 @@ def test_confirmed_matching_project_sends_once_and_preserves_message_identity(
     assert first["result"]["handoff"]["status"] == "sent"
     assert first["result"]["record"]["paratext"]["remoteId"] == "remote-1"
     assert second["result"]["handoff"]["status"] == "sent"
+    restored = _call(engine, "issueResolution.list", {"chapter": "1", "verse": "1"})
+    restored_record = next(
+        item for item in restored["result"]["items"]
+        if item["resolutionId"] == saved["resolutionId"]
+    )
+    assert restored_record["paratext"]["status"] == "sent"
+    assert restored_record["paratext"]["remoteId"] == "remote-1"
     assert len(calls) == 1
     assert calls[0]["message_id"].startswith(f"bridge-{saved['resolutionId']}-")
     assert calls[0]["project_id"] == "ptx-titus"
