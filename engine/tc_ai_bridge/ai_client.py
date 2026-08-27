@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,10 +18,53 @@ from .cache_engine import dependency_snapshot
 from .security import ai_payload_manifest
 from .plugins import PluginRegistry
 from .review_policy import gate_ai_issues, gate_check_reviews
+from .usfm import strip_usfm
 
 
 class AIError(RuntimeError):
     pass
+
+
+_QUOTED_TEXT = re.compile(
+    r'"([^"\r\n]+)"|\'([^\'\r\n]+)\'|“([^”\r\n]+)”|‘([^’\r\n]+)’'
+)
+
+
+def _recover_quoted_target_selections(rationale: str, target_text: str) -> list[dict[str, Any]]:
+    """Resolve an omitted AI selection only from an exact, unambiguous quote.
+
+    Some providers correctly identify a target rendering in their rationale but
+    still return ``nothing_to_select=true``. We may safely recover that phrase
+    when it is quoted, occurs exactly once in the current target verse, and does
+    not overlap another recovered quote. Repeated or ambiguous text remains a
+    human-review item; Bridge never guesses an occurrence.
+    """
+    verse_text = strip_usfm(target_text)
+    matches: list[tuple[int, int, str]] = []
+    seen: set[str] = set()
+    for match in _QUOTED_TEXT.finditer(str(rationale or '')):
+        candidate = next((value for value in match.groups() if value is not None), '').strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        ranges = TranslationCoreProject._selection_ranges(verse_text, candidate)
+        if len(ranges) == 1:
+            start, end = ranges[0]
+            matches.append((start, end, candidate))
+
+    # Prefer the most informative phrase when the model quoted both a phrase
+    # and one of its component words. Independent non-overlapping quotes remain
+    # separate tC selections.
+    accepted: list[tuple[int, int, str]] = []
+    for start, end, candidate in sorted(matches, key=lambda item: (-(item[1] - item[0]), item[0])):
+        if any(start < other_end and other_start < end for other_start, other_end, _ in accepted):
+            continue
+        accepted.append((start, end, candidate))
+    accepted.sort(key=lambda item: item[0])
+    return [
+        {'text': candidate, 'occurrence': 1, 'occurrences': 1}
+        for _, _, candidate in accepted
+    ]
 
 
 @dataclass
@@ -178,7 +222,7 @@ class OpenAIResponsesClient:
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json',
-            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.11',
+            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.13',
         }
         self.last_reasoning_effort = self.reasoning_effort
         status, response = self._request_json(payload, headers)
@@ -217,7 +261,7 @@ class OpenAIResponsesClient:
         url = f'{self.models_endpoint}/{urllib.parse.quote(self.model, safe="")}'
         req = urllib.request.Request(url, headers={
             'Authorization': f'Bearer {self.api_key}',
-            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.11',
+            'User-Agent': 'translationCore-AI-Bridge/0.8.0-beta.13',
         }, method='GET')
         try:
             with urllib.request.urlopen(req, timeout=min(self.timeout, 30.0)) as response:
@@ -531,7 +575,11 @@ class OpenAIResponsesClient:
             f'You are a senior Bible translation reviewer operating translationCore checks for a {language.source_name} → {language.target_name} project. '
             'The human reviewer should not have to read every resource or manually find/select target words: do that preparation now, then present concise evidence-backed final results. '
             f'For EVERY supplied translationCore check, read its evidence_catalog items, understand the source quote and note/key-term concept, locate the exact existing {language.target_name} bottomWord IDs that represent it, and return those IDs. '
-            f'Use ONLY supplied {language.target_name} selection IDs; never invent/normalize/rewrite tokens. selection_ids must be empty when and only when nothing_to_select is true or the concept is truly absent. '
+            f'Use ONLY supplied {language.target_name} selection IDs; never invent/normalize/rewrite tokens. '
+            'A correct translation still requires selection_ids for the exact target word or phrase that carries the checked meaning. '
+            'Do not set nothing_to_select merely because the verdict is pass or because you think selecting text is optional. '
+            'Set nothing_to_select=true only when the concept is genuinely absent, represented entirely implicitly with no exact target span, or the check is not applicable. '
+            'If the rationale names or quotes a target rendering, include every corresponding supplied target ID in selection_ids. '
             'For Translation Notes, apply the linked Translation Academy method/principle and judge whether the target translation handles the specific issue. '
             'For Translation Words, use the Translation Word article, TWL occurrence, source morphology, approved project renderings, and human_approved_terminology_rules. Human-approved terminology rules outrank AI preference; allow contextually justified variation. '
             'Then perform whole-verse QA using the supplied checking evidence: accuracy/completeness first, including omission, unsupported addition, wrong lexical meaning, negation/scope, participants/pronouns, number/person, commands/questions, semantic relations, figures, terminology, and stale/misaligned meaning. '
@@ -557,6 +605,8 @@ class OpenAIResponsesClient:
             nothing = bool(item.get('nothing_to_select', False))
             if nothing and ids:
                 raise AIError('AI check review returned both selection_ids and nothing_to_select=true.')
+            verdict = str(item.get('verdict','review'))
+            rationale = str(item.get('rationale',''))
             texts = [inv.bottom_ids[x].word for x in ids]
             selections = [
                 {
@@ -566,6 +616,31 @@ class OpenAIResponsesClient:
                 }
                 for x in ids
             ]
+            if nothing and not ids and verdict != 'not_applicable':
+                recovered = _recover_quoted_target_selections(
+                    rationale, project.target_verse_text(chapter, verse),
+                )
+                if recovered:
+                    nothing = False
+                    selections = recovered
+                    texts = [selection['text'] for selection in recovered]
+                    rationale = (
+                        rationale
+                        + '\n\nSelection consistency gate: Bridge resolved the exact target text '
+                          'quoted in the AI rationale because it occurs once in this verse.'
+                    ).strip()
+                elif verdict in {'pass', 'review'}:
+                    # A pass with neither an exact selection nor an explicit
+                    # not-applicable conclusion is not a completed tC check.
+                    # Keep it pending and prevent both Basic auto-application
+                    # and Advanced "Apply AI proposal" from saving a false NTS.
+                    nothing = False
+                    verdict = 'review'
+                    rationale = (
+                        rationale
+                        + '\n\nSelection consistency gate: no exact, unambiguous target text '
+                          'was proposed. Select it manually or rerun the AI review.'
+                    ).strip()
             evidence_ids = [str(x) for x in item.get('evidence_ids', [])]
             unknown_evidence = [x for x in evidence_ids if x not in evidence_catalog]
             if unknown_evidence:
@@ -575,8 +650,8 @@ class OpenAIResponsesClient:
                 tool=str(item.get('tool','')), group_id=str(item.get('group_id','')), check_id=str(item.get('check_id','')),
                 source_quote=str(item.get('source_quote','')), proposed_selection_ids=ids, proposed_selection_text=texts,
                 proposed_selections=selections,
-                nothing_to_select=nothing, verdict=str(item.get('verdict','review')), severity=item.get('severity','medium'),
-                rationale=str(item.get('rationale','')), suggested_correction=str(item.get('suggested_correction','')),
+                nothing_to_select=nothing, verdict=verdict, severity=item.get('severity','medium'),
+                rationale=rationale, suggested_correction=str(item.get('suggested_correction','')),
                 confidence=float(item.get('confidence',0) or 0), evidence_used=evs,
             ))
         # Ensure AI did not silently omit or fabricate a supplied check. Missing model rows

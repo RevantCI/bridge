@@ -13,7 +13,7 @@ desktop app (Tauri + Svelte), while keeping the same QA engines
 ([Greek Room](https://github.com/BibleNLP/greek-room)) and translation
 business logic underneath.
 
-**Status:** `v0.8.0-beta.11` — the full import → check → review → align →
+**Status:** `v0.8.0-beta.13` — the full import → check → review → align →
 export loop works end to end. See [Current status](#current-status) below.
 
 ## Who this is for
@@ -36,7 +36,7 @@ export loop works end to end. See [Current status](#current-status) below.
 cd engine
 py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pip install -c constraints-py312-windows.txt -e ".[dev,wildebeest]"
-.venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v   # expect 253 passed
+.venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v   # expect 261 passed
 
 # 2. Full desktop app (needs Rust + MSVC build tools, see Developer Setup)
 cd ..
@@ -105,13 +105,15 @@ persisted tN/tW results, protected human/imported selections, stale-review
 reruns, chapter/book processing, alignment, and export. A small amount of
 Translation Helps navigation jitter remains as non-blocking UX follow-up work.
 
-Milestone 3B.4 is now in progress. Its first vertical slice lets a reviewer turn
-a tN/tW finding into a persisted issue-resolution record, attach an exact target
-word or phrase, correction, evidence and reviewer note, and explicitly queue a
-Paratext Notes handoff. The queue is crash-safe and idempotent. The current
-companion plugin does not yet implement live `create_note`, so Bridge truthfully
-shows such handoffs as queued until a capable connector for the confirmed
-Paratext project is available.
+Beta 13 carries the completed Milestone 3B.4 workflow and fixes contradictory
+AI proposals that cited exact target words while returning **Nothing to
+Select**. Reviewers can turn a tN/tW finding into a
+persisted issue-resolution record, attach exact target text, correction,
+evidence and a reviewer note, and hand it off to a confirmed Paratext project.
+The crash-safe, idempotent queue preserves queued and sent state across
+restarts. Editing a resolved verse starts an automatic grounded recheck;
+Advanced mode keeps uncertain results for a human decision and records the
+result in an append-only lifecycle audit.
 See:
 
 - [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) for what's usable today, in

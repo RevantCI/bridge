@@ -874,7 +874,7 @@ class TranslationCoreProject:
 
     def reconcile_issue_resolutions_after_ai_review(
         self, chapter: str | int, verse: str | int, reviews: list[dict[str, Any]], *,
-        model: str = '', summary: str = '',
+        model: str = '', summary: str = '', allow_automatic_resolution: bool = True,
     ) -> list[dict[str, Any]]:
         """Resolve or reflag saved issues from a completed, current AI review."""
         by_identity = {
@@ -894,7 +894,10 @@ class TranslationCoreProject:
             verdict = str((review or {}).get('verdict') or 'review').lower()
             confidence = float((review or {}).get('confidence') or 0.0)
             evidence = copy.deepcopy(list((review or {}).get('evidence_used') or []))
-            safely_grounded_pass = verdict in {'pass', 'not_applicable'} and confidence >= 0.82 and bool(evidence)
+            safely_grounded_pass = (
+                allow_automatic_resolution and verdict in {'pass', 'not_applicable'}
+                and confidence >= 0.82 and bool(evidence)
+            )
             safely_grounded_problem = verdict == 'problem' and confidence >= 0.70 and bool(evidence)
             if safely_grounded_pass:
                 status, recheck_status, event_name = 'resolved', 'resolved', 'recheck_resolved'

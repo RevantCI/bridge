@@ -3,7 +3,7 @@
 For translators and checkers using Bridge day to day. If you're setting up
 or building the app, see [`DEVELOPER_SETUP.md`](DEVELOPER_SETUP.md) instead.
 
-*Written from the app's current state (`v0.8.0-beta.11`, 2026-08-26).*
+*Written from the app's current state (`v0.8.0-beta.13`, 2026-08-27).*
 
 > **Screenshots:** not included yet — see [Adding screenshots](#adding-screenshots)
 > at the bottom for exactly which screen/file to capture and where to drop
@@ -73,7 +73,7 @@ scope:
 | Review model | Per-tool screens (translationNotes tool, translationWords tool, alignment tool, etc., navigated separately) | One inline verse-by-verse view with all finding types color-coded together, plus a focused review panel |
 | AI assistance | Not built in | Optional: AI-generated explanations and alignment proposals, plus evidence-grounded automatic tN/tW review. Basic mode safely applies high-confidence review selections; Advanced mode proposes them for human approval. Scripture text is never silently changed. |
 | Corpus statistics | Not built in | Alignment corpus statistics (co-occurrence, translation probability, PMI) computed from your own project's completed alignments (backend feature, no dedicated screen yet) |
-| Live tool connectors | N/A | One-shot Paratext and Logos connectors (in progress — see the Developer Guide for current verification status) |
+| Live tool connectors | N/A | Identity-gated Paratext Project Note handoff; one-shot Logos navigation connector (see the Developer Guide for current verification status) |
 | Project files | translationCore project format | **The same format.** A Bridge-exported project (aligned mode) is re-importable into translationCore or any other USFM 3 tool. |
 
 **In short:** if you already know translationCore's tN/tW/alignment tools,
@@ -251,6 +251,11 @@ and each AI result includes its evidence and justification.
   selections are not overwritten, and editing a verse makes its prior AI review
   stale. Bridge shows an explicit warning; choose **Run AI review again** to
   replace it with a current evaluation.
+- **Nothing to Select** is reserved for a genuinely absent or entirely implicit
+  target rendering, or a check that does not apply. If AI cites an exact target
+  phrase but omits its token IDs, Bridge accepts it only when that quoted phrase
+  occurs exactly once; otherwise the check remains pending for manual selection
+  or another AI run.
 - **Resolve / Paratext** records the exact issue, proposed correction, evidence,
   and reviewer note before sending a Project Note. Offline handoffs remain
   queued and retryable; Bridge sends only to the explicitly confirmed active

@@ -53,7 +53,7 @@ reasons — this table is the fast way to see both.
 | **4** | USFM structural checker + versification | ✅ Done (2026-08-20 / 2026-08-21). Both vendored from `BibleNLP/greek-room`, wired into the existing check pipeline. Backend/protocol-only — no dedicated UI panel, matching how other checks surface as inline findings. |
 | **5** | Names & Transliteration (Uroman + Smart Edit Distance) | ✅ Done (2026-08-21). Whole-book spelling-consistency check wired into `verse.runChecks`'s existing `"local"` checks list — no frontend change needed. |
 | **6** | Alignment Intelligence (UAlign corpus stats) | ✅ Statistics engine done (2026-08-24). Turned out to need a real prerequisite not in the original plan: you can't compute stats over "human-approved alignments" with no way to create one — so the **manual word-alignment editor** (see `ALIGNMENT.md`) was built first, then corpus statistics (co-occurrence, translation probability, PMI, optional SED phonetic boost) computed from Bridge's own completed alignments — not a vendored `ualign.py`. Backend/protocol-only, two read-only methods, no UI yet. |
-| **7** | Paratext/Logos connectors, AI explain, drag-and-drop | ✅ All four slices have real work as of 2026-08-24, on a best-effort basis for the two needing a live external app. AI alignment proposals and drag-and-drop: done and verified end-to-end. AI explain: wired and tested against real materialized tN/tW evidence (found and fixed a real TWL resource-layout bug and a missing translationAcademy bundle along the way), verified with a fake transport (no live API key available that session). Paratext connector: companion plugin exists and compiles against Paratext's real interfaces, not yet loaded by a running Paratext instance. Logos connector: PowerShell/COM bridge script exists, process/protocol wiring tested, actual COM calls unverified (no Logos installed). |
+| **7** | Paratext/Logos connectors, AI explain, drag-and-drop | ✅ All four slices have real work. AI alignment proposals and drag-and-drop are verified end-to-end. AI explain is wired to real materialized tN/tW evidence. The Paratext companion now performs identity-gated, idempotent Project Note handoff and has been manually verified against a running Paratext project, including sent-state persistence after restart. The Logos PowerShell/COM bridge is process/protocol tested, but actual COM calls remain unverified because Logos is not installed. |
 
 **Lesson worth keeping in mind for future phases:** every external
 integration attempted so far (Wildebeest, USFM checker, versification,
@@ -69,9 +69,9 @@ reading a doc's description — including this repo's own docs.
 
 - Live original-language resource downloads (current baseline is a pinned,
   bundled snapshot — see §4).
-- Automatic/live Paratext or Logos synchronization (current connectors are
-  one-shot/manual, and only partially verified against live apps — see
-  Phase 7 above).
+- Automatic continuous Paratext or Logos synchronization. Bridge currently
+  performs explicit one-shot Paratext issue handoffs; the live Paratext path is
+  verified, while Logos remains unverified against a running installation.
 - A dedicated UI panel for alignment corpus statistics (protocol-only today).
 - Manual alignment does not invent source tokens — it requires original-
   language tokens already present from import.

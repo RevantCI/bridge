@@ -304,3 +304,46 @@ def test_ungrounded_or_low_confidence_pass_cannot_close_a_resolution(
     assert result["status"] == "open"
     assert result["recheck"]["status"] == "needs_review"
     assert result["recheck"]["verdict"] == "pass"
+
+
+def test_advanced_pass_waits_for_explicit_proposal_application_before_closing(
+    resolution_project, tmp_path,
+):
+    engine = _engine(tmp_path, resolution_project)
+    check = _check(engine)
+    _save(engine, check)
+    ai_review = {
+        "tool": "translationNotes", "group_id": "figs-metaphor", "check_id": "tn-1",
+        "verdict": "pass", "confidence": 0.95,
+        "rationale": "The revised expression communicates the intended meaning.",
+        "evidence_used": [{
+            "title": "Translation Academy", "identifier": "figs-metaphor",
+        }],
+    }
+    engine.project.record_ai_review_result("1", "1", {
+        "summary": "Grounded pass", "model": "review-model", "checkReviews": [ai_review],
+    })
+
+    pending = engine.project.reconcile_issue_resolutions_after_ai_review(
+        "1", "1", [ai_review], model="review-model",
+        allow_automatic_resolution=False,
+    )[0]
+    assert pending["status"] == "open"
+    assert pending["recheck"]["status"] == "needs_review"
+
+    applied = engine.save_check_selection(
+        "1", "1", check["tool"], check["groupId"], check["checkId"],
+        [{"text": "beta", "occurrence": 1, "occurrences": 1}], False,
+        "human", check["stateFingerprint"],
+        {
+            "interface": "advanced-ai-proposal", "acceptedAIProposal": True,
+            "confidence": 0.95,
+        },
+    )
+    assert applied["review"]["provenance"] == "human"
+    assert applied["resolutionLifecycle"][0]["status"] == "resolved"
+    restored = _call(engine, "issueResolution.list", {
+        "chapter": "1", "verse": "1",
+    })["result"]["items"][0]
+    assert restored["status"] == "resolved"
+    assert restored["recheck"]["status"] == "resolved"
