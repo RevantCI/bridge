@@ -361,6 +361,14 @@
 
   // recompute bookSummary reactively when findings/loadedChapters change
   $: void $findingsByVerse, void $checkStatusByVerse, void $loadedChapters, (bookSummary = bookApprovedSummary());
+
+  $: screen = (!opened ? "home" : showingDashboard ? "dashboard" : "editor") as "home" | "dashboard" | "editor";
+  $: projectName = $project?.projectName || $project?.bibleName || $project?.bookName || "";
+  $: dashboardSubtitle = [
+    $project?.targetLanguage,
+    bookProgress.length > 0 ? `${bookProgress.length} ${bookProgress.length === 1 ? "book" : "books"}` : "",
+  ].filter(Boolean).join(" · ");
+
   $: alignmentChapterSummary = ($chapterVerseNums[$currentChapter] ?? []).reduce(
     (counts, verse) => {
       const status = $alignmentStatusByVerse[verseKey($currentChapter, verse)] ?? "untouched";
@@ -372,18 +380,16 @@
 </script>
 
 <div class="frame">
-  {#if !opened}
-    <ImportScreen onOpened={handleOpened} {droppedPath} {dropSequence} />
-  {/if}
-
   <TopBar
+    {screen}
+    {projectName}
+    onGoHome={showProjectHome}
+    onGoToDashboard={openDashboard}
     onOpenSettings={() => settingsOpen.set(true)}
     onOpenExport={() => exportOpen.set(true)}
-    onOpenProjects={showProjectHome}
     onGotoVerse={gotoVerse}
     onChapterChange={switchChapter}
     onBookChange={switchBook}
-    onOpenDashboard={openDashboard}
     exportEnabled={$project !== null}
     bookSwitching={Boolean(openingBook)}
   />
@@ -421,8 +427,12 @@
     </div>
   {/if}
 
-  {#if showingDashboard}
+  {#if screen === "home"}
+    <ImportScreen onOpened={handleOpened} {droppedPath} {dropSequence} />
+  {:else if screen === "dashboard"}
     <ProjectDashboard
+      {projectName}
+      subtitle={dashboardSubtitle}
       books={bookProgress}
       loading={dashboardLoading}
       error={dashboardError}

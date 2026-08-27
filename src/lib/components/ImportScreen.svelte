@@ -209,13 +209,15 @@
   }
 </script>
 
-<div class="import-overlay">
-  <main class="card" class:wide={preview !== null || projects.length > 0}>
-    {#if preview === null}
+<div class="screen">
+  {#if preview === null}
+    <div class="header">
       <div class="eyebrow">PROJECT HOME</div>
       <h1>Your translation projects</h1>
       <p class="intro">Reopen a recent project, import a source, or drop one file or folder anywhere onto this window.</p>
+    </div>
 
+    <div class="list-area">
       {#if projects.length > 0}
         <section class="projects" aria-label="Known projects">
           {#each projects as item}
@@ -245,7 +247,9 @@
       {:else}
         <p class="empty">No projects are registered yet. Existing app-managed projects will appear here automatically.</p>
       {/if}
+    </div>
 
+    <div class="footer">
       <div class="choice-grid">
         <button class="choice primary" on:click={chooseFile} disabled={loading}>
           <span class="choice-title">Import a file</span>
@@ -258,7 +262,11 @@
       </div>
 
       <button class="link-button" on:click={openExisting} disabled={loading}>Open an existing Bridge/translationCore project without copying it</button>
-    {:else}
+      {#if loading}<p class="working">Reading, validating, or opening the selected project…</p>{/if}
+      {#if error}<p class="error">{error}</p>{/if}
+    </div>
+  {:else}
+    <div class="header">
       <div class="header-row">
         <div>
           <div class="eyebrow">IMPORT REVIEW</div>
@@ -267,7 +275,9 @@
         </div>
         <button class="back" on:click={reset} disabled={loading}>Back to projects</button>
       </div>
+    </div>
 
+    <div class="list-area">
       {#if preview.duplicates.classification !== "new"}
         <div class:exact={preview.duplicates.classification === "exactDuplicate"} class="duplicate-notice">
           {#if preview.duplicates.classification === "exactDuplicate"}
@@ -347,22 +357,24 @@
           {#if !canImport}<p class="required">Select a language and complete both project names.</p>{/if}
         </section>
       </div>
-    {/if}
 
-    {#if loading && preview === null}<p class="working">Reading, validating, or opening the selected project…</p>{/if}
-    {#if error}<p class="error">{error}</p>{/if}
-  </main>
+      {#if loading}<p class="working">Importing…</p>{/if}
+      {#if error}<p class="error">{error}</p>{/if}
+    </div>
+  {/if}
 </div>
 
 <style>
-  .import-overlay { position: absolute; inset: 0; background: var(--bg); display: flex; align-items: flex-start; justify-content: center; z-index: 20; padding: 28px; overflow: auto; }
-  .card { position: relative; width: min(570px, 100%); border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 34px; box-shadow: 0 18px 55px rgba(25, 35, 55, .10); margin: auto; }
-  .card.wide { width: min(940px, 100%); }
+  .screen { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
+  .header { flex-shrink: 0; padding: 28px 40px 18px; border-bottom: 1px solid var(--border); }
+  .list-area { flex: 1; overflow: auto; padding: 20px 40px; }
+  .footer { flex-shrink: 0; padding: 16px 40px 24px; border-top: 1px solid var(--border); background: var(--surface); }
+  .header, .list-area, .footer { max-width: 900px; width: 100%; margin: 0 auto; box-sizing: border-box; }
   .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; font-weight: 800; margin-bottom: 8px; }
   h1 { font-size: 22px; line-height: 1.2; margin: 0; color: var(--text); }
   h2 { font-size: 13px; margin: 0 0 12px; color: var(--text); }
-  .intro { color: var(--text-2); font-size: 13px; line-height: 1.55; margin: 10px 0 20px; }
-  .projects { border: 1px solid var(--border); border-radius: 10px; max-height: 270px; overflow: auto; margin-bottom: 18px; }
+  .intro { color: var(--text-2); font-size: 13px; line-height: 1.55; margin: 10px 0 0; }
+  .projects { border: 1px solid var(--border); border-radius: 10px; }
   .project-row { min-height: 66px; display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-bottom: 1px solid var(--border); }
   .project-row:last-child { border-bottom: 0; }
   .project-row.missing { background: #fff9ed; }
@@ -418,14 +430,14 @@
   .import-button { border: 1px solid var(--accent); background: var(--accent); color: white; }
   .separate-button { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); }
   button:disabled { opacity: .55; cursor: not-allowed; }
-  .required, .working, .error { font-size: 10px; margin: 0; text-align: center; }
+  .required, .working, .error { font-size: 10px; margin: 0; }
   .required, .working { color: var(--text-2); }
   .working { margin-top: 15px; }
   .error { color: var(--danger); margin-top: 13px; line-height: 1.45; }
   @media (max-width: 760px) {
     .content-grid { grid-template-columns: 1fr; }
     .choice-grid { grid-template-columns: 1fr; }
-    .card { padding: 24px; }
+    .header, .list-area, .footer { padding-left: 20px; padding-right: 20px; }
     .book-row { grid-template-columns: 42px 1fr; }
     .book-meta { grid-column: 2; text-align: left; padding-bottom: 8px; }
   }

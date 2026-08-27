@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { BookProgressEntry } from "../types/finding";
 
+  export let projectName: string;
+  export let subtitle = "";
   export let books: BookProgressEntry[];
   export let loading: boolean;
   export let error: string;
@@ -13,12 +15,14 @@
   }
 </script>
 
-<div class="dashboard">
-  <main class="card">
-    <div class="eyebrow">PROJECT DASHBOARD</div>
-    <h1>Books in this project</h1>
-    <p class="intro">Pick a book to open it, or check review and AI-check progress at a glance.</p>
+<div class="screen">
+  <div class="header">
+    <div class="eyebrow">PROJECT</div>
+    <h1>{projectName}</h1>
+    {#if subtitle}<p class="intro">{subtitle}</p>{/if}
+  </div>
 
+  <div class="list-area">
     {#if loading}
       <p class="empty">Loading book progress…</p>
     {:else if error}
@@ -62,18 +66,20 @@
         {/each}
       </section>
     {/if}
-  </main>
+  </div>
 </div>
 
 <style>
-  .dashboard { flex: 1; background: var(--bg); display: flex; align-items: flex-start; justify-content: center; overflow: auto; padding: 28px; }
-  .card { width: min(760px, 100%); border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 34px; box-shadow: 0 18px 55px rgba(25, 35, 55, .10); margin: auto; }
+  .screen { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
+  .header { flex-shrink: 0; padding: 28px 40px 18px; border-bottom: 1px solid var(--border); }
+  .list-area { flex: 1; overflow: auto; padding: 20px 40px; }
+  .header, .list-area { max-width: 900px; width: 100%; margin: 0 auto; box-sizing: border-box; }
   .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; font-weight: 800; margin-bottom: 8px; }
   h1 { font-size: 22px; line-height: 1.2; margin: 0; color: var(--text); }
-  .intro { color: var(--text-2); font-size: 13px; line-height: 1.55; margin: 10px 0 20px; }
+  .intro { color: var(--text-2); font-size: 13px; line-height: 1.55; margin: 10px 0 0; }
   .empty { background: var(--surface-2); color: var(--text-2); border-radius: 8px; padding: 14px; font-size: 11px; margin: 0; }
   .error-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--surface-2); color: var(--danger); border-radius: 8px; padding: 14px; font-size: 11px; }
-  .books { border: 1px solid var(--border); border-radius: 10px; max-height: 480px; overflow: auto; }
+  .books { border: 1px solid var(--border); border-radius: 10px; }
   .book-row { min-height: 66px; display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-bottom: 1px solid var(--border); }
   .book-row:last-child { border-bottom: 0; }
   .book-row.missing { background: #fff9ed; }
@@ -91,4 +97,9 @@
   .small-button { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); padding: 6px 10px; cursor: pointer; font-size: 10px; flex-shrink: 0; }
   .small-button.primary { border-color: var(--accent); color: var(--accent); }
   .small-button:disabled { opacity: .55; cursor: not-allowed; }
+  @media (max-width: 760px) {
+    .header, .list-area { padding-left: 20px; padding-right: 20px; }
+    .bar-row { flex-direction: column; align-items: stretch; gap: 2px; }
+    .bar-label { width: auto; }
+  }
 </style>

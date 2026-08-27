@@ -1,13 +1,15 @@
 <script lang="ts">
   import { project, currentChapter } from "../stores";
 
+  export let screen: "home" | "dashboard" | "editor";
+  export let projectName = "";
+  export let onGoHome: () => void;
+  export let onGoToDashboard: () => void;
   export let onOpenSettings: () => void;
   export let onOpenExport: () => void;
-  export let onOpenProjects: () => void;
   export let onGotoVerse: (verse: string) => void;
   export let onChapterChange: (chapter: string) => void;
   export let onBookChange: (path: string) => void;
-  export let onOpenDashboard: () => void;
   export let exportEnabled: boolean;
   export let bookSwitching = false;
 
@@ -38,21 +40,30 @@
   <div class="brand"><div class="mark" /> Bridge</div>
   <div class="divider" />
 
-  {#if $project}
-    {#if $project.importedProjects && $project.importedProjects.length > 1}
-      <select class="select" value={$project.path} on:change={handleBookSelect} disabled={bookSwitching}>
-        {#each $project.importedProjects as book}
-          <option value={book.path}>{book.bookName}</option>
-        {/each}
-      </select>
-    {:else}
-      <select class="select">
-        <option>{$project.bookName}</option>
-      </select>
+  <nav class="breadcrumb" aria-label="Navigation">
+    <button class="crumb" class:current={screen === "home"} on:click={onGoHome}>Projects</button>
+    {#if screen === "dashboard"}
+      <span class="crumb-sep">›</span>
+      <span class="crumb current">{projectName}</span>
+    {:else if screen === "editor"}
+      <span class="crumb-sep">›</span>
+      <button class="crumb" on:click={onGoToDashboard} disabled={bookSwitching}>{projectName}</button>
+      <span class="crumb-sep">›</span>
+      {#if $project && $project.importedProjects && $project.importedProjects.length > 1}
+        <select class="crumb-select" value={$project.path} on:change={handleBookSelect} disabled={bookSwitching}>
+          {#each $project.importedProjects as book}
+            <option value={book.path}>{book.bookName}</option>
+          {/each}
+        </select>
+      {:else}
+        <span class="crumb current">{$project?.bookName ?? ""}</span>
+      {/if}
     {/if}
-    <button class="btn ghost" on:click={onOpenDashboard}>Dashboard</button>
+  </nav>
+
+  {#if screen === "editor"}
     <select class="select" style="width:72px;" value={$currentChapter} on:change={handleChapterSelect}>
-      {#each $project.chapters as ch}
+      {#each $project?.chapters ?? [] as ch}
         <option value={ch}>Ch {ch}</option>
       {/each}
     </select>
@@ -66,8 +77,9 @@
   {/if}
 
   <div class="grow" />
-  <button class="btn ghost" on:click={onOpenProjects}>Projects</button>
-  <button class="btn primary" disabled={!exportEnabled} on:click={onOpenExport}>Export</button>
+  {#if screen === "editor"}
+    <button class="btn primary" disabled={!exportEnabled} on:click={onOpenExport}>Export</button>
+  {/if}
   <button class="btn ghost" on:click={onOpenSettings}>Settings</button>
 </div>
 
@@ -75,13 +87,26 @@
   .topbar { height: 52px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 14px; flex-shrink: 0; }
   .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: var(--text); white-space: nowrap; }
   .mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--gr)); flex-shrink: 0; }
-  .divider { width: 1px; height: 24px; background: var(--border); }
-  .select { height: 28px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; padding: 0 6px; background: var(--surface); color: var(--text); }
-  .goto { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; height: 28px; width: 150px; }
+  .divider { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
+  .breadcrumb { display: flex; align-items: center; gap: 4px; min-width: 0; flex-shrink: 1; overflow: hidden; }
+  .crumb { border: 0; background: transparent; color: var(--text-2); font-size: 12px; font-weight: 600; padding: 4px 6px; border-radius: 6px; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .crumb:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+  .crumb:disabled { cursor: not-allowed; opacity: 0.6; }
+  .crumb.current { color: var(--text); cursor: default; }
+  .crumb.current:hover { background: transparent; }
+  .crumb-sep { color: var(--text-3); font-size: 12px; flex-shrink: 0; }
+  .crumb-select { height: 28px; border: 1px solid transparent; border-radius: 6px; font-size: 12px; font-weight: 600; padding: 0 4px; background: transparent; color: var(--text); max-width: 200px; }
+  .crumb-select:hover { background: var(--surface-2); }
+  .select { height: 28px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; padding: 0 6px; background: var(--surface); color: var(--text); flex-shrink: 0; }
+  .goto { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; height: 28px; width: 150px; flex-shrink: 0; }
   .goto input { border: none; background: transparent; font-size: 12px; color: var(--text); outline: none; width: 100%; }
   .grow { flex: 1; }
-  .btn { font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+  .btn { font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; flex-shrink: 0; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.primary:disabled { background: #B9C6E0; border-color: #B9C6E0; color: #fff; cursor: not-allowed; }
   .btn.ghost { background: transparent; border-color: var(--border); }
+  @media (max-width: 900px) {
+    .goto { width: 110px; }
+    .crumb { max-width: 130px; }
+  }
 </style>
