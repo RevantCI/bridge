@@ -230,6 +230,12 @@ class AIReviewJobManager:
                         result.update(copy.deepcopy(payload))
                         result.update({"chapter": chapter, "verse": verse, "status": "succeeded", "error": None})
                     except Exception as exc:  # one bad verse must not discard a chapter/book pass
+                        # A cooperative worker may notice cancellation after its
+                        # provider request returns and raise instead of returning
+                        # a payload. That is still cancellation, not a failed
+                        # verse, and no completed model result may be retained.
+                        if self._cancelled(job):
+                            return
                         result = {
                             "chapter": chapter, "verse": verse, "status": "failed",
                             "summary": "", "checkReviews": [], "qaIssues": [],

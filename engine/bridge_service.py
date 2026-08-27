@@ -663,8 +663,24 @@ class BridgeEngine:
                 username=self.settings.reviewer_name or "Bridge Reviewer",
                 audit_metadata=metadata,
             )
-            if provenance == "bridge_ai":
+            accepted_advanced_proposal = (
+                provenance == "human"
+                and str((metadata or {}).get("interface") or "") == "advanced-ai-proposal"
+                and bool((metadata or {}).get("acceptedAIProposal"))
+            )
+            if provenance == "bridge_ai" or accepted_advanced_proposal:
                 self.project.rebase_ai_review_fingerprint(chapter, verse)
+                # In Advanced mode the model result remains advisory until the
+                # reviewer explicitly applies it. That explicit mutation is the
+                # human confirmation which may close a safely grounded pass.
+                saved_ai = self.project.load_ai_review_result(chapter, verse) or {}
+                if self.project.ai_review_cache_status(chapter, verse) == "current":
+                    result["resolutionLifecycle"] = self.project.reconcile_issue_resolutions_after_ai_review(
+                        chapter, verse, list(saved_ai.get("checkReviews") or []),
+                        model=str(saved_ai.get("model") or ""),
+                        summary=str(saved_ai.get("summary") or ""),
+                        allow_automatic_resolution=True,
+                    )
             return result
 
     def clear_check_selection(
@@ -1188,6 +1204,7 @@ class BridgeEngine:
             lifecycle = project.reconcile_issue_resolutions_after_ai_review(
                 chapter, verse, review_dicts,
                 model=str(meta.get("model") or client.model), summary=summary,
+                allow_automatic_resolution=(mode == "basic"),
             )
             progress_callback(100, "Verse AI review complete")
             return {

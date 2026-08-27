@@ -401,9 +401,12 @@
       }
       await bridge.saveCheckSelection(
         operationChapter, operationVerse, check.tool, check.groupId, check.checkId,
-        validation.selections, aiReview.nothing_to_select, "bridge_ai", validation.stateFingerprint,
+        // In Advanced mode this click is an explicit human decision. Preserve
+        // human ownership while recording that the accepted values came from
+        // the displayed AI proposal; automatic Basic-mode writes remain bridge_ai.
+        validation.selections, aiReview.nothing_to_select, "human", validation.stateFingerprint,
         {
-          interface: "advanced-ai-proposal", confidence: aiReview.confidence,
+          interface: "advanced-ai-proposal", acceptedAIProposal: true, confidence: aiReview.confidence,
           verdict: aiReview.verdict, evidenceGrounded: aiReview.evidence_used.length > 0,
         },
       );
@@ -589,11 +592,15 @@
         </div>
         {#if resolution && resolution.recheck.status !== "not_run"}
           <div class="lifecycle-detail {resolution.recheck.status}" role="status">
+            <strong>Automatic recheck result</strong>
             {#if resolution.recheck.rationale}<p>{resolution.recheck.rationale}</p>{/if}
             {#if resolution.recheck.reason && !resolution.recheck.rationale}<p>{resolution.recheck.reason}</p>{/if}
             {#if resolution.recheck.error}<p>{resolution.recheck.error}</p>{/if}
             {#if resolution.recheck.verdict}
               <small>AI verdict: {resolution.recheck.verdict.replaceAll("_", " ")}{resolution.recheck.confidence !== undefined ? ` · ${Math.round(resolution.recheck.confidence * 100)}% confidence` : ""}</small>
+            {/if}
+            {#if (resolution.recheck.evidence ?? []).length > 0}
+              <small>Evidence: {(resolution.recheck.evidence ?? []).map(evidenceLabel).join("; ")}</small>
             {/if}
           </div>
         {/if}
@@ -685,6 +692,8 @@
   .lifecycle-detail { margin-top: 6px; padding: 6px 7px; border-radius: 5px; font-size: 9px; line-height: 1.4; color: var(--text-2); background: var(--surface-2); }
   .lifecycle-detail.resolved { color: var(--success); background: var(--success-bg); }
   .lifecycle-detail.reflagged, .lifecycle-detail.failed { color: var(--danger); background: var(--danger-bg); }
+  .lifecycle-detail strong, .lifecycle-detail small { display: block; }
+  .lifecycle-detail strong { margin-bottom: 3px; }
   .lifecycle-detail p { margin: 0 0 3px; }
   .none { font-size: 11px; color: var(--text-3); }
 </style>

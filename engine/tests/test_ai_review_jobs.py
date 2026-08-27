@@ -43,6 +43,30 @@ def test_cancel_waits_for_inflight_request_and_discards_automatic_result():
     assert terminal["latestResult"] is None
 
 
+def test_cancelled_inflight_worker_exception_is_not_reported_as_ai_failure():
+    manager = AIReviewJobManager()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def raise_after_cancel(chapter, verse, mode, progress, cancel_event):
+        entered.set()
+        assert release.wait(1)
+        assert cancel_event.is_set()
+        raise RuntimeError("AI review cancelled; completed result was discarded")
+
+    started = manager.start(_spec(), run_verse=raise_after_cancel)
+    assert entered.wait(1)
+    manager.cancel(started["jobId"])
+    release.set()
+    terminal = _wait(manager, started["jobId"])
+
+    assert terminal["state"] == "cancelled"
+    assert terminal["failedVerses"] == 0
+    assert terminal["error"] is None
+    assert terminal["results"] == {}
+    assert terminal["latestResult"] is None
+
+
 def test_failed_job_retains_compact_status_and_can_retry_from_same_spec():
     manager = AIReviewJobManager()
 
