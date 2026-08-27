@@ -1,4 +1,4 @@
-# Build log: Bridge v0.8.0-beta.12
+# Build log: Bridge v0.8.0-beta.13
 
 Updated: 2026-08-27
 
@@ -38,6 +38,10 @@ gate is `docs/QA_TEST_MATRIX.md`.
   crash-safe and idempotent. Edited resolved verses enter a persisted automatic
   recheck lifecycle, while Advanced-mode AI proposals require explicit human
   acceptance before a safe pass can close an issue.
+- AI selection consistency: an applicable pass may no longer become **Nothing
+  to Select** merely because a provider omitted target IDs. A uniquely quoted
+  phrase found exactly once in the current verse is recovered transparently;
+  ambiguous or missing target text remains pending instead of being guessed.
 - AI provider compatibility: structured Responses requests first use the
   configured reasoning effort. If and only if a provider/model returns an
   explicit HTTP 400 unsupported-`reasoning` error, Bridge retries once without
@@ -56,7 +60,7 @@ gate is `docs/QA_TEST_MATRIX.md`.
 - Automated source gate: the complete Python suite passes in the maintained Windows/
   Python 3.12.4 environment. Four focused frontend navigation-state tests,
   clean Svelte diagnostics, the production frontend build, and 2 Rust tests
-  also pass. Beta 12 frozen-sidecar and NSIS results, including exact artifact
+  also pass. Beta 13 frozen-sidecar and NSIS results, including exact artifact
   hashes and the remaining installed GUI acceptance, are recorded in the QA
   matrix. The former load-sensitive versification wall-clock bound is now a
   deterministic concurrency-invariant test.

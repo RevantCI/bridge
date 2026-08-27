@@ -3,7 +3,7 @@
 For translators and checkers using Bridge day to day. If you're setting up
 or building the app, see [`DEVELOPER_SETUP.md`](DEVELOPER_SETUP.md) instead.
 
-*Written from the app's current state (`v0.8.0-beta.12`, 2026-08-27).*
+*Written from the app's current state (`v0.8.0-beta.13`, 2026-08-27).*
 
 > **Screenshots:** not included yet — see [Adding screenshots](#adding-screenshots)
 > at the bottom for exactly which screen/file to capture and where to drop
@@ -251,6 +251,11 @@ and each AI result includes its evidence and justification.
   selections are not overwritten, and editing a verse makes its prior AI review
   stale. Bridge shows an explicit warning; choose **Run AI review again** to
   replace it with a current evaluation.
+- **Nothing to Select** is reserved for a genuinely absent or entirely implicit
+  target rendering, or a check that does not apply. If AI cites an exact target
+  phrase but omits its token IDs, Bridge accepts it only when that quoted phrase
+  occurs exactly once; otherwise the check remains pending for manual selection
+  or another AI run.
 - **Resolve / Paratext** records the exact issue, proposed correction, evidence,
   and reviewer note before sending a Project Note. Offline handoffs remain
   queued and retryable; Bridge sends only to the explicitly confirmed active

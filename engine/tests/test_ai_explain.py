@@ -57,7 +57,7 @@ def _fake_transport_for_full_review(checks):
                 "check_id": check.get("contextId", {}).get("checkId", ""),
                 "source_quote": check.get("contextId", {}).get("quoteString", ""),
                 "selection_ids": [], "nothing_to_select": True,
-                "verdict": "pass", "severity": "info", "rationale": "Fake reviewer.",
+                "verdict": "not_applicable", "severity": "info", "rationale": "Fake reviewer.",
                 "suggested_correction": "", "confidence": 0.9, "evidence_ids": [],
             }
             for check in checks
@@ -110,6 +110,41 @@ def _grounded_fake_transport():
                         "selection_ids": [target_id], "nothing_to_select": False,
                         "verdict": "pass", "severity": "info", "rationale": "Supported by bundled evidence.",
                         "suggested_correction": "", "confidence": 0.91,
+                        "evidence_ids": check["evidence_ids"][:1],
+                    }
+                    for check in review_input["translationCore_checks"]
+                ],
+                "qa_issues": [],
+            }
+        return 200, json.dumps({
+            "output_text": json.dumps(payload),
+            "usage": {"input_tokens": 200, "output_tokens": 80, "total_tokens": 280,
+                      "input_tokens_details": {"cached_tokens": 0}},
+        }).encode("utf-8")
+
+    return transport
+
+
+def _omitted_selection_transport(rationale):
+    """Model says pass/NTS despite naming an exact target rendering."""
+    alignment_payload = {"links": [], "implicit_top_ids": [], "target_only_ids": [], "review_notes": []}
+
+    def transport(url, headers, body, timeout):
+        request = json.loads(body.decode("utf-8"))
+        schema_name = request.get("text", {}).get("format", {}).get("name", "")
+        if schema_name == "tc_alignment_proposal":
+            payload = alignment_payload
+        else:
+            review_input = json.loads(request["input"])
+            payload = {
+                "summary": "Selection consistency regression.",
+                "check_reviews": [
+                    {
+                        "tool": check["tool"], "group_id": check["groupId"],
+                        "check_id": check["checkId"], "source_quote": check.get("source_quote") or "",
+                        "selection_ids": [], "nothing_to_select": True,
+                        "verdict": "pass", "severity": "info", "rationale": rationale,
+                        "suggested_correction": "", "confidence": 0.90,
                         "evidence_ids": check["evidence_ids"][:1],
                     }
                     for check in review_input["translationCore_checks"]
@@ -185,11 +220,63 @@ def test_ai_explain_returns_real_evidence_backed_check_reviews(imported_titus_pr
     body = result["result"]
     assert body["summary"] == "Fake AI summary for test."
     assert len(body["checkReviews"]) == len(check_ids)
-    assert all(review["verdict"] == "pass" for review in body["checkReviews"])
+    assert all(review["verdict"] == "not_applicable" for review in body["checkReviews"])
     assert body["usage"]["totalTokens"] > 0
 
     totals = settings.get_ai_usage_totals()
     assert totals["tokens"] >= body["usage"]["totalTokens"]
+
+
+def test_ai_recovers_exact_quoted_target_when_model_incorrectly_returns_nothing(
+    imported_titus_project, monkeypatch,
+):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    settings, project_path = imported_titus_project
+    settings.set_api_key("sk-test-123")
+    engine = BridgeEngine(
+        settings=settings,
+        ai_transport=_omitted_selection_transport(
+            "The exact target rendering 'Paul' appropriately expresses the checked meaning."
+        ),
+    )
+    call(engine, "project.open", {"path": project_path})
+
+    result = call(engine, "ai.explain", {"chapter": "1", "verse": "1"})
+
+    assert result["success"] is True, result
+    reviews = result["result"]["checkReviews"]
+    assert reviews
+    assert all(review["verdict"] == "pass" for review in reviews)
+    assert all(review["nothing_to_select"] is False for review in reviews)
+    assert all(review["proposed_selections"] == [
+        {"text": "Paul", "occurrence": 1, "occurrences": 1},
+    ] for review in reviews)
+    assert all("Selection consistency gate" in review["rationale"] for review in reviews)
+
+
+def test_ai_keeps_ambiguous_pass_pending_instead_of_saving_nothing(
+    imported_titus_project, monkeypatch,
+):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    settings, project_path = imported_titus_project
+    settings.set_api_key("sk-test-123")
+    engine = BridgeEngine(
+        settings=settings,
+        ai_transport=_omitted_selection_transport(
+            "The translation handles the checked meaning, but no exact target rendering was identified."
+        ),
+    )
+    call(engine, "project.open", {"path": project_path})
+
+    result = call(engine, "ai.explain", {"chapter": "1", "verse": "1"})
+
+    assert result["success"] is True, result
+    reviews = result["result"]["checkReviews"]
+    assert reviews
+    assert all(review["verdict"] == "review" for review in reviews)
+    assert all(review["nothing_to_select"] is False for review in reviews)
+    assert all(review["proposed_selections"] == [] for review in reviews)
+    assert all("Select it manually or rerun" in review["rationale"] for review in reviews)
 
 
 def test_advanced_background_review_keeps_proposals_uncommitted(imported_titus_project, monkeypatch):
