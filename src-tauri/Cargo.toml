@@ -1,6 +1,6 @@
 [package]
 name = "translationcore-ai-bridge"
-version = "0.8.0-beta.11"
+version = "0.8.0-beta.12"
 description = "translationCore AI Bridge — local-first translation QA workbench"
 edition = "2021"
 
