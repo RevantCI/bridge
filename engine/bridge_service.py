@@ -844,17 +844,26 @@ class BridgeEngine:
         expected_fingerprint: str, metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._require_project()
+        accepted_advanced_proposal = (
+            provenance == "human"
+            and str((metadata or {}).get("interface") or "") == "advanced-ai-proposal"
+            and bool((metadata or {}).get("acceptedAIProposal"))
+        )
+        if (
+            accepted_advanced_proposal
+            and nothing_to_select
+            and str((metadata or {}).get("verdict") or "") == "problem"
+        ):
+            raise ProjectError(
+                "An AI-reported translation problem cannot be saved as Nothing to Select. "
+                "Leave it pending, select the affected target text, or resolve the issue."
+            )
         with self._checker_lock:
             result = self.project.save_check_selection(
                 chapter, verse, tool, group_id, check_id, selections, nothing_to_select,
                 provenance, expected_fingerprint,
                 username=self.settings.reviewer_name or "Bridge Reviewer",
                 audit_metadata=metadata,
-            )
-            accepted_advanced_proposal = (
-                provenance == "human"
-                and str((metadata or {}).get("interface") or "") == "advanced-ai-proposal"
-                and bool((metadata or {}).get("acceptedAIProposal"))
             )
             if provenance == "bridge_ai" or accepted_advanced_proposal:
                 self.project.rebase_ai_review_fingerprint(chapter, verse)
@@ -1292,6 +1301,8 @@ class BridgeEngine:
         if review.verdict == "not_applicable" and not review.nothing_to_select:
             return "Not-applicable verdict must explicitly select nothing"
         if review.nothing_to_select:
+            if review.verdict == "problem":
+                return "An unresolved translation problem cannot be completed as nothing-to-select"
             return "" if not review.proposed_selections else "Proposal contradicts nothing-to-select"
         if not review.proposed_selections:
             return "No exact target selection was proposed"

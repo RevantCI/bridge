@@ -280,6 +280,27 @@ def test_discontinuous_selection_nothing_to_select_and_clear_are_native_states(c
     assert not_applicable["nothingToSelect"] is True
 
 
+def test_advanced_ai_problem_cannot_be_accepted_as_nothing_to_select(check_project, tmp_path):
+    engine = _engine(tmp_path)
+    _open(engine, check_project)
+    review = _review(engine, "translationNotes", "tn-1")
+
+    response = _call(engine, "check.saveSelection", {
+        **_identity(review), "selections": [], "nothingToSelect": True,
+        "provenance": "human", "expectedFingerprint": review["stateFingerprint"],
+        "metadata": {
+            "interface": "advanced-ai-proposal", "acceptedAIProposal": True,
+            "verdict": "problem", "confidence": 0.99,
+        },
+    })
+
+    assert response["success"] is False
+    assert "cannot be saved as Nothing to Select" in response["error"]["message"]
+    persisted = _review(engine, "translationNotes", "tn-1")
+    assert persisted["selectionStatus"] == "pending"
+    assert persisted["provenance"] == "none"
+
+
 def test_stale_fingerprint_and_ai_overwrite_of_human_state_are_rejected(check_project, tmp_path):
     engine = _engine(tmp_path)
     _open(engine, check_project)

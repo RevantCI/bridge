@@ -49,8 +49,15 @@ class TamilPlugin(IndicWhitespacePlugin):
     font_family: str = 'Nirmala UI'
     direction: str = 'ltr'
     categories: tuple[str, ...] = ('spelling', 'word_form', 'grammar', 'sandhi', 'word_joining', 'punctuation', 'naturalness')
-    guidance: str = ('Evaluate Tamil grammar, honorific agreement, case suffixes, verbal agreement, spelling, punctuation, '
-                     'சந்திப்பிழை / Sandhi, word joining, and naturalness. Tamil suffixes or phrases may legitimately encode Hebrew morphology.')
+    guidance: str = (
+        'Evaluate Tamil grammar, honorific agreement, case suffixes, verbal agreement, spelling, punctuation, '
+        'சந்திப்பிழை / Sandhi, word joining, and naturalness. Tamil is agglutinative: case, number, person, '
+        'honorific, additive/conjunctive, genitive, and other grammatical suffixes may be attached to the lexical '
+        'rendering. A name or key term inside a longer inflected or compound Tamil surface token is not absent merely '
+        'because its ending differs from a dictionary form. When that supplied surface token carries the checked '
+        'meaning, select the entire token ID; never invent a detached stem. Tamil suffixes or phrases may also '
+        'legitimately encode Hebrew or Greek morphology.'
+    )
 
     def normalization_policy(self) -> dict[str, Any]:
         return {'unicode': 'NFC', 'preserveScriptureSurfaceForms': True, 'sandhiAware': True}

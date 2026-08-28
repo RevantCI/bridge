@@ -106,6 +106,7 @@
         <div class="field">
           <label for="model">Model</label>
           <input id="model" type="text" bind:value={model} placeholder="e.g. gpt-5.6, claude-sonnet-5, llama3" />
+          <div class="hint">For tN/tW review, use a model with strong multilingual reasoning and structured-output support. Small/mini models may miss inflected target-language renderings or omit checks; Bridge keeps uncertain results pending for human review.</div>
         </div>
 
         <div class="field">

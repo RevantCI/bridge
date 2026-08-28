@@ -603,7 +603,15 @@ class OpenAIResponsesClient:
             'type': 'object', 'additionalProperties': False,
             'properties': {
                 'summary': {'type': 'string'},
-                'check_reviews': {'type': 'array', 'items': check_schema},
+                # Strict structured-output providers can enforce complete coverage before
+                # Bridge receives the response. Parser validation below remains the safety
+                # net for compatible providers that do not enforce JSON Schema fully.
+                'check_reviews': {
+                    'type': 'array',
+                    'items': check_schema,
+                    'minItems': len(check_inputs),
+                    'maxItems': len(check_inputs),
+                },
                 'qa_issues': {'type': 'array', 'items': issue_schema},
             },
             'required': ['summary','check_reviews','qa_issues'],
@@ -611,17 +619,19 @@ class OpenAIResponsesClient:
         instructions = (
             f'You are a senior Bible translation reviewer operating translationCore checks for a {language.source_name} → {language.target_name} project. '
             'The human reviewer should not have to read every resource or manually find/select target words: do that preparation now, then present concise evidence-backed final results. '
-            f'For EVERY supplied translationCore check, read its evidence_catalog items, understand the source quote and note/key-term concept, locate the exact existing {language.target_name} bottomWord IDs that represent it, and return those IDs. '
+            f'Return exactly one check_reviews row for EVERY supplied translationCore check: {len(check_inputs)} input checks require exactly {len(check_inputs)} result rows. Use every supplied check_id exactly once; do not omit, combine, duplicate, rename, or invent checks. '
+            f'For each check, read its evidence_catalog items, understand the source quote and note/key-term concept, examine EVERY supplied target bottomWord (including inflected and compound surface forms), locate the exact existing {language.target_name} bottomWord IDs that represent it, and return those IDs. '
             f'Use ONLY supplied {language.target_name} selection IDs; never invent/normalize/rewrite tokens. '
             'A correct translation still requires selection_ids for the exact target word or phrase that carries the checked meaning. '
             'Do not set nothing_to_select merely because the verdict is pass or because you think selecting text is optional. '
-            'Set nothing_to_select=true only when the concept is genuinely absent, represented entirely implicitly with no exact target span, or the check is not applicable. '
+            'A genuinely absent or incorrectly rendered checked meaning is a problem: return verdict=problem, empty selection_ids, and nothing_to_select=false so the issue remains unresolved. '
+            'Set nothing_to_select=true only when the check is structurally not applicable. A source key term that is translated by a suffix-bearing or compound target token is applicable and must select that entire supplied token ID. '
             'If the rationale names or quotes a target rendering, include every corresponding supplied target ID in selection_ids. '
             'For Translation Notes, apply the linked Translation Academy method/principle and judge whether the target translation handles the specific issue. '
             'For Translation Words, use the Translation Word article, TWL occurrence, source morphology, approved project renderings, and human_approved_terminology_rules. Human-approved terminology rules outrank AI preference; allow contextually justified variation. '
             'Then perform whole-verse QA using the supplied checking evidence: accuracy/completeness first, including omission, unsupported addition, wrong lexical meaning, negation/scope, participants/pronouns, number/person, commands/questions, semantic relations, figures, terminology, and stale/misaligned meaning. '
             f'Separately evaluate only the language-appropriate editorial categories: {", ".join(language.qa_categories)}. {language.prompt_guidance} '
-            'False-positive discipline: before reporting any issue, test the strongest plausible explanation that the target rendering is valid, consult existing alignment/approved decisions/terminology, and report only one finding for one underlying problem. '
+            'False-positive discipline: before reporting a missing-rendering or wrong-lexical-meaning issue, inspect every supplied target token for a valid inflected, suffixed, compounded, transliterated, or contextually equivalent rendering. Do not call a rendering absent merely because it differs from an English gloss or citation form. Test the strongest plausible explanation that the target rendering is valid, consult existing alignment/approved decisions/terminology, and report only one finding for one underlying problem. '
             'Critical findings require very high confidence and explicit evidence. Low-confidence possibilities should be review-level or omitted, not exaggerated. '
             'Reference only evidence IDs that exist in evidence_catalog. Reference Bibles/English are secondary aids, never authority over source data. '
             'Do not propose a correction merely because a literal rendering differs. Human/community final approval remains human. Return only the schema.'
@@ -686,6 +696,17 @@ class OpenAIResponsesClient:
                         rationale
                         + '\n\nSelection consistency gate: no exact, unambiguous target text '
                           'was proposed. Select it manually or rerun the AI review.'
+                    ).strip()
+                elif verdict == 'problem':
+                    # Missing/incorrect meaning is unresolved reviewer work. It
+                    # must never be persisted as translationCore's completed
+                    # Nothing-to-Select decision merely because there is no
+                    # target span to select.
+                    nothing = False
+                    rationale = (
+                        rationale
+                        + '\n\nSelection consistency gate: a reported translation problem is '
+                          'not a Nothing-to-Select decision. The check remains unresolved.'
                     ).strip()
             evidence_ids = [str(x) for x in item.get('evidence_ids', [])]
             unknown_evidence = [x for x in evidence_ids if x not in evidence_catalog]

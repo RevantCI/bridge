@@ -201,6 +201,26 @@
     return check.selectionStatus.charAt(0).toUpperCase() + check.selectionStatus.slice(1);
   }
 
+  function provenanceLabel(check: NativeCheckReview): string {
+    switch (check.provenance) {
+      case "human": return "Human-confirmed decision";
+      case "bridge_ai": return "Bridge AI automatic selection";
+      case "existing_tc": return "Imported translationCore decision";
+      default: return "No saved selection";
+    }
+  }
+
+  function canApplyAiProposal(aiReview: AiCheckReview | undefined): boolean {
+    if (!aiReview) return false;
+    // Cross-verse/implicit semantic mappings are Bridge companion decisions,
+    // not native translationCore selections for the currently open verse.
+    // Only the legacy empty state and an exact current-verse mapping may use
+    // the existing selection writer.
+    if (!["", "found_this_verse"].includes(aiReview.selection_state ?? "")) return false;
+    if ((aiReview.proposed_selections ?? []).length > 0) return true;
+    return aiReview.nothing_to_select && aiReview.verdict === "not_applicable";
+  }
+
   function resolutionLifecycleLabel(record: IssueResolutionRecord): string {
     switch (record.recheck.status) {
       case "stale": return "Correction needs recheck";
@@ -415,6 +435,12 @@
       return;
     }
     if (mutationBusy) return;
+    if (!canApplyAiProposal(aiReview)) {
+      mutationError = aiReview.verdict === "problem" && aiReview.nothing_to_select
+        ? "This AI result reports a translation problem, so it cannot be applied as Nothing to Select. Clear the saved decision and rerun this verse, or edit the selection manually."
+        : "This AI result has no safe, exact proposal to apply.";
+      return;
+    }
     mutationBusy = true;
     mutationError = "";
     mutationNotice = "";
@@ -443,7 +469,7 @@
       );
       await refresh();
       if (key === operationKey) {
-        mutationNotice = `${toolLabel(check)} AI proposal applied. You can still edit or clear it.`;
+        mutationNotice = `${toolLabel(check)} AI proposal applied as a human-confirmed decision. You can still edit or clear it.`;
         onStateChanged();
       }
       try {
@@ -560,7 +586,10 @@
         {:else}
           <p class="muted-evidence">No AI evaluation has been run for this check. Native selection state is shown without calling it passed.</p>
         {/if}
-        <div class="provenance">Selection provenance: {check.provenance.replaceAll("_", " ")}</div>
+        <div class="provenance">Selection provenance: {provenanceLabel(check)}</div>
+        {#if check.nothingToSelect && aiReview?.verdict === "problem"}
+          <p class="proposal-conflict">This saved Nothing-to-Select decision conflicts with the AI problem verdict. Clear it, then rerun this verse or select the affected target text manually.</p>
+        {/if}
       </details>
 
       {#if $reviewerMode === "advanced"}
@@ -590,9 +619,7 @@
           </div>
         {:else}
           <div class="advanced-actions">
-            {#if aiReview
-              && ["", "found_this_verse"].includes(aiReview.selection_state ?? "")
-              && ((aiReview.proposed_selections ?? []).length > 0 || (aiReview.verdict === "not_applicable" && aiReview.nothing_to_select))}
+            {#if aiReview && canApplyAiProposal(aiReview)}
               <button class="small-btn ai-apply" on:click={() => applyAiProposal(check, aiReview)} disabled={mutationBusy}>Apply AI proposal</button>
             {/if}
             <button class="small-btn" on:click={() => startEditing(check)}>Edit selection</button>
@@ -725,6 +752,7 @@
   .semantic-relations { margin-top: 4px; font-size: 9px; color: var(--text-3); }
   .muted-evidence, .provenance { color: var(--text-3); }
   .provenance { margin-top: 5px; text-transform: capitalize; }
+  .proposal-conflict { color: var(--danger); background: var(--danger-bg); border-radius: 5px; padding: 6px 7px; }
   .advanced-actions, .editor-actions { display: flex; gap: 6px; margin-top: 8px; }
   .small-btn, .save-btn, .icon-btn { border-radius: 5px; cursor: pointer; font-size: 10px; }
   .small-btn { padding: 5px 8px; color: var(--text-2); background: var(--surface); border: 1px solid var(--border-strong); }

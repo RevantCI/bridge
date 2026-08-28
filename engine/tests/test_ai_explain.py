@@ -22,6 +22,9 @@ import pytest
 
 from bridge_service import BridgeEngine
 from greek_room_engine.protocol import EngineRequest
+from tc_ai_bridge.models import AICheckReview
+from tc_ai_bridge.plugins import TamilPlugin
+from tc_ai_bridge.review_policy import gate_check_reviews
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.tc_project import TranslationCoreProject
 
@@ -100,6 +103,10 @@ def _grounded_fake_transport():
             payload = alignment_payload
         else:
             review_input = json.loads(request["input"])
+            check_count = len(review_input["translationCore_checks"])
+            check_array_schema = schema_format["schema"]["properties"]["check_reviews"]
+            assert check_array_schema["minItems"] == check_count
+            assert check_array_schema["maxItems"] == check_count
             target_id = review_input["target_bottomWords"][0]["id"]
             payload = {
                 "summary": "Grounded automatic review.",
@@ -125,8 +132,8 @@ def _grounded_fake_transport():
     return transport
 
 
-def _omitted_selection_transport(rationale):
-    """Model says pass/NTS despite naming an exact target rendering."""
+def _omitted_selection_transport(rationale, *, verdict="pass", confidence=0.90):
+    """Model returns NTS without a grounded target selection."""
     alignment_payload = {"links": [], "implicit_top_ids": [], "target_only_ids": [], "review_notes": []}
 
     def transport(url, headers, body, timeout):
@@ -143,8 +150,8 @@ def _omitted_selection_transport(rationale):
                         "tool": check["tool"], "group_id": check["groupId"],
                         "check_id": check["checkId"], "source_quote": check.get("source_quote") or "",
                         "selection_ids": [], "nothing_to_select": True,
-                        "verdict": "pass", "severity": "info", "rationale": rationale,
-                        "suggested_correction": "", "confidence": 0.90,
+                        "verdict": verdict, "severity": "info", "rationale": rationale,
+                        "suggested_correction": "", "confidence": confidence,
                         "evidence_ids": check["evidence_ids"][:1],
                     }
                     for check in review_input["translationCore_checks"]
@@ -277,6 +284,65 @@ def test_ai_keeps_ambiguous_pass_pending_instead_of_saving_nothing(
     assert all(review["nothing_to_select"] is False for review in reviews)
     assert all(review["proposed_selections"] == [] for review in reviews)
     assert all("Select it manually or rerun" in review["rationale"] for review in reviews)
+
+
+def test_ai_problem_without_target_span_cannot_become_nothing_to_select(
+    imported_titus_project, monkeypatch,
+):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    settings, project_path = imported_titus_project
+    settings.set_api_key("sk-test-123")
+    engine = BridgeEngine(
+        settings=settings,
+        ai_transport=_omitted_selection_transport(
+            "The checked meaning appears to be absent from the target verse.",
+            verdict="problem", confidence=0.99,
+        ),
+    )
+    call(engine, "project.open", {"path": project_path})
+
+    result = call(engine, "ai.explain", {"chapter": "1", "verse": "1"})
+
+    assert result["success"] is True, result
+    reviews = result["result"]["checkReviews"]
+    assert reviews
+    assert all(review["verdict"] == "problem" for review in reviews)
+    assert all(review["nothing_to_select"] is False for review in reviews)
+    assert all(review["proposed_selections"] == [] for review in reviews)
+    assert all("not a Nothing-to-Select decision" in review["rationale"] for review in reviews)
+
+    unsafe = AICheckReview(
+        tool="translationNotes", group_id="figs-possession", check_id="check-1",
+        source_quote="τῷ θεῷ μου", proposed_selection_ids=[], proposed_selection_text=[],
+        proposed_selections=[], nothing_to_select=True, verdict="problem", severity="high",
+        rationale="The meaning is absent.", suggested_correction="", confidence=0.99,
+        evidence_used=[{"title": "Translation Note: figs-possession"}],
+    )
+    assert "cannot be completed" in BridgeEngine._safe_ai_selection_reason(unsafe)
+
+
+def test_tamil_review_guidance_requires_inflected_surface_token_selection():
+    guidance = TamilPlugin().prompt_guidance()
+
+    assert "agglutinative" in guidance
+    assert "not absent" in guidance
+    assert "select the entire token ID" in guidance
+
+
+def test_ungrounded_sub_high_confidence_problem_remains_human_review():
+    review = AICheckReview(
+        tool="translationWords", group_id="jesus", check_id="check-1",
+        source_quote="ἐπισκόποις", proposed_selection_ids=[], proposed_selection_text=[],
+        proposed_selections=[], nothing_to_select=False, verdict="problem", severity="high",
+        rationale="The rendering appears to be absent.", suggested_correction="",
+        confidence=0.85, evidence_used=[{"title": "Translation Word: Jesus"}],
+    )
+
+    gated = gate_check_reviews([review])[0]
+
+    assert gated.verdict == "review"
+    assert gated.severity == "medium"
+    assert "Lexical-absence gate" in gated.rationale
 
 
 def test_advanced_background_review_keeps_proposals_uncommitted(imported_titus_project, monkeypatch):

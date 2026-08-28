@@ -79,6 +79,19 @@ def gate_check_reviews(reviews: Iterable[AICheckReview]) -> list[AICheckReview]:
             if r.severity in ('critical', 'high'):
                 r.severity = 'medium'
             r.rationale = (r.rationale + f'\n\nConfidence gate: {old} changed to review at {conf:.0%}; human confirmation required.').strip()
+        # A claimed omission/wrong rendering with no grounded target span is the
+        # model's most error-prone conclusion for morphologically rich languages.
+        # Keep a sub-high-confidence claim visible, but do not label it a settled
+        # problem or let it drive an automatic resolution lifecycle.
+        if r.verdict == 'problem' and not r.proposed_selections and conf < 0.90:
+            r.verdict = 'review'
+            if r.severity in ('critical', 'high'):
+                r.severity = 'medium'
+            r.rationale = (
+                r.rationale
+                + f'\n\nLexical-absence gate: problem changed to review at {conf:.0%} because no exact '
+                  'target span grounded the claim; inspect inflected or compound target forms.'
+            ).strip()
         if r.severity == 'critical' and (conf < 0.90 or evidence_count == 0):
             r.severity = 'high'
             r.rationale = (r.rationale + '\n\nSeverity gate: Critical requires ≥90% confidence and explicit Knowledge Base evidence.').strip()
