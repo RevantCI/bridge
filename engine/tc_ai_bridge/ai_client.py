@@ -19,6 +19,9 @@ from .security import ai_payload_manifest
 from .plugins import PluginRegistry
 from .review_policy import gate_ai_issues, gate_check_reviews
 from .usfm import strip_usfm
+from .semantic_mapping_bridge import prepare_semantic_mappings_for_review
+from .semantic_alignment_guard import cross_verse_alignment_exclusions, guard_alignment_response
+from .semantic_review_policy import apply_semantic_review_policy_all
 
 
 class AIError(RuntimeError):
@@ -283,7 +286,11 @@ class OpenAIResponsesClient:
             raise AIError('OpenAI API connection test returned an unexpected model response.')
         return data
 
-    def propose_alignment(self, project: TranslationCoreProject, chapter: str, verse: str, alignment: VerseAlignment, mode: str = 'gap_fill') -> dict[str, Any]:
+    def propose_alignment(
+        self, project: TranslationCoreProject, chapter: str, verse: str,
+        alignment: VerseAlignment, mode: str = 'gap_fill',
+        semantic_mapping_pack: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Ask AI only for linguistic token links; compile legal tC groups deterministically.
 
         mode='gap_fill' protects every existing non-empty alignment group and primarily asks AI
@@ -291,6 +298,13 @@ class OpenAIResponsesClient:
         verse and may propose an alternative complete grouping for human inspection.
         """
         inv = make_inventory(alignment)
+        current_reference = f'{project.book_id} {chapter}:{verse}'
+        semantic_exclusions = cross_verse_alignment_exclusions(
+            alignment=alignment,
+            semantic_pack=semantic_mapping_pack,
+            current_reference=current_reference,
+        )
+        protected_cross_verse_top_ids = set(semantic_exclusions.get('top_ids', []))
         language = PluginRegistry().detect_project(project, alignment, project.target_verse_text(chapter, verse))
 
         protected_top: set[str] = set(); protected_bottom: set[str] = set()
@@ -343,6 +357,7 @@ class OpenAIResponsesClient:
             'unresolved_target_ids': unresolved_bottom_ids if mode == 'gap_fill' else list(inv.bottom_ids),
             'translationCore_checks': tc_checks,
             'language_context': language.to_dict(),
+            'semantic_mapping_alignment_exclusions': semantic_exclusions,
         }
         self.last_privacy_manifest = ai_payload_manifest(input_obj['reference'], input_obj)
         schema = {
@@ -382,7 +397,13 @@ class OpenAIResponsesClient:
             f'{scope} Respect occurrence metadata, morphology, idioms, particles, grammatical encoding, and discontinuous phrases. '
             f'{language.prompt_guidance} English/reference word order is secondary and must not control source-to-target alignment. Return only the schema.'
         )
+        instructions += (
+            ' Stage 3 semantic passage mappings are authoritative for target LOCATION. '
+            'Any source top ID listed in semantic_mapping_alignment_exclusions.top_ids has an overt target realization in another target verse/range. '
+            'Do not link that source ID to a current-verse bottom ID and do not mark it implicit merely to force verse-local coverage.'
+        )
         raw = self._post_structured(instructions, json.dumps(input_obj, ensure_ascii=False), 'tc_alignment_proposal', schema)
+        raw = guard_alignment_response(raw, protected_cross_verse_top_ids)
         # Older mocks/cached responses may still use the pre-v0.7.4 groups schema. The compiler
         # normalizer accepts those for backwards compatibility, while real v0.7.4 requests use links.
         lock_policy = 'hard' if mode == 'gap_fill' and project.alignment_lock_state(chapter, verse) == 'HARD_LOCK' else 'protected'
@@ -466,7 +487,12 @@ class OpenAIResponsesClient:
             summary += f' · {len(suppressed)} low-confidence/duplicate AI finding(s) suppressed by reviewer-noise gate.'
         return issues, summary
 
-    def run_full_review(self, project: TranslationCoreProject, chapter: str, verse: str, alignment: VerseAlignment, knowledge_base=None, progress_callback=None, expected_input_fingerprint: str | None = None) -> tuple[list[AICheckReview], list[QAIssue], str, dict[str, Any]]:
+    def run_full_review(
+        self, project: TranslationCoreProject, chapter: str, verse: str,
+        alignment: VerseAlignment, knowledge_base=None, progress_callback=None,
+        expected_input_fingerprint: str | None = None,
+        semantic_mapping_pack: dict[str, Any] | None = None,
+    ) -> tuple[list[AICheckReview], list[QAIssue], str, dict[str, Any]]:
         """AI performs the resource reading + target selection work, human reviews final evidence-backed results."""
         from .knowledge_base import TranslationHelpsKnowledgeBase
 
@@ -517,6 +543,14 @@ class OpenAIResponsesClient:
         for rb in pack.get('reference_bibles', []):
             eid=f'E{ev_n:03d}'; ev_n += 1; evidence_catalog[eid]=rb
 
+        if semantic_mapping_pack is None:
+            semantic_mapping_pack = prepare_semantic_mappings_for_review(
+                project=project,
+                client=self,
+                chapter=chapter,
+                verse=verse,
+            )
+
         input_obj = {
             'reference': f'{project.book_id} {chapter}:{verse}',
             'tamil_verse': project.target_verse_text(chapter, verse),
@@ -533,6 +567,9 @@ class OpenAIResponsesClient:
             'target_verse': project.target_verse_text(chapter, verse),
             'source_topWords': top_tokens,
             'target_bottomWords': bottom_tokens,
+            'semantic_passage_mappings': semantic_mapping_pack.get('mappings', []) if semantic_mapping_pack else [],
+            'semantic_mapping_check_states': semantic_mapping_pack.get('checkStates', []) if semantic_mapping_pack else [],
+            'semantic_mapping_unresolved': semantic_mapping_pack.get('unresolved', []) if semantic_mapping_pack else [],
         }
         self.last_privacy_manifest = ai_payload_manifest(input_obj['reference'], input_obj)
 
@@ -588,6 +625,15 @@ class OpenAIResponsesClient:
             'Critical findings require very high confidence and explicit evidence. Low-confidence possibilities should be review-level or omitted, not exaggerated. '
             'Reference only evidence IDs that exist in evidence_catalog. Reference Bibles/English are secondary aids, never authority over source data. '
             'Do not propose a correction merely because a literal rendering differs. Human/community final approval remains human. Return only the schema.'
+        )
+        instructions += (
+            ' IMPORTANT STAGE 3 LOCATION RULES: source and target verse numbers are reference anchors, not mandatory semantic boundaries. '
+            'Use semantic_passage_mappings to determine where each checked source meaning is realized. '
+            'selection_ids can encode ONLY the current verse bottom IDs. '
+            'When a check state is found_another_verse or split_across_verses, return an empty selection_ids array and nothing_to_select=false; do not invent a current-verse token. '
+            'When represented_implicitly, return empty selection_ids and nothing_to_select=false because Bridge records an explicit semantic state. '
+            'When needs_passage_review, target_not_located, source_anchor_unresolved, or mapping_error, do not infer omission merely from non-location; use verdict=review unless independent supplied evidence securely demonstrates a problem. '
+            'Never encode found-in-another-verse as Nothing to Select.'
         )
         if progress_callback: progress_callback(64, 'AI reviewing Notes, Words and whole verse')
         result = self._post_structured(instructions, json.dumps(input_obj, ensure_ascii=False), 'tc_full_review', schema)
@@ -703,6 +749,7 @@ class OpenAIResponsesClient:
             ))
 
         reviews = gate_check_reviews(reviews)
+        reviews = apply_semantic_review_policy_all(reviews, semantic_mapping_pack)
         active_issues, suppressed_issues = gate_ai_issues(issues)
         issues = active_issues
         summary = str(result.get('summary',''))
@@ -722,8 +769,9 @@ class OpenAIResponsesClient:
             'qaIssues': [x.to_dict() for x in issues],
             'suppressedQaIssues': [x.to_dict() for x in suppressed_issues],
             'languageContext': language.to_dict(),
+            'semanticMapping': semantic_mapping_pack,
         })
-        return reviews, issues, summary, {'resource_provenance': pack.get('resource_provenance', {}), 'saved_to': str(saved), 'evidence_catalog': evidence_catalog, 'model': self.model, 'reasoning_effort': self._effective_reasoning_effort(), 'estimated_cost_usd': self.last_cost_usd, 'privacy_manifest': self.last_privacy_manifest, 'language_context': language.to_dict(), 'suppressed_qa_count': len(suppressed_issues)}
+        return reviews, issues, summary, {'resource_provenance': pack.get('resource_provenance', {}), 'saved_to': str(saved), 'evidence_catalog': evidence_catalog, 'model': self.model, 'reasoning_effort': self._effective_reasoning_effort(), 'estimated_cost_usd': self.last_cost_usd, 'privacy_manifest': self.last_privacy_manifest, 'language_context': language.to_dict(), 'suppressed_qa_count': len(suppressed_issues), 'semantic_mapping': semantic_mapping_pack}
 
     def prepare_verse_review(self, project: TranslationCoreProject, chapter: str, verse: str, alignment: VerseAlignment, knowledge_base=None, progress_callback=None) -> tuple[dict[str, Any] | None, VerseAlignment, list[AICheckReview], list[QAIssue], str, dict[str, Any]]:
         """
@@ -735,6 +783,14 @@ class OpenAIResponsesClient:
         """
         start_input_fingerprint = project.review_input_fingerprint(chapter, verse)
         if progress_callback: progress_callback(5, 'Preparing verse review')
+        if progress_callback:
+            progress_callback(7, 'Mapping source meanings across target passage')
+        semantic_mapping_pack = prepare_semantic_mappings_for_review(
+            project=project,
+            client=self,
+            chapter=chapter,
+            verse=verse,
+        )
         needs_alignment = bool(alignment.word_bank) or any(g.top_words and not g.bottom_words for g in alignment.alignments)
         proposal: dict[str, Any] | None = None
         review_alignment = alignment
@@ -742,7 +798,7 @@ class OpenAIResponsesClient:
         first_cost = 0.0
         if needs_alignment:
             if progress_callback: progress_callback(12, 'AI preparing incomplete alignment')
-            proposal = self.propose_alignment(project, chapter, verse, alignment, mode='gap_fill')
+            proposal = self.propose_alignment(project, chapter, verse, alignment, mode='gap_fill', semantic_mapping_pack=semantic_mapping_pack)
             # Automatic final-review preparation may fill gaps, but it must never
             # rewrite already-established project alignment relationships.
             validate_preparation_proposal(alignment, proposal)
@@ -754,7 +810,7 @@ class OpenAIResponsesClient:
             if progress_callback: progress_callback(38, 'Existing alignment ready')
         if project.review_input_fingerprint(chapter, verse) != start_input_fingerprint:
             raise AIError('Verse/project data changed while AI was preparing alignment; stale result was discarded.')
-        reviews, issues, summary, meta = self.run_full_review(project, chapter, verse, review_alignment, knowledge_base, progress_callback=progress_callback, expected_input_fingerprint=start_input_fingerprint)
+        reviews, issues, summary, meta = self.run_full_review(project, chapter, verse, review_alignment, knowledge_base, progress_callback=progress_callback, expected_input_fingerprint=start_input_fingerprint, semantic_mapping_pack=semantic_mapping_pack)
         second_usage = self.last_usage.total_tokens
         second_cost = self.last_cost_usd
         total_cost = first_cost + second_cost
@@ -780,6 +836,7 @@ class OpenAIResponsesClient:
             'reviewedAlignment': review_alignment.to_dict(),
             'checkReviews': [x.to_dict() for x in reviews],
             'qaIssues': [x.to_dict() for x in issues],
+            'semanticMapping': semantic_mapping_pack,
         })
         meta['saved_to'] = str(saved)
         self.last_cost_usd = total_cost

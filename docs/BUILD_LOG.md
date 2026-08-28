@@ -2061,3 +2061,103 @@ the popup; existing selection behavior untouched).
   not necessarily every code that exists in UGNT — unrecognized codes fall
   back to the raw string rather than a wrong label, by design.
 
+## Stage 3 semantic passage mapping merge (2026-08-28)
+
+Merged the Stage 3 builder-handoff package (6 new `tc_ai_bridge` modules,
+`models.py`/`ai_client.py`/`bridge_service.py` integration, Svelte review-UI
+changes, regression tests) per `patches/BETA14_STAGE3_CHECKLIST.md`. Stage 3
+locates where a source tN/tW meaning is actually realized across a target
+passage — including when the target moved it to a different verse — instead
+of assuming every check's meaning stays verse-local, and gates unsafe
+verse-local application of a mapping it can't ground with high confidence.
+
+### Two real bugs found only by running the merged code, not by reading the patch
+
+1. **Silent no-op on any per-unit mapping failure.**
+   `semantic_mapping_bridge.prepare_semantic_mappings_for_review`'s
+   `except Exception` handler on a `map_units` failure returned
+   `checkStates: anchor_unresolved` — correct for anchor-lookup failures
+   discovered *before* `map_units` runs, but anchor_unresolved is empty for
+   units that were found and only failed *later* (e.g. the model's proposed
+   target span didn't validate). Every check in that batch — not just the
+   one that triggered the exception — silently reverted to identical-looking
+   non-Stage-3 review with zero visible signal anything went wrong,
+   defeating the fail-closed design's whole point (surfaced review, not
+   silent bypass). Confirmed live: opening PHP 1:3 in a real Hindi IRV
+   project produced no semantic-mapping card at all; the saved AI review's
+   `semanticMapping.diagnostic` on disk (`.apps/translationCoreAI/aiReview/
+   php/1/3.json`) showed the mapping attempt had actually failed. Fixed by
+   populating one `mapping_error` check-state entry per unit in that except
+   block, and adding the missing `mapping_error` branch to the Svelte
+   semantic-map-card (the original patch's card only handled the other six
+   states).
+2. **Model-supplied target-span offsets are untrustworthy for non-Latin
+   scripts.** `semantic_mapping.py`'s span validator hard-rejected a mapping
+   whenever `seg_text[start:end] != quote` for model-supplied integer
+   offsets — and the prompt never tells the model what indexing convention
+   `start`/`end` use in the first place. This is exactly the failure
+   observed for the Hindi case above (`"Target quote/offset mismatch ...
+   hallucinated or normalized text rejected"`) — LLMs are unreliable at
+   counting exact character offsets in complex/non-Latin scripts (Devanagari
+   conjuncts/matras and similar), independent of whether the quoted text
+   itself was genuine. Fixed by never trusting model-supplied offsets:
+   always re-derive the span via exact literal-text search
+   (`_literal_positions`), requiring the quote occur exactly once,
+   unambiguously, in the target segment. This keeps the real
+   anti-hallucination guarantee (the quoted text must genuinely be present)
+   while removing a source of false-positive rejections that had nothing to
+   do with hallucination.
+
+### Also found: test-suite-wide isolation gap
+
+`default_semantic_source_db_path()`'s dev-mode fallback resolves relative to
+the checked-out source tree (`Path(__file__).resolve().parent.parent /
+'resources' / ...`), so *any* test running `prepare_verse_review` from
+source — not just Stage 3's own tests — silently picked up the real,
+installed production DB and exercised genuine Stage 3 review policy. This
+broke 5 pre-existing `test_ai_explain.py` tests that predate Stage 3 and
+assume plain review behavior. Fixed at the root: `engine/conftest.py`'s
+autouse `isolate_bridge_app_data` fixture now also sets
+`BRIDGE_SEMANTIC_SOURCE_DB` to a path that can't exist, so Stage 3 defaults
+to `state: "unavailable"` for the whole suite. `test_semantic_mapping_stage3.py`
+constructs its DB path explicitly and is unaffected.
+
+### Known gap, not yet fixed
+
+`openSemanticSpan` in `TranslationHelpsReview.svelte` (click a mapped target
+span to jump to it) only navigates — it sets `currentChapter`/`selectedVerse`
+but does not highlight the `start:end` span. There's no existing mechanism in
+this app to highlight an arbitrary span from outside a verse's own
+finding-based highlighting (`utils/highlight.ts` `buildSegments`); that needs
+new plumbing through `ReviewPanel.svelte`/the verse editor, deliberately
+deferred as a follow-up.
+
+### The production DB is not committed
+
+`engine/resources/semantic_mapping/*.sqlite` (~120MB) is gitignored — it's
+over GitHub's 100MB single-file push limit and this repo doesn't use Git
+LFS. See `docs/DEVELOPER_SETUP.md`'s "Stage 3 semantic mapping DB" section
+for how a teammate installs it locally via
+`scripts/install_stage3_files.py` from the builder-handoff package.
+
+### Verified
+
+- `pytest engine/tests -q` — 269 passed, against the real full production DB
+  installed locally (not just the regression-scope one).
+- `npm run check` — 0 errors, 0 warnings. `npm run build` — succeeds.
+  `npm run test:ui-state` — 4/4 pass.
+- Frozen sidecar smoke test (`scripts/smoke_sidecars.py`) passes after
+  rebuilding with `build-sidecars.ps1`.
+- Live desktop app (`npm run tauri dev`), real Hindi IRV Philippians
+  project, PHP 1:3 — this is what surfaced both bugs above; not caught by
+  the test suite alone.
+
+### Still open
+
+- The navigation-only `openSemanticSpan` gap above.
+- `prepare_verse_review` now computes the semantic-mapping pack
+  unconditionally on every verse review (not only when alignment is
+  incomplete) — one extra AI request per verse review, cached per
+  passage-fingerprint so re-opening an unchanged passage is a cache hit.
+  Worth watching real-world cost/latency impact.
+

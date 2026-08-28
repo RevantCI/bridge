@@ -39,6 +39,13 @@ src-tauri/binaries/bridge-engine-*
 # the real, tracked source of truth; this is a disposable build-time copy.
 src-tauri/resources/
 
+# Stage 3 semantic-mapping source DB (~120MB) exceeds GitHub's 100MB
+# single-file push limit and isn't tracked via Git LFS. Install it locally
+# via scripts/install_stage3_files.py — see docs/BUILD_LOG.md for the
+# teammate setup steps. The small regression SFM fixtures alongside it
+# stay tracked (they're inputs to engine/tests/test_semantic_mapping_stage3.py).
+engine/resources/semantic_mapping/*.sqlite
+
 # NOTE: Cargo.lock is intentionally NOT ignored — commit it. This is an
 # application, not a library, and a committed lockfile is what makes
 # `cargo build` reproducible across machines.

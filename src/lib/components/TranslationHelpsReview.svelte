@@ -2,8 +2,8 @@
   import { onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import {
-    aiCheckReviewsByVerse, checkStatusByVerse, findingsByVerse, nativeChecksByVerse,
-    reviewerMode, verseKey, verseTexts,
+    aiCheckReviewsByVerse, checkStatusByVerse, currentChapter, findingsByVerse, nativeChecksByVerse,
+    reviewerMode, selectedVerse, verseKey, verseTexts,
   } from "../stores";
   import type {
     AiCheckReview, CheckTargetSelection, DesktopConnectorState, IssueResolutionRecord,
@@ -382,7 +382,38 @@
     }
   }
 
+  const SEMANTIC_STATES_UNSAFE_FOR_NATIVE_APPLY = new Set([
+    "found_another_verse",
+    "split_across_verses",
+    "represented_implicitly",
+    "target_not_located",
+    "needs_passage_review",
+    "source_anchor_unresolved",
+    "mapping_error",
+  ]);
+
+  // NOTE: navigates to the target verse only. There is no existing mechanism in this
+  // app to highlight an arbitrary start:end span from outside a verse's own
+  // finding-based highlighting (see utils/highlight.ts buildSegments) — that needs
+  // new plumbing through ReviewPanel/the verse editor and is not implemented yet.
+  function openSemanticSpan(reference: string, _start: number | null, _end: number | null): void {
+    const match = /(\d+):(\d+)/.exec(reference ?? "");
+    if (!match) return;
+    const [, targetChapter, targetVerse] = match;
+    currentChapter.set(targetChapter);
+    selectedVerse.set(targetVerse);
+  }
+
   async function applyAiProposal(check: NativeCheckReview, aiReview: AiCheckReview): Promise<void> {
+    const semanticState = aiReview.selection_state ?? "";
+    if (SEMANTIC_STATES_UNSAFE_FOR_NATIVE_APPLY.has(semanticState)) {
+      mutationError = "This AI result is a passage-level semantic mapping and cannot be saved as a verse-local translationCore selection. Review/confirm the mapping instead.";
+      return;
+    }
+    if (aiReview.verdict === "problem" && aiReview.nothing_to_select) {
+      mutationError = "A problem verdict cannot be saved as Nothing to Select.";
+      return;
+    }
     if (mutationBusy) return;
     mutationBusy = true;
     mutationError = "";
@@ -489,6 +520,37 @@
         {#if aiReview}
           <div class="ai-evidence">
             <div><b>AI {aiReview.verdict}</b> · {Math.round(aiReview.confidence * 100)}% confidence</div>
+            {#if aiReview.semantic_mapping || aiReview.selection_state}
+              <div class="semantic-map-card" data-state={aiReview.selection_state}>
+                {#if aiReview.selection_state === "found_another_verse"}
+                  <strong>Meaning found in another target verse</strong>
+                {:else if aiReview.selection_state === "split_across_verses"}
+                  <strong>Meaning represented across multiple target verses</strong>
+                {:else if aiReview.selection_state === "represented_implicitly"}
+                  <strong>Meaning represented implicitly / grammatically</strong>
+                {:else if aiReview.selection_state === "target_not_located"}
+                  <strong>Target realization not securely located</strong>
+                {:else if aiReview.selection_state === "needs_passage_review"}
+                  <strong>Needs passage review</strong>
+                {:else if aiReview.selection_state === "source_anchor_unresolved"}
+                  <strong>Source help anchor needs review</strong>
+                {:else if aiReview.selection_state === "mapping_error"}
+                  <strong>Semantic mapping failed — needs review</strong>
+                {:else if aiReview.selection_state === "found_this_verse"}
+                  <strong>Meaning located in this target verse</strong>
+                {/if}
+
+                {#each aiReview.semantic_mapping?.target_spans ?? [] as span}
+                  <button class="semantic-span" on:click={() => openSemanticSpan(span.reference, span.start, span.end)}>
+                    {span.reference}: <q>{span.quote}</q>
+                  </button>
+                {/each}
+
+                {#if (aiReview.semantic_mapping?.relationships ?? []).length}
+                  <div class="semantic-relations">{aiReview.semantic_mapping?.relationships.join(" · ")}</div>
+                {/if}
+              </div>
+            {/if}
             <p>{aiReview.rationale}</p>
             {#if aiReview.suggested_correction}<p><b>Suggested correction:</b> {aiReview.suggested_correction}</p>{/if}
             {#if aiReview.evidence_used.length > 0}
@@ -528,7 +590,9 @@
           </div>
         {:else}
           <div class="advanced-actions">
-            {#if aiReview && ((aiReview.proposed_selections ?? []).length > 0 || aiReview.nothing_to_select)}
+            {#if aiReview
+              && ["", "found_this_verse"].includes(aiReview.selection_state ?? "")
+              && ((aiReview.proposed_selections ?? []).length > 0 || (aiReview.verdict === "not_applicable" && aiReview.nothing_to_select))}
               <button class="small-btn ai-apply" on:click={() => applyAiProposal(check, aiReview)} disabled={mutationBusy}>Apply AI proposal</button>
             {/if}
             <button class="small-btn" on:click={() => startEditing(check)}>Edit selection</button>
@@ -655,6 +719,10 @@
   details p { line-height: 1.45; margin: 6px 0; white-space: pre-wrap; }
   details ul { margin: 5px 0; padding-left: 16px; }
   .ai-evidence { margin-top: 6px; padding: 7px; background: var(--accent-bg); border-radius: 6px; }
+  .semantic-map-card { margin-bottom: 6px; padding: 6px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface); }
+  .semantic-map-card strong { display: block; font-size: 10px; color: var(--text); margin-bottom: 4px; }
+  .semantic-span { display: block; width: 100%; text-align: left; margin-top: 3px; padding: 3px 5px; font-size: 10px; color: var(--accent); background: none; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+  .semantic-relations { margin-top: 4px; font-size: 9px; color: var(--text-3); }
   .muted-evidence, .provenance { color: var(--text-3); }
   .provenance { margin-top: 5px; text-transform: capitalize; }
   .advanced-actions, .editor-actions { display: flex; gap: 6px; margin-top: 8px; }

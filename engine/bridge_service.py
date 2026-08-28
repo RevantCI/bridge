@@ -66,6 +66,8 @@ from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
 from tc_ai_bridge.reporting import ReportService
 from tc_ai_bridge.verse_evidence import resolve_verse_evidence
+from tc_ai_bridge.semantic_mapping_service import semantic_mappings_for_verse, confirm_semantic_mapping
+from tc_ai_bridge.semantic_mapping_bridge import prepare_semantic_mappings_for_review
 from check_jobs import (
     CheckJobConflict,
     CheckJobError,
@@ -245,6 +247,10 @@ class Methods:
     AI_REVIEW_CANCEL = "ai.review.cancel"
     AI_REVIEW_RETRY = "ai.review.retry"
     AI_REVIEW_LIST_CHAPTER = "ai.review.listForChapter"
+
+    SEMANTIC_MAPPING_GET_FOR_VERSE = "semanticMapping.getForVerse"
+    SEMANTIC_MAPPING_CONFIRM = "semanticMapping.confirm"
+    SEMANTIC_MAPPING_RERUN_FOR_VERSE = "semanticMapping.rerunForVerse"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -1516,6 +1522,27 @@ class BridgeEngine:
             "stale": sum(1 for state in states.values() if state == "stale"),
             "missing": sum(1 for state in states.values() if state == "missing"),
         }
+
+    def semantic_mapping_get_for_verse(self, chapter: str, verse: str) -> dict[str, Any]:
+        self._require_project()
+        return semantic_mappings_for_verse(self.project, chapter, verse)
+
+    def semantic_mapping_confirm(
+        self, fingerprint: str, source_unit_id: str, decision: str,
+        reviewer: str = "", note: str = "", edited_mapping: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._require_project()
+        return confirm_semantic_mapping(
+            self.project,
+            fingerprint=fingerprint, source_unit_id=source_unit_id, decision=decision,
+            reviewer=reviewer, note=note, edited_mapping=edited_mapping,
+        )
+
+    def semantic_mapping_rerun_for_verse(self, chapter: str, verse: str) -> dict[str, Any]:
+        self._require_project()
+        return prepare_semantic_mappings_for_review(
+            project=self.project, client=self._ai_client(), chapter=chapter, verse=verse, force=True,
+        )
 
     # -- live desktop connectors (Paratext/Logos) --------------------------
     #
@@ -2847,6 +2874,20 @@ class BridgeEngine:
             if m == Methods.AI_REVIEW_LIST_CHAPTER:
                 return EngineResponse.ok(
                     request.id, result=self.list_ai_reviews_for_chapter(p["chapter"]),
+                )
+            if m == Methods.SEMANTIC_MAPPING_GET_FOR_VERSE:
+                return EngineResponse.ok(
+                    request.id, result=self.semantic_mapping_get_for_verse(p["chapter"], p["verse"]),
+                )
+            if m == Methods.SEMANTIC_MAPPING_CONFIRM:
+                return EngineResponse.ok(request.id, result=self.semantic_mapping_confirm(
+                    str(p.get("fingerprint") or ""), str(p.get("sourceUnitId") or ""),
+                    str(p.get("decision") or ""), p.get("reviewer", ""), p.get("note", ""),
+                    p.get("editedMapping"),
+                ))
+            if m == Methods.SEMANTIC_MAPPING_RERUN_FOR_VERSE:
+                return EngineResponse.ok(
+                    request.id, result=self.semantic_mapping_rerun_for_verse(p["chapter"], p["verse"]),
                 )
             if m == Methods.ISSUE_RESOLUTION_LIST:
                 return EngineResponse.ok(

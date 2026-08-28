@@ -228,6 +228,41 @@ export interface AlignmentAiProposeResponse {
   usage: { totalTokens: number; estimatedCostUSD: number };
 }
 
+export type SemanticSelectionState =
+  | ""
+  | "found_this_verse"
+  | "found_another_verse"
+  | "split_across_verses"
+  | "represented_implicitly"
+  | "target_not_located"
+  | "needs_passage_review"
+  | "source_anchor_unresolved"
+  | "mapping_error";
+
+export interface SemanticTargetSpan {
+  reference: string;
+  quote: string;
+  start: number | null;
+  end: number | null;
+}
+
+export interface SemanticMappingEvidence {
+  source: string;
+  target: string;
+  explanation: string;
+}
+
+export interface SemanticMapping {
+  source_unit_id: string;
+  source_token_ids: string[];
+  source_reference: string;
+  target_spans: SemanticTargetSpan[];
+  relationships: string[];
+  meaning_status: "PRESERVED" | "PARTIALLY_PRESERVED" | "NOT_LOCATED" | "POSSIBLE_PROBLEM" | "UNCERTAIN";
+  confidence: number;
+  evidence: SemanticMappingEvidence;
+}
+
 /** Field names match AICheckReview.to_dict()/QAIssue.to_dict() verbatim (Python's own
  * dict output, snake_case) — this is display-only data, never sent back to the engine,
  * but declaring it with the wire shape it actually has avoids a silently-wrong type. */
@@ -246,6 +281,8 @@ export interface AiCheckReview {
   suggested_correction: string;
   confidence: number;
   evidence_used: Array<Record<string, unknown>>;
+  selection_state: SemanticSelectionState;
+  semantic_mapping: SemanticMapping | null;
 }
 
 export interface AiQaIssue {

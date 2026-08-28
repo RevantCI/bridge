@@ -154,6 +154,8 @@ class AICheckReview:
     suggested_correction: str = ''
     confidence: float = 0.0
     evidence_used: list[dict[str, Any]] = field(default_factory=list)
+    selection_state: str = ''
+    semantic_mapping: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -171,4 +173,6 @@ class AICheckReview:
             'suggested_correction': self.suggested_correction,
             'confidence': self.confidence,
             'evidence_used': list(self.evidence_used),
+            'selection_state': self.selection_state,
+            'semantic_mapping': copy.deepcopy(self.semantic_mapping),
         }

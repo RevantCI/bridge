@@ -42,6 +42,57 @@ Sanity-check the stdio protocol directly:
 echo '{"id":"1","method":"ping","params":{}}' | python main.py
 ```
 
+## 1a. Stage 3 semantic mapping DB (one-time, per machine)
+
+Stage 3 (`engine/tc_ai_bridge/semantic_mapping*.py`) locates a source
+translationNotes/translationWords meaning across a target passage, even when
+the target rendering moved to a different verse. It reads a bundled source
+database at `engine/resources/semantic_mapping/bridge_semantic_source_v0.3.sqlite`
+(~120MB, all 66 books). **This file is not in git** — it's over GitHub's
+100MB single-file push limit and this repo doesn't use Git LFS. Without it,
+Stage 3 degrades cleanly to `state: "unavailable"` (see
+`semantic_mapping_bridge.default_semantic_source_db_path()`); the rest of
+Bridge works normally, you just won't see semantic-mapping cards in Advanced
+review.
+
+To install it on a new machine:
+
+1. Get `Bridge_Semantic_Mapping_Stage3_v0.3.zip` (the full package with the
+   production DB) from whoever shares Stage 3 builder-handoff packages on
+   your team. There's also a small `..._Builder_Handoff_v0.3.zip` with just
+   the code modules, tests, and a *regression*-scope DB (2 sample books,
+   good enough for a fast smoke test but not real project use).
+2. Extract it anywhere.
+3. From the extracted package's `scripts/` folder, run:
+   ```powershell
+   python install_stage3_files.py <path-to-your-bridge-checkout>
+   ```
+   (add `--regression-db` instead if you extracted the small builder-handoff
+   package and only want the smoke-test DB). This copies the 6
+   `tc_ai_bridge` modules and the DB into your checkout — it never touches
+   `ai_client.py`/`models.py`/frontend files, since those edits are
+   version-sensitive; see `patches/BETA14_STAGE3_CHECKLIST.md` in the
+   package if you're integrating Stage 3 into a checkout that doesn't have
+   it applied yet.
+4. If you're running the full desktop app (not just `pytest`/`npm run dev`),
+   rebuild the sidecars afterward — `build-sidecars.ps1` copies
+   `engine/resources` (now including the DB) into `src-tauri/resources` for
+   bundling:
+   ```powershell
+   .\scripts\build-sidecars.ps1
+   ```
+
+`pytest` doesn't need any of this — `engine/conftest.py`'s autouse fixture
+points `BRIDGE_SEMANTIC_SOURCE_DB` at a path that can't exist, so the whole
+suite runs with Stage 3 cleanly "unavailable" by default. Stage 3's own
+tests (`engine/tests/test_semantic_mapping_stage3.py`) construct their DB
+path explicitly and are unaffected either way.
+
+To point at a DB copy living somewhere other than
+`engine/resources/semantic_mapping/`, set `BRIDGE_SEMANTIC_SOURCE_DB` to its
+full path — useful for testing against a different DB build without moving
+files around.
+
 ## 2. Frontend only (local preview, no Tauri)
 
 ```powershell
