@@ -10,17 +10,17 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 261 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, and vendored Smart Edit Distance. Includes Milestone 3B.3 structured/background AI review, resumable AI batches and persisted chapter hydration, first-open live-review responsiveness, Milestone 3A resource/import, AI provider compatibility, project management, collection grouping/deletion, and Milestone 3B.4 Paratext handoff plus automatic resolution-lifecycle tests |
+| A01 | Backend | Complete Python suite | Source | PASS — 304 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, vendored Smart Edit Distance, and the full Stage 3 semantic source database. Includes language-aware same/cross/split/implicit passage mapping, safe native-selection gating, Milestone 3B.3 structured/background AI review, resumable AI batches, Milestone 3A resource/import, project management, and Milestone 3B.4 Paratext handoff/recheck lifecycle tests |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 2 sidecar-timeout unit tests passed, including the Beta 7 interactive-timeout guard |
-| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 13; the `dist`, Tauri staging, and release-staged copies are byte-identical |
+| A05 | Packaging | Build both target-suffixed sidecars | Frozen | PASS — rebuilt for Beta 14; the `dist`, Tauri staging, and release-staged copies are byte-identical |
 | A06 | USFM | Non-Latin duplicate/missing-verse job | Frozen | PASS — the real standalone checker found both conditions in the packaged Odia fixture |
 | A07 | Protocol | Sidecar remains responsive during a background job | Frozen | PASS — status polling completed the background job while lightweight requests remained responsive |
 | A08 | Security | Settings never serialize plaintext secrets | Source | PASS — regression suite |
 | A09 | Alignment | Manual protocol, conflicts, history, restart and USFM round trip | Source | PASS |
 | A10 | Versification | Detect/orgRef/backVersificationMap against real schema data | Source | PASS — includes real Psalm 3 descriptive-title shift |
-| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 13 release-staged worker |
+| A11 | Versification | Same three protocol methods from a real frozen bridge-engine.exe | Frozen | PASS — `detect`, `orgRef`, and `backVersificationMap` succeeded against the Beta 14 release-staged worker |
 | A12 | Versification | Edge cases: merges, splits, unknown books, verse bridges/segments | Source | PASS — 11 tests against real vendored data |
 | A13 | Versification | Concurrent callers: correctness and a GIL-contention regression guard | Source | PASS — a fresh-process test verifies concurrent first-load correctness against real schema data; a deterministic instrumented test verifies the expensive matcher is serialized (`max_active == 1`) without using a machine-dependent deadline |
 | A14 | Names/Transliteration | Whole-book spelling-consistency check against real uroman + vendored Smart Edit Distance | Source | PASS — 15 tests; real Muhammad/Mohamed and Titus/Tituss cases, a real Tamil vowel-sign inconsistency through full verse sentences, a false-positive exclusion (church/churches), and a bigram-blocking performance regression guard |
@@ -154,10 +154,14 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | M18 | Connect Paratext to a different active project than the confirmed project ID | NOT RUN — Bridge must refuse to send and identify the project mismatch |
 | M19 | Edit a verse with a saved resolution; confirm AI recheck starts automatically and the card becomes **Resolved after recheck** or **Issue remains after recheck** with rationale | NOT RUN |
 | M20 | Cancel or fail the automatic recheck, restart Bridge, and confirm the stale/failed retryable state and previous Paratext sent status both persist | NOT RUN |
+| M21 | Open a target-language passage that moves a checked meaning to a nearby verse; confirm the card says **Meaning found in another target verse** rather than omission/Nothing to Select | NOT RUN — automated PHP Tamil regression passes; installed UI acceptance required |
+| M22 | Click a cross-verse semantic span; confirm Bridge navigates to the mapped target verse and does not offer a native verse-local **Apply AI proposal** action | NOT RUN — navigation and safety gate compile/test; exact-span highlighting is a documented follow-up |
+| M23 | Review a normal same-verse mapping; confirm Advanced mode can still apply its exact proposal and Basic mode retains the existing safe auto-apply behavior | NOT RUN — automated policy and selection regressions pass |
+| M24 | Disconnect from the internet and review a mapped passage in the installed Beta 14 app; confirm the bundled semantic database is available | NOT RUN — installer manifest contains the verified 125,005,824-byte database |
 
 ## Automated evidence
 
-- Python: 253 tests, including all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 304 tests, including Stage 3 language-aware semantic passage mapping and all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book
@@ -178,10 +182,32 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
   alignment/export/undo, and USFM duplicate/missing-verse checks pass. A live
   Greek-Room-only review, translation-help list and status calls remain responsive
   in the desktop's first-open request order during the job.
-- Windows: the Beta 13 release executable and NSIS installer were produced with both
+- Windows: the Beta 14 release executable and NSIS installer were produced with both
   verified worker binaries. The installer is
-  `Bridge_0.8.0-beta.13_x64-setup.exe` (SHA-256
-  `FBB2C6D796369EBA887717F18760B1CB520F22B7B6DC66C68FA73C72EF8EA1D1`).
+  `Bridge_0.8.0-beta.14_x64-setup.exe` (SHA-256
+  `CB202DAF28CBB61E3539BB61A3072B6B4933402AFF2852A9DC79221CBCA38318`).
+
+## Beta 14 artifact provenance — 2026-08-28
+
+- Release source: commit `0668a62` plus the Beta 14 version/provenance release commit.
+- Desktop executable: 13,342,720 bytes, ProductVersion `0.8.0-beta.14`, SHA-256
+  `6063E6176234AE2DF82020F1A318D8CF1FE839AC9DD9A9EF3B8E3A4F79AC302B`.
+- `bridge-engine.exe`: 12,079,239 bytes, SHA-256
+  `31038545B4629BEA548EFB3534748B9AFA065397974889D903A949C1D38E633B`.
+- `bridge-usfm-checker.exe`: 7,775,480 bytes, SHA-256
+  `A2EA8C946A4386B789DD3CA11F3B6D2A01083C02B55017DFAEC91D2590D37E2B`.
+- Bundled Stage 3 semantic database: 125,005,824 bytes, SQLite integrity `ok`, SHA-256
+  `E7E26E1A0A12A33A75E5DC61201FA0D6F1CF4BA940284D70FB6FD492894DEB2F`.
+- Installer: 55,044,246 bytes, ProductVersion `0.8.0-beta.14`, SHA-256
+  `CB202DAF28CBB61E3539BB61A3072B6B4933402AFF2852A9DC79221CBCA38318`.
+- Source gates: 304 Python tests; 2 Rust tests; 4 focused AI-job navigation tests;
+  clean Svelte diagnostics; production frontend and NSIS builds passed.
+- Frozen smoke: the exact release-staged workers passed real Wildebeest/Uroman,
+  pinned UGNT, versification, names, alignment statistics/proposals, AI packaging,
+  connectors, registry/duplicates, responsiveness, alignment/export/undo, and USFM checks.
+- Sidecar identity: each `dist`, Tauri staging, and release-staged worker copy is byte-identical.
+- Signing: `NotSigned` (the expected Windows warning remains).
+- Installed Beta 14 GUI acceptance and exact mapped-span highlighting remain open manual gates.
 
 ## Beta 13 artifact provenance — 2026-08-27
 

@@ -1,6 +1,6 @@
-# Build log: Bridge v0.8.0-beta.13
+# Build log: Bridge v0.8.0-beta.14
 
-Updated: 2026-08-27
+Updated: 2026-08-28
 
 > **Start with [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) instead** for an
 > oriented, up-to-date summary of the stack decisions, phase roadmap, and

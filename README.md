@@ -13,7 +13,7 @@ desktop app (Tauri + Svelte), while keeping the same QA engines
 ([Greek Room](https://github.com/BibleNLP/greek-room)) and translation
 business logic underneath.
 
-**Status:** `v0.8.0-beta.13` — the full import → check → review → align →
+**Status:** `v0.8.0-beta.14` — the full import → check → review → align →
 export loop works end to end. See [Current status](#current-status) below.
 
 ## Who this is for
@@ -105,7 +105,7 @@ persisted tN/tW results, protected human/imported selections, stale-review
 reruns, chapter/book processing, alignment, and export. A small amount of
 Translation Helps navigation jitter remains as non-blocking UX follow-up work.
 
-Beta 13 carries the completed Milestone 3B.4 workflow and fixes contradictory
+Beta 14 carries the completed Milestone 3B.4 workflow, fixes contradictory
 AI proposals that cited exact target words while returning **Nothing to
 Select**. Reviewers can turn a tN/tW finding into a
 persisted issue-resolution record, attach exact target text, correction,
@@ -114,6 +114,11 @@ The crash-safe, idempotent queue preserves queued and sent state across
 restarts. Editing a resolved verse starts an automatic grounded recheck;
 Advanced mode keeps uncertain results for a human decision and records the
 result in an append-only lifecycle audit.
+
+Beta 14 also adds language-aware semantic passage mapping. Source and target
+verse numbers are treated as reference anchors rather than mandatory semantic
+boundaries, so a meaning moved or split across nearby target verses is surfaced
+as a passage mapping instead of a false omission or Nothing-to-Select decision.
 See:
 
 - [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) for what's usable today, in
