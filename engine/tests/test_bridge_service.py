@@ -261,6 +261,128 @@ def test_project_report_requires_open_project():
     assert result["success"] is False
 
 
+def test_project_report_coverage_reflects_progress_rollup(fixture_project, monkeypatch):
+    """coverage.verses is derived from the existing progress rollup
+    (written by _on_check_job_complete after checks.start) — a verse
+    that's never had checks run is NOT_CHECKED, one that comes back clean
+    is PASS."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    monkeypatch.setattr(engine, "_usfm_findings_for_book", lambda project=None, cancel_event=None: [])
+
+    before = call(engine, "project.report")["result"]
+    assert before["coverage"]["verses"]["counts"] == {
+        "PASS": 0, "ISSUE": 0, "REVIEW_REQUIRED": 0, "NOT_CHECKED": 1,
+    }
+
+    started = call(engine, "checks.start", {
+        "scope": "chapter", "chapters": ["1"], "checks": ["greekroom"],
+    })["result"]
+    wait_for_job(engine, started["jobId"])
+
+    after = call(engine, "project.report")["result"]
+    assert after["coverage"]["verses"]["counts"]["PASS"] == 1
+    assert after["coverage"]["verses"]["counts"]["NOT_CHECKED"] == 0
+    assert after["coverage"]["verses"]["checkedPercent"] == 100.0
+    assert after["coverage"]["verses"]["chapters"]["1"]["1"] == "PASS"
+
+
+def test_project_collection_report_aggregates_every_sibling_book(two_book_collection, monkeypatch):
+    """project.collectionReport builds each sibling's own build_book_report()
+    (via ReportService.build_collection_report) rather than only reporting
+    on whichever book happens to be open."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(two_book_collection)})
+
+    result = call(engine, "project.collectionReport")
+    assert result["success"] is True
+    report = result["result"]
+    assert report["bookCount"] == 2
+    assert {b["bookId"] for b in report["books"]} == {"rut", "gen"}
+    assert "verseCoverage" in report
+    assert "publicationGate" in report
+
+
+def _write_alignment_book_with_completed_groups(root: Path, book_id: str, groups: dict):
+    """groups: {chapter: {verse: (source_word, target_word)}}. Every verse
+    is marked complete under tools/wordAlignment/completed — the same
+    signal alignment_statistics.build_corpus_stats reads (see
+    test_alignment_statistics.py's equivalent helper)."""
+    align_dir = root / ".apps" / "translationCore" / "alignmentData" / book_id
+    align_dir.mkdir(parents=True)
+    (root / book_id).mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps({
+        "project": {"id": book_id, "name": book_id.upper()},
+        "target_language": {"id": "tam", "name": "Tamil"},
+        "tc_version": "8", "tc_edit_version": "3.7.0",
+    }), encoding="utf-8")
+    for chapter, verses in groups.items():
+        align_chapter = {}
+        text_chapter = {}
+        for verse, (source_word, target_word) in verses.items():
+            align_chapter[verse] = {
+                "alignments": [{
+                    "topWords": [{"word": source_word, "strong": "H430", "occurrence": 1, "occurrences": 1}],
+                    "bottomWords": [{"word": target_word, "occurrence": 1, "occurrences": 1}],
+                }],
+                "wordBank": [],
+            }
+            text_chapter[verse] = target_word
+            completed_dir = (
+                root / ".apps" / "translationCore" / "tools" / "wordAlignment" / "completed" / str(chapter)
+            )
+            completed_dir.mkdir(parents=True, exist_ok=True)
+            (completed_dir / f"{verse}.json").write_text(
+                json.dumps({"username": "tester", "modifiedTimestamp": "2026-01-01T00:00:00.000Z"}),
+                encoding="utf-8",
+            )
+        (align_dir / f"{chapter}.json").write_text(json.dumps(align_chapter, ensure_ascii=False), encoding="utf-8")
+        (root / book_id / f"{chapter}.json").write_text(json.dumps(text_chapter, ensure_ascii=False), encoding="utf-8")
+    (root / f"{book_id}.usfm").write_text(f"\\id {book_id.upper()}\n", encoding="utf-8")
+
+
+def test_consistency_check_flags_fragmented_renderings(tmp_path):
+    """A source word aligned to 3+ different target renderings across
+    completed alignments, with no single dominant rendering, is flagged —
+    Layer-2 corpus-consistency, built on alignment_statistics.py's
+    existing co-occurrence table."""
+    root = tmp_path / "rut"
+    _write_alignment_book_with_completed_groups(root, "rut", {
+        "1": {
+            "1": ("אֱלֹהִ֑ים", "தேவன்"),
+            "2": ("אֱלֹהִ֑ים", "கடவுள்"),
+            "3": ("אֱלֹהִ֑ים", "இறைவன்"),
+        },
+    })
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(root)})
+    result = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["consistency"]})
+    findings = result["findings"]
+
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["check_type"] == "alignment.inconsistent_rendering"
+    assert finding["original_text"] == "אֱלֹהִ֑ים"
+    assert {e["label"] for e in finding["evidence"]} == {'"தேவன்"', '"கடவுள்"', '"இறைவன்"'}
+
+    # Never anchored to a verse other than the book's own first one.
+    not_first = call(engine, "verse.runChecks", {"chapter": "1", "verse": "2", "checks": ["consistency"]})
+    assert not_first["findings"] == []
+
+
+def test_consistency_check_is_opt_in_not_bundled_into_local(tmp_path):
+    """Deliberately not included under checks=['local'] — see the comment
+    at its call site in _run_verse_checks_for_project."""
+    root = tmp_path / "rut"
+    _write_alignment_book_with_completed_groups(root, "rut", {
+        "1": {"1": ("אֱלֹהִ֑ים", "தேவன்"), "2": ("אֱלֹהִ֑ים", "கடவுள்"), "3": ("אֱלֹהִ֑ים", "இறைவன்")},
+    })
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(root)})
+    result = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["local"]})
+    assert not any(f["check_type"] == "alignment.inconsistent_rendering" for f in result["findings"])
+
+
 def test_verse_get_returns_real_alignment_data(fixture_project):
     engine = BridgeEngine()
     call(engine, "project.open", {"path": str(fixture_project)})

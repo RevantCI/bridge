@@ -44,6 +44,118 @@ class ReportService:
             'knowledgeBaseProvenance':provenance,'git':{'available':git.available,'repository':git.repository,'branch':git.branch,'dirty':git.dirty},
             'team':team,'metrics':self._metrics(),
             'publicationGate':self._publication_gate(scan,queue,qa,discussions),
+            'coverage':{'verses':self._verse_coverage(),'resources':self._resource_coverage()},
+        }
+
+    def _verse_coverage(self) -> dict[str, Any]:
+        """PASS / ISSUE / REVIEW_REQUIRED / NOT_CHECKED per verse, derived
+        entirely from the existing progress rollup (project.load_progress_
+        rollup(), written by BridgeEngine._on_check_job_complete) -- no new
+        persistence. A verse absent from the rollup was never run through
+        checks.start/project.sweepStart and is NOT_CHECKED, regardless of
+        whether it would look fine if it were. Among checked verses: an
+        OPEN finding is an unresolved ISSUE; a NEEDS_DISCUSSION finding
+        (with no OPEN one) is REVIEW_REQUIRED; everything else a checked
+        verse can land in -- no findings, or every finding accepted/
+        rejected/ignored/fixed -- is PASS, matching the existing 'reviewed'
+        notion _recompute_progress_totals already uses (not OPEN = closed
+        out one way or another)."""
+        rollup = self.project.load_progress_rollup()
+        chapters_rollup = rollup.get('chapters', {}) if isinstance(rollup.get('chapters'), dict) else {}
+        counts = {'PASS': 0, 'ISSUE': 0, 'REVIEW_REQUIRED': 0, 'NOT_CHECKED': 0}
+        per_chapter: dict[str, dict[str, str]] = {}
+        for chapter in self.project.chapters():
+            chapter_rollup = chapters_rollup.get(chapter, {})
+            verse_map = chapter_rollup.get('verses', {}) if isinstance(chapter_rollup, dict) else {}
+            chapter_states: dict[str, str] = {}
+            for verse in self.project.verses(chapter):
+                entry = verse_map.get(str(verse)) if isinstance(verse_map, dict) else None
+                if entry is None:
+                    state = 'NOT_CHECKED'
+                else:
+                    statuses = set((entry.get('findings') or {}).values())
+                    if 'open' in statuses:
+                        state = 'ISSUE'
+                    elif 'needs_discussion' in statuses:
+                        state = 'REVIEW_REQUIRED'
+                    else:
+                        state = 'PASS'
+                counts[state] += 1
+                chapter_states[str(verse)] = state
+            per_chapter[chapter] = chapter_states
+        total = sum(counts.values())
+        checked_percent = round(100 * (total - counts['NOT_CHECKED']) / total, 1) if total else 0.0
+        return {'counts': counts, 'totalVerses': total, 'checkedPercent': checked_percent, 'chapters': per_chapter}
+
+    def _resource_coverage(self) -> dict[str, Any]:
+        """Bundled checking-helps availability per tool, straight from the
+        capabilities .bridge/import.json already records at materialization
+        time (project_import.apply_resource_materialization). Absent
+        entirely for an existing translationCore/translationStudio import
+        Bridge never materialized itself -- an honest 'not tracked', not an
+        error, same convention as BridgeEngine._pinned_resource_versions."""
+        import_path = Path(self.project.path) / '.bridge' / 'import.json'
+        if not import_path.is_file():
+            return {}
+        try:
+            data = json.loads(import_path.read_text(encoding='utf-8-sig'))
+        except (OSError, ValueError):
+            return {}
+        capabilities = data.get('capabilities')
+        return dict(capabilities) if isinstance(capabilities, dict) else {}
+
+    @staticmethod
+    def build_collection_report(book_reports: list[dict[str, Any]]) -> dict[str, Any]:
+        """Aggregate already-built build_book_report() outputs -- one per
+        sibling book in a multi-book collection -- into one project-level
+        summary. Takes finished report dicts rather than TranslationCoreProject
+        instances so ReportService itself stays single-project like every
+        other class in tc_ai_bridge; the caller (BridgeEngine) already knows
+        how to enumerate collection siblings (see project_sweep.py's
+        _sibling_sweep_books, the same resolution reused here)."""
+        verse_counts: Counter = Counter()
+        severity_counts: Counter = Counter()
+        books: list[dict[str, Any]] = []
+        all_ready = True
+        critical = high = stale = pending_tx = discussions = 0
+        for report in book_reports:
+            coverage = (report.get('coverage') or {}).get('verses', {}) or {}
+            for state, n in (coverage.get('counts') or {}).items():
+                verse_counts[state] += int(n or 0)
+            for sev, n in (report.get('qaSeverityCounts') or {}).items():
+                severity_counts[sev] += int(n or 0)
+            gate = report.get('publicationGate') or {}
+            all_ready = all_ready and bool(gate.get('readyForHumanPublicationSignoff'))
+            critical += int(gate.get('criticalFindings', 0) or 0)
+            high += int(gate.get('highFindings', 0) or 0)
+            stale += int(gate.get('staleAIReviews', 0) or 0)
+            pending_tx += int(gate.get('pendingTransactions', 0) or 0)
+            discussions += int(gate.get('openDiscussions', 0) or 0)
+            books.append({
+                'bookId': report.get('bookId'), 'project': report.get('project'),
+                'coverage': coverage, 'qaSeverityCounts': report.get('qaSeverityCounts', {}),
+                'publicationGate': gate,
+            })
+        total_verses = sum(verse_counts.values())
+        checked_percent = (
+            round(100 * (total_verses - verse_counts.get('NOT_CHECKED', 0)) / total_verses, 1)
+            if total_verses else 0.0
+        )
+        return {
+            'schemaVersion': 1,
+            'generatedTimestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+            'bookCount': len(book_reports),
+            'verseCoverage': {
+                'counts': dict(verse_counts), 'totalVerses': total_verses, 'checkedPercent': checked_percent,
+            },
+            'qaSeverityCounts': dict(severity_counts),
+            'publicationGate': {
+                'readyForHumanPublicationSignoff': all_ready and bool(book_reports),
+                'criticalFindings': critical, 'highFindings': high,
+                'staleAIReviews': stale, 'pendingTransactions': pending_tx, 'openDiscussions': discussions,
+                'note': 'This gate is advisory. Final publication approval remains human/organizational.',
+            },
+            'books': books,
         }
 
     @staticmethod

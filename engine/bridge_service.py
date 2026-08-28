@@ -31,7 +31,7 @@ from typing import Any, Callable, Optional
 from greek_room_engine.engine import GreekRoomEngine
 from greek_room_engine.adapters.usfm_adapter import UsfmCheckerCancelled, UsfmCheckerError
 from greek_room_engine.adapters.names_adapter import NamesCheckError
-from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity, FindingStatus
+from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity, FindingStatus, EvidenceItem
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
 from tc_ai_bridge.tc_project import TranslationCoreProject, ProjectError, read_progress_rollup
@@ -188,6 +188,7 @@ class Methods:
     PROJECT_SWEEP_START = "project.sweepStart"
     PROJECT_SWEEP_STATUS = "project.sweepStatus"
     PROJECT_SWEEP_CANCEL = "project.sweepCancel"
+    PROJECT_COLLECTION_REPORT = "project.collectionReport"
     PROJECT_INSPECT_IMPORT = "project.inspectImport"
     PROJECT_IMPORT = "project.import"
     CHAPTER_VERSES = "chapter.verses"
@@ -291,6 +292,10 @@ class BridgeEngine:
         # invalidated by verse.edit either, see _names_findings_for_book.
         self._names_findings_by_book: dict[str, list[QaFinding]] = {}
         self._names_errors_by_book: dict[str, str] = {}
+        # Layer-2 corpus-consistency findings (see _consistency_findings_for_book)
+        # — whole-book like USFM/names above, and for the same reason: this
+        # scans every completed verse's alignment, too slow to redo per verse.
+        self._consistency_findings_by_book: dict[str, list[QaFinding]] = {}
         # UAlign-style corpus statistics (Phase 6) scan every COMPLETED verse
         # across the open book's whole collection — see
         # alignment_statistics.py's own docstring for why this is a fresh
@@ -342,6 +347,7 @@ class BridgeEngine:
         self._versification_by_book.clear()
         self._names_findings_by_book.clear()
         self._names_errors_by_book.clear()
+        self._consistency_findings_by_book.clear()
         self._corpus_stats_by_book.clear()
         materialize_lazy_project(path)
         ensure_bridge_original_language(path)
@@ -693,6 +699,22 @@ class BridgeEngine:
 
     def cancel_project_sweep(self, job_id: str = "") -> dict[str, Any]:
         return self._project_sweep.cancel(job_id)
+
+    def build_collection_report(self) -> dict[str, Any]:
+        """Project-level rollup across every book in the current collection
+        -- builds each sibling's own build_book_report() (same reused
+        TranslationCoreProject construction as _run_layer1_checks_for_book)
+        and aggregates them with ReportService.build_collection_report.
+        Synchronous: fine for a handful of books, but this does not solve
+        the whole-Bible performance question (see issue #17) -- a 66-book
+        collection sequentially building 66 full reports in one request
+        could run long."""
+        books = self._sibling_sweep_books()
+        reports: list[dict[str, Any]] = []
+        for book in books:
+            materialize_lazy_project(book.path)
+            reports.append(ReportService(TranslationCoreProject(book.path)).build_book_report())
+        return ReportService.build_collection_report(reports)
 
     # -- verse-level operations ------------------------------------------
 
@@ -1057,6 +1079,7 @@ class BridgeEngine:
         )
         self.project.mark_word_alignment_pending(chapter, verse)
         self._corpus_stats_by_book.pop(str(self.project.path), None)
+        self._consistency_findings_by_book.pop(str(self.project.path), None)
         return self._alignment_context(chapter, verse)
 
     def realign_words(
@@ -1110,6 +1133,7 @@ class BridgeEngine:
             chapter, verse, username=self.settings.reviewer_name or "Bridge Reviewer",
         )
         self._corpus_stats_by_book.pop(str(self.project.path), None)
+        self._consistency_findings_by_book.pop(str(self.project.path), None)
         return self._alignment_context(chapter, verse)
 
     def undo_alignment(
@@ -1124,6 +1148,7 @@ class BridgeEngine:
         )
         self.project.mark_word_alignment_pending(chapter, verse)
         self._corpus_stats_by_book.pop(str(self.project.path), None)
+        self._consistency_findings_by_book.pop(str(self.project.path), None)
         return self._alignment_context(chapter, verse)
 
     def _ai_client(self) -> OpenAIResponsesClient:
@@ -1806,6 +1831,95 @@ class BridgeEngine:
         self._names_findings_by_book[book_key] = findings
         return findings
 
+    # Heuristic thresholds for _consistency_findings_for_book — unlike the
+    # PMI/translation-probability formulas in alignment_statistics.py
+    # (which mirror ualign.py's own AlignmentModel.support_probability()),
+    # these three numbers have no textbook source; they're a starting,
+    # tunable bar for "recurrent enough and fragmented enough to be worth a
+    # human's attention", deliberately conservative (low severity, low
+    # confidence — see the finding below) so this never claims more
+    # certainty than a corpus-frequency heuristic actually has.
+    _CONSISTENCY_MIN_OCCURRENCES = 3
+    _CONSISTENCY_MIN_RENDERINGS = 3
+    _CONSISTENCY_DOMINANCE_THRESHOLD = 0.7
+
+    def _consistency_findings_for_book(
+        self, project: Optional[TranslationCoreProject] = None,
+    ) -> list[QaFinding]:
+        """Whole-book Layer-2 check: a source (original-language) word that
+        recurs often across this book's own human-completed alignments but
+        maps to many different target renderings with no dominant one is
+        flagged as a possible inconsistent-translation signal — using
+        alignment_statistics.py's existing corpus co-occurrence table
+        exactly as that module's own docstring anticipated ("a future
+        phase can layer findings on top of this data without recomputing
+        it"). This is corpus-wide, not tied to any one occurrence's
+        chapter:verse — CorpusStatsTable aggregates counts only, it does
+        not retain which verse produced which pairing (see its own
+        docstring) — so, like a whole-book USFM finding with no matching
+        verse slot, this surfaces on the book's first chapter at verse 0
+        rather than a fabricated precise location. An honest book-level
+        flag, not a claim about any specific occurrence.
+
+        A blunt statistical signal, not a semantic judgment: some of what
+        this flags will be legitimate contextual variation, not a real
+        error — see the roadmap's own caution about distinguishing the
+        two. That distinction needs real semantic evaluation (issue #16),
+        not corpus frequency alone, hence the low severity/confidence.
+        """
+        project = project or self.project
+        if project is None:
+            raise ProjectError("No project open — call project.open first")
+        book_key = str(project.path)
+        cached = self._consistency_findings_by_book.get(book_key)
+        if cached is not None:
+            return cached
+
+        table = self._corpus_stats_by_book.get(book_key)
+        if table is None:
+            table = corpus_stats_tool.build_corpus_stats(project)
+            self._corpus_stats_by_book[book_key] = table
+
+        renderings: dict[str, Counter] = {}
+        for (source_word, target_word), count in table.pair_counts.items():
+            renderings.setdefault(source_word, Counter())[target_word] += count
+
+        chapters = project.chapters()
+        first_chapter = chapters[0] if chapters else "1"
+        findings: list[QaFinding] = []
+        for source_word, counts in renderings.items():
+            total = sum(counts.values())
+            if total < self._CONSISTENCY_MIN_OCCURRENCES or len(counts) < self._CONSISTENCY_MIN_RENDERINGS:
+                continue
+            top_word, top_count = counts.most_common(1)[0]
+            if top_count / total >= self._CONSISTENCY_DOMINANCE_THRESHOLD:
+                continue  # one rendering clearly dominates — not flagged
+            evidence = [
+                EvidenceItem(label=f'"{word}"', value=f"{n} of {total} occurrence(s)")
+                for word, n in counts.most_common()
+            ]
+            findings.append(QaFinding(
+                id=_stable_finding_id(
+                    chapter=str(first_chapter), verse="0", engine="alignment-corpus",
+                    check_type="alignment.inconsistent_rendering", disambiguator=source_word,
+                ),
+                project_id=str(project.summary.path), book=project.book_id,
+                chapter=int(next(iter(re.findall(r"\d+", str(first_chapter))), "0")), verse=0,
+                engine="alignment-corpus", check_type="alignment.inconsistent_rendering",
+                category=FindingCategory.CONSISTENCY, severity=Severity.LOW, confidence=0.4,
+                original_text=source_word,
+                explanation=(
+                    f'"{source_word}" occurs {total} times in completed alignments across this '
+                    f"book with {len(counts)} different target renderings and no single dominant "
+                    f'one (most common: "{top_word}", {top_count}/{total}).'
+                ),
+                evidence=evidence,
+                engine_version=BRIDGE_VERSION,
+            ))
+
+        self._consistency_findings_by_book[book_key] = findings
+        return findings
+
     def run_verse_checks(self, chapter: str, verse: str,
                           checks: list[str]) -> list[QaFinding]:
         """The unified check entrypoint: local QA (tN/tW/alignment) +
@@ -1828,7 +1942,7 @@ class BridgeEngine:
         # its own adapter; it does not touch tC selection/index state and does
         # not need the checker lock.
         needs_checker_lock = any(
-            name in {"local", "tN", "tW", "alignment", "usfm", "names"}
+            name in {"local", "tN", "tW", "alignment", "usfm", "names", "consistency"}
             for name in checks
         )
         if not needs_checker_lock:
@@ -1890,6 +2004,28 @@ class BridgeEngine:
             # needed here.
             for f in self._names_findings_for_book(project):
                 if str(f.chapter) == str(chapter) and str(f.verse) == str(verse):
+                    findings.append(f)
+
+        if "consistency" in checks:
+            # Opt-in, not bundled into "local" — a corpus-frequency
+            # heuristic (see _consistency_findings_for_book) that would
+            # otherwise silently change the finding volume for every
+            # existing "local" caller. Same book-level chapter-0/verse-0
+            # placeholder fallback as the USFM block above, since these
+            # findings aren't anchored to one specific occurrence either.
+            book_verses = project.verses(chapter) if chapter in project.chapters() else []
+            existing_verses = {str(value) for value in book_verses}
+            first_verse = book_verses[0] if book_verses else None
+            for f in self._consistency_findings_for_book(project):
+                if str(f.chapter) != str(chapter):
+                    continue
+                if str(f.verse) == str(verse):
+                    findings.append(f)
+                elif (
+                    first_verse is not None
+                    and str(verse) == str(first_verse)
+                    and (f.verse == 0 or str(f.verse) not in existing_verses)
+                ):
                     findings.append(f)
 
         if "greekroom" in checks or "wildebeest" in checks:
@@ -2523,6 +2659,8 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.project_sweep_status(p.get("jobId", "")))
             if m == Methods.PROJECT_SWEEP_CANCEL:
                 return EngineResponse.ok(request.id, result=self.cancel_project_sweep(p.get("jobId", "")))
+            if m == Methods.PROJECT_COLLECTION_REPORT:
+                return EngineResponse.ok(request.id, result=self.build_collection_report())
             if m == Methods.PROJECT_INSPECT_IMPORT:
                 return EngineResponse.ok(request.id, result=self.inspect_project_import(
                     p["path"], p.get("metadata"),
