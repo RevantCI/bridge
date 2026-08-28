@@ -33,6 +33,8 @@ fn main() {
             commands::project_forget,
             commands::project_delete,
             commands::project_scan,
+            commands::project_report,
+            commands::project_collection_report,
             commands::project_inspect_import,
             commands::project_import,
             commands::chapter_verses,

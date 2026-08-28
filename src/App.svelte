@@ -8,7 +8,7 @@
   import SettingsModal from "./lib/components/SettingsModal.svelte";
   import ExportModal from "./lib/components/ExportModal.svelte";
   import ProjectDashboard from "./lib/components/ProjectDashboard.svelte";
-  import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, QaFinding } from "./lib/types/finding";
+  import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, ProjectReport, QaFinding } from "./lib/types/finding";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
@@ -31,6 +31,9 @@
   let bookProgress: BookProgressEntry[] = [];
   let dashboardLoading = false;
   let dashboardError = "";
+  let report: ProjectReport | null = null;
+  let reportLoading = false;
+  let reportError = "";
 
   onMount(() => {
     let unlisten: (() => void) | null = null;
@@ -86,6 +89,7 @@
     opened = true;
     showingDashboard = true;
     void loadDashboard();
+    void loadReport();
   }
 
   async function loadDashboard(): Promise<void> {
@@ -100,9 +104,22 @@
     }
   }
 
+  async function loadReport(): Promise<void> {
+    reportLoading = true;
+    reportError = "";
+    try {
+      report = await bridge.projectReport();
+    } catch (error) {
+      reportError = error instanceof Error ? error.message : String(error);
+    } finally {
+      reportLoading = false;
+    }
+  }
+
   function openDashboard(): void {
     showingDashboard = true;
     void loadDashboard();
+    void loadReport();
   }
 
   async function enterBookFromDashboard(path: string): Promise<void> {
@@ -285,17 +302,28 @@
     void monitorJob(snapshot, generation);
   }
 
-  async function activateChapter(chapter: string): Promise<void> {
+  async function activateChapter(chapter: string, targetVerse?: string): Promise<void> {
     const sequence = ++chapterLoadSequence;
     currentChapter.set(chapter);
     await ensureChapterData(chapter);
     if (sequence !== chapterLoadSequence || chapter !== $currentChapter) return;
     const verses = $chapterVerseNums[chapter] ?? [];
-    selectedVerse.set(verses.length > 0 ? verses[0] : null);
+    selectedVerse.set(
+      targetVerse && verses.includes(targetVerse) ? targetVerse : (verses.length > 0 ? verses[0] : null),
+    );
     void hydrateChapterAIReviews(chapter, $project?.path ?? "", sequence);
     if (!$loadedChapters[chapter] && !activeJobId) {
       await beginChecks("chapter", [chapter]);
     }
+  }
+
+  // Report/dashboard click-through (see ProjectDashboard's exceptionQueue
+  // rows): project.report is scoped to whichever book is currently open,
+  // so this never needs to switch books — just land on the right
+  // chapter:verse and close the dashboard so the editor is visible.
+  async function navigateToFinding(chapter: string, verse: string): Promise<void> {
+    showingDashboard = false;
+    await activateChapter(chapter, verse);
   }
 
   async function cancelChecks(): Promise<void> {
@@ -438,6 +466,10 @@
       error={dashboardError}
       onSelectBook={enterBookFromDashboard}
       onRetry={loadDashboard}
+      {report}
+      reportLoading={reportLoading}
+      reportError={reportError}
+      onNavigateToFinding={navigateToFinding}
     />
   {:else}
     <div class="body">

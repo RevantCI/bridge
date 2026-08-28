@@ -4,6 +4,7 @@ import type {
   CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, LexiconEntryResponse, NativeCheckListResponse,
   NativeCheckTool, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
   IssueResolutionHandoffResult, IssueResolutionListResponse, IssueResolutionRecord,
+  ProjectReport, CollectionReport,
 } from "../types/finding";
 
 /**
@@ -103,6 +104,14 @@ export const bridge = {
 
   scanProject(): Promise<{ chapters: string[]; checkTypes: Record<string, number>; indexTools: Record<string, number> }> {
     return call("project_scan");
+  },
+
+  projectReport(): Promise<ProjectReport> {
+    return call("project_report");
+  },
+
+  projectCollectionReport(): Promise<CollectionReport> {
+    return call("project_collection_report");
   },
 
   inspectImport(path: string, metadata?: ImportMetadata): Promise<ImportPreview> {

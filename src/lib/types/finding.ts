@@ -34,10 +34,74 @@ export interface QaFinding {
   explanation: string;
   evidence: EvidenceItem[];
   engine_version: string;
+  resource_versions: Record<string, string>;
   status: FindingStatus;
   human_comment: string | null;
   created_at: string;
   resolved_at: string | null;
+}
+
+// Mirrors tc_ai_bridge/reporting.py's ReportService output. Only the
+// fields the UI actually reads are typed here — the real payload carries
+// more (scan, terminology, psalms, git, team, metrics, knowledgeBaseProvenance)
+// that ProjectDashboard doesn't render yet.
+export type CoverageState = "PASS" | "ISSUE" | "REVIEW_REQUIRED" | "NOT_CHECKED";
+
+export interface VerseCoverage {
+  counts: Record<CoverageState, number>;
+  totalVerses: number;
+  checkedPercent: number;
+  chapters: Record<string, Record<string, CoverageState>>;
+}
+
+export interface PublicationGate {
+  readyForHumanPublicationSignoff: boolean;
+  criticalFindings: number;
+  highFindings: number;
+  staleAIReviews: number;
+  pendingTransactions: number;
+  openDiscussions: number;
+  note: string;
+}
+
+export interface ExceptionQueueRow {
+  chapter: string;
+  verse: string;
+  critical: number;
+  high: number;
+  medium: number;
+  cache: string;
+  wordAlignment: string;
+  invalidChecks: number;
+  discussions: number;
+  finalState: string;
+  summary: string;
+}
+
+export interface ProjectReport {
+  project: string;
+  bookId: string;
+  exceptionQueue: ExceptionQueueRow[];
+  qaSeverityCounts: Record<string, number>;
+  needsDiscussion: Array<{ reference: string; [key: string]: unknown }>;
+  publicationGate: PublicationGate;
+  coverage: { verses: VerseCoverage; resources: Record<string, string> };
+}
+
+export interface CollectionReportBookSummary {
+  bookId: string;
+  project: string;
+  coverage: VerseCoverage;
+  qaSeverityCounts: Record<string, number>;
+  publicationGate: PublicationGate;
+}
+
+export interface CollectionReport {
+  bookCount: number;
+  verseCoverage: { counts: Record<CoverageState, number>; totalVerses: number; checkedPercent: number };
+  qaSeverityCounts: Record<string, number>;
+  publicationGate: PublicationGate;
+  books: CollectionReportBookSummary[];
 }
 
 export interface TokenRef {

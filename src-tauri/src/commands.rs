@@ -120,6 +120,20 @@ pub async fn project_scan(sidecar: State<'_, EngineSidecar>) -> Result<Value, St
 }
 
 #[tauri::command]
+pub async fn project_report(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+    sidecar
+        .send_request("project.report", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn project_collection_report(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+    sidecar
+        .send_request("project.collectionReport", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
 pub async fn project_inspect_import(
     sidecar: State<'_, EngineSidecar>,
     path: String,
