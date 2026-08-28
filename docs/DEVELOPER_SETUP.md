@@ -55,13 +55,32 @@ Stage 3 degrades cleanly to `state: "unavailable"` (see
 Bridge works normally, you just won't see semantic-mapping cards in Advanced
 review.
 
-To install it on a new machine:
+To install it on a new machine (fastest path — GitHub Release asset):
 
-1. Get `Bridge_Semantic_Mapping_Stage3_v0.3.zip` (the full package with the
-   production DB) from whoever shares Stage 3 builder-handoff packages on
-   your team. There's also a small `..._Builder_Handoff_v0.3.zip` with just
-   the code modules, tests, and a *regression*-scope DB (2 sample books,
-   good enough for a fast smoke test but not real project use).
+1. Download `bridge_semantic_source_v0.3.sqlite` from
+   [the `stage3-semantic-db-v0.3` release](https://github.com/RevantCI/bridge/releases/tag/stage3-semantic-db-v0.3)
+   (`gh release download stage3-semantic-db-v0.3` works too).
+2. Place it at
+   `engine/resources/semantic_mapping/bridge_semantic_source_v0.3.sqlite` in
+   your checkout (create the folder if it doesn't exist).
+3. If you're running the full desktop app (not just `pytest`/`npm run dev`),
+   rebuild the sidecars afterward — `build-sidecars.ps1` copies
+   `engine/resources` (now including the DB) into `src-tauri/resources` for
+   bundling:
+   ```powershell
+   .\scripts\build-sidecars.ps1
+   ```
+
+If you're integrating Stage 3 into a checkout that doesn't have it applied
+yet (i.e. you also need the `tc_ai_bridge` modules and the `models.py`/
+`ai_client.py`/`bridge_service.py`/frontend patches, not just the DB), use
+the builder-handoff package instead — it has the code, tests, and a small
+*regression*-scope DB (2 sample books, enough for a fast smoke test) as well
+as the full DB:
+
+1. Get `Bridge_Semantic_Mapping_Stage3_v0.3.zip` (full package) or
+   `..._Builder_Handoff_v0.3.zip` (small package, code + regression DB only)
+   from whoever shares Stage 3 builder-handoff packages on your team.
 2. Extract it anywhere.
 3. From the extracted package's `scripts/` folder, run:
    ```powershell
@@ -72,8 +91,7 @@ To install it on a new machine:
    `tc_ai_bridge` modules and the DB into your checkout — it never touches
    `ai_client.py`/`models.py`/frontend files, since those edits are
    version-sensitive; see `patches/BETA14_STAGE3_CHECKLIST.md` in the
-   package if you're integrating Stage 3 into a checkout that doesn't have
-   it applied yet.
+   package if those patches aren't applied yet.
 4. If you're running the full desktop app (not just `pytest`/`npm run dev`),
    rebuild the sidecars afterward — `build-sidecars.ps1` copies
    `engine/resources` (now including the DB) into `src-tauri/resources` for
