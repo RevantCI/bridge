@@ -281,8 +281,30 @@ class ProjectRegistry:
     def list_projects(self, *, refresh_managed: bool = True, collapse_collections: bool = False) -> list[dict[str, Any]]:
         self.managed_root.mkdir(parents=True, exist_ok=True)
         if refresh_managed or not self._managed_discovered:
+            # Only NEW managed directories go through register()'s full
+            # metadata/fingerprint resolution (several file reads each,
+            # plus a source-fingerprint hash the first time a project has
+            # no cached one yet) — an already-known project is skipped
+            # here entirely. Before this, every list_projects() call
+            # (i.e. every time the project picker or dashboard opened)
+            # re-registered EVERY managed project from scratch regardless
+            # of whether anything had changed; with a real multi-book
+            # collection (dozens to 66 sibling folders, each imported as
+            # its own managed project) that turned an instant list into a
+            # many-second stall on every open, purely from redundant work
+            # repeated on projects that hadn't changed since the last
+            # call. A project whose metadata genuinely changes after
+            # first discovery (e.g. a lazy sibling gets materialized) is
+            # re-registered for real when it's actually opened
+            # (open_project() -> register(..., touch=True)), which is the
+            # only place metadata can meaningfully change anyway.
+            known_path_keys = {
+                entry.get("pathKey") for entry in self._data["projects"] if isinstance(entry, dict)
+            }
             for child in self.managed_root.iterdir():
                 if not child.is_dir() or child.name.startswith(".bridge-import-"):
+                    continue
+                if canonical_path_key(child) in known_path_keys:
                     continue
                 if (child / "manifest.json").is_file() or (child / _LAZY_IMPORT_PATH).is_file():
                     self.register(child, save=False)

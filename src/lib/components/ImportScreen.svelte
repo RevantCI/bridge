@@ -12,6 +12,19 @@
   let projects: RegisteredProject[] = [];
   let error: string | null = null;
   let loading = false;
+  // True until the first project.list response comes back. Distinct from
+  // `loading` (which gates the import/open action buttons) because an
+  // empty `projects` array is ambiguous on its own -- it means either
+  // "genuinely no projects yet" or "still waiting on the very first
+  // engine round trip", and those need different copy. The round trip
+  // includes the sidecar's own cold start, which for the frozen
+  // PyInstaller build can itself take tens of seconds (onefile
+  // re-extracts its whole bundle to a fresh temp dir on every launch --
+  // see the "slowEngineStart" escalation below), not just the registry
+  // scan.
+  let projectsLoading = true;
+  let slowEngineStart = false;
+  let slowEngineStartTimer: ReturnType<typeof setTimeout> | undefined;
   let preview: ImportPreview | null = null;
   let languageQuery = "";
   let showLanguages = false;
@@ -80,10 +93,16 @@
   }
 
   async function loadProjects() {
+    projectsLoading = true;
+    slowEngineStart = false;
+    slowEngineStartTimer = setTimeout(() => { slowEngineStart = true; }, 5000);
     try {
       projects = (await bridge.listProjects()).projects;
     } catch (value) {
       error = message(value);
+    } finally {
+      clearTimeout(slowEngineStartTimer);
+      projectsLoading = false;
     }
   }
 
@@ -218,7 +237,13 @@
     </div>
 
     <div class="list-area">
-      {#if projects.length > 0}
+      {#if projectsLoading}
+        <p class="empty">
+          {slowEngineStart
+            ? "Still starting the translation engine — first launch can take up to a minute…"
+            : "Scanning for projects…"}
+        </p>
+      {:else if projects.length > 0}
         <section class="projects" aria-label="Known projects">
           {#each projects as item}
             <article class:missing={item.missing} class="project-row">

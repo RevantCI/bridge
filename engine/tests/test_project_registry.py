@@ -318,6 +318,47 @@ def test_list_projects_does_not_rewrite_files_when_nothing_changed(tmp_path, mon
     assert calls, "touching a project should still persist the change"
 
 
+def test_list_projects_skips_full_rescan_of_already_known_projects(tmp_path, monkeypatch):
+    """The bug this fixes: every list_projects() call used to re-run
+    register()'s full metadata/fingerprint resolution (several file reads
+    per project) for EVERY managed project, every time -- fine for a
+    handful of projects, but with a real multi-book collection (dozens to
+    66 sibling folders, each its own managed project) that turned every
+    dashboard/import-screen open into redundant work proportional to the
+    whole library, repeated forever. Only a project not yet in the
+    registry should hit _project_metadata at all."""
+    import tc_ai_bridge.project_registry as registry_module
+
+    calls = 0
+    original_metadata = registry_module.ProjectRegistry._project_metadata
+
+    def counting_metadata(path):
+        nonlocal calls
+        calls += 1
+        return original_metadata(path)
+
+    monkeypatch.setattr(registry_module.ProjectRegistry, "_project_metadata", staticmethod(counting_metadata))
+
+    managed = tmp_path / "managed"
+    for book_id in ("rut", "tit", "phm"):
+        _project(managed, book_id)
+
+    registry = ProjectRegistry(tmp_path / "registry.json", managed)
+    registry.list_projects()
+    first_call_count = calls
+    assert first_call_count == 3  # one per newly-discovered managed project
+
+    registry.list_projects()
+    registry.list_projects()
+    assert calls == first_call_count, "already-known managed projects must not be re-scanned on repeat listings"
+
+    # A genuinely new managed project still gets discovered.
+    _project(managed, "jas")
+    listed = registry.list_projects()
+    assert calls == first_call_count + 1
+    assert {entry["bookId"] for entry in listed} == {"rut", "tit", "phm", "jas"}
+
+
 def test_list_projects_collapses_collections_only_when_requested(tmp_path):
     registry = ProjectRegistry(tmp_path / "registry.json", tmp_path / "managed")
     registry.register(_project(tmp_path / "managed", "tit"), collection_id="collection-a")
