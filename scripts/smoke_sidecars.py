@@ -116,12 +116,25 @@ def main() -> int:
     if version.returncode != 0 or "vendored-18ddcf0" not in version.stdout:
         raise SystemExit(f"Helper health check failed: {version.stderr or version.stdout}")
 
+    # The bundled tN/tW/tA/UHB/UGNT snapshot no longer lives inside
+    # bridge-engine.spec's onefile archive (see that file's own comment) —
+    # in production Tauri passes --resources-dir, resolved from
+    # bundle.resources; here it's the repo's own engine/resources, the same
+    # source build-sidecars.ps1 copies from. Without this the frozen exe
+    # under test would correctly (by design) report every original-language
+    # resource as unavailable, which would look like this smoke test
+    # catching a real regression when it's actually just an incomplete
+    # invocation.
+    resources_dir = Path(__file__).resolve().parent.parent / "engine" / "resources"
+    if not resources_dir.is_dir():
+        raise SystemExit(f"Expected bundled resources at {resources_dir} for this smoke test")
+
     with tempfile.TemporaryDirectory(prefix="bridge-frozen-smoke-") as temp:
         project = _fixture_project(Path(temp))
         process_env = os.environ.copy()
         process_env["LOCALAPPDATA"] = str(Path(temp) / "app-data")
         process = subprocess.Popen(
-            [str(engine)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            [str(engine), "--resources-dir", str(resources_dir)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", env=process_env,
         )
         frames: queue.Queue[dict] = queue.Queue()
@@ -248,8 +261,15 @@ def main() -> int:
                 raise SystemExit(f"Frozen project.open did not assign a stable project id: {opened}")
             listed = request("project-list", "project.list", {})
             registered = listed.get("result", {}).get("projects", [])
+            # Compare resolved paths on both sides: the registry always
+            # canonicalizes (project_registry.canonical_path_key), while
+            # `project` here is whatever tempfile.TemporaryDirectory() and
+            # %TEMP% happened to hand back — on a machine where %TEMP%
+            # itself is the short 8.3 form (common Windows default when a
+            # username contains a space), that's a different string from
+            # the resolved long form even though it's the same directory.
             if not listed.get("success") or not any(
-                item.get("projectId") == project_id and Path(item.get("path", "")) == project
+                item.get("projectId") == project_id and Path(item.get("path", "")) == project.resolve()
                 for item in registered
             ):
                 raise SystemExit(f"Frozen project registry did not return the opened project: {listed}")

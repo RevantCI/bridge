@@ -11,10 +11,17 @@ from tc_ai_bridge.original_language_resources import (
     OT_BOOKS,
     OriginalLanguageResourceError,
     blank_source_alignments,
+    bundled_resources_root,
     resource_inventory,
     resource_for_book,
     source_tokens_for_verse,
 )
+
+
+def test_bundled_resources_root_prefers_env_override(tmp_path, monkeypatch):
+    override = tmp_path / "wherever-tauri-put-it"
+    monkeypatch.setenv("BRIDGE_BUNDLED_RESOURCES_DIR", str(override))
+    assert bundled_resources_root() == override
 
 
 def test_uhb_genesis_1_1_matches_translationcore_golden_tokens():

@@ -36,6 +36,7 @@
     "externalBin": [
       "binaries/bridge-engine",
       "binaries/bridge-usfm-checker"
-    ]
+    ],
+    "resources": ["resources/"]
   }
 }

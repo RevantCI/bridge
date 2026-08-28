@@ -35,7 +35,10 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # See bridge-engine.spec's comment: UPX isn't installed in this
+    # project's build environment, and provides no benefit on a machine
+    # where it is, once there's no large resources payload to shrink.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,

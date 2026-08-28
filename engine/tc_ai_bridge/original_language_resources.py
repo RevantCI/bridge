@@ -4,6 +4,7 @@ import copy
 import gzip
 import hashlib
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -87,7 +88,16 @@ class OriginalLanguageResourceError(RuntimeError):
 
 
 def bundled_resources_root() -> Path:
-    """Return committed resources in source mode or PyInstaller's payload."""
+    """Return committed resources in source mode or PyInstaller's payload.
+
+    See resource_materializer.bundled_resources_source() for why
+    BRIDGE_BUNDLED_RESOURCES_DIR is checked first — same ~45MB tree,
+    resolved independently here rather than importing that module, same
+    pattern as the vendor-tree resolvers elsewhere in this codebase.
+    """
+    override = os.environ.get('BRIDGE_BUNDLED_RESOURCES_DIR')
+    if override:
+        return Path(override)
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         return Path(sys._MEIPASS) / 'resources'
     return Path(__file__).resolve().parent.parent / 'resources'

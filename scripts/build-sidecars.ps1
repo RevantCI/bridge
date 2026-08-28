@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $engineDir = Join-Path $repoRoot "engine"
 $binaryDir = Join-Path $repoRoot "src-tauri\binaries"
+$resourcesDir = Join-Path $repoRoot "src-tauri\resources"
 
 if (-not $PythonCommand) {
     $venvPython = if ($IsWindows -or $env:OS -eq "Windows_NT") {
@@ -45,6 +46,17 @@ try {
         -Destination (Join-Path $binaryDir "bridge-engine-$TargetTriple$extension") -Force
     Copy-Item -LiteralPath (Join-Path $engineDir "dist\bridge-usfm-checker$extension") `
         -Destination (Join-Path $binaryDir "bridge-usfm-checker-$TargetTriple$extension") -Force
+
+    # The bundled tN/tW/tA/UHB/UGNT snapshot (~45MB) is no longer part of
+    # bridge-engine.spec's onefile archive (see that file's own comment) --
+    # it ships instead via tauri.conf.json's bundle.resources, which reads
+    # from src-tauri/resources at bundle time, same as binaries/ already
+    # does for the sidecar exes. Rebuilt fresh each time rather than
+    # incrementally patched, matching PyInstaller's own --clean above.
+    if (Test-Path -LiteralPath $resourcesDir) {
+        Remove-Item -LiteralPath $resourcesDir -Recurse -Force
+    }
+    Copy-Item -LiteralPath (Join-Path $engineDir "resources") -Destination $resourcesDir -Recurse -Force
 }
 finally {
     Pop-Location

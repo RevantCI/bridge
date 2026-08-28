@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import re
 import shutil
 import sys
@@ -34,12 +35,22 @@ def _version_key(name: str) -> tuple[int, int, int, str]:
 def bundled_resources_source() -> Path:
     """Where the committed/packaged English tN/TWL/TW snapshot lives.
 
-    Frozen (PyInstaller) build: the --add-data payload extracted under
-    sys._MEIPASS. Running from source: engine/resources, a sibling of this
-    package. Either way this is read-only reference content, distinct from
-    the app-owned resources root under application storage (see
+    Checked in this order: BRIDGE_BUNDLED_RESOURCES_DIR (set by main.py
+    from a --resources-dir argument Tauri's sidecar spawner passes — see
+    src-tauri/src/sidecar.rs), then the PyInstaller --add-data payload
+    under sys._MEIPASS, then engine/resources for running from source.
+    The env var exists because this ~45MB tree is no longer bundled INTO
+    bridge-engine.spec's onefile archive (that made the PyInstaller
+    bootloader re-extract all of it on every single launch, a large
+    fraction of a ~30-60s cold start); Tauri now ships it separately via
+    bundle.resources, installed once rather than re-extracted per launch.
+    Either way this is read-only reference content, distinct from the
+    app-owned resources root under application storage (see
     ensure_resources_installed).
     """
+    override = os.environ.get('BRIDGE_BUNDLED_RESOURCES_DIR')
+    if override:
+        return Path(override)
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         return Path(sys._MEIPASS) / 'resources'
     return Path(__file__).resolve().parent.parent / 'resources'

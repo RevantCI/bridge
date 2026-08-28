@@ -132,10 +132,29 @@ impl EngineSidecar {
             return Ok(());
         }
 
-        let sidecar_command = app
+        let mut sidecar_command = app
             .shell()
             .sidecar("bridge-engine")
             .map_err(|e| format!("failed to resolve sidecar: {e}"))?;
+
+        // The bundled tN/tW/tA/UHB/UGNT snapshot ships via bundle.resources
+        // (tauri.conf.json) rather than inside bridge-engine.spec's onefile
+        // archive now — see that spec's own comment for why (PyInstaller's
+        // onefile bootloader used to re-extract all ~45MB of it on every
+        // single launch). main.py reads this flag into
+        // BRIDGE_BUNDLED_RESOURCES_DIR before tc_ai_bridge's resource
+        // resolvers run. A missing/unresolvable resource_dir() (should not
+        // happen in a real build) just means the sidecar falls back to its
+        // own sys._MEIPASS/source-tree resolution, same as before this
+        // change — not fatal to startup.
+        // tauri.conf.json declares "resources/" (array form), which
+        // preserves that source folder name under the resolved resource
+        // root — i.e. the bundled tree lands at resource_dir()/resources,
+        // not resource_dir() itself.
+        if let Ok(resources_dir) = app.path().resource_dir() {
+            let resources_dir = resources_dir.join("resources");
+            sidecar_command = sidecar_command.args(["--resources-dir", &resources_dir.to_string_lossy()]);
+        }
 
         let (mut rx, child) = sidecar_command
             .spawn()

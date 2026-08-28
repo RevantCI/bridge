@@ -34,6 +34,11 @@ src-tauri/binaries/*.exe
 src-tauri/binaries/bridge-engine-*
 !src-tauri/binaries/README.txt
 
+# Same reasoning: build-sidecars.ps1 copies engine/resources here so
+# tauri.conf.json's bundle.resources can ship it — engine/resources is
+# the real, tracked source of truth; this is a disposable build-time copy.
+src-tauri/resources/
+
 # NOTE: Cargo.lock is intentionally NOT ignored — commit it. This is an
 # application, not a library, and a committed lockfile is what makes
 # `cargo build` reproducible across machines.

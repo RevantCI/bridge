@@ -31,8 +31,19 @@ a = Analysis(
     # against a real PyInstaller build (see docs/BUILD_LOG.md's
     # Phase 5 section): the frozen bridge-engine.exe correctly resolves
     # both under sys._MEIPASS and produces real names.* findings.
+    # 'resources' (the bundled tN/tW/tA/UHB/UGNT snapshot, ~45MB) used to
+    # be listed here too. Every PyInstaller onefile launch re-extracts its
+    # ENTIRE datas payload to a fresh temp directory before any Python code
+    # runs, regardless of whether that code ever touches a given file —
+    # measured directly against the frozen exe: ping took 26-60s on every
+    # single launch, cold or warm, dominated by this one folder. It's now
+    # shipped separately via Tauri's bundle.resources (installed once, not
+    # re-extracted per launch) and located at runtime through
+    # BRIDGE_BUNDLED_RESOURCES_DIR (see main.py's _apply_cli_overrides and
+    # resource_materializer.bundled_resources_source()'s docstring) rather
+    # than sys._MEIPASS. The much smaller vendor trees below stay bundled
+    # here — they're needed for basic engine startup, not resource-heavy.
     datas=[
-        ('resources', 'resources'),
         ('vendor/greekroom-versification', 'vendor/greekroom-versification'),
         ('vendor/greekroom-smart-edit-distance', 'vendor/greekroom-smart-edit-distance'),
         # tc_ai_bridge/logos_connector.py's LogosConnectorClient resolves this script
@@ -64,7 +75,12 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX isn't installed in this project's build environment (upx=True was
+    # a no-op here), but leaving it True would add real per-launch
+    # decompression cost on any machine where UPX IS present, with no
+    # benefit now that the archive doesn't carry the 45MB resources folder
+    # anymore -- explicitly off rather than accidentally-off.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,

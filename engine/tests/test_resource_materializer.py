@@ -42,6 +42,27 @@ def _call(engine, method, params=None):
     return engine.handle_request(request).to_dict()
 
 
+def test_bundled_resources_source_prefers_env_override(tmp_path, monkeypatch):
+    """BRIDGE_BUNDLED_RESOURCES_DIR (set by main.py from Tauri's
+    --resources-dir, once bundle.resources ships this tree instead of
+    bridge-engine.spec's onefile archive) must win over both frozen and
+    source-tree resolution."""
+    from tc_ai_bridge.resource_materializer import bundled_resources_source
+
+    override = tmp_path / "wherever-tauri-put-it"
+    monkeypatch.setenv("BRIDGE_BUNDLED_RESOURCES_DIR", str(override))
+    assert bundled_resources_source() == override
+
+
+def test_bundled_resources_source_falls_back_without_override(monkeypatch):
+    from tc_ai_bridge.resource_materializer import bundled_resources_source
+
+    monkeypatch.delenv("BRIDGE_BUNDLED_RESOURCES_DIR", raising=False)
+    result = bundled_resources_source()
+    assert result.name == "resources"
+    assert result.is_dir()  # source-tree engine/resources, real and committed
+
+
 def test_ensure_resources_installed_copies_bundled_snapshot_once(tmp_path):
     app_resources_root = tmp_path / "resources"
     ensure_resources_installed(app_resources_root)

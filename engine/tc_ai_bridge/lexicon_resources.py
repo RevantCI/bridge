@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -69,6 +70,11 @@ class LexiconResource:
 
 
 def bundled_resources_root() -> Path:
+    """See resource_materializer.bundled_resources_source()'s docstring
+    for why BRIDGE_BUNDLED_RESOURCES_DIR is checked first."""
+    override = os.environ.get('BRIDGE_BUNDLED_RESOURCES_DIR')
+    if override:
+        return Path(override)
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         return Path(sys._MEIPASS) / 'resources'
     return Path(__file__).resolve().parent.parent / 'resources'

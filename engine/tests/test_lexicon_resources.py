@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from tc_ai_bridge.lexicon_resources import lexicon_entry_for_strong
+from tc_ai_bridge.lexicon_resources import bundled_resources_root, lexicon_entry_for_strong
+
+
+def test_bundled_resources_root_prefers_env_override(tmp_path, monkeypatch):
+    override = tmp_path / "wherever-tauri-put-it"
+    monkeypatch.setenv("BRIDGE_BUNDLED_RESOURCES_DIR", str(override))
+    assert bundled_resources_root() == override
 
 
 def test_hebrew_lookup_matches_golden_translationcore_style_gloss():
