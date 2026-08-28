@@ -65,6 +65,7 @@ from tc_ai_bridge.usfm import whitespace_tokens
 from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
 from tc_ai_bridge.reporting import ReportService
+from tc_ai_bridge.verse_evidence import resolve_verse_evidence
 from check_jobs import (
     CheckJobConflict,
     CheckJobError,
@@ -200,6 +201,7 @@ class Methods:
     CHECKS_RETRY = "checks.retry"
 
     VERSE_GET = "verse.get"
+    VERSE_EVIDENCE = "verse.evidence"
     VERSE_RUN_CHECKS = "verse.runChecks"
     VERSE_DECIDE = "verse.decide"
     VERSE_EDIT = "verse.edit"
@@ -728,6 +730,30 @@ class BridgeEngine:
             "alignment": alignment.to_dict(),
             "alignmentStatus": self._alignment_verse_status(self.project, chapter, verse),
         }
+
+    def get_verse_evidence(self, chapter: str, verse: str) -> dict[str, Any]:
+        """Resolve one shared VerseEvidence for this verse (target text/
+        tokens, source tokens, alignment, translation-helps evidence, human
+        decisions — see tc_ai_bridge/verse_evidence.py's own docstring for
+        what this does and doesn't replace) and attach the two pieces that
+        module can't see on its own: current QaFindings and any cached AI
+        review result, since only BridgeEngine composes both GreekRoomEngine
+        and tc_ai_bridge."""
+        self._require_project()
+        project = self.project
+        evidence = resolve_verse_evidence(
+            project, chapter, verse,
+            resource_versions=self._pinned_resource_versions(project),
+        )
+        findings = self.run_verse_checks(chapter, verse, ["local", "greekroom"])
+        ai_review_state = project.ai_review_cache_status(chapter, verse)
+        cached_ai_review = project.load_ai_review_result(chapter, verse) if ai_review_state == "current" else None
+
+        result = evidence.to_dict()
+        result["findings"] = [f.to_dict() for f in findings]
+        result["aiReviewState"] = ai_review_state
+        result["aiReview"] = cached_ai_review
+        return result
 
     def get_chapter_verse_data(self, chapter: str) -> dict[str, Any]:
         """Bulk fetch: text + alignment for every verse in a chapter, in
@@ -2694,6 +2720,8 @@ class BridgeEngine:
                 )
             if m == Methods.VERSE_GET:
                 return EngineResponse.ok(request.id, result=self.get_verse(p["chapter"], p["verse"]))
+            if m == Methods.VERSE_EVIDENCE:
+                return EngineResponse.ok(request.id, result=self.get_verse_evidence(p["chapter"], p["verse"]))
             if m == Methods.VERSE_RUN_CHECKS:
                 findings = self.run_verse_checks(p["chapter"], p["verse"], p.get("checks", ["local", "greekroom"]))
                 return EngineResponse.ok(request.id, findings=findings)
