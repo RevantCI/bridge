@@ -81,6 +81,12 @@ class QaFinding:
 
     # Versioning / provenance
     engine_version: str = ""
+    # Pinned bundled-resource versions this finding was produced against
+    # (e.g. {"translationNotes": "v90_unfoldingWord"}) — lets a later
+    # resource update be detected and the finding re-flagged for
+    # reverification instead of silently treated as still current. Empty
+    # for findings that don't depend on a versioned bundled resource.
+    resource_versions: dict[str, str] = field(default_factory=dict)
 
     # Human review state
     status: FindingStatus = FindingStatus.OPEN

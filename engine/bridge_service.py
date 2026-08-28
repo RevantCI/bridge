@@ -64,6 +64,7 @@ from tc_ai_bridge.resource_materializer import materialize_book_checks
 from tc_ai_bridge.usfm import whitespace_tokens
 from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
+from tc_ai_bridge.reporting import ReportService
 from check_jobs import (
     CheckJobConflict,
     CheckJobError,
@@ -77,6 +78,13 @@ from ai_review_jobs import (
     AIReviewJobManager,
     AIReviewJobNotFound,
     AIReviewJobSpec,
+)
+from project_sweep import (
+    ProjectSweepManager,
+    SweepBook,
+    SweepConflict,
+    SweepError,
+    SweepNotFound,
 )
 
 BRIDGE_VERSION = "0.8.0-beta.13"
@@ -133,7 +141,8 @@ def _categorize_qaissue(issue: QAIssue) -> FindingCategory:
 
 
 def _qaissue_to_finding(issue: QAIssue, *, project_id: str, book: str,
-                         chapter: str, verse: str) -> QaFinding:
+                         chapter: str, verse: str,
+                         resource_versions: dict[str, str] | None = None) -> QaFinding:
     """Adapts tc_ai_bridge's QAIssue (tN/tW/local QA) into the same
     QaFinding shape Greek Room findings use, so the UI never has to know
     which engine produced a given finding (architecture doc §6)."""
@@ -161,6 +170,7 @@ def _qaissue_to_finding(issue: QAIssue, *, project_id: str, book: str,
         confidence=issue.confidence if issue.confidence is not None else 0.5,
         explanation=f"{issue.title} — {issue.detail}".strip(" —"),
         engine_version=BRIDGE_VERSION,
+        resource_versions=dict(resource_versions) if resource_versions else {},
     )
 
 
@@ -174,6 +184,10 @@ class Methods:
     PROJECT_FORGET = "project.forget"
     PROJECT_DELETE = "project.delete"
     PROJECT_SCAN = "project.scan"
+    PROJECT_REPORT = "project.report"
+    PROJECT_SWEEP_START = "project.sweepStart"
+    PROJECT_SWEEP_STATUS = "project.sweepStatus"
+    PROJECT_SWEEP_CANCEL = "project.sweepCancel"
     PROJECT_INSPECT_IMPORT = "project.inspectImport"
     PROJECT_IMPORT = "project.import"
     CHAPTER_VERSES = "chapter.verses"
@@ -294,6 +308,7 @@ class BridgeEngine:
         self._import_lock = threading.Lock()
         self._check_jobs = CheckJobManager()
         self._ai_review_jobs = AIReviewJobManager()
+        self._project_sweep = ProjectSweepManager()
         # AppSettings() with no path defaults to a real, persistent location
         # (%LOCALAPPDATA%/Bridge/data/settings.json on Windows — a subfolder
         # of the NSIS install dir, not the dir itself, so an uninstall can't
@@ -559,6 +574,125 @@ class BridgeEngine:
     def chapter_verses(self, chapter: str) -> list[str]:
         self._require_project()
         return self.project.verses(chapter)
+
+    @staticmethod
+    def _pinned_resource_versions(project: TranslationCoreProject) -> dict[str, str]:
+        """Bundled-resource versions this project's tN/tW indexes and
+        wordAlignment resources were built against, as already stamped on
+        manifest.json by apply_resource_materialization/ensure_bridge_
+        original_language. Absent for existing translationCore/
+        translationStudio imports Bridge never materialized itself — that's
+        an honest 'version not tracked', not an error."""
+        manifest = project.manifest
+        versions = {
+            "translationNotes": manifest.get("tc_en_check_version_translationNotes"),
+            "translationWords": manifest.get("tc_en_check_version_translationWords"),
+            "originalLanguage": manifest.get("tc_orig_lang_check_version_wordAlignment"),
+        }
+        return {k: str(v) for k, v in versions.items() if v}
+
+    def build_project_report(self) -> dict[str, Any]:
+        """Deterministic QA/publication report for the current book, via the
+        existing tc_ai_bridge.reporting.ReportService — never previously
+        exposed over the protocol (see docs/BUILD_LOG.md). Book-scoped for
+        now, same as ReportService itself; a whole-collection rollup is a
+        separate, larger piece of work (multi-book aggregation)."""
+        self._require_project()
+        return ReportService(self.project).build_book_report()
+
+    def _sibling_sweep_books(self) -> list[SweepBook]:
+        """Every book in the currently open collection, or just the current
+        book when it isn't part of a multi-book collection — same sibling
+        resolution list_book_progress already uses."""
+        self._require_project()
+        siblings = collection_projects(str(self.project.path))
+        if not siblings:
+            siblings = [{
+                "path": str(self.project.path), "bookId": self.project.book_id,
+                "bookName": self.project.summary.book_name, "lazy": False,
+            }]
+        books: list[SweepBook] = []
+        for entry in siblings:
+            path = str(entry.get("path") or "")
+            if not Path(path).is_dir():
+                continue  # a registered but missing sibling — nothing to sweep
+            books.append(SweepBook(
+                path=path, book_id=str(entry.get("bookId") or ""),
+                book_name=str(entry.get("bookName") or ""),
+            ))
+        return books
+
+    def _run_layer1_checks_for_book(self, book: SweepBook) -> tuple[list[dict[str, Any]], Optional[str]]:
+        """USFM structure + names/spelling consistency + per-verse Wildebeest
+        — the Layer-1 deterministic checks already used by verse.runChecks,
+        run here against a freshly constructed TranslationCoreProject for
+        ONE sibling book. Deliberately never touches self.project (the
+        engine-wide 'open in the UI' slot), so this can run in the sweep's
+        background thread while the user keeps editing whatever book they
+        actually have open. Versification detection is intentionally not
+        included: nothing in this codebase turns a versification mismatch
+        into a QaFinding today (see versification_org_ref/back_map — those
+        only normalize references), so 'checking' it here would mean
+        inventing a new finding shape, out of scope for wiring up the
+        existing checks project-wide.
+        """
+        materialize_lazy_project(book.path)
+        project = TranslationCoreProject(book.path)
+        project_id = str(project.summary.path)
+        target = project.manifest.get("target_language", {})
+        language_id = str(target.get("id") or "") if isinstance(target, dict) else ""
+
+        findings: list[QaFinding] = list(self._usfm_findings_for_book(project=project))
+        findings.extend(self._names_findings_for_book(project=project))
+
+        text_map = self._book_verse_text_map(project)
+        for ref, text in text_map.items():
+            chapter, _, verse = ref.partition(":")
+            gr_findings = self.greek_room.check_verse(
+                project_id=project_id, lang_code=language_id,
+                ref=f"{project.book_id} {chapter}:{verse}", text=text, checks=["wildebeest"],
+            )
+            for f in gr_findings:
+                # Same stabilization as _run_verse_checks_for_project's
+                # greekroom branch — keeps ids identical to what opening
+                # this book normally and running checks verse-by-verse
+                # would produce, so a sweep finding and a live-editor
+                # finding for the same issue are the same finding.
+                f.id = _stable_finding_id(
+                    chapter=chapter, verse=verse, engine=f.engine, check_type=f.check_type,
+                    disambiguator=f"{f.start_offset}:{f.end_offset}:{f.original_text}",
+                )
+            findings.extend(gr_findings)
+
+        by_verse: dict[tuple[str, str], list[QaFinding]] = {}
+        for f in findings:
+            by_verse.setdefault((str(f.chapter), str(f.verse)), []).append(f)
+        for (chapter, verse), verse_findings in by_verse.items():
+            prior_decisions = project.qa_decisions_for_verse(chapter, verse)
+            for f in verse_findings:
+                record = prior_decisions.get(f.id)
+                if record:
+                    try:
+                        f.status = FindingStatus(record.get("decision", "open"))
+                    except ValueError:
+                        pass
+                    f.human_comment = record.get("note") or None
+
+        return [f.to_dict() for f in findings], None
+
+    def start_project_sweep(self) -> dict[str, Any]:
+        """Kick off a background Layer-1 sweep across every book in the
+        current collection. One sweep at a time (see ProjectSweepManager);
+        does not conflict with a concurrent checks.* chapter/book job — a
+        separate lock domain by design."""
+        books = self._sibling_sweep_books()
+        return self._project_sweep.start(books, run_book=self._run_layer1_checks_for_book)
+
+    def project_sweep_status(self, job_id: str = "") -> dict[str, Any]:
+        return self._project_sweep.status(job_id)
+
+    def cancel_project_sweep(self, job_id: str = "") -> dict[str, Any]:
+        return self._project_sweep.cancel(job_id)
 
     # -- verse-level operations ------------------------------------------
 
@@ -1720,10 +1854,12 @@ class BridgeEngine:
         if "local" in checks or "tN" in checks or "tW" in checks or "alignment" in checks:
             alignment = project.load_verse_alignment(chapter, verse)
             issues = run_local_qa(project, chapter, verse, alignment)
+            resource_versions = self._pinned_resource_versions(project)
             for issue in issues:
                 findings.append(_qaissue_to_finding(
                     issue, project_id=project_id, book=book,
                     chapter=chapter, verse=verse,
+                    resource_versions=resource_versions,
                 ))
 
         if "local" in checks or "usfm" in checks:
@@ -2379,6 +2515,14 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.delete_project(p.get("projectId", "")))
             if m == Methods.PROJECT_SCAN:
                 return EngineResponse.ok(request.id, result=self.scan_project())
+            if m == Methods.PROJECT_REPORT:
+                return EngineResponse.ok(request.id, result=self.build_project_report())
+            if m == Methods.PROJECT_SWEEP_START:
+                return EngineResponse.ok(request.id, result=self.start_project_sweep())
+            if m == Methods.PROJECT_SWEEP_STATUS:
+                return EngineResponse.ok(request.id, result=self.project_sweep_status(p.get("jobId", "")))
+            if m == Methods.PROJECT_SWEEP_CANCEL:
+                return EngineResponse.ok(request.id, result=self.cancel_project_sweep(p.get("jobId", "")))
             if m == Methods.PROJECT_INSPECT_IMPORT:
                 return EngineResponse.ok(request.id, result=self.inspect_project_import(
                     p["path"], p.get("metadata"),
@@ -2599,5 +2743,11 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "ai_job_conflict", str(exc))
         except AIReviewJobError as exc:
             return EngineResponse.fail(request.id, "ai_job_error", str(exc))
+        except SweepNotFound as exc:
+            return EngineResponse.fail(request.id, "sweep_not_found", str(exc))
+        except SweepConflict as exc:
+            return EngineResponse.fail(request.id, "sweep_conflict", str(exc))
+        except SweepError as exc:
+            return EngineResponse.fail(request.id, "sweep_error", str(exc))
         except Exception as exc:  # noqa: BLE001 - protocol boundary must never crash the sidecar
             return EngineResponse.fail(request.id, "internal_error", str(exc))

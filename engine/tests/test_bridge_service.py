@@ -54,6 +54,42 @@ def fixture_project(tmp_path):
     return root
 
 
+def _write_minimal_book(root: Path, book_id: str, verse_text: str, lang_id: str = "tam", lang_name: str = "Tamil"):
+    align_dir = root / ".apps" / "translationCore" / "alignmentData" / book_id
+    align_dir.mkdir(parents=True)
+    (root / book_id).mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps({
+        "project": {"id": book_id, "name": book_id.upper()},
+        "target_language": {"id": lang_id, "name": lang_name},
+        "tc_version": "8", "tc_edit_version": "3.7.0",
+    }), encoding="utf-8")
+    (align_dir / "1.json").write_text(json.dumps({"1": {"alignments": [], "wordBank": []}}), encoding="utf-8")
+    (root / book_id / "1.json").write_text(json.dumps({"1": verse_text}, ensure_ascii=False), encoding="utf-8")
+    (root / f"{book_id}.usfm").write_text(
+        f"\\id {book_id.upper()}\n\\c 1\n\\v 1 {verse_text}\n", encoding="utf-8",
+    )
+
+
+@pytest.fixture
+def two_book_collection(tmp_path):
+    """A minimal two-book collection: rut and gen as sibling directories
+    under tmp_path, linked via .bridge/collection.json the way a real
+    multi-book import links siblings (see project_import.py's
+    _collection_projects)."""
+    rut = tmp_path / "rut"
+    gen = tmp_path / "gen"
+    _write_minimal_book(rut, "rut", "ஆதியிலே தேவன் வானத்தையும் பூமியையும் படைத்தார்.")
+    _write_minimal_book(gen, "gen", "தொடக்கத்தில் தேவன் வானத்தையும் பூமியையும் படைத்தார்.")
+    (rut / ".bridge").mkdir(parents=True)
+    (rut / ".bridge" / "collection.json").write_text(json.dumps({
+        "projects": [
+            {"directoryName": "rut", "bookId": "rut", "bookName": "Ruth"},
+            {"directoryName": "gen", "bookId": "gen", "bookName": "Genesis"},
+        ],
+    }), encoding="utf-8")
+    return rut
+
+
 def call(engine, method, params=None):
     return engine.handle_request(EngineRequest(id="t", method=method, params=params or {})).to_dict()
 
@@ -66,6 +102,106 @@ def wait_for_job(engine, job_id, timeout=5.0):
             return snapshot
         time.sleep(0.01)
     raise AssertionError(f"check job {job_id} did not finish")
+
+
+def wait_for_sweep(engine, job_id, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        snapshot = call(engine, "project.sweepStatus", {"jobId": job_id})["result"]
+        if snapshot["state"] in {"succeeded", "failed", "cancelled"}:
+            return snapshot
+        time.sleep(0.01)
+    raise AssertionError(f"project sweep {job_id} did not finish")
+
+
+def test_project_sweep_runs_layer1_checks_across_every_book_in_the_collection(two_book_collection, monkeypatch):
+    """project.sweepStart is the new multi-book path: it must construct its
+    own TranslationCoreProject per sibling rather than reusing
+    BridgeEngine.project, so both rut and gen get checked even though only
+    rut is 'open'. USFM/names are monkeypatched off (real subprocess/NLP
+    tools aren't the point of this test — see the equivalent single-book
+    checks.start tests for that isolation), leaving Wildebeest to run for
+    real against each book's one verse."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(two_book_collection)})
+    monkeypatch.setattr(engine, "_usfm_findings_for_book", lambda project=None, cancel_event=None: [])
+    monkeypatch.setattr(engine, "_names_findings_for_book", lambda project=None: [])
+
+    started = call(engine, "project.sweepStart")["result"]
+    assert started["totalBooks"] == 2
+    finished = wait_for_sweep(engine, started["jobId"])
+
+    assert finished["state"] == "succeeded"
+    assert finished["percent"] == 100
+    assert set(finished["results"]) == {"rut", "gen"}
+    assert all(r["status"] == "succeeded" for r in finished["results"].values())
+    assert all(isinstance(r["findings"], list) for r in finished["results"].values())
+
+
+def test_project_sweep_isolates_one_failing_book(two_book_collection, monkeypatch):
+    """One book's checker blowing up must not stop the rest of the sweep —
+    same 'one verse must not abort the whole book' principle check_jobs.py
+    already applies, one level up at book granularity."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(two_book_collection)})
+    monkeypatch.setattr(engine, "_names_findings_for_book", lambda project=None: [])
+
+    def usfm_or_fail(project=None, cancel_event=None):
+        if project is not None and project.book_id == "gen":
+            raise RuntimeError("simulated USFM checker crash")
+        return []
+
+    monkeypatch.setattr(engine, "_usfm_findings_for_book", usfm_or_fail)
+
+    started = call(engine, "project.sweepStart")["result"]
+    finished = wait_for_sweep(engine, started["jobId"])
+
+    assert finished["state"] == "failed"  # overall state reflects the failure...
+    assert finished["results"]["rut"]["status"] == "succeeded"  # ...but rut still completed
+    assert finished["results"]["gen"]["status"] == "failed"
+    assert "simulated USFM checker crash" in finished["results"]["gen"]["error"]
+
+
+def test_project_sweep_can_be_cancelled(two_book_collection, monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_book(book):
+        entered.set()
+        release.wait(timeout=2)
+        return [], None
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(two_book_collection)})
+    monkeypatch.setattr(engine, "_run_layer1_checks_for_book", slow_book)
+
+    started = call(engine, "project.sweepStart")["result"]
+    assert entered.wait(timeout=1)
+
+    cancelling = call(engine, "project.sweepCancel", {"jobId": started["jobId"]})["result"]
+    assert cancelling["state"] == "cancelling"
+    release.set()
+    cancelled = wait_for_sweep(engine, started["jobId"])
+    assert cancelled["state"] == "cancelled"
+
+
+def test_project_sweep_conflicts_while_one_is_already_running(two_book_collection, monkeypatch):
+    release = threading.Event()
+
+    def slow_book(book):
+        release.wait(timeout=2)
+        return [], None
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(two_book_collection)})
+    monkeypatch.setattr(engine, "_run_layer1_checks_for_book", slow_book)
+
+    call(engine, "project.sweepStart")
+    second = call(engine, "project.sweepStart")
+    release.set()
+
+    assert second["success"] is False
+    assert second["error"]["code"] == "sweep_conflict"
 
 
 def test_ping_and_info_work_without_a_project():
@@ -102,6 +238,27 @@ def test_open_real_fixture_project(fixture_project):
     assert result["result"]["bookId"] == "rut"
     assert result["result"]["targetLanguage"] == "Tamil"
     assert result["result"]["chapters"] == ["1"]
+
+
+def test_project_report_exposes_existing_report_service(fixture_project):
+    """tc_ai_bridge.reporting.ReportService already existed but was never
+    wired into the protocol (see BUILD_LOG.md) — project.report exposes it
+    as-is rather than reimplementing report aggregation."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    result = call(engine, "project.report")
+    assert result["success"] is True
+    report = result["result"]
+    assert report["bookId"] == "rut"
+    assert "publicationGate" in report
+    assert "knowledgeBaseProvenance" in report
+    assert report["qaSeverityCounts"] == {}
+
+
+def test_project_report_requires_open_project():
+    engine = BridgeEngine()
+    result = call(engine, "project.report")
+    assert result["success"] is False
 
 
 def test_verse_get_returns_real_alignment_data(fixture_project):
@@ -929,6 +1086,42 @@ def test_qaissue_categorization_matches_real_local_checks_codes():
     ]
     for issue, expected in cases:
         assert _categorize_qaissue(issue) == expected, f"{issue.code} -> expected {expected}"
+
+
+def test_qaissue_to_finding_carries_resource_versions_when_given():
+    """A finding stamped with the tN/tW/original-language versions it was
+    produced against can later be told apart from a stale one after those
+    bundled resources update — see BridgeEngine._pinned_resource_versions."""
+    from bridge_service import _qaissue_to_finding
+    from tc_ai_bridge.models import QAIssue
+
+    issue = QAIssue("TC_PENDING", "high", "translationWords: unchecked item", "y", "translationCore")
+    finding = _qaissue_to_finding(
+        issue, project_id="p", book="rut", chapter="1", verse="1",
+        resource_versions={"translationWords": "v90_unfoldingWord"},
+    )
+    assert finding.resource_versions == {"translationWords": "v90_unfoldingWord"}
+
+    finding_without = _qaissue_to_finding(issue, project_id="p", book="rut", chapter="1", verse="1")
+    assert finding_without.resource_versions == {}
+
+
+def test_pinned_resource_versions_reads_manifest_and_skips_untracked(fixture_project):
+    """Existing (non-Bridge-materialized) projects never had these manifest
+    keys stamped — that must read back as 'not tracked', not a crash or a
+    fabricated version string."""
+    from bridge_service import BridgeEngine
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    assert engine._pinned_resource_versions(engine.project) == {}
+
+    engine.project.manifest["tc_en_check_version_translationNotes"] = "v90_unfoldingWord"
+    engine.project.manifest["tc_orig_lang_check_version_wordAlignment"] = "v3.0.0_unfoldingWord"
+    assert engine._pinned_resource_versions(engine.project) == {
+        "translationNotes": "v90_unfoldingWord",
+        "originalLanguage": "v3.0.0_unfoldingWord",
+    }
 
 
 def test_finding_ids_are_stable_across_repeated_check_runs():
