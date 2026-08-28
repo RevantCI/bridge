@@ -24,6 +24,17 @@ pub async fn engine_info(sidecar: State<'_, EngineSidecar>) -> Result<Value, Str
         .await
 }
 
+/// Recent sidecar diagnostics (spawn/restart/terminate, request timeouts,
+/// and relayed stderr) for the Diagnostics panel. Live updates after this
+/// initial fetch arrive via the "engine-log" event instead of polling.
+#[tauri::command]
+pub async fn engine_log_recent(
+    sidecar: State<'_, EngineSidecar>,
+    limit: Option<usize>,
+) -> Result<Vec<crate::sidecar::LogEntry>, String> {
+    Ok(sidecar.recent_log(limit.unwrap_or(200)).await)
+}
+
 /// Opens the native OS folder picker and returns the chosen path, or null
 /// if the user cancelled. Separate from project_open so the frontend can
 /// show the picker immediately without waiting on the sidecar.

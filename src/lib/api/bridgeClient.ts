@@ -47,6 +47,28 @@ async function onFileDrop(
   });
 }
 
+export interface EngineLogEntry {
+  ts_ms: number;
+  level: "info" | "warn" | "error";
+  message: string;
+}
+
+/** Live diagnostics entries as sidecar.rs records them (spawn/restart/
+ * terminate, request timeouts, relayed stderr). Fires after the initial
+ * `engineLogRecent()` fetch, so the panel never needs to poll. */
+async function onEngineLog(onEntry: (entry: EngineLogEntry) => void): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<EngineLogEntry>("engine-log", (event) => onEntry(event.payload));
+}
+
+/** Fires when sidecar.rs silently respawns bridge-engine.exe mid-session
+ * (it crashed, or something else killed it) — the new process has no
+ * project open, so anything project-scoped will fail until it's reopened. */
+async function onEngineRespawned(onRespawn: () => void): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("engine-respawned", () => onRespawn());
+}
+
 interface EngineEnvelope<T> {
   id: string;
   success: boolean;
@@ -69,9 +91,15 @@ export const bridge = {
   },
 
   onFileDrop,
+  onEngineLog,
+  onEngineRespawned,
 
   engineInfo(): Promise<Record<string, unknown>> {
     return call("engine_info");
+  },
+
+  engineLogRecent(limit?: number): Promise<EngineLogEntry[]> {
+    return invoke<EngineLogEntry[]>("engine_log_recent", { limit });
   },
 
   async pickProjectFolder(): Promise<string | null> {

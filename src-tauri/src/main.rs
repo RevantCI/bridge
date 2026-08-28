@@ -25,6 +25,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::engine_ping,
             commands::engine_info,
+            commands::engine_log_recent,
             commands::pick_project_folder,
             commands::pick_import_file,
             commands::project_open,

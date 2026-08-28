@@ -10,6 +10,7 @@ the protocol stream.
 from __future__ import annotations
 
 import sys
+import traceback
 from typing import Any, Protocol
 
 from ..protocol import EngineRequest, EngineResponse
@@ -58,6 +59,14 @@ def run_stdio_loop(engine: Any | None = None) -> None:
             print(response.to_json(), flush=True)
         except Exception as exc:  # noqa: BLE001
             print(EngineResponse.fail(request.id, "internal_error", str(exc)).to_json(), flush=True)
+            # str(exc) alone loses the traceback, which is the one thing
+            # that actually tells you where an "internal_error" came from.
+            # Rust relays stderr into its own log (see sidecar.rs), so this
+            # is the only place that trace survives a release build where
+            # eprintln has no console to write to.
+            print(f"[unhandled] {request.method}: {exc}", file=sys.stderr)
+            traceback.print_exc(file=sys.stderr)
+            sys.stderr.flush()
 
 
 if __name__ == "__main__":

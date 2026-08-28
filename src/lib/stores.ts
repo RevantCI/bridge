@@ -1,5 +1,6 @@
 import { writable, derived, get } from "svelte/store";
 import type { AiCheckReview, AlignmentWorkStatus, NativeCheckReview, ProjectInfo, QaFinding } from "./types/finding";
+import type { EngineLogEntry } from "./api/bridgeClient";
 
 export function verseKey(chapter: string, verse: string): string {
   return `${chapter}:${verse}`;
@@ -63,6 +64,17 @@ export const checkingProgress = writable<CheckingProgress>({
 export const settingsOpen = writable(false);
 export const exportOpen = writable(false);
 export const showSource = writable(false);
+export const diagnosticsOpen = writable(false);
+
+const ENGINE_LOG_CAPACITY = 400;
+export const engineLog = writable<EngineLogEntry[]>([]);
+
+export function appendEngineLog(entry: EngineLogEntry): void {
+  engineLog.update((entries) => {
+    const next = [...entries, entry];
+    return next.length > ENGINE_LOG_CAPACITY ? next.slice(next.length - ENGINE_LOG_CAPACITY) : next;
+  });
+}
 
 export const verseNums = derived(
   [chapterVerseNums, currentChapter],

@@ -8,12 +8,13 @@
   import SettingsModal from "./lib/components/SettingsModal.svelte";
   import ExportModal from "./lib/components/ExportModal.svelte";
   import ProjectDashboard from "./lib/components/ProjectDashboard.svelte";
+  import DiagnosticsPanel from "./lib/components/DiagnosticsPanel.svelte";
   import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, ProjectReport, QaFinding } from "./lib/types/finding";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
     verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState, reviewerMode,
-    aiCheckReviewsByVerse,
+    aiCheckReviewsByVerse, diagnosticsOpen, engineLog, appendEngineLog,
   } from "./lib/stores";
 
   let opened = false;
@@ -34,11 +35,58 @@
   let report: ProjectReport | null = null;
   let reportLoading = false;
   let reportError = "";
+  let engineNotice = "";
+  let engineNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+  // Sidecar respawns are silent by design (see sidecar.rs) — the new
+  // process has no project open, so anything project-scoped will fail
+  // with "No project open" until this reconnects it. This is the recovery
+  // path for that, not just a status update.
+  async function handleEngineRespawn(): Promise<void> {
+    if (engineNoticeTimer) clearTimeout(engineNoticeTimer);
+    engineNotice = "Engine restarted — reconnecting…";
+    try {
+      await bridge.ping();
+      engineStatus = "ready";
+    } catch {
+      engineStatus = "error";
+    }
+    const reopenPath = $project?.path;
+    if (reopenPath) {
+      try {
+        const info = await bridge.openProject(reopenPath, $project?.projectId);
+        const siblings = $project?.importedProjects;
+        if (!info.importedProjects && siblings) info.importedProjects = siblings;
+        project.set(info);
+        engineNotice = "Engine restarted — project reconnected automatically.";
+      } catch (error) {
+        engineNotice = `Engine restarted, but the project could not be reopened automatically (${error instanceof Error ? error.message : String(error)}). Reopen it from Projects if things look stale.`;
+      }
+    } else {
+      engineNotice = "Engine restarted.";
+    }
+    engineNoticeTimer = setTimeout(() => { engineNotice = ""; }, 10000);
+  }
 
   onMount(() => {
     let unlisten: (() => void) | null = null;
+    let unlistenLog: (() => void) | null = null;
+    let unlistenRespawn: (() => void) | null = null;
     let disposed = false;
     void (async () => {
+      try {
+        const initialLog = await bridge.engineLogRecent(200);
+        if (!disposed) engineLog.set(initialLog);
+      } catch (error) {
+        console.error("Could not load engine diagnostics", error);
+      }
+      const stopLog = await bridge.onEngineLog(appendEngineLog);
+      if (disposed) stopLog();
+      else unlistenLog = stopLog;
+      const stopRespawn = await bridge.onEngineRespawned(() => void handleEngineRespawn());
+      if (disposed) stopRespawn();
+      else unlistenRespawn = stopRespawn;
+
       try {
         await bridge.ping();
         engineStatus = "ready";
@@ -61,6 +109,9 @@
     return () => {
       disposed = true;
       unlisten?.();
+      unlistenLog?.();
+      unlistenRespawn?.();
+      if (engineNoticeTimer) clearTimeout(engineNoticeTimer);
     };
   });
 
@@ -498,12 +549,21 @@
         <span style="color:var(--success);">✓ Approved: {$approvedCount}/{$verseNums.length}</span>
       {/if}
       <span class="grow" />
+      {#if engineNotice}<span class="engine-notice">{engineNotice}</span>{/if}
       <span>Engine: {engineStatus}</span>
+      <button class="diagnostics-btn" on:click={() => diagnosticsOpen.set(true)}>
+        Diagnostics
+        {#if $engineLog.some((entry) => entry.level === "error")}<span class="error-dot" />{/if}
+      </button>
     </div>
   {/if}
 
   {#if $settingsOpen}
     <SettingsModal onClose={() => settingsOpen.set(false)} />
+  {/if}
+
+  {#if $diagnosticsOpen}
+    <DiagnosticsPanel onClose={() => diagnosticsOpen.set(false)} />
   {/if}
 
   {#if $exportOpen}
@@ -541,6 +601,10 @@
   .whole-book-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .grow { flex: 1; }
   .statusbar { height: 28px; background: var(--surface); border-top: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 16px; font-size: 11px; color: var(--text-2); flex-shrink: 0; }
+  .engine-notice { color: var(--warning); font-weight: 600; }
+  .diagnostics-btn { position: relative; font-size: 10px; font-weight: 650; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-2); cursor: pointer; display: flex; align-items: center; gap: 5px; }
+  .diagnostics-btn:hover { background: var(--surface); }
+  .error-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--danger); }
   .global-drop { position: absolute; inset: 12px; z-index: 100; display: grid; place-items: center; border: 3px dashed var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--accent-bg) 92%, transparent); color: var(--accent); font-size: 17px; font-weight: 750; pointer-events: none; }
   .drop-error { position: absolute; z-index: 101; left: 50%; bottom: 42px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; border: 1px solid var(--danger); border-radius: 8px; background: var(--surface); color: var(--danger); padding: 9px 12px; font-size: 11px; box-shadow: 0 8px 24px rgba(0,0,0,.14); }
   .drop-error button { border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 11px; }
