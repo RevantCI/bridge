@@ -20,6 +20,16 @@
   export let advancedMode = false;
   export let onOpenSemanticValidation: () => void = () => {};
 
+  let bookSearch = "";
+
+  $: normalizedBookSearch = bookSearch.trim().toLocaleLowerCase();
+  $: filteredBooks = books.filter((book) => {
+    if (!normalizedBookSearch) return true;
+    return `${book.bookId ?? ""} ${book.bookName ?? ""}`
+      .toLocaleLowerCase()
+      .includes(normalizedBookSearch);
+  });
+
   function percent(part: number, total: number): number {
     if (total <= 0) return 0;
     return Math.round((part / total) * 100);
@@ -112,8 +122,13 @@
     {:else if books.length === 0}
       <p class="empty">No books found in this project.</p>
     {:else}
+      <div class="book-tools">
+        <label for="book-search">Find a book</label>
+        <input id="book-search" type="search" bind:value={bookSearch} placeholder="Book name or code, for example Luke or LUK" />
+        <span>{filteredBooks.length} of {books.length}</span>
+      </div>
       <section class="books" aria-label="Books in this project">
-        {#each books as book (book.path)}
+        {#each filteredBooks as book (book.path)}
           <article class:missing={book.missing} class="book-row">
             <div class="book-badge">{book.bookId?.toUpperCase() || "?"}</div>
             <div class="book-copy">
@@ -142,6 +157,8 @@
             </div>
             <button class="small-button primary" on:click={() => onSelectBook(book.path)} disabled={book.missing}>Open</button>
           </article>
+        {:else}
+          <p class="empty no-match">No books match “{bookSearch}”.</p>
         {/each}
       </section>
     {/if}
@@ -149,10 +166,13 @@
 </div>
 
 <style>
-  .screen { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
+  /* The report and book list form one document. Keeping overflow on only the
+     inner book list made a long exception queue extend below the viewport with
+     no reachable scrollbar. The screen is the single scroll owner. */
+  .screen { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; background: var(--surface); }
   .header { flex-shrink: 0; padding: 28px 40px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
   .header-copy { min-width: 0; }
-  .list-area { flex: 1; overflow: auto; padding: 20px 40px; }
+  .list-area { flex: none; overflow: visible; padding: 20px 40px; }
   .header, .list-area { max-width: 900px; width: 100%; margin: 0 auto; box-sizing: border-box; }
   .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; font-weight: 800; margin-bottom: 8px; }
   h1 { font-size: 22px; line-height: 1.2; margin: 0; color: var(--text); }
@@ -189,6 +209,11 @@
   .pill.invalid { background: var(--surface-2); color: var(--text-2); }
   .more { color: var(--text-2); font-size: 10px; margin: 8px 2px 0; }
   .books { border: 1px solid var(--border); border-radius: 10px; }
+  .book-tools { display: grid; grid-template-columns: auto minmax(180px, 360px) 1fr; align-items: center; gap: 9px; margin-bottom: 10px; }
+  .book-tools label { color: var(--text-2); font-size: 10px; font-weight: 700; }
+  .book-tools input { min-width: 0; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); color: var(--text); padding: 8px 10px; font: inherit; font-size: 11px; }
+  .book-tools span { color: var(--text-3); font-size: 9px; }
+  .no-match { margin: 10px; }
   .book-row { min-height: 66px; display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-bottom: 1px solid var(--border); }
   .book-row:last-child { border-bottom: 0; }
   .book-row.missing { background: #fff9ed; }
@@ -211,5 +236,7 @@
     .header, .list-area { padding-left: 20px; padding-right: 20px; }
     .bar-row { flex-direction: column; align-items: stretch; gap: 2px; }
     .bar-label { width: auto; }
+    .book-tools { grid-template-columns: 1fr auto; }
+    .book-tools label { grid-column: 1 / -1; }
   }
 </style>

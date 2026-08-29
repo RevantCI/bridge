@@ -177,10 +177,26 @@
     void loadReport();
   }
 
-  function openSemanticValidation(): void {
+  const VALIDATION_BOOK_IDS = new Set(["LUK", "PHP"]);
+
+  async function openSemanticValidation(): Promise<void> {
     if ($reviewerMode !== "advanced") return;
+    const currentBookId = $project?.bookId?.toUpperCase() ?? "";
+    if (!VALIDATION_BOOK_IDS.has(currentBookId)) {
+      const validationBook = $project?.importedProjects?.find((book) => (
+        VALIDATION_BOOK_IDS.has(book.bookId?.toUpperCase())
+      ));
+      if (validationBook && !(await switchBook(validationBook.path, false))) return;
+    }
     showingDashboard = false;
     showingSemanticValidation = true;
+  }
+
+  async function switchValidationBook(path: string): Promise<void> {
+    if (!$project || path === $project.path) return;
+    if (!(await switchBook(path, false))) {
+      throw new Error(bookOpenError || "The validation book could not be opened.");
+    }
   }
 
   async function enterBookFromDashboard(path: string): Promise<void> {
@@ -207,8 +223,9 @@
   // project.open doesn't echo back importedProjects (only project.import
   // does), so the sibling list is carried forward on the frontend instead
   // of being re-fetched.
-  async function switchBook(path: string) {
-    if (!$project || path === $project.path || openingBook) return;
+  async function switchBook(path: string, enterEditor = true): Promise<boolean> {
+    if (!$project || openingBook) return false;
+    if (path === $project.path) return true;
     const siblings = $project.importedProjects;
     const destination = siblings?.find((book) => book.path === path);
     openingBook = destination?.bookName ?? "book";
@@ -219,9 +236,11 @@
       if (!info.importedProjects && siblings) info.importedProjects = siblings;
       resetBookState();
       project.set(info);
-      await enterCurrentProject();
+      if (enterEditor) await enterCurrentProject();
+      return true;
     } catch (error) {
       bookOpenError = error instanceof Error ? error.message : String(error);
+      return false;
     } finally {
       openingBook = "";
     }
@@ -542,10 +561,15 @@
       onOpenSemanticValidation={openSemanticValidation}
     />
   {:else if screen === "validation"}
-    <SemanticMappingValidation
-      onClose={openDashboard}
-      onNavigate={navigateToFinding}
-    />
+    {#key $project?.path}
+      <SemanticMappingValidation
+        onClose={openDashboard}
+        onNavigate={navigateToFinding}
+        books={$project?.importedProjects ?? []}
+        currentBookPath={$project?.path ?? ""}
+        onBookChange={switchValidationBook}
+      />
+    {/key}
   {:else}
     <div class="body">
       <div class="editor-col">

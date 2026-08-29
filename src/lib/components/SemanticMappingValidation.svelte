@@ -2,12 +2,15 @@
   import { onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import type {
-    SemanticMapping, SemanticValidationCandidate, SemanticValidationCorrection,
+    ImportedProject, SemanticMapping, SemanticValidationCandidate, SemanticValidationCorrection,
     SemanticValidationQueue, SemanticValidationStatus,
   } from "../types/finding";
 
   export let onClose: () => void;
   export let onNavigate: (chapter: string, verse: string) => void;
+  export let books: ImportedProject[] = [];
+  export let currentBookPath = "";
+  export let onBookChange: (path: string) => Promise<void> = async () => {};
 
   let queue: SemanticValidationQueue | null = null;
   let loading = true;
@@ -23,6 +26,9 @@
   let editMeaning: SemanticMapping["meaning_status"] = "PRESERVED";
   let editConfidence = 0.9;
   let notes: Record<string, string> = {};
+  let switchingBook = false;
+
+  $: validationBooks = books.filter((book) => ["LUK", "PHP"].includes(book.bookId?.toUpperCase()));
 
   const statusLabel: Record<SemanticValidationStatus, string> = {
     UNCONFIRMED: "Unconfirmed",
@@ -152,6 +158,18 @@
     const match = reference.match(/^[A-Z0-9]+\s+([^:]+):([^\s-]+)/i);
     if (match) onNavigate(match[1], match[2]);
   }
+
+  async function changeBook(path: string): Promise<void> {
+    if (!path || path === currentBookPath || switchingBook) return;
+    switchingBook = true;
+    error = "";
+    try {
+      await onBookChange(path);
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+      switchingBook = false;
+    }
+  }
 </script>
 
 <div class="screen">
@@ -161,13 +179,28 @@
       <h1>Semantic mapping validation</h1>
       <p>Confirm, reject, or correct machine-proposed passage mappings. These decisions never rewrite Scripture or translationCore selections.</p>
     </div>
-    <button class="close" on:click={onClose}>Back to dashboard</button>
+    <div class="header-actions">
+      {#if validationBooks.length > 0}
+        <label class="book-picker">Validation book
+          <select
+            value={currentBookPath}
+            disabled={switchingBook}
+            on:change={(event) => changeBook(event.currentTarget.value)}
+          >
+            {#each validationBooks as book (book.path)}
+              <option value={book.path}>{book.bookId.toUpperCase()} — {book.bookName}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+      <button class="close" on:click={onClose}>Back to dashboard</button>
+    </div>
   </header>
-
-  {#if error}<div class="error" role="alert">{error}</div>{/if}
 
   {#if loading}
     <div class="empty">Loading the validation queue…</div>
+  {:else if error}
+    <div class="error" role="alert">{error}</div>
   {:else if !queue?.available}
     <div class="empty">No bundled validation candidates apply to the currently open book. Open IRVTam Luke or Philippians from this collection.</div>
   {:else if queue}
@@ -288,6 +321,8 @@
   .screen { flex: 1; overflow: auto; background: var(--surface-2); padding-bottom: 40px; }
   header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 24px 32px 18px; background: var(--surface); border-bottom: 1px solid var(--border); }
   header > div { max-width: 760px; }
+  .header-actions { display: flex; align-items: flex-end; gap: 9px; flex-shrink: 0; }
+  .book-picker { min-width: 190px; }
   .eyebrow { color: var(--accent); font-size: 9px; letter-spacing: .12em; font-weight: 800; margin-bottom: 6px; }
   h1 { margin: 0; font-size: 21px; color: var(--text); }
   header p { margin: 7px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-2); }
