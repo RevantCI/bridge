@@ -642,7 +642,7 @@ class OpenAIResponsesClient:
             'selection_ids can encode ONLY the current verse bottom IDs. '
             'When a check state is found_another_verse or split_across_verses, return an empty selection_ids array and nothing_to_select=false; do not invent a current-verse token. '
             'When represented_implicitly, return empty selection_ids and nothing_to_select=false because Bridge records an explicit semantic state. '
-            'When needs_passage_review, target_not_located, source_anchor_unresolved, or mapping_error, do not infer omission merely from non-location; use verdict=review unless independent supplied evidence securely demonstrates a problem. '
+            'When needs_passage_review, needs_extended_passage_review, target_not_located, source_anchor_unresolved, or mapping_error, do not infer omission merely from non-location; use verdict=review unless independent supplied evidence securely demonstrates a problem. '
             'Never encode found-in-another-verse as Nothing to Select.'
         )
         if progress_callback: progress_callback(64, 'AI reviewing Notes, Words and whole verse')

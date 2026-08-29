@@ -127,6 +127,24 @@ which mode is actually active.
 | v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/BUILD_LOG.md's Phase 7 section) |
 | v1.0.x | Paratext/Logos live navigation, AI explain, and optional AI + Greek Room synthesis. | Drag-and-drop import and ai.explain ✅ Built (2026-08-24, tested against a fake transport — no real API key available). Paratext/Logos connector plugins now exist and are wired (2026-08-24) but are unverified against a live Paratext/Logos instance — see docs/BUILD_LOG.md's Phase 7 sections for exactly what's confirmed vs. not, and paratext_plugin/README.md + engine/logos_connector/README.md for the remaining steps |
 
+### Stage 3 adaptive passage search
+
+Stage 3 seeds retrieval from the current USFM structural passage, sentence, or
+paragraph and then expands by adjacent structural-window layers. Limits on
+model calls, windows, segments, and characters are computational budgets only;
+there is no global ±N-verse linguistic rule. Exhaustion produces
+`needs_extended_passage_review`, never `MISSING`, `OMISSION`, or translationCore
+Nothing-to-Select.
+
+Mappings are content-fingerprinted companion records. Exact target quotes are
+re-located and verified against the imported USFM; model offsets are not
+trusted. A Basic-mode native selection additionally requires a preserved,
+high-confidence, unambiguous same-verse mapping whose verified quote exactly
+matches the proposed translationCore selection and has no contradictory QA
+evidence. Advanced mode keeps all mappings advisory until an explicit human
+action. Cross-verse, split, merged, implicit, uncertain, and exhausted mappings
+never enter translationCore's verse-local selection structures.
+
 ## Phase 1 outcome: BridgeEngine
 
 `engine/bridge_service.py` is the actual sidecar dispatcher now (see `main.py`). It composes:

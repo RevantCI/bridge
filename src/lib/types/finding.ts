@@ -236,6 +236,7 @@ export type SemanticSelectionState =
   | "represented_implicitly"
   | "target_not_located"
   | "needs_passage_review"
+  | "needs_extended_passage_review"
   | "source_anchor_unresolved"
   | "mapping_error";
 

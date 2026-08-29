@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from tc_ai_bridge.semantic_mapping import (
-    SemanticMappingEngine, SemanticMappingValidationError, SemanticSourceRepository,
-    SemanticMappingStore, mapping_state_for_review,
+    PassageSearchBudget, SemanticMappingEngine, SemanticMappingValidationError,
+    SemanticSourceRepository, SemanticMappingStore, mapping_state_for_review,
 )
 from tc_ai_bridge.usfm_passages import UsfmPassageIndex
 
@@ -48,6 +48,31 @@ def test_unresolved_expands_and_never_becomes_omission(stage3_db, tamil_php_usfm
     assert run.result["unresolved_source_units"][0]["reason"] == "SEARCH_BUDGET_EXHAUSTED"
     assert run.result["passage_assessment"] == "NEEDS_REVIEW"
     assert len(fake.calls)==2
+    assert run.search_budget_exhausted is True
+    assert run.search_diagnostic
+
+
+def test_structural_expansion_budget_is_not_a_verse_distance_rule(stage3_db, tamil_luk_usfm):
+    repo=SemanticSourceRepository(stage3_db)
+    unit=repo.unit_for_check(book="LUK",chapter=1,verse=68,tool="translationNotes",check_id="jx5n")
+    idx=UsfmPassageIndex.from_path(tamil_luk_usfm,book_hint="LUK")
+    seed=idx.window_for_source_reference("1","68")
+    assert seed is not None and any(segment.verse == "68-79" for segment in seed.segments)
+    unresolved={"mappings":[],"unresolved_source_units":[{"source_unit_id":unit.id,"reason":"AMBIGUOUS","detail":"competing passages"}],"passage_assessment":"NEEDS_REVIEW"}
+    fake=FakeClient([unresolved])
+    budget=PassageSearchBudget(max_model_calls=1,max_adjacent_layers=20,max_windows=50,max_segments=200,max_target_characters=100000)
+    run=SemanticMappingEngine(repo,fake,search_budget=budget).map_units(target_index=idx,source_units=[unit])
+    assert run.result["unresolved_source_units"][0]["reason"] == "SEARCH_BUDGET_EXHAUSTED"
+    assert run.search_diagnostic == "model-call budget exhausted"
+
+
+def test_usfm_is_byte_identical_after_mapping(stage3_db, tamil_php_usfm):
+    original=Path(tamil_php_usfm).read_bytes()
+    repo=SemanticSourceRepository(stage3_db); unit=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationNotes",check_id="gjyv")
+    idx=UsfmPassageIndex.from_path(tamil_php_usfm,book_hint="PHP")
+    response=fixture_response(unit.id,list(unit.source_token_ids),"PHP 1:3","PHP 1:6","என் தேவனை")
+    SemanticMappingEngine(repo,FakeClient([response]),max_neighbor_windows=0).map_units(target_index=idx,source_units=[unit])
+    assert Path(tamil_php_usfm).read_bytes() == original
 
 def test_range_verse_keeps_continuation_poetry(tamil_luk_usfm):
     idx=UsfmPassageIndex.from_path(tamil_luk_usfm,book_hint="LUK")
@@ -77,6 +102,20 @@ def test_companion_store_cache_round_trip(stage3_db, tamil_php_usfm, tmp_path):
     assert store.path_for("PHP",r1.fingerprint).exists()
     fake2=FakeClient([]); r2=SemanticMappingEngine(repo,fake2,max_neighbor_windows=0).map_units(target_index=idx,source_units=[unit],store=store)
     assert r2.cache_hit is True and not fake2.calls
+
+
+def test_expanded_unresolved_cache_skips_all_repeat_model_calls(stage3_db, tamil_php_usfm, tmp_path):
+    repo=SemanticSourceRepository(stage3_db); unit=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationNotes",check_id="gjyv")
+    idx=UsfmPassageIndex.from_path(tamil_php_usfm,book_hint="PHP")
+    unresolved={"mappings":[],"unresolved_source_units":[{"source_unit_id":unit.id,"reason":"AMBIGUOUS","detail":"competing candidates"}],"passage_assessment":"NEEDS_REVIEW"}
+    store=SemanticMappingStore(tmp_path)
+    first=FakeClient([unresolved,unresolved])
+    r1=SemanticMappingEngine(repo,first,max_neighbor_windows=1).map_units(target_index=idx,source_units=[unit],store=store)
+    assert len(first.calls) == 2 and r1.search_budget_exhausted
+    second=FakeClient([])
+    r2=SemanticMappingEngine(repo,second,max_neighbor_windows=1).map_units(target_index=idx,source_units=[unit],store=store)
+    assert r2.cache_hit is True and r2.search_budget_exhausted is True
+    assert second.calls == []
 
 def test_alignment_guard_removes_cross_verse_false_links():
     from tc_ai_bridge.semantic_alignment_guard import guard_alignment_response
@@ -124,6 +163,50 @@ def test_review_policy_blocks_cross_verse_native_selection():
     assert review["nothing_to_select"] is False
     assert native_tc_apply_allowed(review) is False
     assert "PHP 1:6" in review["rationale"]
+
+
+def test_basic_native_apply_requires_exact_high_confidence_grounded_same_verse_mapping():
+    from tc_ai_bridge.semantic_review_policy import native_tc_apply_allowed
+    review={
+      "selection_state":"found_this_verse", "verdict":"pass", "nothing_to_select":False,
+      "proposed_selections":[{"text":"தேவன்","occurrence":1,"occurrences":1}],
+      "semantic_mapping":{
+        "meaning_status":"PRESERVED", "confidence":.95, "relationships":["SAME_VERSE"],
+        "target_spans":[{"reference":"PHP 1:2","quote":"தேவன்","start":4,"end":9}],
+      },
+    }
+    assert native_tc_apply_allowed(review) is True
+    review["proposed_selections"]=[
+      {"text":"என்","occurrence":1,"occurrences":1},
+      {"text":"தேவனை","occurrence":1,"occurrences":1},
+    ]
+    review["semantic_mapping"]["target_spans"][0].update({"quote":"என் தேவனை","start":4,"end":13})
+    assert native_tc_apply_allowed(review) is True
+    review["semantic_mapping"]["confidence"] = .89
+    assert native_tc_apply_allowed(review) is False
+    review["semantic_mapping"]["confidence"] = .95
+    review["proposed_selections"][0]["text"] = "வேறொரு சொல்"
+    assert native_tc_apply_allowed(review) is False
+
+
+def test_advanced_cross_verse_mapping_stays_companion_data():
+    from tc_ai_bridge.semantic_review_policy import apply_semantic_review_policy, native_tc_apply_allowed
+    review={
+      "check_id":"x", "proposed_selections":[{"text":"local guess","occurrence":1,"occurrences":1}],
+      "proposed_selection_ids":["B001"], "proposed_selection_text":["local guess"],
+      "nothing_to_select":False, "verdict":"pass", "rationale":"",
+    }
+    pack={
+      "checkStates":[{"checkId":"x","sourceUnitId":"translationNotes:x","state":"split_across_verses"}],
+      "mappings":[{"source_unit_id":"translationNotes:x","target_spans":[
+        {"reference":"LUK 1:2","quote":"a","start":0,"end":1},
+        {"reference":"LUK 1:3","quote":"b","start":0,"end":1}],
+        "relationships":["SPLIT_ACROSS_VERSES"],"meaning_status":"PRESERVED","confidence":.98}],
+    }
+    apply_semantic_review_policy(review,pack)
+    assert review["proposed_selections"] == []
+    assert review["nothing_to_select"] is False
+    assert native_tc_apply_allowed(review) is False
 
 
 def test_review_policy_unresolved_never_auto_omission():

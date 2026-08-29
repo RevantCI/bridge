@@ -68,6 +68,7 @@ from tc_ai_bridge.reporting import ReportService
 from tc_ai_bridge.verse_evidence import resolve_verse_evidence
 from tc_ai_bridge.semantic_mapping_service import semantic_mappings_for_verse, confirm_semantic_mapping
 from tc_ai_bridge.semantic_mapping_bridge import prepare_semantic_mappings_for_review
+from tc_ai_bridge.semantic_review_policy import native_tc_apply_allowed
 from check_jobs import (
     CheckJobConflict,
     CheckJobError,
@@ -1298,6 +1299,9 @@ class BridgeEngine:
             return "AI confidence is below the 82% automatic-selection threshold"
         if not review.evidence_used:
             return "No bundled evidence was cited"
+        selection_state = str(getattr(review, "selection_state", "") or "")
+        if selection_state and not native_tc_apply_allowed(review):
+            return "Stage 3 mapping is not safe for a verse-local automatic selection"
         if review.verdict == "not_applicable" and not review.nothing_to_select:
             return "Not-applicable verdict must explicitly select nothing"
         if review.nothing_to_select:
@@ -1316,14 +1320,30 @@ class BridgeEngine:
         reviews: list[Any],
         *,
         model: str,
+        qa_issues: list[Any] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         applied: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        qa_issues = list(qa_issues or [])
         for review in reviews:
             reason = self._safe_ai_selection_reason(review)
             identity = {
                 "tool": review.tool, "groupId": review.group_id, "checkId": review.check_id,
             }
+            contradictory = [
+                issue for issue in qa_issues
+                if (
+                    str(getattr(issue, "check_id", "") or "") == str(review.check_id)
+                    or (
+                        not str(getattr(issue, "check_id", "") or "")
+                        and str(getattr(issue, "group_id", "") or "") == str(review.group_id)
+                    )
+                )
+                and str(getattr(issue, "severity", "") or "") in {"critical", "high", "medium"}
+                and float(getattr(issue, "confidence", 0.0) or 0.0) >= 0.75
+            ]
+            if contradictory:
+                reason = "Contradictory QA evidence requires human review"
             if reason:
                 skipped.append({**identity, "reason": reason})
                 continue
@@ -1401,6 +1421,7 @@ class BridgeEngine:
                 progress_callback(94, "Applying safe evidence-grounded selections")
                 applied, skipped = self._apply_basic_ai_selections(
                     project, chapter, verse, reviews, model=str(meta.get("model") or client.model),
+                    qa_issues=issues,
                 )
             review_dicts = [item.to_dict() for item in reviews]
             lifecycle = project.reconcile_issue_resolutions_after_ai_review(

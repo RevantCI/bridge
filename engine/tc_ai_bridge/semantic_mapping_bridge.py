@@ -260,11 +260,15 @@ def prepare_semantic_mappings_for_review(
             state = mapping_state_for_review(mapping, origin)
         else:
             pending = unresolved_by_unit.get(unit.id, {})
+            extended = pending.get("reason") == "SEARCH_BUDGET_EXHAUSTED"
             state = {
-                "state": "needs_passage_review", "selectable": False, "targetSpans": [],
+                "state": "needs_extended_passage_review" if extended else "needs_passage_review",
+                "selectable": False, "targetSpans": [],
                 "meaningStatus": "UNCERTAIN", "relationships": ["UNCERTAIN"],
                 "detail": str(pending.get("detail") or "Target realization was not securely located."),
             }
+            if extended:
+                state["reviewCode"] = "NEEDS_EXTENDED_PASSAGE_REVIEW"
         check_states.append({
             "sourceUnitId": unit.id, "checkId": unit.check_id, "tool": unit.tool,
             "groupId": unit.group_id, **state,
@@ -276,7 +280,10 @@ def prepare_semantic_mappings_for_review(
         "searchedWindows": list(run.searched_windows),
         "mappings": run.result["mappings"], "unresolved": unresolved_all,
         "checkStates": check_states,
-        "sourceDb": str(db_path), "engineVersion": "3.0.0-beta14-stage3",
+        "sourceDb": str(db_path), "engineVersion": "3.0.1-stage3",
+        "searchBudgetExhausted": run.search_budget_exhausted,
+        "searchDiagnostic": run.search_diagnostic,
+        "searchOutcome": "NEEDS_EXTENDED_PASSAGE_REVIEW" if run.search_budget_exhausted else "COMPLETE",
     }
 
 

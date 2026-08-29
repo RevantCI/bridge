@@ -17,11 +17,11 @@ from typing import Any, Iterable, Protocol, Sequence
 
 from .usfm_passages import PassageWindow, TargetSegment, UsfmPassageIndex
 
-SCHEMA_VERSION = "bridge.semantic_mapping_result.v0.3"
-ENGINE_VERSION = "3.0.0-beta14-stage3"
+SCHEMA_VERSION = "bridge.semantic_mapping_result.v0.4"
+ENGINE_VERSION = "3.0.1-stage3"
 
 RELATIONSHIPS = (
-    "SAME_VERSE", "REORDERED_WITHIN_VERSE", "CROSS_VERSE_MOVED",
+    "SAME_VERSE", "REORDERED_WITHIN_VERSE", "CROSS_VERSE", "CROSS_VERSE_MOVED",
     "CROSS_VERSE_REORDERED", "SPLIT_ACROSS_VERSES", "MERGED_ACROSS_VERSES",
     "CLAUSE_MOVED", "CLAUSE_REORDERED", "SENTENCE_MOVED", "SENTENCE_REORDERED",
     "PARAPHRASED", "PRONOMINALIZED", "GRAMMATICALLY_ENCODED", "IMPLICIT",
@@ -76,6 +76,32 @@ class MappingRun:
     result: dict[str, Any]
     fingerprint: str
     cache_hit: bool = False
+    search_budget_exhausted: bool = False
+    search_diagnostic: str = ""
+
+
+@dataclass(frozen=True)
+class PassageSearchBudget:
+    """Language-independent computational limits for adaptive passage search.
+
+    These limits bound latency/cost only.  Exhausting any limit produces an
+    extended-passage-review state; it is never evidence of omission.
+    """
+
+    max_model_calls: int = 3
+    max_adjacent_layers: int = 2
+    max_windows: int = 5
+    max_segments: int = 48
+    max_target_characters: int = 30_000
+
+    def normalized(self) -> "PassageSearchBudget":
+        return PassageSearchBudget(
+            max_model_calls=max(1, int(self.max_model_calls)),
+            max_adjacent_layers=max(0, int(self.max_adjacent_layers)),
+            max_windows=max(1, int(self.max_windows)),
+            max_segments=max(1, int(self.max_segments)),
+            max_target_characters=max(1, int(self.max_target_characters)),
+        )
 
 
 class SemanticSourceRepository:
@@ -367,12 +393,22 @@ class SemanticMappingStore:
 class SemanticMappingEngine:
     def __init__(
         self, source_repo: SemanticSourceRepository, client: StructuredClient,
-        *, model: str | None = None, max_neighbor_windows: int = 2,
+        *, model: str | None = None, max_neighbor_windows: int | None = None,
+        search_budget: PassageSearchBudget | None = None,
     ):
         self.source_repo = source_repo
         self.client = client
         self.model = model or str(getattr(client, "model", ""))
-        self.max_neighbor_windows = max(0, int(max_neighbor_windows))
+        # ``max_neighbor_windows`` remains as a backwards-compatible performance
+        # control.  It means structural expansion layers, not a ±N-verse rule.
+        if search_budget is None:
+            layers = 2 if max_neighbor_windows is None else max(0, int(max_neighbor_windows))
+            search_budget = PassageSearchBudget(
+                max_model_calls=layers + 1,
+                max_adjacent_layers=layers,
+                max_windows=max(1, 1 + (2 * layers)),
+            )
+        self.search_budget = search_budget.normalized()
 
     def map_units(
         self, *, target_index: UsfmPassageIndex, source_units: Sequence[SourceSemanticUnit],
@@ -384,30 +420,86 @@ class SemanticMappingEngine:
         if seed is None:
             raise SemanticMappingError("No target passage window can be seeded for requested source unit(s)")
 
-        selected_windows = [seed]
+        selected_windows: list[PassageWindow] = []
         all_mappings: dict[str, dict[str, Any]] = {}
         pending = {u.id: u for u in source_units}
         last_unresolved: dict[str, dict[str, Any]] = {}
+        stop_reason = ""
+        model_calls = 0
 
-        for radius in range(0, self.max_neighbor_windows + 1):
-            if radius:
-                selected_windows = target_index.expand(seed, before=radius, after=radius)
+        # Check the widest admissible cached result first.  Otherwise an older
+        # unresolved seed-window cache would either stop expansion prematurely
+        # or force an unnecessary model call before the final expanded cache is
+        # reached.  Cache identity includes all source units and exact target
+        # segment text, so this lookup cannot reuse stale Scripture.
+        if store and not force:
+            planned: list[list[PassageWindow]] = []
+            cached_windows: list[PassageWindow] = []
+            for layer_number, layer in enumerate(target_index.adjacent_window_layers(seed)):
+                if layer_number > self.search_budget.max_adjacent_layers or len(planned) >= self.search_budget.max_model_calls:
+                    break
+                additions = [window for window in layer if window not in cached_windows]
+                candidate = sorted(cached_windows + additions, key=lambda w: w.ordinal)
+                segments = target_index.segments_for_windows(candidate)
+                characters = sum(len(segment.text) for segment in segments)
+                if cached_windows and (
+                    len(candidate) > self.search_budget.max_windows
+                    or len(segments) > self.search_budget.max_segments
+                    or characters > self.search_budget.max_target_characters
+                ):
+                    break
+                cached_windows = candidate
+                planned.append(list(candidate))
+            for candidate in reversed(planned):
+                segments = target_index.segments_for_windows(candidate)
+                fp = self._fingerprint(source_units, segments)
+                cached = store.load(target_index.book, fp)
+                if not cached:
+                    continue
+                validated = self._validate_result(
+                    cached["result"], source_units, segments, allow_search_exhausted=True,
+                )
+                exhausted = any(
+                    row.get("reason") == "SEARCH_BUDGET_EXHAUSTED"
+                    for row in validated.get("unresolved_source_units", [])
+                )
+                return MappingRun(
+                    tuple(source_units), tuple(w.id for w in candidate), validated,
+                    fp, True, exhausted,
+                    str((cached.get("search") or {}).get("diagnostic") or ""),
+                )
+
+        layers = target_index.adjacent_window_layers(seed)
+        for layer_number, layer in enumerate(layers):
+            if layer_number > self.search_budget.max_adjacent_layers:
+                stop_reason = "adjacent structural-passage layer budget exhausted"
+                break
+            if model_calls >= self.search_budget.max_model_calls:
+                stop_reason = "model-call budget exhausted"
+                break
+            additions = [window for window in layer if window not in selected_windows]
+            candidate_windows = sorted(selected_windows + additions, key=lambda w: w.ordinal)
+            candidate_segments = target_index.segments_for_windows(candidate_windows)
+            candidate_characters = sum(len(segment.text) for segment in candidate_segments)
+            if selected_windows and (
+                len(candidate_windows) > self.search_budget.max_windows
+                or len(candidate_segments) > self.search_budget.max_segments
+                or candidate_characters > self.search_budget.max_target_characters
+            ):
+                stop_reason = "target passage window/segment/character budget exhausted"
+                break
+            selected_windows = candidate_windows
             requested = list(pending.values())
             if not requested:
                 break
             segments = target_index.segments_for_windows(selected_windows)
-            fp = self._fingerprint(requested, segments)
-            if store and not force:
-                cached = store.load(target_index.book, fp)
-                if cached:
-                    validated = self._validate_result(cached["result"], requested, segments)
-                    return MappingRun(tuple(source_units), tuple(w.id for w in selected_windows), validated, fp, True)
-
+            fp = self._fingerprint(source_units, segments)
             raw = self.client._post_structured(
                 self._instructions(),
                 json.dumps(self._input_object(requested, selected_windows, segments), ensure_ascii=False),
-                "bridge_semantic_mapping_v03", semantic_mapping_schema(),
+                "bridge_semantic_mapping_v04", semantic_mapping_schema(),
             )
+            model_calls += 1
             validated = self._validate_result(raw, requested, segments)
             for item in validated["mappings"]:
                 all_mappings[item["source_unit_id"]] = item
@@ -417,13 +509,16 @@ class SemanticMappingEngine:
                 break
 
         # Search exhaustion is explicitly NOT an omission verdict.
+        if pending and not stop_reason:
+            stop_reason = "configured structural passage search budget exhausted"
         unresolved = []
         for uid in pending:
             prior = last_unresolved.get(uid, {})
             unresolved.append({
                 "source_unit_id": uid,
                 "reason": "SEARCH_BUDGET_EXHAUSTED",
-                "detail": str(prior.get("detail") or "Meaning was not securely located within the configured adaptive passage search budget; extend passage review or ask a human reviewer."),
+                "detail": str(prior.get("detail") or "Meaning was not securely located within the configured adaptive passage search budget; extend passage review or ask a human reviewer.")
+                + (f" Search stopped because the {stop_reason}." if stop_reason else ""),
             })
         final = {
             "mappings": [all_mappings[u.id] for u in source_units if u.id in all_mappings],
@@ -439,9 +534,16 @@ class SemanticMappingEngine:
                 "model": self.model, "createdAt": datetime.now(timezone.utc).isoformat(),
                 "fingerprint": final_fp, "searchedWindows": [w.id for w in selected_windows],
                 "sourceUnits": [asdict(u) for u in source_units], "result": final,
-                "provenance": {"proposal": "ai", "humanConfirmation": None},
+                "provenance": {"proposal": "MACHINE_PROPOSED", "humanConfirmation": None},
+                "search": {
+                    "budget": asdict(self.search_budget), "modelCalls": model_calls,
+                    "budgetExhausted": bool(unresolved), "diagnostic": stop_reason,
+                },
             })
-        return MappingRun(tuple(source_units), tuple(w.id for w in selected_windows), final, final_fp, False)
+        return MappingRun(
+            tuple(source_units), tuple(w.id for w in selected_windows), final,
+            final_fp, False, bool(unresolved), stop_reason,
+        )
 
     def _seed_window(self, index: UsfmPassageIndex, units: Sequence[SourceSemanticUnit]) -> PassageWindow | None:
         refs = [u.source_reference for u in units]
@@ -476,6 +578,7 @@ class SemanticMappingEngine:
                 "target_language_rule": "Do not assume any language-specific word order or verse-local realization.",
                 "verse_boundary_rule": "Verse numbers are anchors, not mandatory semantic boundaries.",
                 "authority": "UHB/UGNT source tokens are canonical; ULT/help wording is supporting evidence only.",
+                "search_boundary_rule": "The supplied target passage is a computational search window, not a claim that meaning outside it is absent.",
             },
             "resource_provenance": self.source_repo.metadata().get("resource_manifest", {}),
             "source_units": unit_rows,
@@ -495,6 +598,7 @@ class SemanticMappingEngine:
             "For every overt target realization, copy an exact verbatim quote from exactly one supplied target segment and give that segment's reference. Do not normalize, translate, repair, or invent target text. "
             "Use an empty target_spans array only for truly implicit/grammatical realizations or when not securely located. If a unit is not securely located, put it in unresolved_source_units rather than declaring an omission. "
             "Do not use POSSIBLE_OMISSION as a relationship; Bridge decides possible-omission state only after adaptive search and review policy. Return only the strict schema."
+            " If two or more target candidates compete and one cannot be grounded decisively, return the unit unresolved with reason AMBIGUOUS; never choose one merely to complete the mapping."
         )
 
     def _fingerprint(self, units: Sequence[SourceSemanticUnit], segments: Sequence[TargetSegment]) -> str:
@@ -594,6 +698,8 @@ class SemanticMappingEngine:
             if len(target_refs) > 1 and "SPLIT_ACROSS_VERSES" not in rel:
                 rel.append("SPLIT_ACROSS_VERSES")
             if clean_spans and all(r != expected.source_reference for r in target_refs):
+                if "CROSS_VERSE" not in rel:
+                    rel.append("CROSS_VERSE")
                 if not any(x in rel for x in ("CROSS_VERSE_MOVED", "CROSS_VERSE_REORDERED", "VERSIFICATION_DIFFERENCE")):
                     rel.append("CROSS_VERSE_MOVED")
 
@@ -605,6 +711,8 @@ class SemanticMappingEngine:
             clean["relationships"] = list(dict.fromkeys(rel))
             clean["meaning_status"] = status
             clean["confidence"] = confidence
+            clean["proposal_provenance"] = "MACHINE_PROPOSED"
+            clean["validation_status"] = "UNCONFIRMED"
             clean_mappings.append(clean)
 
         clean_unresolved: list[dict[str, Any]] = []

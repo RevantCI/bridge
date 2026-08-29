@@ -264,9 +264,37 @@ class UsfmPassageIndex:
         return self._window_by_ref.get(seg.reference)
 
     def expand(self, window: PassageWindow, *, before: int = 1, after: int = 1) -> list[PassageWindow]:
+        """Return adjacent structural windows around ``window``.
+
+        ``before``/``after`` are computational retrieval controls, never a
+        linguistic claim about how many verses can realize a source meaning.
+        """
         lo = max(0, window.ordinal - max(0, before))
         hi = min(len(self.windows), window.ordinal + max(0, after) + 1)
         return self.windows[lo:hi]
+
+    def adjacent_window_layers(self, window: PassageWindow) -> Iterator[tuple[PassageWindow, ...]]:
+        """Yield the seed passage, then increasingly distant structural layers.
+
+        A layer contains the preceding/following structural passage at the same
+        distance where available.  Consumers decide how many layers, segments,
+        characters, or model calls their search budget permits.  Verse distance
+        is intentionally absent: verse numbers remain reference anchors rather
+        than semantic search boundaries.
+        """
+        yield (window,)
+        distance = 1
+        while window.ordinal - distance >= 0 or window.ordinal + distance < len(self.windows):
+            layer: list[PassageWindow] = []
+            before = window.ordinal - distance
+            after = window.ordinal + distance
+            if before >= 0:
+                layer.append(self.windows[before])
+            if after < len(self.windows):
+                layer.append(self.windows[after])
+            if layer:
+                yield tuple(layer)
+            distance += 1
 
     @staticmethod
     def segments_for_windows(windows: Iterable[PassageWindow]) -> list[TargetSegment]:

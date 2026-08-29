@@ -119,6 +119,11 @@ Beta 14 also adds language-aware semantic passage mapping. Source and target
 verse numbers are treated as reference anchors rather than mandatory semantic
 boundaries, so a meaning moved or split across nearby target verses is surfaced
 as a passage mapping instead of a false omission or Nothing-to-Select decision.
+Search begins with the current USFM structural passage/sentence/paragraph and
+expands through adjacent structural windows only within explicit latency/cost
+budgets. Exhaustion becomes **Needs extended passage review**, never an
+automatic missing/omission conclusion. Bridge preserves imported verse markers
+and target word order; cross-verse relationships live only in companion data.
 See:
 
 - [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) for what's usable today, in

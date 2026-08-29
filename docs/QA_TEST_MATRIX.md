@@ -10,7 +10,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 304 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, vendored Smart Edit Distance, and the full Stage 3 semantic source database. Includes language-aware same/cross/split/implicit passage mapping, safe native-selection gating, Milestone 3B.3 structured/background AI review, resumable AI batches, Milestone 3A resource/import, project management, and Milestone 3B.4 Paratext handoff/recheck lifecycle tests |
+| A01 | Backend | Complete Python suite | Source | PASS — 313 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, vendored Smart Edit Distance, and the full Stage 3 semantic source database. Includes adaptive structural passage expansion, expanded-cache reuse, byte-identical USFM preservation, conservative Basic/Advanced mapping policy, generated IRVTam validation screens, Milestone 3B.3 structured/background AI review, resumable AI batches, Milestone 3A resource/import, project management, and Milestone 3B.4 Paratext handoff/recheck lifecycle tests |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 2 sidecar-timeout unit tests passed, including the Beta 7 interactive-timeout guard |
@@ -158,10 +158,15 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | M22 | Click a cross-verse semantic span; confirm Bridge navigates to the mapped target verse and does not offer a native verse-local **Apply AI proposal** action | NOT RUN — navigation and safety gate compile/test; exact-span highlighting is a documented follow-up |
 | M23 | Review a normal same-verse mapping; confirm Advanced mode can still apply its exact proposal and Basic mode retains the existing safe auto-apply behavior | NOT RUN — automated policy and selection regressions pass |
 | M24 | Disconnect from the internet and review a mapped passage in the installed Beta 14 app; confirm the bundled semantic database is available | NOT RUN — installer manifest contains the verified 125,005,824-byte database |
+| M25 | Exhaust the configured structural passage budget and confirm the card says **Needs extended passage review**, never omission or Nothing to Select | NOT RUN — deterministic backend regression passes; installed UI acceptance required |
+| M26 | In Basic mode, verify only a ≥90%-confidence, preserved, unambiguous same-verse mapping with an exact USFM-backed native selection and no contradictory QA evidence is applied | NOT RUN — policy regressions pass; installed AI acceptance required |
+| M27 | In Advanced mode, inspect cross-verse/split/implicit proposals and confirm they remain companion mappings and cannot be applied as verse-local tC selections | NOT RUN — policy and UI gates compile/test; installed acceptance required |
+| M28 | Edit either a source/current verse or mapped target verse and confirm the content fingerprint prevents reuse of stale mapping data | NOT RUN — target-edit fingerprint regression passes; full two-sided installed acceptance required |
+| M29 | Generate/review the IRVTam validation queue and explicitly confirm/reject selected `MACHINE_PROPOSED` rows before using them as evidence | NOT RUN — 36-row unconfirmed local queue generated; human corpus validation pending |
 
 ## Automated evidence
 
-- Python: 304 tests, including Stage 3 language-aware semantic passage mapping and all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 313 tests, including Stage 3 language-aware semantic passage mapping and all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book

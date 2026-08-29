@@ -13,7 +13,7 @@ from .semantic_mapping_bridge import mapping_by_source_unit, semantic_state_by_c
 _NATIVE_SAFE = {"", "found_this_verse"}
 _NONLOCAL = {"found_another_verse", "split_across_verses"}
 _NO_LITERAL_LOCAL = {"represented_implicitly"}
-_UNRESOLVED = {"target_not_located", "needs_passage_review", "source_anchor_unresolved", "mapping_error"}
+_UNRESOLVED = {"target_not_located", "needs_passage_review", "needs_extended_passage_review", "source_anchor_unresolved", "mapping_error"}
 
 
 def semantic_mapping_for_check(pack: dict[str, Any] | None, check_id: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -40,7 +40,23 @@ def native_tc_apply_allowed(review: Any) -> bool:
     if verdict == "problem" and nothing:
         return False
     if state == "found_this_verse":
-        return bool(selections) and not nothing
+        mapping = _get(review, "semantic_mapping", None) or {}
+        if str(mapping.get("meaning_status") or "") != "PRESERVED":
+            return False
+        if float(mapping.get("confidence") or 0.0) < 0.90:
+            return False
+        if "UNCERTAIN" in set(mapping.get("relationships") or []):
+            return False
+        spans = list(mapping.get("target_spans") or [])
+        if not spans or any(not isinstance(span.get("start"), int) or not isinstance(span.get("end"), int) for span in spans):
+            return False
+        span_quotes = [str(span.get("quote") or "") for span in spans]
+        selection_text = [str(row.get("text") or "") for row in selections if isinstance(row, dict)]
+        # The native operation must consume the exact, USFM-verified mapping,
+        # not a different model guess from the verse review pass.
+        exact_rows = selection_text == span_quotes
+        one_verified_phrase = len(span_quotes) == 1 and " ".join(selection_text) == span_quotes[0]
+        return bool(selection_text) and (exact_rows or one_verified_phrase) and not nothing
     # Legacy no-semantic-state path remains available for not-applicable only;
     # this preserves Beta 13 compatibility without misusing NTS for mapped data.
     return verdict == "not_applicable" and nothing or bool(selections)

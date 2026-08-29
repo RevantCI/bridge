@@ -1,6 +1,6 @@
 # Build log: Bridge v0.8.0-beta.14
 
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 > **Start with [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) instead** for an
 > oriented, up-to-date summary of the stack decisions, phase roadmap, and
@@ -9,6 +9,40 @@ Updated: 2026-08-28
 > session-by-session narrative that the summary distills. This file is the
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
+
+## Stage 3 IRVTam discovery and adaptive-search hardening (2026-08-29)
+
+- Replaced implicit radius behavior with explicit language-independent search
+  budgets for model calls, adjacent structural layers, windows, segments, and
+  target characters. Verse counts are not semantic boundaries.
+- Search-budget exhaustion now surfaces as
+  `needs_extended_passage_review`; it cannot become omission or
+  Nothing-to-Select.
+- Fixed expanded-result cache lookup so a persisted wide-passage result is
+  reused before any repeat seed-window model call.
+- Hardened Basic-mode application: Stage 3 mappings must be same-verse,
+  meaning-preserved, at least 90% confident, non-uncertain, exactly grounded in
+  imported USFM, compatible with the native selection, and free of matching
+  contradictory QA evidence. Advanced-mode passage mappings remain advisory.
+- Added a reproducible IRVTam discovery tool and generated 36
+  `MACHINE_PROPOSED` / `UNCONFIRMED` review candidates across Luke and
+  Philippians. One is the exact PHP 1:3 → 1:6 regression; 35 are conservative
+  local structural screens and therefore make no semantic preservation claim.
+- The full external semantic-model discovery pass was not executed because
+  sending corpus/source evidence to the configured endpoint requires explicit
+  data-transfer approval. The generator is ready once that authorization is
+  supplied.
+- Mapping remains companion-only and a regression test verifies the input USFM
+  stays byte-identical.
+
+Verified on Windows/Python 3.12.4:
+
+- Complete Python suite: **313 passed in 485.97s**.
+- Focused Stage 3/corpus suites: **22 passed**.
+- Svelte/TypeScript: **0 errors, 0 warnings**.
+- Production Vite build: passed (existing >500 kB chunk warning only).
+- UI state tests: **4 passed**.
+- Rust desktop tests: **2 passed**.
 
 ## Current release state
 

@@ -1,0 +1,1649 @@
+{
+  "schema": "bridge.semantic_mapping_validation_set.v0.1",
+  "generatedAt": "2026-08-29T00:06:30.815643+00:00",
+  "proposalProvenance": "MACHINE_PROPOSED",
+  "validationStatus": "UNCONFIRMED",
+  "languageSpecificRulesUsed": false,
+  "model": "LOCAL_DETERMINISTIC_STRUCTURAL_SCREEN",
+  "searchBudget": {
+    "max_model_calls": 3,
+    "max_adjacent_layers": 2,
+    "max_windows": 5,
+    "max_segments": 48,
+    "max_target_characters": 30000
+  },
+  "sourceDatabase": {
+    "file": "bridge_semantic_source_v0.3.sqlite",
+    "sha256": "E7E26E1A0A12A33A75E5DC61201FA0D6F1CF4BA940284D70FB6FD492894DEB2F"
+  },
+  "corpora": [
+    {
+      "book": "LUK",
+      "file": "43LUKIRVTam.SFM",
+      "sha256": "20A97D2A785A33CAFEDDA32F8710B2C111534E4DC89B74949BAB84F8A1C72FD7"
+    },
+    {
+      "book": "PHP",
+      "file": "51PHPIRVTam.SFM",
+      "sha256": "2467E7E1E31E8597304B17760C7946B974BF4C8749179A82586D7245B929D7FD"
+    }
+  ],
+  "summary": {
+    "candidateCount": 36,
+    "relationshipCounts": {
+      "CROSS_VERSE": 1,
+      "CROSS_VERSE_REORDERED": 1,
+      "VERSIFICATION_DIFFERENCE": 4,
+      "MERGED_ACROSS_VERSES": 4,
+      "SENTENCE_REORDERED": 4,
+      "PRONOMINALIZED": 8,
+      "GRAMMATICALLY_ENCODED": 8,
+      "IMPLICIT": 8,
+      "REORDERED_WITHIN_VERSE": 3
+    },
+    "requestedCoverage": {
+      "CROSS_VERSE": 1,
+      "CROSS_VERSE_REORDERED": 1,
+      "SENTENCE_MOVED": 0,
+      "SENTENCE_REORDERED": 4,
+      "CLAUSE_MOVED": 0,
+      "CLAUSE_REORDERED": 0,
+      "SPLIT_ACROSS_VERSES": 0,
+      "MERGED_ACROSS_VERSES": 4,
+      "REORDERED_WITHIN_VERSE": 3,
+      "PRONOMINALIZED": 8,
+      "GRAMMATICALLY_ENCODED": 8,
+      "IMPLICIT": 8,
+      "VERSIFICATION_DIFFERENCE": 4,
+      "POSSIBLE_OMISSION_CANDIDATE": 0,
+      "UNCERTAIN_COMPETING_MAPPING": 0
+    }
+  },
+  "candidates": [
+    {
+      "candidateId": "php-1-3-gjyv-cross-verse-regression",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "EXACT_REGRESSION_SENTINEL",
+      "diagnosticScore": 110,
+      "sourceUnit": {
+        "id": "translationNotes:gjyv",
+        "tool": "translationNotes",
+        "check_id": "gjyv",
+        "group_id": "figs-possession",
+        "source_reference": "PHP 1:3",
+        "source_quote": "τῷ Θεῷ μου",
+        "source_token_ids": [
+          "PHP.1.3.T002",
+          "PHP.1.3.T003",
+          "PHP.1.3.T004"
+        ],
+        "note": "Use of the words **my God** does not mean that God belongs to Paul, but that Paul belongs to God. That is, God is the one whom Paul worships exclusively. Alternate translation: [the one who is God to me]",
+        "occurrence": 1
+      },
+      "targetSpans": [
+        {
+          "reference": "PHP 1:6",
+          "quote": "என் தேவனை",
+          "start": 34,
+          "end": 43
+        }
+      ],
+      "relationships": [
+        "CROSS_VERSE",
+        "CROSS_VERSE_REORDERED"
+      ],
+      "meaningStatus": "PRESERVED",
+      "confidence": 0.99,
+      "evidence": {
+        "source": "τῷ Θεῷ μου",
+        "target": "என் தேவனை",
+        "explanation": "Required PHP 1:3→1:6 regression; exact target quote verified in imported IRVTam USFM."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0002"
+      ],
+      "mappingFingerprint": "660d240530a958d7d1b05101d2b2ef6cf79d07f4bc4db044e8eba5573585431c",
+      "rank": 1
+    },
+    {
+      "candidateId": "10cd4fe4b550fd643817",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 100,
+      "sourceUnit": {
+        "id": "translationNotes:l085",
+        "tool": "translationNotes",
+        "check_id": "l085",
+        "group_id": "figs-personification",
+        "source_reference": "LUK 1:68",
+        "source_quote": "ὁ Θεὸς τοῦ Ἰσραήλ",
+        "source_token_ids": [
+          "LUK.1.68.T003",
+          "LUK.1.68.T004",
+          "LUK.1.68.T005",
+          "LUK.1.68.T006"
+        ],
+        "note": "Luke is referring to the Israelites as if they were a single person, their ancestor, **Israel**. Alternate translation: [the people of Israel]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 1:67",
+        "LUK 1:68-79"
+      ],
+      "relationships": [
+        "VERSIFICATION_DIFFERENCE",
+        "MERGED_ACROSS_VERSES"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ὁ Θεὸς τοῦ Ἰσραήλ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0057"
+      ],
+      "mappingFingerprint": "",
+      "rank": 2
+    },
+    {
+      "candidateId": "211f17eba424f7200213",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 100,
+      "sourceUnit": {
+        "id": "translationWords:cz7a",
+        "tool": "translationWords",
+        "check_id": "cz7a",
+        "group_id": "redeem",
+        "source_reference": "LUK 1:68",
+        "source_quote": "λύτρωσιν",
+        "source_token_ids": [
+          "LUK.1.68.T011"
+        ],
+        "note": "",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 1:67",
+        "LUK 1:68-79"
+      ],
+      "relationships": [
+        "VERSIFICATION_DIFFERENCE",
+        "MERGED_ACROSS_VERSES"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "λύτρωσιν",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0057"
+      ],
+      "mappingFingerprint": "",
+      "rank": 3
+    },
+    {
+      "candidateId": "97803748a6e253af49e2",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 100,
+      "sourceUnit": {
+        "id": "translationNotes:d67v",
+        "tool": "translationNotes",
+        "check_id": "d67v",
+        "group_id": "figs-idiom",
+        "source_reference": "LUK 1:68",
+        "source_quote": "ἐπεσκέψατο & τῷ λαῷ αὐτοῦ",
+        "source_token_ids": [
+          "LUK.1.68.T008",
+          "LUK.1.68.T012",
+          "LUK.1.68.T013",
+          "LUK.1.68.T014"
+        ],
+        "note": "Here, the term **visited** is an idiom. Alternate translation: [he has come to help … his people]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 1:67",
+        "LUK 1:68-79"
+      ],
+      "relationships": [
+        "VERSIFICATION_DIFFERENCE",
+        "MERGED_ACROSS_VERSES"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ἐπεσκέψατο & τῷ λαῷ αὐτοῦ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0057"
+      ],
+      "mappingFingerprint": "",
+      "rank": 4
+    },
+    {
+      "candidateId": "d80f7b54d5b3b7157a5a",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 100,
+      "sourceUnit": {
+        "id": "translationNotes:jx5n",
+        "tool": "translationNotes",
+        "check_id": "jx5n",
+        "group_id": "figs-explicit",
+        "source_reference": "LUK 1:68",
+        "source_quote": "ὁ Θεὸς τοῦ Ἰσραήλ",
+        "source_token_ids": [
+          "LUK.1.68.T003",
+          "LUK.1.68.T004",
+          "LUK.1.68.T005",
+          "LUK.1.68.T006"
+        ],
+        "note": "If it would be helpful to your readers, you could state the relationship between God and Israel more explicitly. Alternate translation: [the God whom the people of Israel worship]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 1:67",
+        "LUK 1:68-79"
+      ],
+      "relationships": [
+        "VERSIFICATION_DIFFERENCE",
+        "MERGED_ACROSS_VERSES"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ὁ Θεὸς τοῦ Ἰσραήλ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0057"
+      ],
+      "mappingFingerprint": "",
+      "rank": 5
+    },
+    {
+      "candidateId": "215cacac6e35404749b0",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 92,
+      "sourceUnit": {
+        "id": "translationNotes:l814",
+        "tool": "translationNotes",
+        "check_id": "l814",
+        "group_id": "figs-hypo",
+        "source_reference": "LUK 12:46",
+        "source_quote": "ἥξει ὁ κύριος τοῦ δούλου ἐκείνου",
+        "source_token_ids": [
+          "LUK.12.46.T001",
+          "LUK.12.46.T002",
+          "LUK.12.46.T003",
+          "LUK.12.46.T004",
+          "LUK.12.46.T005",
+          "LUK.12.46.T006"
+        ],
+        "note": "If you translated the previous verse as a hypothetical condition, you could translate this verse as the result of that condition. It may be helpful to begin a new sentence here. Alternate translation: [Then the master of that slave will arrive]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 12:45",
+        "LUK 12:46"
+      ],
+      "relationships": [
+        "SENTENCE_REORDERED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ἥξει ὁ κύριος τοῦ δούλου ἐκείνου",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0520"
+      ],
+      "mappingFingerprint": "",
+      "rank": 6
+    },
+    {
+      "candidateId": "327d419f6c26d289554f",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 92,
+      "sourceUnit": {
+        "id": "translationNotes:yvp4",
+        "tool": "translationNotes",
+        "check_id": "yvp4",
+        "group_id": "figs-hypo",
+        "source_reference": "LUK 11:24",
+        "source_quote": "καὶ μὴ εὑρίσκον, λέγει, ὑποστρέψω εἰς τὸν οἶκόν μου, ὅθεν ἐξῆλθον",
+        "source_token_ids": [
+          "LUK.11.24.T015",
+          "LUK.11.24.T016",
+          "LUK.11.24.T017",
+          "LUK.11.24.T018",
+          "LUK.11.24.T019",
+          "LUK.11.24.T020",
+          "LUK.11.24.T021",
+          "LUK.11.24.T022",
+          "LUK.11.24.T023",
+          "LUK.11.24.T024",
+          "LUK.11.24.T025"
+        ],
+        "note": "Jesus continues to use a hypothetical situation to teach. If you show that directly in your translation, it may be helpful to begin a new sentence here. Alternate translation: [And suppose the demon does not find another place to live. Then it would say, ‘I will return to my house from which I came out]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 11:24",
+        "LUK 11:25",
+        "LUK 11:26"
+      ],
+      "relationships": [
+        "SENTENCE_REORDERED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "καὶ μὴ εὑρίσκον, λέγει, ὑποστρέψω εἰς τὸν οἶκόν μου, ὅθεν ἐξῆλθον",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0452"
+      ],
+      "mappingFingerprint": "",
+      "rank": 7
+    },
+    {
+      "candidateId": "64fa30f6f48afd67263c",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 92,
+      "sourceUnit": {
+        "id": "translationNotes:uvt4",
+        "tool": "translationNotes",
+        "check_id": "uvt4",
+        "group_id": "figs-explicit",
+        "source_reference": "LUK 10:19",
+        "source_quote": "καὶ ἐπὶ πᾶσαν τὴν δύναμιν τοῦ ἐχθροῦ",
+        "source_token_ids": [
+          "LUK.10.19.T012",
+          "LUK.10.19.T013",
+          "LUK.10.19.T014",
+          "LUK.10.19.T015",
+          "LUK.10.19.T016",
+          "LUK.10.19.T017",
+          "LUK.10.19.T018"
+        ],
+        "note": "This phrase continues the meaning from earlier in the sentence. The **enemy** is Satan, as described in the previous verse. It may be helpful to begin a new sentence here. Alternate translation: [I have also given you authority to overcome the resistance of Satan]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:19"
+      ],
+      "relationships": [
+        "SENTENCE_REORDERED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "καὶ ἐπὶ πᾶσαν τὴν δύναμιν τοῦ ἐχθροῦ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0409"
+      ],
+      "mappingFingerprint": "",
+      "rank": 8
+    },
+    {
+      "candidateId": "6f280fc1d169ca262b07",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 92,
+      "sourceUnit": {
+        "id": "translationNotes:i17j",
+        "tool": "translationNotes",
+        "check_id": "i17j",
+        "group_id": "writing-participants",
+        "source_reference": "LUK 10:38",
+        "source_quote": "γυνὴ δέ τις ὀνόματι Μάρθα",
+        "source_token_ids": [
+          "LUK.10.38.T011",
+          "LUK.10.38.T012",
+          "LUK.10.38.T013",
+          "LUK.10.38.T014",
+          "LUK.10.38.T015"
+        ],
+        "note": "This introduces **Martha** as a new character. Your language may have its own way of introducing new people. It may be helpful to begin a new sentence here. Alternate translation: [There was a woman named Martha who lived there]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:38"
+      ],
+      "relationships": [
+        "SENTENCE_REORDERED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "γυνὴ δέ τις ὀνόματι Μάρθα",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0427"
+      ],
+      "mappingFingerprint": "",
+      "rank": 9
+    },
+    {
+      "candidateId": "017d8aae1a34a6cb7dec",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 80,
+      "sourceUnit": {
+        "id": "translationNotes:r519",
+        "tool": "translationNotes",
+        "check_id": "r519",
+        "group_id": "writing-pronouns",
+        "source_reference": "LUK 11:16",
+        "source_quote": "ἕτεροι δὲ πειράζοντες",
+        "source_token_ids": [
+          "LUK.11.16.T001",
+          "LUK.11.16.T002",
+          "LUK.11.16.T003"
+        ],
+        "note": "The pronoun **{him}** refers to Jesus. Alternate translation: [Other people challenged Jesus]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 11:16"
+      ],
+      "relationships": [
+        "PRONOMINALIZED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ἕτεροι δὲ πειράζοντες",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0444"
+      ],
+      "mappingFingerprint": "",
+      "rank": 10
+    },
+    {
+      "candidateId": "1c3f7d3748697f504b50",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 80,
+      "sourceUnit": {
+        "id": "translationNotes:kt1d",
+        "tool": "translationNotes",
+        "check_id": "kt1d",
+        "group_id": "writing-pronouns",
+        "source_reference": "PHP 2:28",
+        "source_quote": "σπουδαιοτέρως οὖν ἔπεμψα αὐτὸν, ἵνα ἰδόντες αὐτὸν πάλιν, χαρῆτε κἀγὼ ἀλυπότερος ὦ",
+        "source_token_ids": [
+          "PHP.2.28.T001",
+          "PHP.2.28.T002",
+          "PHP.2.28.T003",
+          "PHP.2.28.T004",
+          "PHP.2.28.T005",
+          "PHP.2.28.T006",
+          "PHP.2.28.T007",
+          "PHP.2.28.T008",
+          "PHP.2.28.T009",
+          "PHP.2.28.T010",
+          "PHP.2.28.T011",
+          "PHP.2.28.T012"
+        ],
+        "note": "Here, both occurrences of the pronoun **him** refer to Epaphroditus. If it would be helpful in your language, consider clarifying who **him** is referring to in a way that would be natural in your language. Alternate translation: [Therefore, I sent Epaphroditus all the more eagerly, so that, having seen him again, you might rejoice, and I might be free from pain]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 2:28"
+      ],
+      "relationships": [
+        "PRONOMINALIZED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "σπουδαιοτέρως οὖν ἔπεμψα αὐτὸν, ἵνα ἰδόντες αὐτὸν πάλιν, χαρῆτε κἀγὼ ἀλυπότερος ὦ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0042"
+      ],
+      "mappingFingerprint": "",
+      "rank": 11
+    },
+    {
+      "candidateId": "49a71725247971ec1e76",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 80,
+      "sourceUnit": {
+        "id": "translationNotes:wdvh",
+        "tool": "translationNotes",
+        "check_id": "wdvh",
+        "group_id": "writing-pronouns",
+        "source_reference": "PHP 2:26",
+        "source_quote": "ἐπειδὴ ἐπιποθῶν ἦν πάντας ὑμᾶς, καὶ ἀδημονῶν διότι ἠκούσατε ὅτι ἠσθένησεν",
+        "source_token_ids": [
+          "PHP.2.26.T001",
+          "PHP.2.26.T002",
+          "PHP.2.26.T003",
+          "PHP.2.26.T004",
+          "PHP.2.26.T005",
+          "PHP.2.26.T006",
+          "PHP.2.26.T007",
+          "PHP.2.26.T008",
+          "PHP.2.26.T009",
+          "PHP.2.26.T010",
+          "PHP.2.26.T011"
+        ],
+        "note": "In this verse all three uses of the pronoun **he** refer to Epaphroditus. If it would be helpful in your language, consider clarifying this in your translation in a way that would be natural. Alternate translation: [seeing that Epaphroditus has been longing to be with you all and is distressed because you heard that he was sick]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 2:26"
+      ],
+      "relationships": [
+        "PRONOMINALIZED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ἐπειδὴ ἐπιποθῶν ἦν πάντας ὑμᾶς, καὶ ἀδημονῶν διότι ἠκούσατε ὅτι ἠσθένησεν",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0040"
+      ],
+      "mappingFingerprint": "",
+      "rank": 12
+    },
+    {
+      "candidateId": "5bec5a39123049625d5f",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 80,
+      "sourceUnit": {
+        "id": "translationNotes:k8yb",
+        "tool": "translationNotes",
+        "check_id": "k8yb",
+        "group_id": "writing-pronouns",
+        "source_reference": "LUK 10:8",
+        "source_quote": "καὶ δέχωνται ὑμᾶς",
+        "source_token_ids": [
+          "LUK.10.8.T007",
+          "LUK.10.8.T008",
+          "LUK.10.8.T009"
+        ],
+        "note": "The pronoun **they** refers to the people living in this city. Alternate translation: [if the people there welcome you]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:8",
+        "LUK 10:9"
+      ],
+      "relationships": [
+        "PRONOMINALIZED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "καὶ δέχωνται ὑμᾶς",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0401"
+      ],
+      "mappingFingerprint": "",
+      "rank": 13
+    },
+    {
+      "candidateId": "6e3739e765cdcda99658",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 80,
+      "sourceUnit": {
+        "id": "translationNotes:l700",
+        "tool": "translationNotes",
+        "check_id": "l700",
+        "group_id": "figs-youcrowd",
+        "source_reference": "LUK 11:34",
+        "source_quote": "σου",
+        "source_token_ids": [
+          "LUK.11.34.T008"
+        ],
+        "note": "Even though Jesus is speaking to the crowd, he is addressing an individual situation, so **your** and **you** are singular in [11:34–36](rc://en/ult/book/luk/11/34). But if the singular form of these pronouns would not be natural in your language for someone who was speaking to a group of people, you could use the plural forms in your translation.",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 11:34"
+      ],
+      "relationships": [
+        "PRONOMINALIZED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "σου",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0460"
+      ],
+      "mappingFingerprint": "",
+      "rank": 14
+    },
+    {
+      "candidateId": "76da0e4756e90c266928",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 80,
+      "sourceUnit": {
+        "id": "translationNotes:nt9n",
+        "tool": "translationNotes",
+        "check_id": "nt9n",
+        "group_id": "writing-pronouns",
+        "source_reference": "LUK 10:10",
+        "source_quote": "καὶ μὴ δέχωνται ὑμᾶς",
+        "source_token_ids": [
+          "LUK.10.10.T007",
+          "LUK.10.10.T008",
+          "LUK.10.10.T009",
+          "LUK.10.10.T010"
+        ],
+        "note": "This is a direct contrast to the similar expression in [10:8](rc://en/ult/book/luk/10/08). Once again the pronoun **they** refers to the people living in this city. Alternate translation: [if the people there do not welcome you]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:10",
+        "LUK 10:11"
+      ],
+      "relationships": [
+        "PRONOMINALIZED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "καὶ μὴ δέχωνται ὑμᾶς",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0402"
+      ],
+      "mappingFingerprint": "",
+      "rank": 15
+    },
+    {
+      "candidateId": "bdb1c34458653fb736b3",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 80,
+      "sourceUnit": {
+        "id": "translationNotes:nb4b",
+        "tool": "translationNotes",
+        "check_id": "nb4b",
+        "group_id": "writing-pronouns",
+        "source_reference": "PHP 1:28",
+        "source_quote": "τοῦτο ἀπὸ Θεοῦ",
+        "source_token_ids": [
+          "PHP.1.28.T018",
+          "PHP.1.28.T019",
+          "PHP.1.28.T020"
+        ],
+        "note": "The word **this** in the phrase **this from God** could refer to: (1) what comes before it in this verse, both the courage God gives the Philippian Christians and the sign that their courage gives to those opposing them. Alternate translation: [your lack of fear and the evidence it gives is all from God]; (2) the sign given to those who oppose the Philippian Christians. Alternate translation: [this sign is from God]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 1:28"
+      ],
+      "relationships": [
+        "PRONOMINALIZED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "τοῦτο ἀπὸ Θεοῦ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0019"
+      ],
+      "mappingFingerprint": "",
+      "rank": 16
+    },
+    {
+      "candidateId": "d76aefc5d389f8381702",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 80,
+      "sourceUnit": {
+        "id": "translationNotes:d3ou",
+        "tool": "translationNotes",
+        "check_id": "d3ou",
+        "group_id": "writing-pronouns",
+        "source_reference": "PHP 2:27",
+        "source_quote": "καὶ γὰρ ἠσθένησεν παραπλήσιον θανάτῳ, ἀλλὰ ὁ Θεὸς ἠλέησεν αὐτόν, οὐκ αὐτὸν δὲ μόνον, ἀλλὰ καὶ ἐμέ, ἵνα μὴ λύπην ἐπὶ λύπην σχῶ",
+        "source_token_ids": [
+          "PHP.2.27.T001",
+          "PHP.2.27.T002",
+          "PHP.2.27.T003",
+          "PHP.2.27.T004",
+          "PHP.2.27.T005",
+          "PHP.2.27.T006",
+          "PHP.2.27.T007",
+          "PHP.2.27.T008",
+          "PHP.2.27.T009",
+          "PHP.2.27.T010",
+          "PHP.2.27.T011",
+          "PHP.2.27.T012",
+          "PHP.2.27.T013",
+          "PHP.2.27.T014",
+          "PHP.2.27.T015",
+          "PHP.2.27.T016",
+          "PHP.2.27.T017",
+          "PHP.2.27.T018",
+          "PHP.2.27.T019",
+          "PHP.2.27.T020",
+          "PHP.2.27.T021",
+          "PHP.2.27.T022",
+          "PHP.2.27.T023"
+        ],
+        "note": "The pronoun **he** refers to Epaphroditus, as do both uses of the pronoun **him**. If this would be unclear in your language, consider clarifying this in your translation. Alternate translation: [For indeed Epaphroditus was sick nearly to death. But God had mercy on him, and not on him only, but also on me, so that I might not have sorrow upon sorrow]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 2:27"
+      ],
+      "relationships": [
+        "PRONOMINALIZED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "καὶ γὰρ ἠσθένησεν παραπλήσιον θανάτῳ, ἀλλὰ ὁ Θεὸς ἠλέησεν αὐτόν, οὐκ αὐτὸν δὲ μόνον, ἀλλὰ καὶ ἐμέ, ἵνα μὴ λύπην ἐπὶ λύπην σχῶ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0041"
+      ],
+      "mappingFingerprint": "",
+      "rank": 17
+    },
+    {
+      "candidateId": "1d15182c590383b5ee56",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 78,
+      "sourceUnit": {
+        "id": "translationNotes:jwgb",
+        "tool": "translationNotes",
+        "check_id": "jwgb",
+        "group_id": "figs-abstractnouns",
+        "source_reference": "PHP 1:11",
+        "source_quote": "εἰς δόξαν καὶ ἔπαινον Θεοῦ",
+        "source_token_ids": [
+          "PHP.1.11.T008",
+          "PHP.1.11.T009",
+          "PHP.1.11.T010",
+          "PHP.1.11.T011",
+          "PHP.1.11.T012"
+        ],
+        "note": "If it would be clearer in your language, you could express the idea behind the abstract nouns **glory** and **praise** with verbs. Alternate translation: [which will cause people to glorify and praise God]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 1:9",
+        "PHP 1:10",
+        "PHP 1:11"
+      ],
+      "relationships": [
+        "GRAMMATICALLY_ENCODED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "εἰς δόξαν καὶ ἔπαινον Θεοῦ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0005"
+      ],
+      "mappingFingerprint": "",
+      "rank": 18
+    },
+    {
+      "candidateId": "29b9662fa9bda0147d92",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 78,
+      "sourceUnit": {
+        "id": "translationNotes:s4cj",
+        "tool": "translationNotes",
+        "check_id": "s4cj",
+        "group_id": "figs-activepassive",
+        "source_reference": "LUK 10:20",
+        "source_quote": "τὰ ὀνόματα ὑμῶν ἐνγέγραπται ἐν τοῖς οὐρανοῖς",
+        "source_token_ids": [
+          "LUK.10.20.T014",
+          "LUK.10.20.T015",
+          "LUK.10.20.T016",
+          "LUK.10.20.T017",
+          "LUK.10.20.T018",
+          "LUK.10.20.T019",
+          "LUK.10.20.T020"
+        ],
+        "note": "If it would be helpful in your language, you could express this with an active form, and you could state who has done the action. Alternate translation: [God has written down your names in heaven]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:20"
+      ],
+      "relationships": [
+        "GRAMMATICALLY_ENCODED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "τὰ ὀνόματα ὑμῶν ἐνγέγραπται ἐν τοῖς οὐρανοῖς",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0410"
+      ],
+      "mappingFingerprint": "",
+      "rank": 19
+    },
+    {
+      "candidateId": "306390bcb30afb4b4777",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 78,
+      "sourceUnit": {
+        "id": "translationNotes:tu2t",
+        "tool": "translationNotes",
+        "check_id": "tu2t",
+        "group_id": "figs-gendernotations",
+        "source_reference": "PHP 1:12",
+        "source_quote": "ἀδελφοί",
+        "source_token_ids": [
+          "PHP.1.12.T005"
+        ],
+        "note": "Although the term **brothers** is masculine, Paul is using the word here in a spiritual sense to include both men and women who believe in Jesus. Alternate translation: [brothers and sisters]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 1:12"
+      ],
+      "relationships": [
+        "GRAMMATICALLY_ENCODED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ἀδελφοί",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0006"
+      ],
+      "mappingFingerprint": "",
+      "rank": 20
+    },
+    {
+      "candidateId": "59b59419980d9fb310ab",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 78,
+      "sourceUnit": {
+        "id": "translationNotes:t3w4",
+        "tool": "translationNotes",
+        "check_id": "t3w4",
+        "group_id": "figs-activepassive",
+        "source_reference": "PHP 1:11",
+        "source_quote": "πεπληρωμένοι",
+        "source_token_ids": [
+          "PHP.1.11.T001"
+        ],
+        "note": "The phrase **being filled with** is a passive form. If it would be more natural in your language, you could express this with an active form. Alternate translation: [letting God fill you with] or [continually producing]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 1:9",
+        "PHP 1:10",
+        "PHP 1:11"
+      ],
+      "relationships": [
+        "GRAMMATICALLY_ENCODED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "πεπληρωμένοι",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0005"
+      ],
+      "mappingFingerprint": "",
+      "rank": 21
+    },
+    {
+      "candidateId": "72a5ea27071217daff98",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 78,
+      "sourceUnit": {
+        "id": "translationNotes:bjh5",
+        "tool": "translationNotes",
+        "check_id": "bjh5",
+        "group_id": "figs-activepassive",
+        "source_reference": "LUK 10:15",
+        "source_quote": "ἕως τοῦ ᾍδου καταβήσῃ",
+        "source_token_ids": [
+          "LUK.10.15.T008",
+          "LUK.10.15.T009",
+          "LUK.10.15.T010",
+          "LUK.10.15.T011"
+        ],
+        "note": "If it would be helpful in your language, you could express this with an active form, and you could state who would do the action. Alternate translation: [God is going to punish you severely]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:15",
+        "LUK 10:16"
+      ],
+      "relationships": [
+        "GRAMMATICALLY_ENCODED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ἕως τοῦ ᾍδου καταβήσῃ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0406"
+      ],
+      "mappingFingerprint": "",
+      "rank": 22
+    },
+    {
+      "candidateId": "89a5a44ade2007b21587",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 78,
+      "sourceUnit": {
+        "id": "translationNotes:ybw6",
+        "tool": "translationNotes",
+        "check_id": "ybw6",
+        "group_id": "grammar-connect-logic-result",
+        "source_reference": "PHP 1:10",
+        "source_quote": "εἰς",
+        "source_token_ids": [
+          "PHP.1.10.T001"
+        ],
+        "note": "Here, the phrase **so that** shows that what follows this phrase is the desired result of Paul’s prayer in verse nine. Consider using a connecting word or phrase that will clearly show that what follows it is the desired result of what Paul prayed in verse nine.",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 1:9",
+        "PHP 1:10",
+        "PHP 1:11"
+      ],
+      "relationships": [
+        "GRAMMATICALLY_ENCODED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "εἰς",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0005"
+      ],
+      "mappingFingerprint": "",
+      "rank": 23
+    },
+    {
+      "candidateId": "9c448df3c1b8ee377be4",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 78,
+      "sourceUnit": {
+        "id": "translationNotes:fdk3",
+        "tool": "translationNotes",
+        "check_id": "fdk3",
+        "group_id": "figs-abstractnouns",
+        "source_reference": "LUK 10:11",
+        "source_quote": "ἤγγικεν ἡ Βασιλεία τοῦ Θεοῦ",
+        "source_token_ids": [
+          "LUK.10.11.T020",
+          "LUK.10.11.T021",
+          "LUK.10.11.T022",
+          "LUK.10.11.T023",
+          "LUK.10.11.T024"
+        ],
+        "note": "See how you translated the similar sentence in [10:9](rc://en/ult/book/luk/10/09).",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:10",
+        "LUK 10:11"
+      ],
+      "relationships": [
+        "GRAMMATICALLY_ENCODED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ἤγγικεν ἡ Βασιλεία τοῦ Θεοῦ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0402"
+      ],
+      "mappingFingerprint": "",
+      "rank": 24
+    },
+    {
+      "candidateId": "c08e83db433a98932c4c",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 78,
+      "sourceUnit": {
+        "id": "translationNotes:l594",
+        "tool": "translationNotes",
+        "check_id": "l594",
+        "group_id": "figs-activepassive",
+        "source_reference": "LUK 10:20",
+        "source_quote": "τὰ πνεύματα ὑμῖν ὑποτάσσεται",
+        "source_token_ids": [
+          "LUK.10.20.T007",
+          "LUK.10.20.T008",
+          "LUK.10.20.T009",
+          "LUK.10.20.T010"
+        ],
+        "note": "If it would be helpful in your language, you could express this with an active form. Alternate translation: [the demons must obey you]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:20"
+      ],
+      "relationships": [
+        "GRAMMATICALLY_ENCODED"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "τὰ πνεύματα ὑμῖν ὑποτάσσεται",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0410"
+      ],
+      "mappingFingerprint": "",
+      "rank": 25
+    },
+    {
+      "candidateId": "07c0514957d51e363d6c",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 76,
+      "sourceUnit": {
+        "id": "translationNotes:k2j7",
+        "tool": "translationNotes",
+        "check_id": "k2j7",
+        "group_id": "figs-ellipsis",
+        "source_reference": "PHP 1:24",
+        "source_quote": "ἀναγκαιότερον",
+        "source_token_ids": [
+          "PHP.1.24.T007"
+        ],
+        "note": "In the phrase **{is} more necessary** Paul leaves out the implied words “than departing” because he knows that his readers will understand them from the context. If this would be unclear in your language, consider supplying these omitted words in your translation. Alternate translation: [rather than departing is more necessary]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 1:23",
+        "PHP 1:24"
+      ],
+      "relationships": [
+        "IMPLICIT"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ἀναγκαιότερον",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0016"
+      ],
+      "mappingFingerprint": "",
+      "rank": 26
+    },
+    {
+      "candidateId": "37ed9f0502e7fc6fc7e9",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 76,
+      "sourceUnit": {
+        "id": "translationNotes:del5",
+        "tool": "translationNotes",
+        "check_id": "del5",
+        "group_id": "figs-ellipsis",
+        "source_reference": "PHP 2:1",
+        "source_quote": "εἴ τι παραμύθιον ἀγάπης, εἴ τις κοινωνία Πνεύματος, εἴ τις σπλάγχνα καὶ οἰκτιρμοί",
+        "source_token_ids": [
+          "PHP.2.1.T007",
+          "PHP.2.1.T008",
+          "PHP.2.1.T009",
+          "PHP.2.1.T010",
+          "PHP.2.1.T011",
+          "PHP.2.1.T012",
+          "PHP.2.1.T013",
+          "PHP.2.1.T014",
+          "PHP.2.1.T015",
+          "PHP.2.1.T016",
+          "PHP.2.1.T017",
+          "PHP.2.1.T018",
+          "PHP.2.1.T019"
+        ],
+        "note": "In the three occurrences of the phrase **if any** in this verse, the missing words, “there is,” are implied and can be supplied in your translation if omitting them would cause confusion. Alternate translation: [if there is any comfort from love, if there is any fellowship of the Spirit, if there are any affections and compassions]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 2:1",
+        "PHP 2:2"
+      ],
+      "relationships": [
+        "IMPLICIT"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "εἴ τι παραμύθιον ἀγάπης, εἴ τις κοινωνία Πνεύματος, εἴ τις σπλάγχνα καὶ οἰκτιρμοί",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0022"
+      ],
+      "mappingFingerprint": "",
+      "rank": 27
+    },
+    {
+      "candidateId": "3fbda7f295b936d9bfaa",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 76,
+      "sourceUnit": {
+        "id": "translationNotes:o7ef",
+        "tool": "translationNotes",
+        "check_id": "o7ef",
+        "group_id": "figs-metonymy",
+        "source_reference": "PHP 1:7",
+        "source_quote": "δεσμοῖς μου",
+        "source_token_ids": [
+          "PHP.1.7.T021",
+          "PHP.1.7.T022"
+        ],
+        "note": "Paul refers to his imprisonment in Rome by using the phrase **my chains**. Paul was chained to a guard and the Philippian Christians would have understood that Paul was referring to his imprisonment when he used the phrase **my chains** because of the close association between **chains** and being in prison. If this association is not clear in your language, you could use an equivalent expression or use plain language. Alternate translation: [my imprisonment]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 1:7"
+      ],
+      "relationships": [
+        "IMPLICIT"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "δεσμοῖς μου",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0003"
+      ],
+      "mappingFingerprint": "",
+      "rank": 28
+    },
+    {
+      "candidateId": "7a18bc8d1a8ea09705ab",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 76,
+      "sourceUnit": {
+        "id": "translationNotes:txw5",
+        "tool": "translationNotes",
+        "check_id": "txw5",
+        "group_id": "figs-explicit",
+        "source_reference": "LUK 10:14",
+        "source_quote": "ἐν τῇ κρίσει",
+        "source_token_ids": [
+          "LUK.10.14.T007",
+          "LUK.10.14.T008",
+          "LUK.10.14.T009"
+        ],
+        "note": "The disciples would have understood that Jesus was referring to the time when God will bring final judgment. Alternate translation: [at the time when God judges everyone for what they have done]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:14"
+      ],
+      "relationships": [
+        "IMPLICIT"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ἐν τῇ κρίσει",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0405"
+      ],
+      "mappingFingerprint": "",
+      "rank": 29
+    },
+    {
+      "candidateId": "7c9dba62287f4591d61d",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 76,
+      "sourceUnit": {
+        "id": "translationNotes:ls03",
+        "tool": "translationNotes",
+        "check_id": "ls03",
+        "group_id": "figs-metaphor",
+        "source_reference": "LUK 10:25",
+        "source_quote": "τί ποιήσας, ζωὴν αἰώνιον κληρονομήσω",
+        "source_token_ids": [
+          "LUK.10.25.T010",
+          "LUK.10.25.T011",
+          "LUK.10.25.T012",
+          "LUK.10.25.T013",
+          "LUK.10.25.T014"
+        ],
+        "note": "The lawyer means implicitly that he would **inherit** or “come to possess” this **everlasting life** from God. Alternate translation: [what must I do so that God will give me everlasting life]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:25"
+      ],
+      "relationships": [
+        "IMPLICIT"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "τί ποιήσας, ζωὴν αἰώνιον κληρονομήσω",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0415"
+      ],
+      "mappingFingerprint": "",
+      "rank": 30
+    },
+    {
+      "candidateId": "7f7610c4bb4e79c91c28",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 76,
+      "sourceUnit": {
+        "id": "translationNotes:eus8",
+        "tool": "translationNotes",
+        "check_id": "eus8",
+        "group_id": "figs-explicit",
+        "source_reference": "LUK 10:16",
+        "source_quote": "τὸν ἀποστείλαντά με",
+        "source_token_ids": [
+          "LUK.10.16.T017",
+          "LUK.10.16.T018",
+          "LUK.10.16.T019"
+        ],
+        "note": "This refers implicitly to God, who appointed Jesus for this special task. Alternate translation: [God who sent me]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:15",
+        "LUK 10:16"
+      ],
+      "relationships": [
+        "IMPLICIT"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "τὸν ἀποστείλαντά με",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0406"
+      ],
+      "mappingFingerprint": "",
+      "rank": 31
+    },
+    {
+      "candidateId": "9bb025b602ffb28955e5",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 76,
+      "sourceUnit": {
+        "id": "translationNotes:a175",
+        "tool": "translationNotes",
+        "check_id": "a175",
+        "group_id": "figs-metaphor",
+        "source_reference": "LUK 10:21",
+        "source_quote": "νηπίοις",
+        "source_token_ids": [
+          "LUK.10.21.T031"
+        ],
+        "note": "The phrase **little children** refers to people who may not have much education, but who are willing to accept Jesus’ teachings in the same way that little children willingly listen to those they trust. You could explain the meaning of this metaphor in your translation, or you could translate it as a simile, as UST does. Alternate translation: [people who trust my teachings implicitly]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 10:21"
+      ],
+      "relationships": [
+        "IMPLICIT"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "νηπίοις",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0411"
+      ],
+      "mappingFingerprint": "",
+      "rank": 32
+    },
+    {
+      "candidateId": "eaffc11e34e15a890218",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 76,
+      "sourceUnit": {
+        "id": "translationNotes:z5ia",
+        "tool": "translationNotes",
+        "check_id": "z5ia",
+        "group_id": "figs-ellipsis",
+        "source_reference": "PHP 1:18",
+        "source_quote": "τί γάρ",
+        "source_token_ids": [
+          "PHP.1.18.T001",
+          "PHP.1.18.T002"
+        ],
+        "note": "In the rhetorical question **What then?**, Paul leaves out some words that might be necessary in some languages. If you want to use a rhetorical question here, you may want to add the words which are implied but not stated. This could be done in two ways: (1) as a rhetorical question which expects a negative answer. Alternate translation: [What does it matter what their motives are?] or [So what difference does it make?]; (2) as a phrase that focuses on the result. Alternate translation: [What then is the result of this?]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "PHP 1:18"
+      ],
+      "relationships": [
+        "IMPLICIT"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "τί γάρ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "PHP-PW3-0011"
+      ],
+      "mappingFingerprint": "",
+      "rank": 33
+    },
+    {
+      "candidateId": "90a7dd033b0a5cc0a606",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 70,
+      "sourceUnit": {
+        "id": "translationNotes:l119",
+        "tool": "translationNotes",
+        "check_id": "l119",
+        "group_id": "figs-infostructure",
+        "source_reference": "LUK 2:11",
+        "source_quote": "ἐτέχθη ὑμῖν σήμερον Σωτὴρ, ὅς ἐστιν Χριστὸς, Κύριος, ἐν πόλει Δαυείδ",
+        "source_token_ids": [
+          "LUK.2.11.T002",
+          "LUK.2.11.T003",
+          "LUK.2.11.T004",
+          "LUK.2.11.T005",
+          "LUK.2.11.T006",
+          "LUK.2.11.T007",
+          "LUK.2.11.T008",
+          "LUK.2.11.T009",
+          "LUK.2.11.T010",
+          "LUK.2.11.T011",
+          "LUK.2.11.T012"
+        ],
+        "note": "If it would be more natural in your language, you could reverse the order of these phrases. Alternate translation: [a Savior, who is Christ the Lord, has been born for you today in the city of David]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 2:11"
+      ],
+      "relationships": [
+        "REORDERED_WITHIN_VERSE"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "ἐτέχθη ὑμῖν σήμερον Σωτὴρ, ὅς ἐστιν Χριστὸς, Κύριος, ἐν πόλει Δαυείδ",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0068"
+      ],
+      "mappingFingerprint": "",
+      "rank": 34
+    },
+    {
+      "candidateId": "d9a1a0edada39b02faf6",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 70,
+      "sourceUnit": {
+        "id": "translationNotes:j3yj",
+        "tool": "translationNotes",
+        "check_id": "j3yj",
+        "group_id": "figs-events",
+        "source_reference": "LUK 8:29",
+        "source_quote": "πολλοῖς γὰρ χρόνοις συνηρπάκει αὐτόν, καὶ ἐδεσμεύετο ἁλύσεσιν καὶ πέδαις, φυλασσόμενος",
+        "source_token_ids": [
+          "LUK.8.29.T011",
+          "LUK.8.29.T012",
+          "LUK.8.29.T013",
+          "LUK.8.29.T014",
+          "LUK.8.29.T015",
+          "LUK.8.29.T016",
+          "LUK.8.29.T017",
+          "LUK.8.29.T018",
+          "LUK.8.29.T019",
+          "LUK.8.29.T020",
+          "LUK.8.29.T021"
+        ],
+        "note": "If it would be helpful in your language, you could reverse the order of these phrases. Luke appears to be describing how the demon would seize the man after he was bound and while he was being guarded. Alternate translation: [For though he was bound with chains and shackles and kept under guard, many times it had seized him]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 8:29"
+      ],
+      "relationships": [
+        "REORDERED_WITHIN_VERSE"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "πολλοῖς γὰρ χρόνοις συνηρπάκει αὐτόν, καὶ ἐδεσμεύετο ἁλύσεσιν καὶ πέδαις, φυλασσόμενος",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0315"
+      ],
+      "mappingFingerprint": "",
+      "rank": 35
+    },
+    {
+      "candidateId": "f3874fd1d9407274a0da",
+      "proposalProvenance": "MACHINE_PROPOSED",
+      "validationStatus": "UNCONFIRMED",
+      "proposalScope": "STRUCTURAL_SCREEN",
+      "diagnosticScore": 70,
+      "sourceUnit": {
+        "id": "translationNotes:abc0",
+        "tool": "translationNotes",
+        "check_id": "abc0",
+        "group_id": "figs-events",
+        "source_reference": "LUK 5:28",
+        "source_quote": "καταλιπὼν πάντα, ἀναστὰς",
+        "source_token_ids": [
+          "LUK.5.28.T002",
+          "LUK.5.28.T003",
+          "LUK.5.28.T004"
+        ],
+        "note": "If it would be helpful in your language, you could reverse the order of these phrases. Alternate translation: [having gotten up and having left everything behind]",
+        "occurrence": 1
+      },
+      "targetSpans": [],
+      "targetPassageReferences": [
+        "LUK 5:28"
+      ],
+      "relationships": [
+        "REORDERED_WITHIN_VERSE"
+      ],
+      "meaningStatus": "UNCERTAIN",
+      "confidence": 0.0,
+      "evidence": {
+        "source": "καταλιπὼν πάντα, ἀναστὰς",
+        "target": "",
+        "explanation": "Deterministic Stage 3 help/USFM structure identified this passage for semantic validation; no cross-language meaning conclusion or target span has been accepted."
+      },
+      "searchedWindows": [
+        "LUK-PW3-0188"
+      ],
+      "mappingFingerprint": "",
+      "rank": 36
+    }
+  ]
+}

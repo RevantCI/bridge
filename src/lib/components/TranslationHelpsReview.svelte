@@ -408,6 +408,7 @@
     "represented_implicitly",
     "target_not_located",
     "needs_passage_review",
+    "needs_extended_passage_review",
     "source_anchor_unresolved",
     "mapping_error",
   ]);
@@ -558,6 +559,8 @@
                   <strong>Target realization not securely located</strong>
                 {:else if aiReview.selection_state === "needs_passage_review"}
                   <strong>Needs passage review</strong>
+                {:else if aiReview.selection_state === "needs_extended_passage_review"}
+                  <strong>Needs extended passage review</strong>
                 {:else if aiReview.selection_state === "source_anchor_unresolved"}
                   <strong>Source help anchor needs review</strong>
                 {:else if aiReview.selection_state === "mapping_error"}
