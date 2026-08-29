@@ -67,6 +67,9 @@ from tc_ai_bridge import alignment_statistics as corpus_stats_tool
 from tc_ai_bridge.reporting import ReportService
 from tc_ai_bridge.verse_evidence import resolve_verse_evidence
 from tc_ai_bridge.semantic_mapping_service import semantic_mappings_for_verse, confirm_semantic_mapping
+from tc_ai_bridge.semantic_validation_service import (
+    decide_semantic_validation_candidate, list_semantic_validation_candidates,
+)
 from tc_ai_bridge.semantic_mapping_bridge import prepare_semantic_mappings_for_review
 from tc_ai_bridge.semantic_review_policy import native_tc_apply_allowed
 from check_jobs import (
@@ -252,6 +255,8 @@ class Methods:
     SEMANTIC_MAPPING_GET_FOR_VERSE = "semanticMapping.getForVerse"
     SEMANTIC_MAPPING_CONFIRM = "semanticMapping.confirm"
     SEMANTIC_MAPPING_RERUN_FOR_VERSE = "semanticMapping.rerunForVerse"
+    SEMANTIC_VALIDATION_LIST = "semanticValidation.list"
+    SEMANTIC_VALIDATION_DECIDE = "semanticValidation.decide"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -1574,6 +1579,20 @@ class BridgeEngine:
         self._require_project()
         return prepare_semantic_mappings_for_review(
             project=self.project, client=self._ai_client(), chapter=chapter, verse=verse, force=True,
+        )
+
+    def semantic_validation_list(self) -> dict[str, Any]:
+        self._require_project()
+        return list_semantic_validation_candidates(self.project)
+
+    def semantic_validation_decide(
+        self, candidate_id: str, decision: str, reviewer: str,
+        note: str = "", corrected_mapping: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._require_project()
+        return decide_semantic_validation_candidate(
+            self.project, candidate_id=candidate_id, decision=decision,
+            reviewer=reviewer, note=note, corrected_mapping=corrected_mapping,
         )
 
     # -- live desktop connectors (Paratext/Logos) --------------------------
@@ -2921,6 +2940,14 @@ class BridgeEngine:
                 return EngineResponse.ok(
                     request.id, result=self.semantic_mapping_rerun_for_verse(p["chapter"], p["verse"]),
                 )
+            if m == Methods.SEMANTIC_VALIDATION_LIST:
+                return EngineResponse.ok(request.id, result=self.semantic_validation_list())
+            if m == Methods.SEMANTIC_VALIDATION_DECIDE:
+                return EngineResponse.ok(request.id, result=self.semantic_validation_decide(
+                    str(p.get("candidateId") or ""), str(p.get("decision") or ""),
+                    str(p.get("reviewer") or ""), str(p.get("note") or ""),
+                    p.get("correctedMapping"),
+                ))
             if m == Methods.ISSUE_RESOLUTION_LIST:
                 return EngineResponse.ok(
                     request.id, result=self.list_issue_resolutions(p["chapter"], p["verse"]),

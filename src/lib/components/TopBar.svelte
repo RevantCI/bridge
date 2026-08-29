@@ -1,7 +1,7 @@
 <script lang="ts">
   import { project, currentChapter } from "../stores";
 
-  export let screen: "home" | "dashboard" | "editor";
+  export let screen: "home" | "dashboard" | "validation" | "editor";
   export let projectName = "";
   export let onGoHome: () => void;
   export let onGoToDashboard: () => void;
@@ -42,9 +42,15 @@
 
   <nav class="breadcrumb" aria-label="Navigation">
     <button class="crumb" class:current={screen === "home"} on:click={onGoHome}>Projects</button>
-    {#if screen === "dashboard"}
+    {#if screen === "dashboard" || screen === "validation"}
       <span class="crumb-sep">›</span>
-      <span class="crumb current">{projectName}</span>
+      {#if screen === "validation"}
+        <button class="crumb" on:click={onGoToDashboard}>{projectName}</button>
+        <span class="crumb-sep">›</span>
+        <span class="crumb current">Mapping validation</span>
+      {:else}
+        <span class="crumb current">{projectName}</span>
+      {/if}
     {:else if screen === "editor"}
       <span class="crumb-sep">›</span>
       <button class="crumb" on:click={onGoToDashboard} disabled={bookSwitching}>{projectName}</button>

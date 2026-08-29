@@ -753,6 +753,36 @@ pub async fn ai_review_list_chapter(
 }
 
 #[tauri::command]
+pub async fn semantic_validation_list(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+    sidecar
+        .send_request("semanticValidation.list", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn semantic_validation_decide(
+    sidecar: State<'_, EngineSidecar>,
+    candidate_id: String,
+    decision: String,
+    reviewer: String,
+    note: Option<String>,
+    corrected_mapping: Option<Value>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "semanticValidation.decide",
+            serde_json::json!({
+                "candidateId": candidate_id,
+                "decision": decision,
+                "reviewer": reviewer,
+                "note": note.unwrap_or_default(),
+                "correctedMapping": corrected_mapping.unwrap_or(Value::Null),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn paratext_get_state(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar
         .send_request("paratext.getState", serde_json::json!({}))

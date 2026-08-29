@@ -122,6 +122,7 @@ which mode is actually active.
 | **v0.8.0-beta.12 / Milestone 3B.4** | Persisted tN/tW issue resolution with exact target text, correction, evidence and reviewer note; crash-safe idempotent Paratext Notes handoff; live project-identity-gated note creation; automatic stale/recheck/resolved/reflagged lifecycle with append-only audit; explicit Advanced-mode acceptance of AI proposals. | Installed acceptance passed core lifecycle; contradictory pass/Nothing-to-Select proposal found |
 | **v0.8.0-beta.13** | Requires exact target selections for applicable AI-reviewed tN/tW checks; safely recovers a uniquely quoted target phrase and keeps ambiguous omissions pending instead of storing a false Nothing-to-Select decision. | Hotfix implementation and focused regressions pass; installed acceptance pending |
 | **v0.8.0-beta.14** | Adds language-aware semantic passage mapping for source meanings realized in the same, nearby, split, reordered, or implicit target context; keeps cross-verse decisions out of translationCore's verse-local selection state. | 304 source tests, frozen smoke, Rust/frontend gates and NSIS packaging pass; installed acceptance pending |
+| **v0.8.0-beta.15 validation workflow** | Advanced-mode ranked IRVTam validation queue; exact-USFM-gated confirm/correct actions; reject/discussion decisions; append-only reviewer audit; restart persistence; confidence/relationship calibration. | Implementation and source gates pass; 15–20 human decisions and installed acceptance pending before packaging |
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
 | v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
 | v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/BUILD_LOG.md's Phase 7 section) |
@@ -165,6 +166,8 @@ Protocol methods implemented so far: `ping`, `engine.info`, `project.open`,
 `alignment.get/status/realign/unalign/save/complete/undo/backups/restore`,
 `alignment.corpusStats.summary/forVerse`, `alignment.aiPropose/aiApplyProposal`,
 `ai.explain`, `ai.review.start/status/cancel/retry`,
+`semanticMapping.getForVerse/confirm/rerunForVerse`,
+`semanticValidation.list/decide`,
 `paratext.getState/setReference`, `logos.getState/setReference`,
 `versification.detect/orgRef/backVersificationMap`,
 `settings.get/set`, `export.aligned`, and `export.nonAligned`.

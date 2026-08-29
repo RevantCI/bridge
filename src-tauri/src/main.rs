@@ -74,6 +74,8 @@ fn main() {
             commands::ai_review_cancel,
             commands::ai_review_retry,
             commands::ai_review_list_chapter,
+            commands::semantic_validation_list,
+            commands::semantic_validation_decide,
             commands::paratext_get_state,
             commands::paratext_set_reference,
             commands::logos_get_state,

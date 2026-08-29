@@ -264,6 +264,82 @@ export interface SemanticMapping {
   evidence: SemanticMappingEvidence;
 }
 
+export type SemanticValidationStatus =
+  | "UNCONFIRMED"
+  | "HUMAN_CONFIRMED"
+  | "HUMAN_REJECTED"
+  | "HUMAN_CORRECTED";
+
+export interface SemanticValidationDecision {
+  candidateId: string;
+  sourceUnitId: string;
+  decision: "confirmed" | "rejected" | "corrected" | "unsure";
+  validationStatus: SemanticValidationStatus;
+  provenance: SemanticValidationStatus;
+  reviewer: string;
+  note: string;
+  at: string;
+  mapping?: SemanticMapping;
+}
+
+export interface SemanticValidationCandidate {
+  candidateId: string;
+  proposalProvenance: "MACHINE_PROPOSED";
+  validationStatus: SemanticValidationStatus;
+  diagnosticScore: number;
+  rank: number;
+  sourceUnit: {
+    id: string;
+    tool: string;
+    check_id: string;
+    group_id: string;
+    source_reference: string;
+    source_quote: string;
+    note: string;
+    occurrence: number;
+  };
+  targetSpans: SemanticTargetSpan[];
+  relationships: string[];
+  meaningStatus: SemanticMapping["meaning_status"];
+  confidence: number;
+  evidence: SemanticMappingEvidence;
+  mappingFingerprint: string;
+  projectMatch: boolean;
+  projectMatchError: string;
+  reviewDecision: SemanticValidationDecision | null;
+}
+
+export interface SemanticValidationQueue {
+  schema: string;
+  manifestSha256: string;
+  model: string;
+  book: string;
+  available: boolean;
+  candidates: SemanticValidationCandidate[];
+  summary: {
+    total: number;
+    counts: Record<SemanticValidationStatus, number>;
+  };
+  calibration: {
+    reviewed: number;
+    confirmed: number;
+    corrected: number;
+    rejected: number;
+    proposalAgreementPercent: number | null;
+    byConfidence: Record<string, { reviewed: number; confirmed: number; corrected: number; rejected: number }>;
+    byRelationship: Record<string, { reviewed: number; confirmed: number; corrected: number; rejected: number }>;
+  };
+  relationships: string[];
+  auditPath: string;
+}
+
+export interface SemanticValidationCorrection {
+  target_spans: SemanticTargetSpan[];
+  relationships: string[];
+  meaning_status: SemanticMapping["meaning_status"];
+  confidence: number;
+}
+
 /** Field names match AICheckReview.to_dict()/QAIssue.to_dict() verbatim (Python's own
  * dict output, snake_case) — this is display-only data, never sent back to the engine,
  * but declaring it with the wire shape it actually has avoids a silently-wrong type. */

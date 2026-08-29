@@ -57,6 +57,19 @@ try {
         Remove-Item -LiteralPath $resourcesDir -Recurse -Force
     }
     Copy-Item -LiteralPath (Join-Path $engineDir "resources") -Destination $resourcesDir -Recurse -Force
+
+    # The generated Stage 3 validation queue is documentation/source evidence,
+    # not part of the runtime semantic database. Copy the single reviewed
+    # artifact into Tauri resources at release time so development and installed
+    # builds consume the same SHA-pinned queue without maintaining two tracked
+    # copies.
+    $validationSource = Join-Path $repoRoot "docs\validation\irvtam-semantic-mapping-candidates.json"
+    $validationDestination = Join-Path $resourcesDir "semantic_mapping\validation"
+    if (-not (Test-Path -LiteralPath $validationSource)) {
+        throw "Stage 3 validation set is missing: $validationSource"
+    }
+    New-Item -ItemType Directory -Force -Path $validationDestination | Out-Null
+    Copy-Item -LiteralPath $validationSource -Destination (Join-Path $validationDestination "irvtam-semantic-mapping-candidates.json") -Force
 }
 finally {
     Pop-Location

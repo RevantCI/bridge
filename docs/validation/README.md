@@ -39,3 +39,19 @@ The generated artifact SHA-256 is
 Human validation must be recorded through the Stage 3 companion mapping audit.
 It must never edit verse markers, target word order, or translationCore's
 verse-local check data merely because a passage relationship crosses verses.
+
+In Bridge, switch to **Advanced** mode, open the IRVTam Luke or Philippians
+project dashboard, and select **Validate semantic mappings**. Enter the reviewer
+identity, inspect the source/help evidence and imported-USFM target spans, then
+choose **Confirm exact mapping**, **Correct**, **Reject**, or **Needs
+discussion**. Corrected spans use one line per span:
+
+```text
+BOOK chapter:verse | exact target quote | optional start | optional end
+```
+
+Bridge records these decisions under the project's companion
+`semanticValidation/irvtam-v0.1.json` audit. The first release gate is 15–20
+representative human decisions. Only after reviewing the displayed calibration
+by confidence and relationship should model thresholds or classification
+behavior be changed.

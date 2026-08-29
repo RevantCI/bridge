@@ -54,6 +54,7 @@ reasons — this table is the fast way to see both.
 | **5** | Names & Transliteration (Uroman + Smart Edit Distance) | ✅ Done (2026-08-21). Whole-book spelling-consistency check wired into `verse.runChecks`'s existing `"local"` checks list — no frontend change needed. |
 | **6** | Alignment Intelligence (UAlign corpus stats) | ✅ Statistics engine done (2026-08-24). Turned out to need a real prerequisite not in the original plan: you can't compute stats over "human-approved alignments" with no way to create one — so the **manual word-alignment editor** (see `ALIGNMENT.md`) was built first, then corpus statistics (co-occurrence, translation probability, PMI, optional SED phonetic boost) computed from Bridge's own completed alignments — not a vendored `ualign.py`. Backend/protocol-only, two read-only methods, no UI yet. |
 | **7** | Paratext/Logos connectors, AI explain, drag-and-drop | ✅ All four slices have real work. AI alignment proposals and drag-and-drop are verified end-to-end. AI explain is wired to real materialized tN/tW evidence. The Paratext companion now performs identity-gated, idempotent Project Note handoff and has been manually verified against a running Paratext project, including sent-state persistence after restart. The Logos PowerShell/COM bridge is process/protocol tested, but actual COM calls remain unverified because Logos is not installed. |
+| *(Stage 3 follow-up)* | — | Language-independent semantic passage mapping and a 40-case IRVTam discovery queue are built. The Advanced validation UI now records exact-USFM-gated human confirmation/correction/rejection in an append-only companion audit. The next release gate is 15–20 human validations, confidence/relationship calibration, and installed Beta 15 acceptance. |
 
 **Lesson worth keeping in mind for future phases:** every external
 integration attempted so far (Wildebeest, USFM checker, versification,
@@ -73,6 +74,9 @@ reading a doc's description — including this repo's own docs.
   performs explicit one-shot Paratext issue handoffs; the live Paratext path is
   verified, while Logos remains unverified against a running installation.
 - A dedicated UI panel for alignment corpus statistics (protocol-only today).
+- Human confirmation of the first 15–20 generated semantic mappings and a
+  second-language corpus validation; machine proposals remain unconfirmed
+  until that work is completed.
 - Manual alignment does not invent source tokens — it requires original-
   language tokens already present from import.
 

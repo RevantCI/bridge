@@ -124,6 +124,15 @@ expands through adjacent structural windows only within explicit latency/cost
 budgets. Exhaustion becomes **Needs extended passage review**, never an
 automatic missing/omission conclusion. Bridge preserves imported verse markers
 and target word order; cross-verse relationships live only in companion data.
+
+The current Beta 15 work adds an Advanced-mode human-validation queue for the
+40 generated IRVTam Luke/Philippians mapping candidates. Reviewers can filter,
+confirm, reject, defer, or correct exact multi-span mappings; every decision is
+append-only, reviewer-attributed, restart-safe companion data. A live
+calibration summary separates human agreement, corrections, and rejections by
+confidence and relationship so thresholds can be adjusted from evidence after
+the initial 15–20 reviews. No validation action changes Scripture or native
+translationCore selections.
 See:
 
 - [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) for what's usable today, in

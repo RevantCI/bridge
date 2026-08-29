@@ -10,6 +10,39 @@ Updated: 2026-08-29
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
 
+## Stage 3 human validation workflow (2026-08-29)
+
+- Added an Advanced-mode validation screen for the 40 ranked IRVTam
+  `MACHINE_PROPOSED` candidates. It supports status/relationship/text filters,
+  source and exact-target evidence, passage navigation, reviewer notes, and
+  confirm/reject/correct/needs-discussion decisions.
+- Confirmation is allowed only while every proposed target span still exactly
+  matches the open imported project. Human corrections support multiple target
+  spans and optional explicit offsets for repeated target text; all corrected
+  relationships, meaning states, confidence values, and cross-verse
+  classifications are deterministically validated.
+- Decisions are stored in an append-only per-project companion audit with
+  reviewer, timestamp, manifest SHA-256, candidate mapping fingerprint, note,
+  provenance, and the exact accepted/corrected mapping. The latest decision is
+  indexed for restart recovery; no validation path writes USFM, checkData, or
+  alignment data.
+- Added live calibration summaries for reviewed proposals overall and by model
+  confidence band/relationship. Unconfirmed and needs-discussion rows are not
+  counted as model failures. Threshold or classification changes remain gated
+  on the first 15–20 human decisions.
+- Release packaging copies the single checked-in validation artifact into
+  Tauri resources, avoiding a second tracked copy while keeping development and
+  installed builds on the same SHA-pinned queue.
+
+Verified on Windows/Python 3.12.4:
+
+- Complete Python suite: **319 passed in 320.31s**.
+- Focused semantic validation/Stage 3 suites: **28 passed in 16.29s**.
+- Svelte/TypeScript: **0 errors, 0 warnings**.
+- Production Vite build: passed (existing >500 kB chunk warning only).
+- UI state tests: **4 passed**.
+- Rust command/sidecar tests: **2 passed**; changed command file passes rustfmt.
+
 ## Stage 3 IRVTam discovery and adaptive-search hardening (2026-08-29)
 
 - Replaced implicit radius behavior with explicit language-independent search

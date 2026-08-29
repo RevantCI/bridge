@@ -17,6 +17,8 @@
   export let reportLoading = false;
   export let reportError = "";
   export let onNavigateToFinding: (chapter: string, verse: string) => void = () => {};
+  export let advancedMode = false;
+  export let onOpenSemanticValidation: () => void = () => {};
 
   function percent(part: number, total: number): number {
     if (total <= 0) return 0;
@@ -34,9 +36,14 @@
 
 <div class="screen">
   <div class="header">
-    <div class="eyebrow">PROJECT</div>
-    <h1>{projectName}</h1>
-    {#if subtitle}<p class="intro">{subtitle}</p>{/if}
+    <div class="header-copy">
+      <div class="eyebrow">PROJECT</div>
+      <h1>{projectName}</h1>
+      {#if subtitle}<p class="intro">{subtitle}</p>{/if}
+    </div>
+    {#if advancedMode}
+      <button class="validation-button" on:click={onOpenSemanticValidation}>Validate semantic mappings</button>
+    {/if}
   </div>
 
   {#if reportLoading}
@@ -143,7 +150,8 @@
 
 <style>
   .screen { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
-  .header { flex-shrink: 0; padding: 28px 40px 18px; border-bottom: 1px solid var(--border); }
+  .header { flex-shrink: 0; padding: 28px 40px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+  .header-copy { min-width: 0; }
   .list-area { flex: 1; overflow: auto; padding: 20px 40px; }
   .header, .list-area { max-width: 900px; width: 100%; margin: 0 auto; box-sizing: border-box; }
   .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; font-weight: 800; margin-bottom: 8px; }
@@ -197,6 +205,7 @@
   .fill.checked { background: var(--gr); }
   .small-button { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); padding: 6px 10px; cursor: pointer; font-size: 10px; flex-shrink: 0; }
   .small-button.primary { border-color: var(--accent); color: var(--accent); }
+  .validation-button { border: 1px solid var(--accent); border-radius: 7px; background: var(--accent-bg); color: var(--accent); padding: 8px 11px; cursor: pointer; font-size: 10px; font-weight: 700; flex-shrink: 0; }
   .small-button:disabled { opacity: .55; cursor: not-allowed; }
   @media (max-width: 760px) {
     .header, .list-area { padding-left: 20px; padding-right: 20px; }

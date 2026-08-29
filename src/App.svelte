@@ -9,6 +9,7 @@
   import ExportModal from "./lib/components/ExportModal.svelte";
   import ProjectDashboard from "./lib/components/ProjectDashboard.svelte";
   import DiagnosticsPanel from "./lib/components/DiagnosticsPanel.svelte";
+  import SemanticMappingValidation from "./lib/components/SemanticMappingValidation.svelte";
   import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, ProjectReport, QaFinding } from "./lib/types/finding";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
@@ -29,6 +30,7 @@
   let dropError = "";
   let chapterLoadSequence = 0;
   let showingDashboard = false;
+  let showingSemanticValidation = false;
   let bookProgress: BookProgressEntry[] = [];
   let dashboardLoading = false;
   let dashboardError = "";
@@ -132,6 +134,7 @@
     resetBookState();
     project.set(null);
     opened = false;
+    showingSemanticValidation = false;
     openingBook = "";
     bookOpenError = "";
   }
@@ -168,9 +171,16 @@
   }
 
   function openDashboard(): void {
+    showingSemanticValidation = false;
     showingDashboard = true;
     void loadDashboard();
     void loadReport();
+  }
+
+  function openSemanticValidation(): void {
+    if ($reviewerMode !== "advanced") return;
+    showingDashboard = false;
+    showingSemanticValidation = true;
   }
 
   async function enterBookFromDashboard(path: string): Promise<void> {
@@ -374,6 +384,7 @@
   // chapter:verse and close the dashboard so the editor is visible.
   async function navigateToFinding(chapter: string, verse: string): Promise<void> {
     showingDashboard = false;
+    showingSemanticValidation = false;
     await activateChapter(chapter, verse);
   }
 
@@ -441,7 +452,13 @@
   // recompute bookSummary reactively when findings/loadedChapters change
   $: void $findingsByVerse, void $checkStatusByVerse, void $loadedChapters, (bookSummary = bookApprovedSummary());
 
-  $: screen = (!opened ? "home" : showingDashboard ? "dashboard" : "editor") as "home" | "dashboard" | "editor";
+  $: if ($reviewerMode !== "advanced" && showingSemanticValidation) {
+    showingSemanticValidation = false;
+    showingDashboard = true;
+  }
+  $: screen = (
+    !opened ? "home" : showingSemanticValidation ? "validation" : showingDashboard ? "dashboard" : "editor"
+  ) as "home" | "dashboard" | "validation" | "editor";
   $: projectName = $project?.projectName || $project?.bibleName || $project?.bookName || "";
   $: dashboardSubtitle = [
     $project?.targetLanguage,
@@ -521,6 +538,13 @@
       reportLoading={reportLoading}
       reportError={reportError}
       onNavigateToFinding={navigateToFinding}
+      advancedMode={$reviewerMode === "advanced"}
+      onOpenSemanticValidation={openSemanticValidation}
+    />
+  {:else if screen === "validation"}
+    <SemanticMappingValidation
+      onClose={openDashboard}
+      onNavigate={navigateToFinding}
     />
   {:else}
     <div class="body">
