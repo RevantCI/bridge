@@ -700,6 +700,11 @@ class SemanticMappingEngine:
             if clean_spans and all(r != expected.source_reference for r in target_refs):
                 if "CROSS_VERSE" not in rel:
                     rel.append("CROSS_VERSE")
+                if (
+                    {"SENTENCE_REORDERED", "CLAUSE_REORDERED", "REORDERED_WITHIN_VERSE"} & set(rel)
+                    and "CROSS_VERSE_REORDERED" not in rel
+                ):
+                    rel.append("CROSS_VERSE_REORDERED")
                 if not any(x in rel for x in ("CROSS_VERSE_MOVED", "CROSS_VERSE_REORDERED", "VERSIFICATION_DIFFERENCE")):
                     rel.append("CROSS_VERSE_MOVED")
 

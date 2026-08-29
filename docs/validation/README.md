@@ -3,13 +3,18 @@
 `irvtam-semantic-mapping-candidates.json` is a generated review queue, not
 ground truth. Every row starts as `MACHINE_PROPOSED` / `UNCONFIRMED`.
 
-The current checked-in IRVTam corpus contains complete Luke and Philippians
-USFM files. The local-only generation pass produced 36 candidates across both
-books. One row is the required exact PHP 1:3 → PHP 1:6 regression sentinel.
-The remaining rows are explicitly marked `STRUCTURAL_SCREEN`: Stage 3 source
-help metadata and target USFM structure selected them as useful passages for
-semantic review, but no target span or meaning-preserved conclusion was
-accepted. They must not be used for Basic-mode auto-application.
+The checked-in IRVTam corpus contains complete Luke and Philippians USFM files.
+After explicit data-transfer authorization, the full structured semantic pass
+with `gpt-5.6` produced 90 validator-accepted mappings. The representative
+review queue contains 40 candidates: 28 from Luke and 12 from Philippians.
+Every one remains unconfirmed and must not be treated as ground truth.
+
+All 43 overt target spans in the queue were re-derived from the imported USFM:
+the stored quote occurs unambiguously and equals the text at its stored
+offsets. Model-supplied offsets are never trusted. One Luke 11:2-4 batch was
+rejected in full because a proposed quote failed this check; its diagnostic is
+retained in `batchDiagnostics`. The exact PHP 1:3 -> PHP 1:6 regression is
+present with source `τῷ Θεῷ μου` and target `என் தேவனை`.
 
 Generate the local-only set without transmitting corpus text:
 
@@ -17,11 +22,19 @@ Generate the local-only set without transmitting corpus text:
 .\engine\.venv\Scripts\python.exe scripts\generate_irvtam_mapping_candidates.py --structural-only --limit 40
 ```
 
-The same script can run the full structured semantic mapper when transmission
-of the selected source evidence and target passages to the configured
-OpenAI-compatible endpoint has been explicitly authorized. That pass replaces
-structural screens with exact, USFM-verified span proposals where the model can
-ground them; competing/unresolved results remain review states.
+Run the authorized full structured pass with:
+
+```powershell
+.\engine\.venv\Scripts\python.exe scripts\generate_irvtam_mapping_candidates.py --max-batches 10 --units-per-batch 10 --limit 40
+```
+
+The full pass checkpoints after each batch and caches content-fingerprinted
+validated results under the ignored `engine/build/semantic-corpus-discovery`
+directory. A rejected batch does not discard previous paid-for work and does
+not cause Bridge to weaken exact-quote validation.
+
+The generated artifact SHA-256 is
+`C4610F094F85A1530E4AD137412B1434E88A41A04686126E782E1AD3E989C344`.
 
 Human validation must be recorded through the Stage 3 companion mapping audit.
 It must never edit verse markers, target word order, or translationCore's

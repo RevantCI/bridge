@@ -345,6 +345,18 @@ def rank_representative_candidates(candidates: Iterable[dict[str, Any]], *, limi
         book_counts[book] = book_counts.get(book, 0) + 1
         if len(output) >= limit:
             break
+    # Diversity caps shape the front of the queue; they must not unnecessarily
+    # shrink a requested 20–50-row review set when the corpus yielded more valid
+    # proposals. Fill the tail by diagnostic rank without changing the diverse
+    # ordering already selected above.
+    selected_ids = {str(candidate.get("candidateId")) for candidate in output}
+    for candidate in ranked:
+        if len(output) >= limit:
+            break
+        if str(candidate.get("candidateId")) in selected_ids:
+            continue
+        output.append(candidate)
+        selected_ids.add(str(candidate.get("candidateId")))
     for rank, candidate in enumerate(output, 1):
         candidate["rank"] = rank
     return output

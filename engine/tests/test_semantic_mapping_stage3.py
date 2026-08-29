@@ -31,6 +31,23 @@ def test_php_cross_verse_mapping(stage3_db, tamil_php_usfm):
     assert m["target_spans"][0]["reference"] == "PHP 1:6"
     assert mapping_state_for_review(m,"PHP 1:3")["state"] == "found_another_verse"
 
+
+def test_cross_verse_sentence_reordering_is_classified_explicitly(stage3_db, tamil_php_usfm):
+    repo=SemanticSourceRepository(stage3_db); unit=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationNotes",check_id="gjyv")
+    idx=UsfmPassageIndex.from_path(tamil_php_usfm,book_hint="PHP")
+    target=idx.segment_for_source_reference("1","6")
+    assert target is not None
+    response=fixture_response(
+        unit.id,list(unit.source_token_ids),"PHP 1:3","PHP 1:6",
+        target.text[34:43],rel="SENTENCE_REORDERED",
+    )
+    run=SemanticMappingEngine(repo,FakeClient([response]),max_neighbor_windows=1).map_units(
+        target_index=idx,source_units=[unit],
+    )
+    relationships=run.result["mappings"][0]["relationships"]
+    assert "CROSS_VERSE" in relationships
+    assert "CROSS_VERSE_REORDERED" in relationships
+
 def test_hallucinated_target_quote_is_rejected(stage3_db, tamil_php_usfm):
     repo=SemanticSourceRepository(stage3_db); unit=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationNotes",check_id="gjyv")
     idx=UsfmPassageIndex.from_path(tamil_php_usfm,book_hint="PHP")

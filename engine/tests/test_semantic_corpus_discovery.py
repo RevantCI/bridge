@@ -54,6 +54,16 @@ def test_representative_ranking_and_manifest(stage3_db, tamil_php_usfm, tamil_lu
     assert len(payload["sourceDatabase"]["sha256"]) == 64
 
 
+def test_representative_ranking_fills_requested_tail_after_diversity_caps():
+    rows=[{
+        "candidateId":str(index),"diagnosticScore":100-index,"relationships":["SAME_VERSE"],
+        "sourceUnit":{"source_reference":f"LUK 1:{index+1}"},
+    } for index in range(12)]
+    ranked=rank_representative_candidates(rows,limit=10)
+    assert len(ranked) == 10
+    assert [row["rank"] for row in ranked] == list(range(1,11))
+
+
 def test_local_structural_screen_is_explicitly_unconfirmed(stage3_db, tamil_php_usfm, tamil_luk_usfm):
     repo=SemanticSourceRepository(stage3_db)
     candidates=structural_screen_candidates(

@@ -24,21 +24,25 @@ Updated: 2026-08-29
   meaning-preserved, at least 90% confident, non-uncertain, exactly grounded in
   imported USFM, compatible with the native selection, and free of matching
   contradictory QA evidence. Advanced-mode passage mappings remain advisory.
-- Added a reproducible IRVTam discovery tool and generated 36
-  `MACHINE_PROPOSED` / `UNCONFIRMED` review candidates across Luke and
-  Philippians. One is the exact PHP 1:3 → 1:6 regression; 35 are conservative
-  local structural screens and therefore make no semantic preservation claim.
-- The full external semantic-model discovery pass was not executed because
-  sending corpus/source evidence to the configured endpoint requires explicit
-  data-transfer approval. The generator is ready once that authorization is
-  supplied.
+- Added a reproducible IRVTam discovery tool. After explicit data-transfer
+  authorization, a full `gpt-5.6` pass generated 90 validator-accepted
+  mappings and ranked a 40-row `MACHINE_PROPOSED` / `UNCONFIRMED` review queue
+  across Luke (28) and Philippians (12). All 43 overt spans were independently
+  verified against exact imported-USFM offsets.
+- The PHP 1:3 -> 1:6 `τῷ Θεῷ μου` -> `என் தேவனை` regression is preserved as
+  `CROSS_VERSE_REORDERED`, meaning preserved, at 99% model confidence. This is
+  an unconfirmed validation candidate, not a Tamil-specific rule.
+- One Luke 11:2-4 batch was rejected when a target quote was not an
+  unambiguous exact USFM match. The generator now checkpoints every batch,
+  retains rejection diagnostics, and reuses content-fingerprinted validated
+  results without weakening production validation.
 - Mapping remains companion-only and a regression test verifies the input USFM
   stays byte-identical.
 
 Verified on Windows/Python 3.12.4:
 
-- Complete Python suite: **313 passed in 485.97s**.
-- Focused Stage 3/corpus suites: **22 passed**.
+- Complete Python suite: **315 passed in 314.32s**.
+- Focused Stage 3/corpus suites: **24 passed in 16.19s**.
 - Svelte/TypeScript: **0 errors, 0 warnings**.
 - Production Vite build: passed (existing >500 kB chunk warning only).
 - UI state tests: **4 passed**.

@@ -10,7 +10,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 | ID | Area | Scenario | Level | Status |
 |---|---|---|---|---|
-| A01 | Backend | Complete Python suite | Source | PASS — 313 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, vendored Smart Edit Distance, and the full Stage 3 semantic source database. Includes adaptive structural passage expansion, expanded-cache reuse, byte-identical USFM preservation, conservative Basic/Advanced mapping policy, generated IRVTam validation screens, Milestone 3B.3 structured/background AI review, resumable AI batches, Milestone 3A resource/import, project management, and Milestone 3B.4 Paratext handoff/recheck lifecycle tests |
+| A01 | Backend | Complete Python suite | Source | PASS — 315 passed on Windows/Python 3.12.4 with real Wildebeest 0.9.2, real uroman 1.3.1.1, vendored Smart Edit Distance, and the full Stage 3 semantic source database. Includes adaptive structural passage expansion, expanded-cache reuse, byte-identical USFM preservation, conservative Basic/Advanced mapping policy, generated IRVTam validation mappings, Milestone 3B.3 structured/background AI review, resumable AI batches, Milestone 3A resource/import, project management, and Milestone 3B.4 Paratext handoff/recheck lifecycle tests |
 | A02 | Frontend | Svelte/TypeScript diagnostics | Source | PASS — 0 errors, 0 warnings |
 | A03 | Frontend | Production Vite build | Source | PASS — existing chunk-size warning |
 | A04 | Desktop | Rust tests and compilation | Source | PASS — release and test profiles compile; 2 sidecar-timeout unit tests passed, including the Beta 7 interactive-timeout guard |
@@ -162,11 +162,11 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | M26 | In Basic mode, verify only a ≥90%-confidence, preserved, unambiguous same-verse mapping with an exact USFM-backed native selection and no contradictory QA evidence is applied | NOT RUN — policy regressions pass; installed AI acceptance required |
 | M27 | In Advanced mode, inspect cross-verse/split/implicit proposals and confirm they remain companion mappings and cannot be applied as verse-local tC selections | NOT RUN — policy and UI gates compile/test; installed acceptance required |
 | M28 | Edit either a source/current verse or mapped target verse and confirm the content fingerprint prevents reuse of stale mapping data | NOT RUN — target-edit fingerprint regression passes; full two-sided installed acceptance required |
-| M29 | Generate/review the IRVTam validation queue and explicitly confirm/reject selected `MACHINE_PROPOSED` rows before using them as evidence | NOT RUN — 36-row unconfirmed local queue generated; human corpus validation pending |
+| M29 | Generate/review the IRVTam validation queue and explicitly confirm/reject selected `MACHINE_PROPOSED` rows before using them as evidence | PARTIAL — authorized model pass generated 90 validator-accepted mappings and a representative 40-row unconfirmed queue; all 43 overt spans pass exact-USFM audit, but human corpus validation is still pending |
 
 ## Automated evidence
 
-- Python: 313 tests, including Stage 3 language-aware semantic passage mapping and all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: 315 tests, including Stage 3 language-aware semantic passage mapping and all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book
