@@ -40,9 +40,37 @@ def translation_words_book_analytics(project) -> dict[str, Any]:
     return {'bookId':project.book_id,'conceptCount':len(out),'concepts':out}
 
 
+def _local_findings_by_verse(project) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """Local (Wildebeest/USFM/Names) QaFinding dicts already persisted in
+    checkCache.json (see BridgeEngine.build_project_report's cache-warming
+    and each engine's own _*_findings_for_book), grouped by (chapter, verse)
+    and filtered to still-open status via the same progress rollup
+    _verse_coverage() reads for the coverage bar — so the exception queue
+    and the coverage bar agree on what still needs attention instead of
+    reading two different pictures of the same data (issue #24)."""
+    cache = project.load_check_cache()
+    rollup = project.load_progress_rollup()
+    chapters_rollup = rollup.get('chapters', {}) if isinstance(rollup.get('chapters'), dict) else {}
+    by_verse: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for section in ('wildebeest', 'usfm', 'names'):
+        for f in (cache.get(section) or {}).get('findings', []) or []:
+            chapter = str(f.get('chapter', ''))
+            verse = str(f.get('verse', ''))
+            chapter_entry = chapters_rollup.get(chapter)
+            verse_map = chapter_entry.get('verses', {}) if isinstance(chapter_entry, dict) else {}
+            verse_entry = verse_map.get(verse) if isinstance(verse_map, dict) else None
+            statuses = verse_entry.get('findings', {}) if isinstance(verse_entry, dict) else {}
+            status = statuses.get(str(f.get('id', '')), 'open') if isinstance(statuses, dict) else 'open'
+            if status != 'open':
+                continue
+            by_verse.setdefault((chapter, verse), []).append(f)
+    return by_verse
+
+
 def exception_first_queue(project) -> list[dict[str,Any]]:
     rows=[]
     ai={(str(x.get('chapter')),str(x.get('verse'))):x for x in project.list_ai_review_results()}
+    local_by_verse=_local_findings_by_verse(project)
     for ch in project.chapters():
         for vs in project.verses(ch):
             if vs=='front': continue
@@ -59,6 +87,12 @@ def exception_first_queue(project) -> list[dict[str,Any]]:
                     if sev=='critical':critical+=1
                     elif sev=='high':high+=1
                     elif sev=='medium':medium+=1
+            local_findings=local_by_verse.get((str(ch),str(vs)),[])
+            for f in local_findings:
+                sev=str(f.get('severity','medium')).lower()
+                if sev=='critical':critical+=1
+                elif sev=='high':high+=1
+                elif sev=='medium':medium+=1
             wa=project.word_alignment_state(ch,vs)
             checks=project.checks_for_verse(ch,vs)
             invalid=sum(
@@ -75,8 +109,24 @@ def exception_first_queue(project) -> list[dict[str,Any]]:
             )
             discussion=sum(1 for d in project.decisions_for_verse(ch,vs) if d.get('decision')=='needs_discussion')
             review=project.load_review_state(ch,vs) or {}; final_state=str(review.get('status',''))
-            if critical or high or cache in ('stale','missing') or invalid or wa=='invalid' or discussion or final_state.startswith('stale'):
-                rows.append({'chapter':str(ch),'verse':str(vs),'critical':critical,'high':high,'medium':medium,'cache':cache,'wordAlignment':wa,'invalidChecks':invalid,'discussions':discussion,'finalState':final_state,'summary':str(saved.get('summary',''))})
+            if critical or high or cache in ('stale','missing') or invalid or wa=='invalid' or discussion or final_state.startswith('stale') or local_findings:
+                summary=str(saved.get('summary','')) or '; '.join(
+                    str(f.get('explanation','')) for f in local_findings[:3] if f.get('explanation')
+                )
+                rows.append({
+                    'chapter':str(ch),'verse':str(vs),'critical':critical,'high':high,'medium':medium,
+                    'cache':cache,'wordAlignment':wa,'invalidChecks':invalid,'discussions':discussion,
+                    'finalState':final_state,'summary':summary,
+                    'localFindings':[
+                        {
+                            'engine':str(f.get('engine','')),
+                            'severity':str(f.get('severity','medium')).lower(),
+                            'checkType':str(f.get('check_type','')),
+                            'explanation':str(f.get('explanation','')),
+                        }
+                        for f in local_findings
+                    ],
+                })
     rank={'stale':0,'missing':1,'current':2}
     rows.sort(key=lambda r:(-r['critical'],-r['high'],-r['invalidChecks'],-r['discussions'],rank.get(r['cache'],9),int(r['chapter']) if r['chapter'].isdigit() else 999,int(r['verse']) if r['verse'].isdigit() else 999))
     return rows

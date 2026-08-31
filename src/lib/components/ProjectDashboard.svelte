@@ -45,6 +45,15 @@
     PASS: "pass", ISSUE: "issue", REVIEW_REQUIRED: "review", NOT_CHECKED: "not-checked",
   };
 
+  let expandedRows = new Set<string>();
+
+  function toggleExpanded(key: string): void {
+    const next = new Set(expandedRows);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    expandedRows = next;
+  }
+
   // The report only carries the open book's code; its localized name (as
   // parsed from the source USFM's \h/\toc2 line at import — see
   // project_import.py) lives on the matching row in `books`.
@@ -189,14 +198,40 @@
           {#if report.exceptionQueue.length > 0}
             <div class="exceptions" aria-label="Verses needing attention">
               {#each report.exceptionQueue.slice(0, 25) as row (row.chapter + ':' + row.verse)}
-                <button class="exception-row" on:click={() => onNavigateToFinding(row.chapter, row.verse)}>
-                  <span class="ref">{report.bookId?.toUpperCase()} {row.chapter}:{row.verse}</span>
-                  {#if row.critical}<span class="pill critical">{row.critical} critical</span>{/if}
-                  {#if row.high}<span class="pill high">{row.high} high</span>{/if}
-                  {#if row.discussions}<span class="pill discussion">{row.discussions} discussion</span>{/if}
-                  {#if row.wordAlignment === "invalid"}<span class="pill invalid">alignment invalid</span>{/if}
-                  {#if row.summary}<span class="summary">{row.summary}</span>{/if}
-                </button>
+                {@const key = row.chapter + ":" + row.verse}
+                {@const hasLocal = row.localFindings.length > 0}
+                <div class="exception-item">
+                  <div class="exception-row-wrap">
+                    <button class="exception-row" on:click={() => onNavigateToFinding(row.chapter, row.verse)}>
+                      <span class="ref">{report.bookId?.toUpperCase()} {row.chapter}:{row.verse}</span>
+                      {#if row.critical}<span class="pill critical">{row.critical} critical</span>{/if}
+                      {#if row.high}<span class="pill high">{row.high} high</span>{/if}
+                      {#if row.discussions}<span class="pill discussion">{row.discussions} discussion</span>{/if}
+                      {#if row.wordAlignment === "invalid"}<span class="pill invalid">alignment invalid</span>{/if}
+                      {#if row.summary}<span class="summary">{row.summary}</span>{/if}
+                    </button>
+                    {#if hasLocal}
+                      <button
+                        type="button"
+                        class="expand-toggle"
+                        aria-label={expandedRows.has(key) ? "Collapse findings" : `Show ${row.localFindings.length} Greek Room finding(s)`}
+                        aria-expanded={expandedRows.has(key)}
+                        on:click={() => toggleExpanded(key)}
+                      >{row.localFindings.length} Greek Room {expandedRows.has(key) ? "▲" : "▼"}</button>
+                    {/if}
+                  </div>
+                  {#if hasLocal && expandedRows.has(key)}
+                    <div class="local-findings">
+                      {#each row.localFindings as finding}
+                        <div class="local-finding-row">
+                          <span class="pill engine">{finding.engine}</span>
+                          <span class="pill {finding.severity}">{finding.severity}</span>
+                          <span class="local-explain">{finding.explanation}</span>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
               {/each}
               {#if report.exceptionQueue.length > 25}
                 <p class="more">+ {report.exceptionQueue.length - 25} more</p>
@@ -252,16 +287,29 @@
   .legend-item i.not-checked { background: var(--border-strong); }
   .legend-percent { margin-left: auto; font-weight: 700; color: var(--text); }
   .exceptions { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-  .exception-row { width: 100%; text-align: left; display: flex; align-items: center; gap: 8px; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--border); background: var(--surface); cursor: pointer; font: inherit; }
-  .exception-row:last-child { border-bottom: 0; }
+  .exception-item { border-bottom: 1px solid var(--border); }
+  .exception-item:last-child { border-bottom: 0; }
+  .exception-row-wrap { display: flex; align-items: stretch; background: var(--surface); }
+  .exception-row { flex: 1; min-width: 0; text-align: left; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 9px 12px; border: 0; background: none; cursor: pointer; font: inherit; }
   .exception-row:hover { background: var(--surface-2); }
   .exception-row .ref { font-weight: 700; font-size: 11px; color: var(--text); flex-shrink: 0; }
   .exception-row .summary { color: var(--text-2); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pill { font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 999px; flex-shrink: 0; }
   .pill.critical { background: var(--danger-bg); color: var(--danger); }
   .pill.high { background: var(--warning-bg); color: var(--warning); }
+  .pill.medium { background: var(--warning-bg); color: var(--warning); }
+  .pill.low { background: var(--surface-2); color: var(--text-2); }
   .pill.discussion { background: var(--accent-bg); color: var(--accent); }
   .pill.invalid { background: var(--surface-2); color: var(--text-2); }
+  .pill.engine { background: var(--accent-bg); color: var(--accent); text-transform: capitalize; }
+  .expand-toggle {
+    flex-shrink: 0; font-size: 9px; font-weight: 700; color: var(--accent); align-self: center;
+    margin-right: 10px; padding: 2px 7px; border-radius: 999px; background: var(--accent-bg);
+    border: 0; cursor: pointer;
+  }
+  .local-findings { background: var(--surface-2); padding: 6px 12px 10px 32px; display: flex; flex-direction: column; gap: 6px; }
+  .local-finding-row { display: flex; align-items: center; gap: 7px; font-size: 10px; }
+  .local-explain { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .more { color: var(--text-2); font-size: 10px; margin: 8px 2px 0; }
   .books { border: 1px solid var(--border); border-radius: 10px; }
   .book-tools { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; margin-bottom: 10px; }

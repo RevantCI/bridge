@@ -64,6 +64,13 @@ export interface PublicationGate {
   note: string;
 }
 
+export interface LocalFindingSummary {
+  engine: string;
+  severity: string;
+  checkType: string;
+  explanation: string;
+}
+
 export interface ExceptionQueueRow {
   chapter: string;
   verse: string;
@@ -76,6 +83,7 @@ export interface ExceptionQueueRow {
   discussions: number;
   finalState: string;
   summary: string;
+  localFindings: LocalFindingSummary[];
 }
 
 export interface ProjectReport {
