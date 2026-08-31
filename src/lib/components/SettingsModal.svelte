@@ -5,8 +5,9 @@
   import type { SettingsData } from "../types/finding";
 
   export let onClose: () => void;
+  export let initialPane: "ai" | "quality" | "resources" | "security" = "ai";
 
-  let activePane: "ai" | "quality" | "resources" | "security" = "ai";
+  let activePane: "ai" | "quality" | "resources" | "security" = initialPane;
   let loading = true;
   let saving = false;
   let saveMessage = "";

@@ -39,6 +39,12 @@
   let reportError = "";
   let engineNotice = "";
   let engineNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+  let settingsInitialPane: "ai" | "quality" | "resources" | "security" = "ai";
+
+  function openSettings(pane: "ai" | "quality" | "resources" | "security" = "ai"): void {
+    settingsInitialPane = pane;
+    settingsOpen.set(true);
+  }
 
   // Sidecar respawns are silent by design (see sidecar.rs) — the new
   // process has no project open, so anything project-scoped will fail
@@ -500,7 +506,7 @@
     {projectName}
     onGoHome={showProjectHome}
     onGoToDashboard={openDashboard}
-    onOpenSettings={() => settingsOpen.set(true)}
+    onOpenSettings={() => openSettings("ai")}
     onOpenExport={() => exportOpen.set(true)}
     onGotoVerse={gotoVerse}
     onChapterChange={switchChapter}
@@ -559,6 +565,7 @@
       onNavigateToFinding={navigateToFinding}
       advancedMode={$reviewerMode === "advanced"}
       onOpenSemanticValidation={openSemanticValidation}
+      onRequestAdvancedMode={() => openSettings("quality")}
     />
   {:else if screen === "validation"}
     {#key $project?.path}
@@ -607,7 +614,7 @@
   {/if}
 
   {#if $settingsOpen}
-    <SettingsModal onClose={() => settingsOpen.set(false)} />
+    <SettingsModal initialPane={settingsInitialPane} onClose={() => settingsOpen.set(false)} />
   {/if}
 
   {#if $diagnosticsOpen}

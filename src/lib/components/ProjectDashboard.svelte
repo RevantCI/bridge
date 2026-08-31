@@ -19,6 +19,7 @@
   export let onNavigateToFinding: (chapter: string, verse: string) => void = () => {};
   export let advancedMode = false;
   export let onOpenSemanticValidation: () => void = () => {};
+  export let onRequestAdvancedMode: () => void = () => {};
 
   let bookSearch = "";
 
@@ -51,9 +52,16 @@
       <h1>{projectName}</h1>
       {#if subtitle}<p class="intro">{subtitle}</p>{/if}
     </div>
-    {#if advancedMode}
-      <button class="validation-button" on:click={onOpenSemanticValidation}>Validate semantic mappings</button>
-    {/if}
+    <div class="validation-entry">
+      <button
+        class="validation-button"
+        class:requires-advanced={!advancedMode}
+        on:click={advancedMode ? onOpenSemanticValidation : onRequestAdvancedMode}
+      >
+        {advancedMode ? "Validate semantic mappings" : "Enable semantic validation"}
+      </button>
+      {#if !advancedMode}<small>Requires Advanced reviewer mode</small>{/if}
+    </div>
   </div>
 
   {#if reportLoading}
@@ -231,6 +239,9 @@
   .small-button { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); padding: 6px 10px; cursor: pointer; font-size: 10px; flex-shrink: 0; }
   .small-button.primary { border-color: var(--accent); color: var(--accent); }
   .validation-button { border: 1px solid var(--accent); border-radius: 7px; background: var(--accent-bg); color: var(--accent); padding: 8px 11px; cursor: pointer; font-size: 10px; font-weight: 700; flex-shrink: 0; }
+  .validation-entry { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+  .validation-entry small { color: var(--text-3); font-size: 9px; }
+  .validation-button.requires-advanced { border-color: var(--border-strong); background: var(--surface); color: var(--text-2); }
   .small-button:disabled { opacity: .55; cursor: not-allowed; }
   @media (max-width: 760px) {
     .header, .list-area { padding-left: 20px; padding-right: 20px; }
