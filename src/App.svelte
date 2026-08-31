@@ -218,6 +218,15 @@
     showingDashboard = false;
   }
 
+  // Clicking a book row (not its Open button) previews that book's report in
+  // the dashboard's right panel without leaving the dashboard — same
+  // switchBook(path, false) seam openSemanticValidation/switchValidationBook
+  // already use to activate a sibling book with no editor navigation.
+  async function previewBookOnDashboard(path: string): Promise<void> {
+    if ($project && path === $project.path) return;
+    if (await switchBook(path, false)) void loadReport();
+  }
+
   // Shared by initial open and book switching: land on the first chapter
   // and its first verse once `project` points at the book to display.
   async function enterCurrentProject(): Promise<void> {
@@ -558,6 +567,7 @@
       loading={dashboardLoading}
       error={dashboardError}
       onSelectBook={enterBookFromDashboard}
+      onPreviewBook={previewBookOnDashboard}
       onRetry={loadDashboard}
       {report}
       reportLoading={reportLoading}
