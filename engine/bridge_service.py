@@ -1109,6 +1109,26 @@ class BridgeEngine:
         if Counter(t.signature for t in current.all_bottom()) != Counter(t.signature for t in proposed.all_bottom()):
             raise AlignmentError("A save may regroup target tokens but may not add, remove, or duplicate them.")
 
+    def _finish_alignment_mutation(self, chapter: str, verse: str) -> dict[str, Any]:
+        """Shared tail for every alignment-mutating path (manual realign/unalign/save,
+        AI auto-align, undo/restore): clear pending/invalid caches, then automatically
+        mark the verse complete the moment every word is grouped — no separate human
+        "Mark alignment complete" click. `mark_word_alignment_pending` runs first even
+        when the verse turns out to still be complete, so an edit that keeps a
+        previously human-completed verse fully aligned re-earns "completed" through
+        the same check rather than leaving a stale marker in place.
+        """
+        self.project.mark_word_alignment_pending(chapter, verse)
+        self._corpus_stats_by_book.pop(str(self.project.path), None)
+        self._consistency_findings_by_book.pop(str(self.project.path), None)
+        context = self._alignment_context(chapter, verse)
+        if context["canComplete"] and context["completionState"] != "completed":
+            self.project.mark_word_alignment_completed(
+                chapter, verse, username=self.settings.reviewer_name or "Bridge Reviewer",
+            )
+            context = self._alignment_context(chapter, verse)
+        return context
+
     def _save_alignment(
         self,
         chapter: str,
@@ -1124,10 +1144,7 @@ class BridgeEngine:
             expected_original=expected_original,
             operation=operation,
         )
-        self.project.mark_word_alignment_pending(chapter, verse)
-        self._corpus_stats_by_book.pop(str(self.project.path), None)
-        self._consistency_findings_by_book.pop(str(self.project.path), None)
-        return self._alignment_context(chapter, verse)
+        return self._finish_alignment_mutation(chapter, verse)
 
     def realign_words(
         self,
@@ -1193,10 +1210,7 @@ class BridgeEngine:
         self.project.restore_verse_alignment_history(
             chapter, verse, history_id=history_id, expected_original=expected_original,
         )
-        self.project.mark_word_alignment_pending(chapter, verse)
-        self._corpus_stats_by_book.pop(str(self.project.path), None)
-        self._consistency_findings_by_book.pop(str(self.project.path), None)
-        return self._alignment_context(chapter, verse)
+        return self._finish_alignment_mutation(chapter, verse)
 
     def _ai_client(self) -> OpenAIResponsesClient:
         api_key = self.settings.get_api_key()
@@ -1407,7 +1421,7 @@ class BridgeEngine:
                 self._ensure_resource_indexes(project)
             client = self._ai_client()
             alignment = project.load_verse_alignment(chapter, verse)
-            proposal, _, reviews, issues, summary, meta = client.prepare_verse_review(
+            proposal, review_alignment, reviews, issues, summary, meta = client.prepare_verse_review(
                 project, chapter, verse, alignment, progress_callback=progress_callback,
             )
             total_tokens = int(meta.get("total_tokens_for_prepare", 0) or 0)
@@ -1420,6 +1434,18 @@ class BridgeEngine:
                     reason="AI review was cancelled; no lifecycle conclusion was accepted.",
                 )
                 raise AIError("AI review cancelled; the completed model result was not automatically applied.")
+            if proposal is not None and review_alignment.to_dict() != alignment.to_dict():
+                progress_callback(90, "Saving AI-filled alignment gaps")
+                try:
+                    with self._checker_lock:
+                        self._save_alignment(
+                            chapter, verse, review_alignment, alignment.to_dict(), "ai_review_auto_align",
+                        )
+                except Exception:
+                    # A concurrent edit or a validation edge case here must not sink the
+                    # tN/tW review this verse otherwise completed; the verse simply stays
+                    # unaligned and is picked up by the alignment-popup/verse-list flag.
+                    pass
             applied: list[dict[str, Any]] = []
             skipped: list[dict[str, Any]] = []
             if mode == "basic":

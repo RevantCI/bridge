@@ -1,6 +1,6 @@
 # Build log: Bridge v0.8.0-beta.14
 
-Updated: 2026-08-29
+Updated: 2026-08-31
 
 > **Start with [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) instead** for an
 > oriented, up-to-date summary of the stack decisions, phase roadmap, and
@@ -9,6 +9,49 @@ Updated: 2026-08-29
 > session-by-session narrative that the summary distills. This file is the
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
+
+## Automatic alignment during AI review; alignment popup goes read/decide-only (2026-08-31)
+
+Issues #20/#21, agreed with Benz: the "Automatic AI review" card's This
+verse/Chapter/Whole book buttons only ran tN/tW evidence review; alignment
+stayed a fully separate manual popup action. Both are now one automatic
+pass, and the popup's manual controls shrink to match.
+
+- **#20** — `prepare_verse_review` (`tc_ai_bridge/ai_client.py`) already
+  computed a gap_fill alignment proposal internally whenever a verse's
+  alignment was incomplete, purely to ground the tN/tW review against —
+  the proposal was then discarded (only surfaced as an unused
+  `alignmentProposal` field, never rendered anywhere in the UI). No second
+  AI call was needed: `_run_ai_review_for_project` (`bridge_service.py`)
+  now saves that same in-memory proposal through the normal
+  identity-checked `_save_alignment` pipeline whenever it actually differs
+  from the verse's current alignment, deliberately bypassing Bridge's usual
+  human-confirm-before-apply gate for this one path (explicit call by
+  Revant + Benz, not an oversight). A failed auto-align (concurrent edit,
+  validation edge case) is swallowed rather than failing the verse's tN/tW
+  result — the verse just stays flagged unaligned.
+- **#21** — `AlignmentModal.svelte` no longer has "Ask AI to propose
+  alignment" / "Apply proposal" (alignment is filled automatically per
+  #20); manual align/unalign token-click controls are unchanged. A new
+  `_finish_alignment_mutation` helper in `bridge_service.py` is now the
+  shared tail for every alignment-mutating path (`_save_alignment`,
+  `undo_alignment`/`restore`) — it auto-marks the verse `completionState:
+  "completed"` the instant every word is grouped, no button click. The
+  manual "Mark alignment complete" button is removed; the existing "✓
+  Human-completed" label is kept as-is (explicit decision: don't rename to
+  "approved"). A new banner flags an incomplete verse in the popup itself;
+  the verse-list's existing per-verse indicator (`VerseList.svelte`, ●
+  complete/◐ partial/○ untouched/! invalid) needed no change — it was
+  already driven by the same data-derived `status`, not the button-gated
+  `completionState`.
+- Deliberately left alone: `alignment.complete`/`alignment.aiPropose`/
+  `alignment.aiApplyProposal` (backend + `bridgeClient.ts` wrappers) still
+  exist, just unreachable from any current UI — removing a still-tested,
+  independently-useful capability wasn't part of either issue's ask.
+
+Verified: full engine suite 321 passed (2 new tests added in
+`test_ai_review_auto_align.py`); `npm run check` 0 errors/0 warnings;
+`npm run build` succeeds.
 
 ## Stage 3 human validation workflow (2026-08-29)
 

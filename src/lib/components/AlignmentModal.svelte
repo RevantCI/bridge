@@ -5,7 +5,7 @@
     alignmentStatusByVerse, checkStatusByVerse, currentChapter, findingsByVerse,
     verseKey,
   } from "../stores";
-  import type { AlignmentAiProposal, AlignmentContext, AlignmentToken } from "../types/finding";
+  import type { AlignmentContext, AlignmentToken } from "../types/finding";
   import LexiconPopup from "./LexiconPopup.svelte";
 
   export let chapter: string;
@@ -21,11 +21,6 @@
   let selectedTop: string[] = [];
   let selectedBottom: string[] = [];
   let restoreId = "";
-
-  let aiBusy = false;
-  let aiError = "";
-  let proposal: AlignmentAiProposal | null = null;
-  let proposalCostUSD = 0;
 
   onMount(load);
 
@@ -45,6 +40,10 @@
   function toggle(list: string[], id: string): string[] {
     return list.includes(id) ? list.filter((value) => value !== id) : [...list, id];
   }
+
+  $: unalignedCount = context
+    ? context.bottomTokens.filter((item) => !targetGroup(item.id)).length
+    : 0;
 
   function label(token: AlignmentToken): string {
     return token.occurrences > 1 ? `${token.word} ${token.occurrence}/${token.occurrences}` : token.word;
@@ -113,10 +112,6 @@
     );
   }
 
-  function complete() {
-    void mutate(() => bridge.completeAlignment(chapter, verse), "Alignment marked complete.");
-  }
-
   function undo() {
     if (!context) return;
     void mutate(
@@ -131,46 +126,6 @@
       () => bridge.restoreAlignment(chapter, verse, restoreId, context!.alignment),
       "Selected alignment backup restored.",
     );
-  }
-
-  async function askAi() {
-    if (!context || aiBusy || busy) return;
-    aiBusy = true;
-    aiError = "";
-    proposal = null;
-    try {
-      const response = await bridge.aiProposeAlignment(chapter, verse, "gap_fill");
-      proposal = response.proposal;
-      proposalCostUSD = response.usage.estimatedCostUSD;
-    } catch (value) {
-      aiError = value instanceof Error ? value.message : String(value);
-    } finally {
-      aiBusy = false;
-    }
-  }
-
-  function dismissProposal() {
-    proposal = null;
-    aiError = "";
-  }
-
-  async function applyProposal() {
-    if (!context || !proposal || busy) return;
-    const toApply = proposal;
-    busy = true;
-    error = "";
-    notice = "";
-    try {
-      await refreshChecks(
-        await bridge.aiApplyAlignmentProposal(chapter, verse, toApply, context.alignment),
-        "AI-proposed alignment applied.",
-      );
-      proposal = null;
-    } catch (value) {
-      error = value instanceof Error ? value.message : String(value);
-    } finally {
-      busy = false;
-    }
   }
 </script>
 
@@ -203,6 +158,13 @@
           <strong>Original-language source unavailable</strong>
           <span>{context.sourceMessage}</span>
         </div>
+      {:else if unalignedCount > 0}
+        <div class="alignment-flag">
+          ⚑ Not fully aligned — {unalignedCount} target word{unalignedCount === 1 ? "" : "s"} still
+          {unalignedCount === 1 ? "needs" : "need"} a source word. Align the remaining word bank items below.
+        </div>
+      {:else if context.status === "invalid"}
+        <div class="alignment-flag">⚑ Alignment has structural issues — see below.</div>
       {/if}
 
       {#if context.issues.length > 0}
@@ -282,46 +244,7 @@
           disabled={busy || selectedBottom.length === 0 || selectedBottom.every((id) => !targetGroup(id))}
         >Unalign selected & save</button>
         <button on:click={() => { selectedTop = []; selectedBottom = []; }} disabled={busy}>Clear selection</button>
-        <button on:click={askAi} disabled={busy || aiBusy || !context.sourceAvailable}>
-          {aiBusy ? "Asking AI…" : "Ask AI to propose alignment"}
-        </button>
       </div>
-
-      {#if aiError}<div class="error">{aiError}</div>{/if}
-
-      {#if proposal}
-        <section class="ai-proposal">
-          <div class="panel-title">
-            <span>AI-proposed alignment (not yet applied)</span>
-            <small>~${proposalCostUSD.toFixed(4)} estimated</small>
-          </div>
-          {#if proposal.requires_human_review}
-            <div class="ai-review-flag">
-              ⚠ Needs review before applying
-              {#if proposal.conflicts.length}· {proposal.conflicts.length} conflicted link(s) were not applied{/if}
-              {#if proposal.uncertain_links.length}· {proposal.uncertain_links.length} medium-confidence link(s) omitted{/if}
-              {#if proposal.target_only_ids.length}· {proposal.target_only_ids.length} target word(s) left unaligned{/if}
-            </div>
-          {/if}
-          <div class="group-grid">
-            {#each proposal.groups.filter((g) => g.origin !== "existing") as group}
-              <div class="group-card proposal-card" class:incomplete={group.bottom_ids.length === 0}>
-                <span class="group-id">{group.origin}</span>
-                <span dir={context.sourceDirection}>{token(group.top_ids, "top") || "No source"}</span>
-                <span class="arrow">↔</span>
-                <span dir={context.targetDirection}>{token(group.bottom_ids, "bottom") || "Unaligned"}</span>
-              </div>
-            {:else}<p class="empty">AI found no changes beyond the existing alignment.</p>{/each}
-          </div>
-          {#each proposal.review_notes as note}<p class="ai-note">· {note}</p>{/each}
-          <div class="ai-proposal-actions">
-            <button class="primary" on:click={applyProposal} disabled={busy}>
-              {busy ? "Applying…" : "Apply proposal & save"}
-            </button>
-            <button on:click={dismissProposal} disabled={busy}>Discard proposal</button>
-          </div>
-        </section>
-      {/if}
 
       <section class="groups">
         <div class="panel-title"><span>Current alignment groups</span><small>Supports 1:1, 1:many, many:1 and many:many</small></div>
@@ -349,9 +272,6 @@
         </div>
         <div class="completion">
           {#if context.completionState === "completed"}<span class="completed">✓ Human-completed</span>{/if}
-          <button class="complete" on:click={complete} disabled={busy || !context.canComplete || context.completionState === "completed"}>
-            Mark alignment complete
-          </button>
         </div>
       </footer>
     {:else if error}
@@ -387,8 +307,9 @@
   .status.complete, .completed { color: var(--success); background: #EAF7EF; }
   .status.partial { color: var(--warning); background: var(--warning-bg); }
   .status.invalid, .danger { color: var(--danger); }
-  .source-warning, .issues, .notice, .error { border-radius: 9px; padding: 10px 12px; margin-bottom: 12px; font-size: 12px; line-height: 1.45; }
+  .source-warning, .issues, .notice, .error, .alignment-flag { border-radius: 9px; padding: 10px 12px; margin-bottom: 12px; font-size: 12px; line-height: 1.45; }
   .source-warning { display: flex; flex-direction: column; gap: 3px; background: var(--warning-bg); color: var(--warning); }
+  .alignment-flag { background: var(--warning-bg); color: var(--warning); font-weight: 600; }
   .issues { background: #FFF5F5; color: var(--danger); }
   .notice { background: #EAF7EF; color: var(--success); }
   .error { background: #FFF0F0; color: var(--danger); }
@@ -416,13 +337,7 @@
   }
   .token-wrap .info:hover { color: var(--accent); border-color: var(--accent); }
   .primary-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0; }
-  button.primary, button.complete { background: var(--accent); border-color: var(--accent); color: white; font-weight: 700; }
-  .ai-proposal { border: 1px solid var(--accent); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: var(--accent-bg); }
-  .ai-proposal .panel-title small { color: var(--text-2); }
-  .ai-review-flag { background: var(--warning-bg); color: var(--warning); border-radius: 7px; padding: 8px 10px; font-size: 11px; margin-bottom: 10px; }
-  .proposal-card { background: var(--surface); }
-  .ai-note { font-size: 11px; color: var(--text-2); margin: 4px 0; }
-  .ai-proposal-actions { display: flex; gap: 8px; margin-top: 10px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; font-weight: 700; }
   .groups { margin-bottom: 12px; }
   .group-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
   .group-card { display: grid; grid-template-columns: 42px 1fr 20px 1fr; gap: 7px; align-items: center; border: 1px solid var(--border); border-radius: 7px; padding: 8px; font-size: 11px; }
