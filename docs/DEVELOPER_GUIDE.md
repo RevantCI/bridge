@@ -54,7 +54,86 @@ reasons — this table is the fast way to see both.
 | **5** | Names & Transliteration (Uroman + Smart Edit Distance) | ✅ Done (2026-08-21). Whole-book spelling-consistency check wired into `verse.runChecks`'s existing `"local"` checks list — no frontend change needed. |
 | **6** | Alignment Intelligence (UAlign corpus stats) | ✅ Statistics engine done (2026-08-24). Turned out to need a real prerequisite not in the original plan: you can't compute stats over "human-approved alignments" with no way to create one — so the **manual word-alignment editor** (see `ALIGNMENT.md`) was built first, then corpus statistics (co-occurrence, translation probability, PMI, optional SED phonetic boost) computed from Bridge's own completed alignments — not a vendored `ualign.py`. Backend/protocol-only, two read-only methods, no UI yet. |
 | **7** | Paratext/Logos connectors, AI explain, drag-and-drop | ✅ All four slices have real work. AI alignment proposals and drag-and-drop are verified end-to-end. AI explain is wired to real materialized tN/tW evidence. The Paratext companion now performs identity-gated, idempotent Project Note handoff and has been manually verified against a running Paratext project, including sent-state persistence after restart. The Logos PowerShell/COM bridge is process/protocol tested, but actual COM calls remain unverified because Logos is not installed. |
-| *(Stage 3 follow-up)* | — | Language-independent semantic passage mapping and a 40-case IRVTam discovery queue are built. The Advanced validation UI now records exact-USFM-gated human confirmation/correction/rejection in an append-only companion audit. The next release gate is 15–20 human validations, confidence/relationship calibration, and installed Beta 15 acceptance. |
+| *(Stage 3 follow-up)* | — | Language-independent semantic passage mapping and a 40-case IRVTam discovery queue are built. All 40 Luke/Philippians proposals have now been human-reviewed and verified after restart: 38 confirmed, one corrected, and one rejected (95% combined proposal agreement). The remaining Beta 15 gate is to convert those decisions into sanitized regression fixtures, make only evidence-supported classification/confidence changes, and complete installed acceptance. |
+
+### Beta 15 developer handoff — 2026-08-31
+
+Start from `main` at `933d48c` (`feat(dashboard): split project dashboard into
+book list and report panels`) or a later descendant. The working tree was clean
+before this handoff update. The bundled proposal artifact remains
+[`validation/irvtam-semantic-mapping-candidates.json`](validation/irvtam-semantic-mapping-candidates.json):
+40 `MACHINE_PROPOSED` rows generated with `gpt-5.6`. Do not rewrite that file
+as though the model originally produced human-confirmed data.
+
+Manual installed-app validation is complete for every bundled candidate:
+
+| Book | Reviewed | Confirmed | Corrected | Rejected | Displayed agreement |
+|---|---:|---:|---:|---:|---:|
+| Luke | 28/28 | 27 | 1 | 0 | 96% |
+| Philippians | 12/12 | 11 | 0 | 1 | 92% |
+| **Combined** | **40/40** | **38** | **1** | **1** | **95%** |
+
+Bridge was restarted after review. Both book-specific decision sets and their
+calibration totals persisted. The reviewed set covers `SAME_VERSE`,
+`CROSS_VERSE`, `CROSS_VERSE_REORDERED`, `SPLIT_ACROSS_VERSES`,
+`MERGED_ACROSS_VERSES`, `REORDERED_WITHIN_VERSE`, `CLAUSE_MOVED`,
+`SENTENCE_REORDERED`, `PRONOMINALIZED`, `GRAMMATICALLY_ENCODED`, `IMPLICIT`,
+and `PARAPHRASED`. The known regression is explicitly human-confirmed:
+
+```text
+PHP 1:3  τῷ Θεῷ μου
+PHP 1:6  என் தேவனை
+CROSS_VERSE_REORDERED · PRESERVED · proposed confidence 0.99
+candidate a9d12c8a97e405ae0709
+```
+
+The two non-confirmed records require careful interpretation:
+
+- `dababa8fb3c5280df4c0` (LUK 3:34, `translate-names`) was saved as
+  `HUMAN_CORRECTED`. Its saved mapping has the two exact spans in LUK 3:33 and
+  3:34, `CROSS_VERSE + SPLIT_ACROSS_VERSES + PARAPHRASED`, `PRESERVED`, and
+  confidence `0.99`. That payload currently matches the machine proposal in
+  all material mapping fields. Treat it as proof of the correction workflow,
+  not as evidence that a relationship or threshold is wrong.
+- `a55017aa58d2d1fcb657` (PHP 1:5, translationWord `fellowship`) was rejected.
+  The rejected proposal mapped `τῇ κοινωνίᾳ` to
+  `நீங்கள் எங்களோடு ஊழியத்தில் ஐக்கியப்பட்டிருப்பதால்` in PHP 1:3 at
+  confidence `0.97`. The audit contains no reviewer note, so it establishes a
+  negative regression fixture but does **not** by itself justify a particular
+  prompt, relationship, or confidence adjustment. Obtain or derive explicit
+  linguistic evidence before changing production policy.
+
+The per-project source audits remain local companion data, not repository
+fixtures:
+
+```text
+%LOCALAPPDATA%\Bridge\data\projects\tam_irv_luk\.apps\translationCoreAI\semanticValidation\irvtam-v0.1.json
+%LOCALAPPDATA%\Bridge\data\projects\tam_irv_php\.apps\translationCoreAI\semanticValidation\irvtam-v0.1.json
+```
+
+Next implementation steps, in order:
+
+1. Export a sanitized, deterministic human-validation fixture keyed by
+   candidate ID, proposal manifest hash/fingerprint, expected decision, and
+   accepted/corrected mapping. Do not check in machine-specific paths or depend
+   on the mutable local audit files in tests.
+2. Add regressions for all 40 decisions, the PHP 1:3 → 1:6 sentinel, the
+   corrected multi-span contract, the rejected fellowship proposal, audit
+   persistence, and byte-identical USFM/native-selection preservation.
+3. Calibrate by confidence band and relationship. Do not lower global
+   safeguards or introduce Tamil-specific logic from one rejection. Any
+   classifier change must have a stated linguistic cause and its own fixture.
+4. Complete the remaining manual `Needs discussion` path. No `unsure` event is
+   present in the current audits, so QA item M32 is still partial even though
+   every proposal has a terminal confirm/correct/reject decision.
+5. Run the focused semantic suites, complete Python suite, Svelte check,
+   production frontend build, UI-state tests, Rust tests, frozen-sidecar smoke,
+   and NSIS packaging. Then perform installed Beta 15 upgrade/persistence,
+   validation, USFM-preservation, alignment, export, and Paratext acceptance.
+
+Do not mark Beta 15 complete merely from the 40/40 review count. The checked-in
+fixture, evidence-supported calibration decision, automated gates, exact
+artifact provenance, and installed acceptance are still release requirements.
 
 **Lesson worth keeping in mind for future phases:** every external
 integration attempted so far (Wildebeest, USFM checker, versification,
@@ -74,9 +153,9 @@ reading a doc's description — including this repo's own docs.
   performs explicit one-shot Paratext issue handoffs; the live Paratext path is
   verified, while Logos remains unverified against a running installation.
 - A dedicated UI panel for alignment corpus statistics (protocol-only today).
-- Human confirmation of the first 15–20 generated semantic mappings and a
-  second-language corpus validation; machine proposals remain unconfirmed
-  until that work is completed.
+- A second-language semantic-mapping corpus validation. The first IRVTam set is
+  now fully reviewed, but its sanitized regression fixture and Beta 15 release
+  gates described above are still pending.
 - Manual alignment does not invent source tokens — it requires original-
   language tokens already present from import.
 
