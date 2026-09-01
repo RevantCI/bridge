@@ -1,14 +1,19 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import AlignmentModal from "./AlignmentModal.svelte";
   import TranslationHelpsReview from "./TranslationHelpsReview.svelte";
   import { aiJobAppliesToReference, isAIReviewJobActive } from "../utils/aiJobScope";
+  import { findingNumbers } from "../utils/highlight";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
-    verseTexts, checkStatusByVerse, alignmentStatusByVerse, checkingProgress, verseKey,
+    checkStatusByVerse, checkingProgress, verseKey,
     aiCheckReviewsByVerse, nativeChecksByVerse, project, reviewerMode,
   } from "../stores";
+  import {
+    editingChapter, editingVerse, editText, editSaving, editError, editErrorKey,
+    recheckingKey, recheckedKey, startVerseEdit, cancelVerseEdit, setVerseEditSavedHook,
+  } from "../verseEditor";
   import type { AiExplainResult, AIReviewJobSnapshot, FindingStatus } from "../types/finding";
 
   let greekRoomChecking = false;
@@ -80,15 +85,6 @@
     }
   }
 
-  let editing = false;
-  let editText = "";
-  let editError: string | null = null;
-  let editSaving = false;
-  let editChapter = "";
-  let editVerse = "";
-  let recheckingKey = "";
-  let recheckedKey = "";
-  let editErrorKey = "";
   let alignmentOpen = false;
   let alignmentKey = "";
   let aiExplainError = "";
@@ -133,11 +129,11 @@
   }
 
   $: if (
-    editing && !editSaving && $selectedVerse &&
-    verseKey($currentChapter, $selectedVerse) !== verseKey(editChapter, editVerse)
+    $editingChapter && !$editSaving && $selectedVerse &&
+    verseKey($currentChapter, $selectedVerse) !== verseKey($editingChapter, $editingVerse)
   ) {
-    editing = false;
-    editError = null;
+    cancelVerseEdit();
+    editError.set("");
   }
 
   $: if (
@@ -309,83 +305,55 @@
   }
 
   function openAlignment() {
-    if (!$selectedVerse || $checkingProgress.running || editSaving || recheckingKey) return;
+    if (!$selectedVerse || $checkingProgress.running || $editSaving || $recheckingKey) return;
     alignmentKey = verseKey($currentChapter, $selectedVerse);
     alignmentOpen = true;
   }
 
   function startEdit() {
-    if (!$selectedVerse || $checkingProgress.running || editSaving || recheckingKey) return;
-    editChapter = $currentChapter;
-    editVerse = $selectedVerse;
-    editText = $verseTexts[verseKey(editChapter, editVerse)] ?? "";
-    editError = null;
-    editErrorKey = "";
-    editing = true;
+    startVerseEdit($currentChapter, $selectedVerse ?? "");
   }
 
-  async function saveEdit() {
-    if (!editChapter || !editVerse) return;
-    const chapter = editChapter;
-    const verse = editVerse;
-    const key = verseKey(chapter, verse);
-    if (editText.trim() === ($verseTexts[key] ?? "").trim()) {
-      // No real change — apply_scripture_edit rejects this as a no-op
-      // rather than journaling a spurious edit, so don't call it.
-      editing = false;
-      return;
-    }
-    editError = null;
-    editSaving = true;
-    try {
-      const editResult = await bridge.editVerse(chapter, verse, editText);
-      verseTexts.update((t) => ({ ...t, [key]: editText }));
-      aiCheckReviewsByVerse.update((values) => {
-        const next = { ...values };
-        delete next[key];
-        return next;
-      });
-      nativeChecksByVerse.update((values) => {
-        const next = { ...values };
-        delete next[key];
-        return next;
-      });
-      alignmentStatusByVerse.update((values) => ({ ...values, [key]: "invalid" }));
-      if ($selectedVerse && verseKey($currentChapter, $selectedVerse) === key) {
-        await translationHelpsReview?.refresh();
-      }
-      editing = false;
-      recheckingKey = key;
-      recheckedKey = "";
-      checkStatusByVerse.update((map) => ({ ...map, [key]: "pending" }));
+  onMount(() => {
+    setVerseEditSavedHook(({ chapter, verse, issueResolutionsNeedingRecheck }) => {
+      const key = verseKey(chapter, verse);
+      // Invalidate any live Greek-Room-only check still in flight from when
+      // this verse was first selected, so it can't resolve after this point
+      // and overwrite saveVerseEdit's own fresh (post-edit) findings with a
+      // stale pre-edit wildebeest result.
       latestLiveCheckByVerse.set(key, ++liveCheckSequence);
-      const findings = await bridge.runVerseChecks(chapter, verse, ["local", "greekroom"]);
-      findingsByVerse.update((map) => ({ ...map, [key]: findings }));
-      checkStatusByVerse.update((map) => ({ ...map, [key]: "succeeded" }));
-      recheckingKey = "";
-      recheckedKey = key;
-      if (editResult.issueResolutionsNeedingRecheck > 0) {
+      if ($selectedVerse && verseKey($currentChapter, $selectedVerse) === key) {
+        void translationHelpsReview?.refresh();
+      }
+      if (issueResolutionsNeedingRecheck > 0) {
         // A saved issue can only close against the edited text. Start the
         // evidence-grounded verse review automatically; failures remain visibly
         // stale/retryable and never restore the previous resolved state.
-        await startAIReview("verse", chapter, verse);
+        void startAIReview("verse", chapter, verse);
       }
-      window.setTimeout(() => {
-        if (recheckedKey === key) recheckedKey = "";
-      }, 3500);
-    } catch (e) {
-      recheckingKey = "";
-      checkStatusByVerse.update((map) => ({ ...map, [key]: "failed" }));
-      editError = e instanceof Error ? e.message : String(e);
-      editErrorKey = key;
-    } finally {
-      editSaving = false;
-    }
-  }
+    });
+  });
 
   const severityBadge: Record<string, string> = {
     high: "badge-wrong", medium: "badge-review", low: "badge-review", info: "badge-review",
   };
+
+  type ReviewTab = "greekroom" | "tntw" | "ai";
+  let activeTab: ReviewTab = "greekroom";
+  // The three real Greek Room engines (see each adapter's own engine_name:
+  // wildebeest_adapter.py, usfm_adapter.py, names_adapter.py) — everything
+  // else on a finding's `engine` field (tN/tW/alignment's own QAIssue.source,
+  // or "local" as its fallback) is native tC/Bridge QA, not Greek Room.
+  const GREEK_ROOM_ENGINES = new Set(["wildebeest", "usfm", "names"]);
+  function isGreekRoom(engine: string): boolean {
+    return GREEK_ROOM_ENGINES.has(engine);
+  }
+  $: greekRoomOpenCount = $selectedFindings.filter((f) => isGreekRoom(f.engine) && f.status === "open").length;
+  $: tntwOpenCount = $selectedFindings.filter((f) => !isGreekRoom(f.engine) && f.status === "open").length;
+  // Same cross-reference-style numbering shown inline in the verse text
+  // (VerseList.svelte) — both read $selectedFindings for the same verse,
+  // so the numbers line up without any shared state beyond that.
+  $: findingNumberMap = findingNumbers($selectedFindings);
 </script>
 
 <div class="panel">
@@ -397,27 +365,17 @@
       </div>
     </div>
 
-    <div class="panel-scroll">
-      {#if recheckingKey === verseKey($currentChapter, $selectedVerse)}
+    <div class="panel-pinned">
+      {#if $recheckingKey === verseKey($currentChapter, $selectedVerse)}
         <div class="operation-status checking"><span class="spin" /> Verse saved. Re-checking local and Greek Room QA…</div>
-      {:else if recheckedKey === verseKey($currentChapter, $selectedVerse)}
+      {:else if $recheckedKey === verseKey($currentChapter, $selectedVerse)}
         <div class="operation-status saved">✓ Verse saved and re-check completed.</div>
-      {:else if editError && editErrorKey === verseKey($currentChapter, $selectedVerse) && !editing}
-        <div class="operation-status failed">The verse was not fully rechecked: {editError}</div>
+      {:else if $editError && $editErrorKey === verseKey($currentChapter, $selectedVerse) && !$editingChapter}
+        <div class="operation-status failed">The verse was not fully rechecked: {$editError}</div>
       {/if}
 
-      {#if editing}
-        <div class="section">
-          <div class="section-title">Edit verse</div>
-          <textarea bind:value={editText} rows="3" />
-          {#if editError}<p class="edit-error">{editError}</p>{/if}
-          <div class="edit-actions">
-            <button class="accept" on:click={saveEdit} disabled={editSaving || editText.trim() === ""}>
-              {editSaving ? "Saving…" : "Save & re-check"}
-            </button>
-            <button class="cancel" on:click={() => (editing = false)} disabled={editSaving}>Cancel</button>
-          </div>
-        </div>
+      {#if $editingChapter === $currentChapter && $editingVerse === $selectedVerse}
+        <div class="operation-status checking">✎ Editing this verse in the left panel — save or cancel there.</div>
       {/if}
 
       <div class="section ai-review-controls">
@@ -467,115 +425,151 @@
         {/if}
         {#if visibleAIExplainError}<p class="ai-control-error">{visibleAIExplainError}</p>{/if}
       </div>
+    </div>
 
-      <TranslationHelpsReview
-        bind:this={translationHelpsReview}
-        chapter={$currentChapter}
-        verse={$selectedVerse}
-        onStateChanged={nativeCheckStateChanged}
-        onRerunAIReview={() => void startAIReview("verse")}
-        aiReviewBusy={$checkingProgress.running || aiJobBusy}
-      />
-
-      <div class="section">
-        <div class="section-title">
+    <div class="panel-scroll">
+      <div class="tabs" role="tablist" aria-label="Verse report">
+        <button
+          type="button" role="tab" aria-selected={activeTab === "greekroom"}
+          class:active={activeTab === "greekroom"} on:click={() => (activeTab = "greekroom")}
+        >
           Greek Room QA
-          {#if greekRoomChecking}
-            <span class="live"><span class="spin" /> live check</span>
-          {/if}
-        </div>
-        {#each $selectedFindings.filter((f) => f.engine === "wildebeest") as f}
-          <div class="finding">
-            <div class="verdict">
-              <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
-              <span class="check-id">{f.check_type}</span>
-              {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
-              {#if decisionSaveState[f.id] === "saving"}
-                <span class="save-state">Saving…</span>
-              {:else if decisionSaveState[f.id] === "saved"}
-                <span class="save-state saved">✓ Saved</span>
-              {:else if decisionSaveState[f.id] === "error"}
-                <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
-              {/if}
-            </div>
-            <p class="explain">{f.explanation}</p>
-            {#if f.evidence.length > 0}
-              <ul class="evidence">
-                {#each f.evidence as e}<li>{e.label}: {e.value}</li>{/each}
-              </ul>
-            {/if}
-            <div class="decision-row">
-              <button class="accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
-              <button class="reject" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
-              <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
-            </div>
-          </div>
-        {:else}
-          {#if !greekRoomChecking}<p class="none">No Greek Room findings.</p>{/if}
-        {/each}
+          {#if greekRoomChecking}<span class="tab-live" />{/if}
+          {#if greekRoomOpenCount > 0}<span class="tab-count">{greekRoomOpenCount}</span>{/if}
+        </button>
+        <button
+          type="button" role="tab" aria-selected={activeTab === "tntw"}
+          class:active={activeTab === "tntw"} on:click={() => (activeTab = "tntw")}
+        >
+          tN/tW/Alignment
+          {#if tntwOpenCount > 0}<span class="tab-count">{tntwOpenCount}</span>{/if}
+        </button>
+        <button
+          type="button" role="tab" aria-selected={activeTab === "ai"}
+          class:active={activeTab === "ai"} on:click={() => (activeTab = "ai")}
+        >AI explanation</button>
       </div>
 
-      <div class="section">
-        <div class="section-title">Already computed in background pass</div>
-        {#each $selectedFindings.filter((f) => f.engine !== "wildebeest") as f}
-          <div class="finding">
-            <div class="verdict">
-              <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
-              <span class="check-id">{f.category}</span>
-              {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
-              {#if decisionSaveState[f.id] === "saving"}
-                <span class="save-state">Saving…</span>
-              {:else if decisionSaveState[f.id] === "saved"}
-                <span class="save-state saved">✓ Saved</span>
-              {:else if decisionSaveState[f.id] === "error"}
-                <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
-              {/if}
+      <div class="tab-panel" role="tabpanel" hidden={activeTab !== "tntw"}>
+        <TranslationHelpsReview
+          bind:this={translationHelpsReview}
+          chapter={$currentChapter}
+          verse={$selectedVerse}
+          onStateChanged={nativeCheckStateChanged}
+          onRerunAIReview={() => void startAIReview("verse")}
+          aiReviewBusy={$checkingProgress.running || aiJobBusy}
+        />
+
+        <div class="section">
+          <div class="section-title">Already computed in background pass</div>
+          {#each $selectedFindings.filter((f) => !isGreekRoom(f.engine)) as f}
+            <div class="finding">
+              <div class="verdict">
+                {#if findingNumberMap.has(f.id)}<span class="finding-num-badge" title="Marked in the verse text">{findingNumberMap.get(f.id)}</span>{/if}
+                <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
+                <span class="check-id">{f.category}</span>
+                {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
+                {#if decisionSaveState[f.id] === "saving"}
+                  <span class="save-state">Saving…</span>
+                {:else if decisionSaveState[f.id] === "saved"}
+                  <span class="save-state saved">✓ Saved</span>
+                {:else if decisionSaveState[f.id] === "error"}
+                  <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
+                {/if}
+              </div>
+              <p class="explain">{f.explanation}</p>
             </div>
-            <p class="explain">{f.explanation}</p>
-            <div class="decision-row">
-              <button class="accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
-              <button class="reject" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
-              <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
-            </div>
-          </div>
-        {:else}
-          <p class="none">No local QA findings.</p>
-        {/each}
+          {:else}
+            <p class="none">No local QA findings.</p>
+          {/each}
+        </div>
       </div>
 
-      {#if visibleAIExplainError}
-        <div class="section ai-explain-section">
-          <div class="section-title">AI explanation</div>
-          <p class="ai-error">{visibleAIExplainError}</p>
-        </div>
-      {:else if aiExplainResult}
-        <div class="section ai-explain-section">
-          <div class="section-title">
-            AI explanation
-            <span class="ai-cost">~${aiExplainResult.usage.estimatedCostUSD.toFixed(4)}</span>
+      {#if activeTab === "greekroom"}
+        <div class="tab-panel" role="tabpanel">
+          <div class="section">
+            <div class="section-title">
+              Greek Room QA
+              {#if greekRoomChecking}
+                <span class="live"><span class="spin" /> live check</span>
+              {/if}
+            </div>
+            {#each $selectedFindings.filter((f) => isGreekRoom(f.engine)) as f}
+              <div class="finding">
+                <div class="verdict">
+                  {#if findingNumberMap.has(f.id)}<span class="finding-num-badge" title="Marked in the verse text">{findingNumberMap.get(f.id)}</span>{/if}
+                  <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
+                  <span class="engine-badge">{f.engine}</span>
+                  <span class="check-id">{f.check_type}</span>
+                  {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
+                  {#if decisionSaveState[f.id] === "saving"}
+                    <span class="save-state">Saving…</span>
+                  {:else if decisionSaveState[f.id] === "saved"}
+                    <span class="save-state saved">✓ Saved</span>
+                  {:else if decisionSaveState[f.id] === "error"}
+                    <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
+                  {/if}
+                </div>
+                <p class="explain">{f.explanation}</p>
+                {#if f.evidence.length > 0}
+                  <ul class="evidence">
+                    {#each f.evidence as e}<li>{e.label}: {e.value}</li>{/each}
+                  </ul>
+                {/if}
+                <div class="decision-row two-up">
+                  <button
+                    class="edit-inline"
+                    on:click={startEdit}
+                    disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
+                    title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
+                  >✎ Edit verse</button>
+                  <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
+                </div>
+              </div>
+            {:else}
+              {#if !greekRoomChecking}<p class="none">No Greek Room findings.</p>{/if}
+            {/each}
           </div>
-          <p class="ai-summary">{aiExplainResult.summary}</p>
-          {#each aiExplainResult.checkReviews as review}
-            <div class="finding ai-check-review">
-              <div class="verdict">
-                <span class="badge {severityBadge[review.severity] ?? 'badge-review'}">{review.verdict}</span>
-                <span class="check-id">{review.tool}{review.group_id ? ` · ${review.group_id}` : ""}</span>
-              </div>
-              <p class="explain">{review.rationale}</p>
-              {#if review.suggested_correction}<p class="ai-suggestion">Suggested: {review.suggested_correction}</p>{/if}
+        </div>
+      {:else if activeTab === "ai"}
+        <div class="tab-panel" role="tabpanel">
+          {#if visibleAIExplainError}
+            <div class="section ai-explain-section">
+              <div class="section-title">AI explanation</div>
+              <p class="ai-error">{visibleAIExplainError}</p>
             </div>
-          {/each}
-          {#each aiExplainResult.qaIssues as issue}
-            <div class="finding ai-qa-issue">
-              <div class="verdict">
-                <span class="badge {severityBadge[issue.severity] ?? 'badge-review'}">{issue.severity}</span>
-                <span class="check-id">{issue.title}</span>
+          {:else if aiExplainResult}
+            <div class="section ai-explain-section">
+              <div class="section-title">
+                AI explanation
+                <span class="ai-cost">~${aiExplainResult.usage.estimatedCostUSD.toFixed(4)}</span>
               </div>
-              <p class="explain">{issue.detail}</p>
+              <p class="ai-summary">{aiExplainResult.summary}</p>
+              {#each aiExplainResult.checkReviews as review}
+                <div class="finding ai-check-review">
+                  <div class="verdict">
+                    <span class="badge {severityBadge[review.severity] ?? 'badge-review'}">{review.verdict}</span>
+                    <span class="check-id">{review.tool}{review.group_id ? ` · ${review.group_id}` : ""}</span>
+                  </div>
+                  <p class="explain">{review.rationale}</p>
+                  {#if review.suggested_correction}<p class="ai-suggestion">Suggested: {review.suggested_correction}</p>{/if}
+                </div>
+              {/each}
+              {#each aiExplainResult.qaIssues as issue}
+                <div class="finding ai-qa-issue">
+                  <div class="verdict">
+                    <span class="badge {severityBadge[issue.severity] ?? 'badge-review'}">{issue.severity}</span>
+                    <span class="check-id">{issue.title}</span>
+                  </div>
+                  <p class="explain">{issue.detail}</p>
+                </div>
+              {/each}
+              {#if aiExplainResult.checkReviews.length === 0 && aiExplainResult.qaIssues.length === 0}
+                <p class="none">AI found nothing to flag for this verse.</p>
+              {/if}
             </div>
-          {/each}
-          {#if aiExplainResult.checkReviews.length === 0 && aiExplainResult.qaIssues.length === 0}
-            <p class="none">AI found nothing to flag for this verse.</p>
+          {:else}
+            <p class="none">No AI explanation yet for this verse — run "AI review" below.</p>
           {/if}
         </div>
       {/if}
@@ -586,19 +580,19 @@
       <button
         class="align-btn"
         on:click={openAlignment}
-        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey)}
+        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
         title={$checkingProgress.running ? "Wait for background checking to finish before aligning" : "Review word alignment"}
       >⇄ Align words</button>
       <button
         class="edit-btn"
         on:click={startEdit}
-        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey)}
+        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
         title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
       >✎ Edit verse</button>
       <button
         class="ai-explain-btn"
         on:click={() => startAIReview("verse")}
-        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey) || aiJobBusy}
+        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey) || aiJobBusy}
         title="Run an evidence-grounded AI review for this verse in the background"
       >🤖 AI review</button>
     </div>
@@ -614,6 +608,7 @@
 <style>
   .panel { width: 400px; flex-shrink: 0; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); }
   .panel-header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .panel-pinned { flex-shrink: 0; padding: 14px 16px; border-bottom: 1px solid var(--border); overflow-y: auto; max-height: 60vh; }
   .ref { font-size: 13px; font-weight: 700; color: var(--text); }
   .sub { font-size: 11px; color: var(--text-2); margin-top: 2px; }
   .panel-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; }
@@ -621,6 +616,22 @@
   .operation-status.checking { color: var(--accent); background: var(--accent-bg); }
   .operation-status.saved { color: var(--success); background: var(--success-bg); }
   .operation-status.failed { color: var(--danger); background: var(--danger-bg); }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+  .tabs button {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 8px 6px; font-size: 10.5px; font-weight: 700; color: var(--text-2);
+    background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+    cursor: pointer;
+  }
+  .tabs button:hover:not(.active) { color: var(--text); }
+  .tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-count {
+    font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+    background: var(--accent-bg); color: var(--accent);
+  }
+  .tabs button.active .tab-count { background: var(--accent); color: white; }
+  .tab-live { width: 6px; height: 6px; border-radius: 50%; background: var(--gr); flex-shrink: 0; }
+  .tab-panel:empty { display: none; }
   .section { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
   .section-title { font-size: 11px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .live { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; color: var(--gr); }
@@ -628,30 +639,31 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .finding { border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 10px; }
   .finding:first-child { border-top: none; padding-top: 0; margin-top: 0; }
-  .verdict { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 5px; }
+  .verdict { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 6px; }
+  .badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 5px; flex-shrink: 0; }
   .badge-wrong { background: var(--danger-bg); color: var(--danger); }
   .badge-review { background: var(--warning-bg); color: var(--warning); }
   .badge-decided { background: var(--success-bg); color: var(--success); text-transform: capitalize; }
-  .check-id { font-size: 11px; color: var(--text-3); }
+  .check-id { font-size: 11px; color: var(--text-3); min-width: 0; overflow-wrap: anywhere; }
+  .engine-badge { font-size: 9px; font-weight: 700; text-transform: capitalize; color: var(--accent); background: var(--accent-bg); padding: 2px 7px; border-radius: 999px; flex-shrink: 0; }
+  .finding-num-badge {
+    display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+    font-size: 9px; font-weight: 800; color: white; background: var(--accent); border-radius: 50%;
+    flex-shrink: 0;
+  }
   .save-state { margin-left: auto; font-size: 10px; color: var(--text-3); white-space: nowrap; }
   .save-state.saved { color: var(--success); }
   .save-state.failed { color: var(--danger); }
   .explain { font-size: 12px; color: var(--text-2); line-height: 1.6; margin: 0 0 8px; }
   .evidence { font-size: 11px; color: var(--text-2); padding-left: 16px; margin: 0 0 8px; }
   .decision-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .decision-row.two-up { grid-template-columns: 1fr 1fr; }
   .decision-row button { padding: 7px; font-size: 11px; font-weight: 700; border-radius: 6px; border: none; cursor: pointer; }
   .accept { background: var(--success); color: #fff; }
-  .reject { background: var(--danger); color: #fff; }
   .ignore { background: #F5EBFC; color: #9333EA; }
+  .edit-inline { background: var(--accent-bg); color: var(--accent); }
   .none { font-size: 11px; color: var(--text-3); }
-  textarea { width: 100%; font-size: 14px; padding: 8px; border: 1px solid var(--accent); border-radius: 6px; font-family: inherit; margin-bottom: 8px; }
-  .edit-error { color: var(--danger); font-size: 11px; margin: -4px 0 8px; line-height: 1.4; }
-  .edit-actions { display: flex; gap: 6px; }
-  .edit-actions button { flex: 1; padding: 7px; font-size: 11px; font-weight: 700; border-radius: 6px; cursor: pointer; }
-  .edit-actions .accept { border: none; }
-  .cancel { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
-  .decision-row button:disabled, .edit-actions button:disabled { opacity: .55; cursor: not-allowed; }
+  .decision-row button:disabled { opacity: .55; cursor: not-allowed; }
   .footer-actions { padding: 12px 16px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .edit-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
   .align-btn, .ai-explain-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }

@@ -16,6 +16,28 @@ export interface TextSegment {
   findingIds: string[];
   className: string | null;
   title: string;
+  numbers: number[];
+}
+
+/**
+ * Deterministic 1-based numbering, in verse reading order, for findings
+ * anchored to an exact word/phrase span — the same cross-reference-style
+ * marker shown both inline in the verse (buildSegments) and next to each
+ * finding in ReviewPanel, so a reader can spot which highlighted word a
+ * list entry refers to without hunting for it. Findings with no span
+ * (most tN/tW/alignment QAIssues — verse-level, not word-level) aren't
+ * numbered, matching buildSegments' own existing offset filter. Callers
+ * must pass the same verse's finding list to both sides for the numbers
+ * to line up — true today since ReviewPanel's $selectedFindings and
+ * VerseList's findingsByVerse[key] both read the exact same store entry.
+ */
+export function findingNumbers(findings: QaFinding[]): Map<string, number> {
+  const spanned = findings
+    .filter((f) => f.start_offset !== null && f.end_offset !== null)
+    .sort((a, b) => (a.start_offset! - b.start_offset!) || a.id.localeCompare(b.id));
+  const numbers = new Map<string, number>();
+  spanned.forEach((f, index) => numbers.set(f.id, index + 1));
+  return numbers;
 }
 
 export interface ExactTextRange {
@@ -42,6 +64,7 @@ interface ReviewSpan extends ExactTextRange {
   id: string;
   className: string;
   title: string;
+  number?: number;
 }
 
 /**
@@ -58,11 +81,13 @@ export function buildSegments(
   nativeChecks: NativeCheckReview[] = [],
   aiReviews: AiCheckReview[] = [],
 ): TextSegment[] {
+  const numbers = findingNumbers(findings);
   const spans: ReviewSpan[] = findings
     .filter((f) => f.start_offset !== null && f.end_offset !== null && f.end_offset! <= text.length)
     .map((finding) => ({
       start: finding.start_offset!, end: finding.end_offset!, id: finding.id,
       className: categoryClass(finding.category), title: finding.explanation,
+      number: numbers.get(finding.id),
     }));
 
   for (const check of nativeChecks) {
@@ -112,7 +137,7 @@ export function buildSegments(
   }
 
   if (spans.length === 0) {
-    return [{ text, findingIds: [], className: null, title: "" }];
+    return [{ text, findingIds: [], className: null, title: "", numbers: [] }];
   }
 
   const boundaries = new Set<number>([0, text.length]);
@@ -133,6 +158,9 @@ export function buildSegments(
       findingIds: Array.from(new Set(covering.map((span) => span.id))),
       className: classes.length > 0 ? classes.join(" ") : null,
       title: Array.from(new Set(covering.map((span) => span.title).filter(Boolean))).join("\n\n"),
+      numbers: Array.from(new Set(
+        covering.map((span) => span.number).filter((n): n is number => n !== undefined),
+      )).sort((a, b) => a - b),
     });
   }
   return segments;

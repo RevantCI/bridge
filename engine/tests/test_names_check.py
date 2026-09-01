@@ -64,6 +64,15 @@ def test_names_check_surfaces_a_real_spelling_inconsistency(spelling_fixture_pro
     assert finding["engine"] == "names"
     assert finding["original_text"] == "Tituss"
     assert finding["suggested_replacement"] == "Titus"
+    # NamesAdapter itself never sees verse text (only token_occurrences), so
+    # _names_findings_for_book must compute the span — real offsets into the
+    # exact verse text, not just an anchor at (chapter, verse), so the
+    # frontend can both highlight the flagged word inline and number it
+    # (see highlight.ts's findingNumbers/buildSegments).
+    verse_text = "In everything show yourself an example, Tituss my son."
+    assert finding["start_offset"] is not None
+    assert finding["end_offset"] is not None
+    assert verse_text[finding["start_offset"]:finding["end_offset"]] == "Tituss"
 
     # Doesn't leak onto an unrelated verse that has no spelling issue.
     clean = call(engine, "verse.runChecks", {"chapter": "1", "verse": "1", "checks": ["names"]})

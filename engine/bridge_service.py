@@ -122,6 +122,28 @@ def _stable_finding_id(*, chapter: str, verse: str, engine: str,
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:20]
 
 
+_WHITESPACE_TOKEN_TRIM_CHARS = ' \t\r\n.,;:!?“”‘’"\'()[]{}<>—–…।॥'
+
+
+def _first_token_span(text: str, token: str) -> Optional[tuple[int, int]]:
+    """Locate `token`'s first whole-word occurrence in `text`, using the
+    same whitespace + punctuation-trim boundary rule as tc_ai_bridge.usfm's
+    whitespace_tokens — but computed directly against the caller's raw
+    string rather than that function's strip_usfm()'d copy, since the
+    result must index into the exact same string a QaFinding's
+    start_offset/end_offset is highlighted against on the frontend, and
+    strip_usfm's whitespace collapsing can shift character positions."""
+    for match in re.finditer(r"\S+", text):
+        raw = match.group()
+        stripped = raw.strip(_WHITESPACE_TOKEN_TRIM_CHARS)
+        if stripped != token:
+            continue
+        offset = raw.index(stripped)
+        start = match.start() + offset
+        return start, start + len(stripped)
+    return None
+
+
 def _categorize_qaissue(issue: QAIssue) -> FindingCategory:
     """Maps tc_ai_bridge's QAIssue codes to our shared FindingCategory,
     based on the real code/title patterns in local_checks.py — NOT a
@@ -317,19 +339,13 @@ class BridgeEngine:
         # invalidated by verse.edit either, see _names_findings_for_book.
         self._names_findings_by_book: dict[str, list[QaFinding]] = {}
         self._names_errors_by_book: dict[str, str] = {}
-        # Wildebeest findings historically had no persistence at all — computed
-        # live, per-verse, only when a user opened that verse in the editor
+        # Wildebeest findings have no whole-book cache: they're computed
+        # live, per-verse, only when a user opens that verse in the editor
         # (ReviewPanel.svelte's runVerseChecks(["greekroom"]) on selection).
-        # That left the project report's exception queue blank for any verse
-        # nobody had opened yet in the current session (issue #24). This cache
-        # exists ONLY for report-building (see build_project_report) — the
-        # live per-verse "greekroom" check in _run_verse_checks_for_project
-        # deliberately stays uncached so interactive editing stays fast;
-        # forcing a whole-book recompute on every keystroke-level check would
-        # be a real regression there. Cached the same way as names findings:
-        # keyed on a hash of every verse's current target text, so a
-        # verse.edit between opens correctly invalidates it on next reopen.
-        self._wildebeest_findings_by_book: dict[str, list[QaFinding]] = {}
+        # A whole-book Wildebeest cache was tried for the project report's
+        # exception queue (issue #24) and reverted the same day — see
+        # build_project_report's docstring for why computing it inline
+        # there is unsafe (blocks the single-threaded stdio dispatcher).
         # Layer-2 corpus-consistency findings (see _consistency_findings_for_book)
         # — whole-book like USFM/names above, and for the same reason: this
         # scans every completed verse's alignment, too slow to redo per verse.
@@ -385,7 +401,6 @@ class BridgeEngine:
         self._versification_by_book.clear()
         self._names_findings_by_book.clear()
         self._names_errors_by_book.clear()
-        self._wildebeest_findings_by_book.clear()
         self._consistency_findings_by_book.clear()
         self._corpus_stats_by_book.clear()
         materialize_lazy_project(path)
@@ -664,24 +679,23 @@ class BridgeEngine:
         now, same as ReportService itself; a whole-collection rollup is a
         separate, larger piece of work (multi-book aggregation).
 
-        Warms the three whole-book local-finding caches before handing off
-        to ReportService, which only ever reads already-persisted state
-        (see its own docstring) and never triggers computation itself —
-        without this, a verse nobody had opened yet in the current session
-        would have no Wildebeest data for exception_first_queue to read
-        (issue #24). Best-effort: a broken checker install must degrade
-        that one engine's coverage, not the whole report.
+        Deliberately does NOT warm the local-finding caches here (tried in
+        issue #24, reverted the same day): the stdio dispatcher in
+        stdio_transport.py is a single-threaded `for line in sys.stdin`
+        loop — nothing else the sidecar does is concurrent with a request
+        handler. project.report is called on every book/dashboard view, so
+        synchronously computing whole-book USFM/Names/Wildebeest here (fast
+        enough on a 1-2 verse test fixture to look fine) blocked the entire
+        sidecar long enough on a real ~800-verse book (1 Samuel) that even
+        an unrelated project.open for a different book queued behind it and
+        timed out client-side. exception_first_queue still merges whatever
+        local findings already happen to be cached (from a prior
+        verse.runChecks/checks.start pass) — a book nobody has opened at
+        all in this session just won't have any yet, same as before #24.
+        Warming these safely needs a background job (CheckJobManager/
+        AIReviewJobManager's own pattern), not inline in this handler.
         """
         self._require_project()
-        with self._checker_lock:
-            for warm in (
-                self._usfm_findings_for_book, self._names_findings_for_book,
-                self._wildebeest_findings_for_book,
-            ):
-                try:
-                    warm(self.project)
-                except Exception:
-                    pass
         return ReportService(self.project).build_book_report()
 
     def _sibling_sweep_books(self) -> list[SweepBook]:
@@ -2020,8 +2034,13 @@ class BridgeEngine:
             raise NamesCheckError(cached_error)
 
         text_map = self._book_verse_text_map(project)
+        # "|spans-v1" forces a one-time cache invalidation for on-disk
+        # checkCache.json sections written before findings carried
+        # start_offset/end_offset — otherwise a content-hash match on
+        # unchanged verse text would keep silently returning the older,
+        # offset-less cached findings.
         content_hash = hashlib.sha256(
-            "\n".join(f"{k}={v}" for k, v in sorted(text_map.items())).encode("utf-8")
+            ("\n".join(f"{k}={v}" for k, v in sorted(text_map.items())) + "|spans-v1").encode("utf-8")
         ).hexdigest()
         cached_section = project.load_check_cache().get("names") or {}
         if cached_section.get("contentHash") == content_hash:
@@ -2059,6 +2078,16 @@ class BridgeEngine:
                 chapter=str(f.chapter), verse=str(f.verse), engine=f.engine,
                 check_type=f.check_type, disambiguator=disambiguator,
             )
+            # NamesAdapter deliberately never sees verse text (only
+            # token_occurrences), so it can't compute a span itself — do it
+            # here, against the exact same raw text_map string the frontend
+            # highlights into, not whitespace_tokens' strip_usfm'd copy
+            # (which can shift character positions via whitespace collapse).
+            verse_text = text_map.get(f"{f.chapter}:{f.verse}")
+            if verse_text:
+                span = _first_token_span(verse_text, f.original_text)
+                if span:
+                    f.start_offset, f.end_offset = span
         # Persist after id stabilization (see USFM above — same reasoning).
         # The hash is over current verse text, so an edit_verse call between
         # opens correctly invalidates this on the next reopen, unlike the
@@ -2067,59 +2096,6 @@ class BridgeEngine:
             "names", content_hash, [f.to_dict() for f in findings],
         )
         self._names_findings_by_book[book_key] = findings
-        return findings
-
-    def _wildebeest_findings_for_book(
-        self, project: Optional[TranslationCoreProject] = None,
-    ) -> list[QaFinding]:
-        """Lazily compute + cache whole-book Wildebeest findings, for
-        report-building only — see the cache dict's own docstring in
-        __init__ for why this exists alongside the live per-verse
-        "greekroom" check rather than replacing it."""
-        project = project or self.project
-        if project is None:
-            raise ProjectError("No project open — call project.open first")
-        book_key = str(project.path)
-        cached = self._wildebeest_findings_by_book.get(book_key)
-        if cached is not None:
-            return cached
-
-        text_map = self._book_verse_text_map(project)
-        content_hash = hashlib.sha256(
-            "\n".join(f"{k}={v}" for k, v in sorted(text_map.items())).encode("utf-8")
-        ).hexdigest()
-        cached_section = project.load_check_cache().get("wildebeest") or {}
-        if cached_section.get("contentHash") == content_hash:
-            findings = [QaFinding.from_dict(d) for d in cached_section.get("findings", [])]
-            self._wildebeest_findings_by_book[book_key] = findings
-            return findings
-
-        project_id = str(project.summary.path)
-        book = project.summary.book_id
-        target = project.manifest.get("target_language", {})
-        language_id = str(target.get("id") or "") if isinstance(target, dict) else ""
-        findings = []
-        for ref, text in text_map.items():
-            chapter, _, verse = ref.partition(":")
-            verse_findings = self.greek_room.check_verse(
-                project_id=project_id, lang_code=language_id,
-                ref=f"{book} {chapter}:{verse}", text=text, checks=["wildebeest"],
-            )
-            for f in verse_findings:
-                # Same stable-id formula as the live per-verse path (see
-                # run_verse_checks below) so a decision recorded against a
-                # finding from one path still matches when the other path
-                # produces "the same" finding.
-                f.id = _stable_finding_id(
-                    chapter=chapter, verse=verse, engine=f.engine,
-                    check_type=f.check_type,
-                    disambiguator=f"{f.start_offset}:{f.end_offset}:{f.original_text}",
-                )
-            findings.extend(verse_findings)
-        project.save_check_cache_section(
-            "wildebeest", content_hash, [f.to_dict() for f in findings],
-        )
-        self._wildebeest_findings_by_book[book_key] = findings
         return findings
 
     # Heuristic thresholds for _consistency_findings_for_book — unlike the
