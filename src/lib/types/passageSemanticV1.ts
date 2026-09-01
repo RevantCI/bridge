@@ -15,7 +15,7 @@ export type Cardinality = "ONE_TO_ONE" | "ONE_TO_MANY" | "MANY_TO_ONE" | "MANY_T
 export type SemanticUnitKind = "LEXICAL" | "MORPHOLOGICAL" | "NEGATION" | "QUANTIFIER" | "PARTICIPANT" | "REFERENT" | "PREDICATE" | "SEMANTIC_ROLE" | "CLAUSE" | "CLAUSE_RELATION" | "DISCOURSE_RELATION" | "IMPLICIT_GRAMMATICAL" | "IDIOM" | "CONSTRUCTION" | "TEMPORAL" | "SPATIAL";
 export type DependencyRelation = "CONTAINS" | "DEPENDS_ON" | "DERIVED_FROM" | "REFINES";
 export type SemanticRelation = "COREFERS_WITH" | "COEXTENSIVE_WITH" | "MODIFIES" | "NEGATES" | "QUANTIFIES" | "PARTICIPANT_OF" | "ARGUMENT_OF" | "SEMANTICALLY_RELATED";
-export type SemanticUnitProvenance = "CANONICAL_RESOURCE" | "DETERMINISTIC_RULE" | "RESOURCE_ENRICHED" | "AI_PROPOSED" | "HUMAN_DEFINED" | "IMPORTED_TC" | "IMPORTED_STAGE3" | "MIGRATION";
+export type SemanticUnitProvenance = "CANONICAL_RESOURCE" | "DETERMINISTIC_RULE" | "LANGUAGE_ANALYZER" | "RESOURCE_ENRICHED" | "AI_PROPOSED" | "HUMAN_DEFINED" | "IMPORTED_TC" | "IMPORTED_STAGE3" | "MIGRATION";
 export type AuditEligibility = "ELIGIBLE" | "CONDITIONAL" | "AGGREGATE_ONLY" | "EXCLUDED" | "REVIEW_ONLY";
 export type SemanticObligationStrength = "REQUIRED" | "CONTEXT_DEPENDENT" | "GRAMMATICAL" | "DERIVED" | "NON_OBLIGATORY" | "UNCERTAIN";
 export type CoverageAccountingRole = "PRIMARY" | "COMPONENT" | "AGGREGATE" | "EVIDENCE_ONLY";
@@ -514,6 +514,89 @@ export interface SourceSemanticInventory {
   coverageAccounts: SourceInventoryCoverageAccount[];
   evidence: EvidenceRecord[];
   diagnostics: SourceInventoryDiagnostics;
+  cacheStatus: "MISS" | "HIT";
+}
+
+export type CapabilityAvailability = "AVAILABLE" | "UNAVAILABLE" | "FALLBACK" | "STRUCTURAL_FALLBACK";
+export type TargetSpanKind = "TOKEN" | "SUBTOKEN" | "PHRASE" | "STRUCTURAL_SEGMENT" | "CLAUSE" | "SENTENCE";
+export type TargetNeighborhoodScope = "NORMALIZED_VERSE" | "STRUCTURAL_SENTENCE" | "PARAGRAPH" | "ADJACENT_STRUCTURAL_SEGMENT" | "SELECTED_PASSAGE" | "CHAPTER_BOUNDARY_CONTINUATION";
+
+export interface TargetLanguageCapabilities {
+  languageTag: string;
+  script: string;
+  direction: "LTR" | "RTL";
+  tokenization: "AVAILABLE" | "FALLBACK";
+  morphology: "AVAILABLE" | "UNAVAILABLE";
+  pos: "AVAILABLE" | "UNAVAILABLE";
+  dependencySyntax: "AVAILABLE" | "UNAVAILABLE";
+  sentenceBoundary: "AVAILABLE" | "STRUCTURAL_FALLBACK";
+  coreference: "AVAILABLE" | "UNAVAILABLE";
+  semanticRoles: "AVAILABLE" | "UNAVAILABLE";
+  tokenizerProfile: string;
+  normalizationProfile: string;
+  providers: Array<{ id: string; version: string }>;
+}
+
+export interface TargetSearchSpan {
+  id: string;
+  kind: TargetSpanKind;
+  displayedReference: string;
+  tokenInstanceIds: string[];
+  startCodePoint: number;
+  endCodePoint: number;
+  quote: string;
+  quoteSha256: string;
+  targetRevision: string;
+  spanPolicyVersion: string;
+  analysis?: string;
+  providerId?: string;
+  providerVersion?: string;
+}
+
+export interface TargetSearchNeighborhood {
+  id: string;
+  scopeKind: TargetNeighborhoodScope;
+  displayedReferences: string[];
+}
+
+export interface TargetInventoryDiagnostics {
+  targetCharacters: number;
+  graphemeClusters: number;
+  orthographicTokens: number;
+  subtokensMorphemes: number;
+  targetSemanticUnits: number;
+  lexicalUnits: number;
+  grammaticalUnits: number;
+  negationUnits: number;
+  quantifierUnits: number;
+  participantUnits: number;
+  predicateUnits: number;
+  clauses: number;
+  analyzerDerivedUnits: number;
+  reviewOnlyUnits: number;
+  unknownUnsegmentedSpans: number;
+  searchSpans: number;
+  searchNeighborhoods: number;
+}
+
+export interface TargetSemanticInventory {
+  id: string;
+  book: string;
+  rangeKey: string;
+  canonicalReferences: string[];
+  fingerprint: string;
+  targetSemanticFingerprint: string;
+  targetRevision: string;
+  targetContentHash: string;
+  targetInventoryEngineVersion: string;
+  spanPolicyVersion: string;
+  capabilities: TargetLanguageCapabilities;
+  tokens: TokenInstance[];
+  units: SemanticUnit[];
+  searchSpans: TargetSearchSpan[];
+  searchNeighborhoods: TargetSearchNeighborhood[];
+  structureMarkers: PassageStructureMarker[];
+  diagnostics: TargetInventoryDiagnostics;
   cacheStatus: "MISS" | "HIT";
 }
 

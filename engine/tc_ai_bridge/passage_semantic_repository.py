@@ -43,7 +43,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 3
+DATABASE_SCHEMA_VERSION = 4
 
 
 class FoundationError(RuntimeError):
@@ -447,6 +447,58 @@ CREATE TABLE source_inventory_evidence (
 """
 
 
+_MIGRATION_V4 = r"""
+CREATE TABLE target_inventory_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    book TEXT NOT NULL,
+    range_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    target_revision TEXT NOT NULL,
+    target_content_hash TEXT NOT NULL,
+    language_id TEXT NOT NULL,
+    tokenizer_version TEXT NOT NULL,
+    analyzer_registry_version TEXT NOT NULL,
+    structure_hash TEXT NOT NULL,
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    diagnostics_json TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, book, range_key, fingerprint)
+);
+CREATE INDEX ix_target_inventory_range
+ON target_inventory_runs(project_id, book, range_key, lifecycle_status);
+
+CREATE TABLE target_inventory_tokens (
+    inventory_id TEXT NOT NULL REFERENCES target_inventory_runs(id) ON DELETE CASCADE,
+    token_instance_id TEXT NOT NULL REFERENCES token_instances(id),
+    PRIMARY KEY(inventory_id, token_instance_id)
+);
+CREATE TABLE target_inventory_units (
+    inventory_id TEXT NOT NULL REFERENCES target_inventory_runs(id) ON DELETE CASCADE,
+    semantic_unit_id TEXT NOT NULL REFERENCES semantic_units(id),
+    PRIMARY KEY(inventory_id, semantic_unit_id)
+);
+CREATE TABLE target_search_spans (
+    id TEXT NOT NULL,
+    inventory_id TEXT NOT NULL REFERENCES target_inventory_runs(id) ON DELETE CASCADE,
+    displayed_reference TEXT NOT NULL,
+    span_kind TEXT NOT NULL CHECK(span_kind IN ('TOKEN','SUBTOKEN','PHRASE','STRUCTURAL_SEGMENT','CLAUSE','SENTENCE')),
+    start_code_point INTEGER NOT NULL,
+    end_code_point INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY(inventory_id, id)
+);
+CREATE TABLE target_search_neighborhoods (
+    id TEXT PRIMARY KEY,
+    inventory_id TEXT NOT NULL REFERENCES target_inventory_runs(id) ON DELETE CASCADE,
+    scope_kind TEXT NOT NULL CHECK(scope_kind IN ('NORMALIZED_VERSE','STRUCTURAL_SENTENCE','PARAGRAPH','ADJACENT_STRUCTURAL_SEGMENT','SELECTED_PASSAGE','CHAPTER_BOUNDARY_CONTINUATION')),
+    payload_json TEXT NOT NULL
+);
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -491,6 +543,10 @@ class FoundationRepository:
             if current < 3:
                 self._backup_before_migration(conn, current, 3)
                 self._apply_migration(conn, 3, _MIGRATION_V3)
+                current = 3
+            if current < 4:
+                self._backup_before_migration(conn, current, 4)
+                self._apply_migration(conn, 4, _MIGRATION_V4)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -1108,6 +1164,100 @@ class FoundationRepository:
             )
             conn.commit()
 
+    def save_target_inventory(
+        self, *, inventory_id: str, project_id: str, book: str, range_key: str,
+        fingerprint: str, target_revision: str, target_content_hash: str,
+        language_id: str, tokenizer_version: str, analyzer_registry_version: str,
+        structure_hash: str, diagnostics: dict[str, Any], payload: dict[str, Any],
+        token_ids: list[str], unit_ids: list[str], spans: list[dict[str, Any]],
+        neighborhoods: list[dict[str, Any]], references: list[str],
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE target_inventory_runs SET lifecycle_status='SUPERSEDED',revision=revision+1 "
+                "WHERE project_id=? AND book=? AND range_key=? AND lifecycle_status='ACTIVE' AND fingerprint<>?",
+                (project_id, book, range_key, fingerprint),
+            )
+            existing = conn.execute(
+                "SELECT project_id,book,range_key,fingerprint FROM target_inventory_runs WHERE id=?",
+                (inventory_id,),
+            ).fetchone()
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO target_inventory_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (inventory_id, project_id, book, range_key, fingerprint, target_revision,
+                     target_content_hash, language_id, tokenizer_version, analyzer_registry_version,
+                     structure_hash, "ACTIVE", 1, json.dumps(diagnostics, ensure_ascii=False),
+                     json.dumps(payload, ensure_ascii=False), self._now()),
+                )
+            else:
+                identity = (project_id, book, range_key, fingerprint)
+                persisted_identity = tuple(existing[key] for key in (
+                    "project_id", "book", "range_key", "fingerprint",
+                ))
+                if persisted_identity != identity:
+                    raise FoundationConflict(
+                        "Target inventory content identity conflicts with an existing record"
+                    )
+                # Machine-built inventories are content addressed. When an edit
+                # is reverted exactly, reuse the identical immutable payload
+                # rather than manufacturing a second identity. This never moves
+                # or reinterprets a human-reviewed record.
+                conn.execute(
+                    "UPDATE target_inventory_runs SET lifecycle_status='ACTIVE',revision=revision+1 "
+                    "WHERE id=?", (inventory_id,),
+                )
+            conn.executemany(
+                "INSERT OR IGNORE INTO target_inventory_tokens VALUES(?,?)",
+                [(inventory_id, item) for item in token_ids],
+            )
+            conn.executemany(
+                "INSERT OR IGNORE INTO target_inventory_units VALUES(?,?)",
+                [(inventory_id, item) for item in unit_ids],
+            )
+            conn.executemany(
+                "INSERT OR IGNORE INTO target_search_spans VALUES(?,?,?,?,?,?,?)",
+                [(item["id"], inventory_id, item["displayedReference"], item["kind"],
+                  item["startCodePoint"], item["endCodePoint"],
+                  json.dumps(item, ensure_ascii=False)) for item in spans],
+            )
+            conn.executemany(
+                "INSERT OR IGNORE INTO target_search_neighborhoods VALUES(?,?,?,?)",
+                [(item["id"], inventory_id, item["scopeKind"], json.dumps(item, ensure_ascii=False))
+                 for item in neighborhoods],
+            )
+            for reference in references:
+                conn.execute(
+                    "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)",
+                    ("TARGET_INVENTORY", inventory_id, "TARGET_REFERENCE",
+                     self.target_dependency_id(project_id, book, reference)),
+                )
+            conn.commit()
+
+    def target_inventory_for_fingerprint(
+        self, project_id: str, book: str, range_key: str, fingerprint: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM target_inventory_runs WHERE project_id=? AND book=? "
+                "AND range_key=? AND fingerprint=? AND lifecycle_status='ACTIVE'",
+                (project_id, book, range_key, fingerprint),
+            ).fetchone()
+        return None if row is None else json.loads(row[0])
+
+    def target_inventory(self, inventory_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json,lifecycle_status FROM target_inventory_runs WHERE id=?",
+                (inventory_id,),
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(f"Unknown target inventory: {inventory_id}")
+        if row["lifecycle_status"] != "ACTIVE":
+            raise FoundationValidationError("Target inventory is stale or inactive")
+        return json.loads(row["payload_json"])
+
     def save_semantic_relationship(self, relationship: SemanticRelationship) -> None:
         payload = to_wire(relationship)
         with self._connect() as conn:
@@ -1672,6 +1822,7 @@ class FoundationRepository:
             "LEXICAL_SOLUTION": "lexical_solutions",
             "CORRECTION_PROPOSAL": "correction_proposals",
             "EXPORTABILITY": "exportability_records",
+            "TARGET_INVENTORY": "target_inventory_runs",
         }
         queue: list[tuple[str, str]] = [(dependency_type, dependency_id)]
         visited: set[tuple[str, str]] = set()

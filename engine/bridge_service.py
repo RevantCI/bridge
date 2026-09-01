@@ -291,6 +291,12 @@ class Methods:
     SOURCE_SEMANTIC_GET_UNIT = "sourceSemantic.getUnit"
     SOURCE_SEMANTIC_GET_COVERAGE_ACCOUNTS = "sourceSemantic.getCoverageAccounts"
     SOURCE_SEMANTIC_GET_DIAGNOSTICS = "sourceSemantic.getDiagnostics"
+    TARGET_SEMANTIC_BUILD_RANGE = "targetSemantic.buildRange"
+    TARGET_SEMANTIC_GET_RANGE = "targetSemantic.getRange"
+    TARGET_SEMANTIC_GET_UNIT = "targetSemantic.getUnit"
+    TARGET_SEMANTIC_GET_DIAGNOSTICS = "targetSemantic.getDiagnostics"
+    TARGET_SEMANTIC_GET_SEARCH_SPANS = "targetSemantic.getSearchSpans"
+    TARGET_SEMANTIC_GET_CAPABILITIES = "targetSemantic.getCapabilities"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -1767,6 +1773,28 @@ class BridgeEngine:
     def source_semantic_get_diagnostics(self, inventory_id: str) -> dict[str, Any]:
         return self._require_passage_semantic_runtime().source_semantic_diagnostics(inventory_id)
 
+    def target_semantic_build_range(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().build_target_semantic_range(
+            chapter, verse, end_chapter, end_verse,
+        )
+
+    def target_semantic_get_range(self, inventory_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().target_semantic_range(inventory_id)
+
+    def target_semantic_get_unit(self, unit_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().target_semantic_unit(unit_id)
+
+    def target_semantic_get_diagnostics(self, inventory_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().target_semantic_diagnostics(inventory_id)
+
+    def target_semantic_get_search_spans(self, inventory_id: str) -> list[dict[str, Any]]:
+        return self._require_passage_semantic_runtime().target_semantic_search_spans(inventory_id)
+
+    def target_semantic_get_capabilities(self, inventory_id: str = "") -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().target_semantic_capabilities(inventory_id)
+
     # -- live desktop connectors (Paratext/Logos) --------------------------
     #
     # Direct pass-through calls only in this pass: read the connector's current
@@ -3179,6 +3207,31 @@ class BridgeEngine:
                 ))
             if m == Methods.SOURCE_SEMANTIC_GET_DIAGNOSTICS:
                 return EngineResponse.ok(request.id, result=self.source_semantic_get_diagnostics(
+                    str(p.get("inventoryId") or ""),
+                ))
+            if m == Methods.TARGET_SEMANTIC_BUILD_RANGE:
+                return EngineResponse.ok(request.id, result=self.target_semantic_build_range(
+                    str(p.get("chapter") or ""), str(p.get("verse") or ""),
+                    str(p.get("endChapter") or ""), str(p.get("endVerse") or ""),
+                ))
+            if m == Methods.TARGET_SEMANTIC_GET_RANGE:
+                return EngineResponse.ok(request.id, result=self.target_semantic_get_range(
+                    str(p.get("inventoryId") or ""),
+                ))
+            if m == Methods.TARGET_SEMANTIC_GET_UNIT:
+                return EngineResponse.ok(request.id, result=self.target_semantic_get_unit(
+                    str(p.get("unitId") or ""),
+                ))
+            if m == Methods.TARGET_SEMANTIC_GET_DIAGNOSTICS:
+                return EngineResponse.ok(request.id, result=self.target_semantic_get_diagnostics(
+                    str(p.get("inventoryId") or ""),
+                ))
+            if m == Methods.TARGET_SEMANTIC_GET_SEARCH_SPANS:
+                return EngineResponse.ok(request.id, result=self.target_semantic_get_search_spans(
+                    str(p.get("inventoryId") or ""),
+                ))
+            if m == Methods.TARGET_SEMANTIC_GET_CAPABILITIES:
+                return EngineResponse.ok(request.id, result=self.target_semantic_get_capabilities(
                     str(p.get("inventoryId") or ""),
                 ))
             if m == Methods.ISSUE_RESOLUTION_LIST:

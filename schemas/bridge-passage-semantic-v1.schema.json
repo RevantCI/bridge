@@ -48,7 +48,7 @@
     },
     "DependencyRelation": { "type": "string", "enum": ["CONTAINS", "DEPENDS_ON", "DERIVED_FROM", "REFINES"] },
     "SemanticRelation": { "type": "string", "enum": ["COREFERS_WITH", "COEXTENSIVE_WITH", "MODIFIES", "NEGATES", "QUANTIFIES", "PARTICIPANT_OF", "ARGUMENT_OF", "SEMANTICALLY_RELATED"] },
-    "SemanticUnitProvenance": { "type": "string", "enum": ["CANONICAL_RESOURCE", "DETERMINISTIC_RULE", "RESOURCE_ENRICHED", "AI_PROPOSED", "HUMAN_DEFINED", "IMPORTED_TC", "IMPORTED_STAGE3", "MIGRATION"] },
+    "SemanticUnitProvenance": { "type": "string", "enum": ["CANONICAL_RESOURCE", "DETERMINISTIC_RULE", "LANGUAGE_ANALYZER", "RESOURCE_ENRICHED", "AI_PROPOSED", "HUMAN_DEFINED", "IMPORTED_TC", "IMPORTED_STAGE3", "MIGRATION"] },
     "AuditEligibility": { "type": "string", "enum": ["ELIGIBLE", "CONDITIONAL", "AGGREGATE_ONLY", "EXCLUDED", "REVIEW_ONLY"] },
     "SemanticObligationStrength": { "type": "string", "enum": ["REQUIRED", "CONTEXT_DEPENDENT", "GRAMMATICAL", "DERIVED", "NON_OBLIGATORY", "UNCERTAIN"] },
     "CoverageAccountingRole": { "type": "string", "enum": ["PRIMARY", "COMPONENT", "AGGREGATE", "EVIDENCE_ONLY"] },

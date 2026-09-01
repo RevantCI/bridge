@@ -935,6 +935,91 @@ pub async fn source_semantic_get_diagnostics(
 }
 
 #[tauri::command]
+pub async fn target_semantic_build_range(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    end_chapter: Option<String>,
+    end_verse: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "targetSemantic.buildRange",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse,
+                "endChapter": end_chapter.unwrap_or_default(),
+                "endVerse": end_verse.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn target_semantic_get_range(
+    sidecar: State<'_, EngineSidecar>,
+    inventory_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "targetSemantic.getRange",
+            serde_json::json!({"inventoryId": inventory_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn target_semantic_get_unit(
+    sidecar: State<'_, EngineSidecar>,
+    unit_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "targetSemantic.getUnit",
+            serde_json::json!({"unitId": unit_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn target_semantic_get_diagnostics(
+    sidecar: State<'_, EngineSidecar>,
+    inventory_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "targetSemantic.getDiagnostics",
+            serde_json::json!({"inventoryId": inventory_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn target_semantic_get_search_spans(
+    sidecar: State<'_, EngineSidecar>,
+    inventory_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "targetSemantic.getSearchSpans",
+            serde_json::json!({"inventoryId": inventory_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn target_semantic_get_capabilities(
+    sidecar: State<'_, EngineSidecar>,
+    inventory_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "targetSemantic.getCapabilities",
+            serde_json::json!({"inventoryId": inventory_id.unwrap_or_default()}),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn paratext_get_state(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar
         .send_request("paratext.getState", serde_json::json!({}))

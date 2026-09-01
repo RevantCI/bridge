@@ -474,7 +474,8 @@ class SourceSemanticInventory:
                     kind=SemanticUnitKind.NEGATION, tokens=[token], suffix="explicit-negation",
                     obligation=SemanticObligationStrength.REQUIRED,
                     eligibility=AuditEligibility.ELIGIBLE, role=CoverageAccountingRole.PRIMARY,
-                    dimension=CoverageDimension.POLARITY, features={"polarity": "NEGATIVE"},
+                    dimension=CoverageDimension.POLARITY,
+                    features={"polarity": "NEGATIVE", "lemma": lemma},
                 )
                 units.append(self._save_unit(negation))
                 dependency_rows.append((lexical.id, negation.id, "REFINES"))

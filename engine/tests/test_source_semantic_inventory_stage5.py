@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -239,3 +240,27 @@ def test_minimal_source_semantic_protocol_apis(tmp_path: Path) -> None:
     assert engine.handle_request(EngineRequest(
         id="diagnostics", method="sourceSemantic.getDiagnostics", params={"inventoryId": inventory_id},
     )).to_dict()["result"]["sourceTokensRepresented"] > 0
+
+
+def test_stage5_frozen_golden_semantic_roles(tmp_path: Path) -> None:
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "stage5-source-golden-v1.json").read_text(encoding="utf-8")
+    )
+    for index, case in enumerate(fixture["cases"]):
+        result = _inventory(tmp_path / str(index), case["book"]).build_range(
+            *case["start"], *case["end"],
+        )
+        assert len(result["tokens"]) >= case["minimumTokens"]
+        kinds = {unit["kind"] for unit in result["units"]}
+        assert set(case["requiredKinds"]) <= kinds
+        if case.get("requiredTokenLanguage"):
+            assert case["requiredTokenLanguage"] in {token["languageId"] for token in result["tokens"]}
+        for expected in case.get("requiredPrimary", []):
+            assert any(
+                unit["kind"] == expected["kind"]
+                and unit["coverageDimension"] == expected["dimension"]
+                and unit["accountingRole"] == "PRIMARY"
+                and unicodedata.normalize("NFD", unit["semanticFeatures"].get("lemma", unit["semanticFeatures"].get("quantifierLemma")))
+                == unicodedata.normalize("NFD", expected["lemma"])
+                for unit in result["units"]
+            ), (case["book"], expected)

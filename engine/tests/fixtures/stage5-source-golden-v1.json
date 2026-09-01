@@ -1,0 +1,30 @@
+{
+  "schema": "bridge.stage5-source-golden/v1",
+  "cases": [
+    {
+      "book": "PHP", "start": ["1", "3"], "end": ["1", "6"],
+      "requiredKinds": ["LEXICAL", "MORPHOLOGICAL", "QUANTIFIER", "PREDICATE", "REFERENT", "IMPLICIT_GRAMMATICAL", "CLAUSE_RELATION"],
+      "requiredPrimary": [
+        {"kind": "QUANTIFIER", "lemma": "πᾶς", "dimension": "QUANTITY"},
+        {"kind": "LEXICAL", "lemma": "θεός", "dimension": "LEXICAL_CONTENT"},
+        {"kind": "LEXICAL", "lemma": "εὐχαριστέω", "dimension": "LEXICAL_CONTENT"}
+      ],
+      "minimumTokens": 51
+    },
+    {
+      "book": "GEN", "start": ["2", "5"], "end": ["2", "5"],
+      "requiredPrimary": [
+        {"kind": "NEGATION", "lemma": "לֹא", "dimension": "POLARITY"},
+        {"kind": "QUANTIFIER", "lemma": "כֹּל", "dimension": "QUANTITY"}
+      ],
+      "requiredKinds": ["NEGATION", "QUANTIFIER", "CONSTRUCTION"],
+      "minimumTokens": 20
+    },
+    {
+      "book": "DAN", "start": ["2", "4"], "end": ["2", "4"],
+      "requiredKinds": ["LEXICAL", "MORPHOLOGICAL", "CONSTRUCTION"],
+      "requiredTokenLanguage": "arc",
+      "minimumTokens": 10
+    }
+  ]
+}

@@ -98,6 +98,7 @@ wire_enum!(SemanticRelation {
 wire_enum!(SemanticUnitProvenance {
     CanonicalResource,
     DeterministicRule,
+    LanguageAnalyzer,
     ResourceEnriched,
     AiProposed,
     HumanDefined,
@@ -909,6 +910,120 @@ pub struct SourceSemanticInventory {
     pub coverage_accounts: Vec<SourceInventoryCoverageAccount>,
     pub evidence: Vec<EvidenceRecord>,
     pub diagnostics: SourceInventoryDiagnostics,
+    pub cache_status: SourceInventoryCacheStatus,
+}
+
+wire_enum!(TargetSpanKind {
+    Token,
+    Subtoken,
+    Phrase,
+    StructuralSegment,
+    Clause,
+    Sentence
+});
+wire_enum!(TargetNeighborhoodScope {
+    NormalizedVerse,
+    StructuralSentence,
+    Paragraph,
+    AdjacentStructuralSegment,
+    SelectedPassage,
+    ChapterBoundaryContinuation
+});
+wire_enum!(TextDirection { Ltr, Rtl });
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetAnalyzerIdentity {
+    pub id: String,
+    pub version: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetLanguageCapabilities {
+    pub language_tag: String,
+    pub script: String,
+    pub direction: TextDirection,
+    pub tokenization: String,
+    pub morphology: String,
+    pub pos: String,
+    pub dependency_syntax: String,
+    pub sentence_boundary: String,
+    pub coreference: String,
+    pub semantic_roles: String,
+    pub tokenizer_profile: String,
+    pub normalization_profile: String,
+    pub providers: Vec<TargetAnalyzerIdentity>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetSearchSpan {
+    pub id: String,
+    pub kind: TargetSpanKind,
+    pub displayed_reference: String,
+    pub token_instance_ids: Vec<String>,
+    pub start_code_point: usize,
+    pub end_code_point: usize,
+    pub quote: String,
+    pub quote_sha256: String,
+    pub target_revision: String,
+    pub span_policy_version: String,
+    pub analysis: Option<String>,
+    pub provider_id: Option<String>,
+    pub provider_version: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetSearchNeighborhood {
+    pub id: String,
+    pub scope_kind: TargetNeighborhoodScope,
+    pub displayed_references: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetInventoryDiagnostics {
+    pub target_characters: u64,
+    pub grapheme_clusters: u64,
+    pub orthographic_tokens: u64,
+    pub subtokens_morphemes: u64,
+    pub target_semantic_units: u64,
+    pub lexical_units: u64,
+    pub grammatical_units: u64,
+    pub negation_units: u64,
+    pub quantifier_units: u64,
+    pub participant_units: u64,
+    pub predicate_units: u64,
+    pub clauses: u64,
+    pub analyzer_derived_units: u64,
+    pub review_only_units: u64,
+    pub unknown_unsegmented_spans: u64,
+    pub search_spans: u64,
+    pub search_neighborhoods: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetSemanticInventory {
+    pub id: String,
+    pub book: String,
+    pub range_key: String,
+    pub canonical_references: Vec<String>,
+    pub fingerprint: String,
+    pub target_semantic_fingerprint: String,
+    pub target_revision: String,
+    pub target_content_hash: String,
+    pub target_inventory_engine_version: String,
+    pub span_policy_version: String,
+    pub capabilities: TargetLanguageCapabilities,
+    pub tokens: Vec<TokenInstance>,
+    pub units: Vec<SemanticUnit>,
+    pub search_spans: Vec<TargetSearchSpan>,
+    pub search_neighborhoods: Vec<TargetSearchNeighborhood>,
+    pub structure_markers: Vec<PassageStructureMarker>,
+    pub diagnostics: TargetInventoryDiagnostics,
     pub cache_status: SourceInventoryCacheStatus,
 }
 

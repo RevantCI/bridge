@@ -52,6 +52,7 @@ from .unicode_coordinates import grapheme_boundaries
 from .usfm_passages import PassageWindow, TargetSegment, UsfmPassageIndex
 from . import versification
 from .source_semantic_inventory import SourceSemanticInventory
+from .target_semantic_inventory import TargetSemanticInventory
 
 
 RUNTIME_VERSION = "stage4-runtime-v1"
@@ -476,6 +477,7 @@ class PassageSemanticRuntime:
         self.synchronize_current_text()
         self._synchronize_source_lock()
         self.source_semantic = SourceSemanticInventory(self)
+        self.target_semantic = TargetSemanticInventory(self)
         self._migrate_legacy_companions()
 
     def _identity_fingerprint(self) -> str:
@@ -1188,3 +1190,23 @@ class PassageSemanticRuntime:
 
     def source_semantic_diagnostics(self, inventory_id: str) -> dict[str, Any]:
         return self.source_semantic.get_diagnostics(inventory_id)
+
+    def build_target_semantic_range(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+    ) -> dict[str, Any]:
+        return self.target_semantic.build_range(chapter, verse, end_chapter, end_verse)
+
+    def target_semantic_range(self, inventory_id: str) -> dict[str, Any]:
+        return self.target_semantic.get_range(inventory_id)
+
+    def target_semantic_unit(self, unit_id: str) -> dict[str, Any]:
+        return self.target_semantic.get_unit(unit_id)
+
+    def target_semantic_diagnostics(self, inventory_id: str) -> dict[str, Any]:
+        return self.target_semantic.get_diagnostics(inventory_id)
+
+    def target_semantic_search_spans(self, inventory_id: str) -> list[dict[str, Any]]:
+        return self.target_semantic.get_search_spans(inventory_id)
+
+    def target_semantic_capabilities(self, inventory_id: str = "") -> dict[str, Any]:
+        return self.target_semantic.get_capabilities(inventory_id)

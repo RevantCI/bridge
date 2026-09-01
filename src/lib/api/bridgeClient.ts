@@ -16,6 +16,10 @@ import type {
   SourceInventoryCoverageAccount,
   SourceInventoryDiagnostics,
   SourceSemanticInventory,
+  TargetInventoryDiagnostics,
+  TargetLanguageCapabilities,
+  TargetSearchSpan,
+  TargetSemanticInventory,
 } from "../types/passageSemanticV1";
 
 /**
@@ -443,6 +447,32 @@ export const bridge = {
 
   sourceSemanticGetDiagnostics(inventoryId: string): Promise<SourceInventoryDiagnostics> {
     return call("source_semantic_get_diagnostics", { inventoryId });
+  },
+
+  targetSemanticBuildRange(
+    chapter: string, verse: string, endChapter?: string, endVerse?: string,
+  ): Promise<TargetSemanticInventory> {
+    return call("target_semantic_build_range", { chapter, verse, endChapter, endVerse });
+  },
+
+  targetSemanticGetRange(inventoryId: string): Promise<TargetSemanticInventory> {
+    return call("target_semantic_get_range", { inventoryId });
+  },
+
+  targetSemanticGetUnit(unitId: string): Promise<SemanticUnit> {
+    return call("target_semantic_get_unit", { unitId });
+  },
+
+  targetSemanticGetDiagnostics(inventoryId: string): Promise<TargetInventoryDiagnostics> {
+    return call("target_semantic_get_diagnostics", { inventoryId });
+  },
+
+  targetSemanticGetSearchSpans(inventoryId: string): Promise<TargetSearchSpan[]> {
+    return call("target_semantic_get_search_spans", { inventoryId });
+  },
+
+  targetSemanticGetCapabilities(inventoryId?: string): Promise<TargetLanguageCapabilities> {
+    return call("target_semantic_get_capabilities", { inventoryId });
   },
 
   paratextGetState(): Promise<DesktopConnectorState> {
