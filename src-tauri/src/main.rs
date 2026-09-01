@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod passage_semantic_wire;
 mod sidecar;
 
 use sidecar::EngineSidecar;
