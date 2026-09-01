@@ -2,6 +2,7 @@
   import { tick } from "svelte";
   import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, currentChapter, showSource, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse } from "../stores";
   import { buildSegments } from "../utils/highlight";
+  import { editingChapter, editingVerse, editText, editSaving, editError, saveVerseEdit, cancelVerseEdit } from "../verseEditor";
 
   export let onSelect: (verse: string) => void;
 
@@ -37,8 +38,10 @@
     {@const alignmentStatus = $alignmentStatusByVerse[key] ?? "untouched"}
     {@const openCount = findings.filter((f) => f.status === "open").length}
     {@const segments = buildSegments($verseTexts[key] ?? "", findings, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [])}
+    {@const isEditingThis = $editingChapter === $currentChapter && $editingVerse === v}
     <div
       class="verse"
+      class:editing-row={isEditingThis}
       data-verse-key={key}
       class:active={$selectedVerse === v}
       class:approved={checkStatus === "succeeded" && openCount === 0}
@@ -51,18 +54,31 @@
       <div class="vnum">
         {v}{#if checkStatus === "succeeded" && openCount === 0}&nbsp;✓{:else if checkStatus === "failed" || checkStatus === "cancelled"}&nbsp;⚠{/if}
       </div>
-      <div class="vtext">
-        {#each segments as seg}
-          {#if seg.className}
-            <mark class={seg.className} title={seg.title}>{seg.text}</mark>{#if seg.numbers.length}<sup class="finding-num">{seg.numbers.join(",")}</sup>{/if}
-          {:else}
-            {seg.text}
-          {/if}
-        {/each}
-      </div>
-      <span class="alignment-state {alignmentStatus}" title={`Alignment: ${alignmentStatus}`}>
-        {alignmentStatus === "complete" ? "●" : alignmentStatus === "partial" ? "◐" : alignmentStatus === "invalid" ? "!" : "○"}
-      </span>
+      {#if isEditingThis}
+        <div class="vedit" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
+          <textarea bind:value={$editText} rows="2" disabled={$editSaving} />
+          {#if $editError}<p class="edit-error">{$editError}</p>{/if}
+          <div class="edit-actions">
+            <button class="save" on:click={() => void saveVerseEdit()} disabled={$editSaving || $editText.trim() === ""}>
+              {$editSaving ? "Saving…" : "Save & re-check"}
+            </button>
+            <button class="cancel" on:click={cancelVerseEdit} disabled={$editSaving}>Cancel</button>
+          </div>
+        </div>
+      {:else}
+        <div class="vtext">
+          {#each segments as seg}
+            {#if seg.className}
+              <mark class={seg.className} title={seg.title}>{seg.text}</mark>{#if seg.numbers.length}<sup class="finding-num">{seg.numbers.join(",")}</sup>{/if}
+            {:else}
+              {seg.text}
+            {/if}
+          {/each}
+        </div>
+        <span class="alignment-state {alignmentStatus}" title={`Alignment: ${alignmentStatus}`}>
+          {alignmentStatus === "complete" ? "●" : alignmentStatus === "partial" ? "◐" : alignmentStatus === "invalid" ? "!" : "○"}
+        </span>
+      {/if}
     </div>
   {/each}
 
@@ -87,4 +103,18 @@
   .alignment-state.partial { color: var(--warning); }
   .alignment-state.invalid { color: var(--danger); font-weight: 800; }
   .empty { color: var(--text-3); font-size: 13px; }
+  .verse.editing-row { cursor: default; background: var(--surface); border-color: var(--accent); }
+  .vedit { flex: 1; min-width: 0; cursor: default; }
+  .vedit textarea {
+    width: 100%; box-sizing: border-box; font-size: 16px; line-height: 1.7; color: var(--text);
+    font-family: inherit; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px;
+    resize: vertical; margin-bottom: 8px;
+  }
+  .vedit textarea:disabled { opacity: .6; }
+  .edit-error { color: var(--danger); font-size: 11px; margin: -4px 0 8px; line-height: 1.4; }
+  .edit-actions { display: flex; gap: 8px; }
+  .edit-actions button { padding: 8px 14px; font-size: 12px; font-weight: 700; border-radius: 7px; border: none; cursor: pointer; }
+  .edit-actions .save { background: var(--accent); color: white; }
+  .edit-actions .cancel { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
+  .edit-actions button:disabled { opacity: .55; cursor: not-allowed; }
 </style>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import AlignmentModal from "./AlignmentModal.svelte";
   import TranslationHelpsReview from "./TranslationHelpsReview.svelte";
@@ -7,9 +7,13 @@
   import { findingNumbers } from "../utils/highlight";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
-    verseTexts, checkStatusByVerse, alignmentStatusByVerse, checkingProgress, verseKey,
+    checkStatusByVerse, checkingProgress, verseKey,
     aiCheckReviewsByVerse, nativeChecksByVerse, project, reviewerMode,
   } from "../stores";
+  import {
+    editingChapter, editingVerse, editText, editSaving, editError, editErrorKey,
+    recheckingKey, recheckedKey, startVerseEdit, cancelVerseEdit, setVerseEditSavedHook,
+  } from "../verseEditor";
   import type { AiExplainResult, AIReviewJobSnapshot, FindingStatus } from "../types/finding";
 
   let greekRoomChecking = false;
@@ -81,15 +85,6 @@
     }
   }
 
-  let editing = false;
-  let editText = "";
-  let editError: string | null = null;
-  let editSaving = false;
-  let editChapter = "";
-  let editVerse = "";
-  let recheckingKey = "";
-  let recheckedKey = "";
-  let editErrorKey = "";
   let alignmentOpen = false;
   let alignmentKey = "";
   let aiExplainError = "";
@@ -134,11 +129,11 @@
   }
 
   $: if (
-    editing && !editSaving && $selectedVerse &&
-    verseKey($currentChapter, $selectedVerse) !== verseKey(editChapter, editVerse)
+    $editingChapter && !$editSaving && $selectedVerse &&
+    verseKey($currentChapter, $selectedVerse) !== verseKey($editingChapter, $editingVerse)
   ) {
-    editing = false;
-    editError = null;
+    cancelVerseEdit();
+    editError.set("");
   }
 
   $: if (
@@ -310,79 +305,34 @@
   }
 
   function openAlignment() {
-    if (!$selectedVerse || $checkingProgress.running || editSaving || recheckingKey) return;
+    if (!$selectedVerse || $checkingProgress.running || $editSaving || $recheckingKey) return;
     alignmentKey = verseKey($currentChapter, $selectedVerse);
     alignmentOpen = true;
   }
 
   function startEdit() {
-    if (!$selectedVerse || $checkingProgress.running || editSaving || recheckingKey) return;
-    editChapter = $currentChapter;
-    editVerse = $selectedVerse;
-    editText = $verseTexts[verseKey(editChapter, editVerse)] ?? "";
-    editError = null;
-    editErrorKey = "";
-    editing = true;
+    startVerseEdit($currentChapter, $selectedVerse ?? "");
   }
 
-  async function saveEdit() {
-    if (!editChapter || !editVerse) return;
-    const chapter = editChapter;
-    const verse = editVerse;
-    const key = verseKey(chapter, verse);
-    if (editText.trim() === ($verseTexts[key] ?? "").trim()) {
-      // No real change — apply_scripture_edit rejects this as a no-op
-      // rather than journaling a spurious edit, so don't call it.
-      editing = false;
-      return;
-    }
-    editError = null;
-    editSaving = true;
-    try {
-      const editResult = await bridge.editVerse(chapter, verse, editText);
-      verseTexts.update((t) => ({ ...t, [key]: editText }));
-      aiCheckReviewsByVerse.update((values) => {
-        const next = { ...values };
-        delete next[key];
-        return next;
-      });
-      nativeChecksByVerse.update((values) => {
-        const next = { ...values };
-        delete next[key];
-        return next;
-      });
-      alignmentStatusByVerse.update((values) => ({ ...values, [key]: "invalid" }));
-      if ($selectedVerse && verseKey($currentChapter, $selectedVerse) === key) {
-        await translationHelpsReview?.refresh();
-      }
-      editing = false;
-      recheckingKey = key;
-      recheckedKey = "";
-      checkStatusByVerse.update((map) => ({ ...map, [key]: "pending" }));
+  onMount(() => {
+    setVerseEditSavedHook(({ chapter, verse, issueResolutionsNeedingRecheck }) => {
+      const key = verseKey(chapter, verse);
+      // Invalidate any live Greek-Room-only check still in flight from when
+      // this verse was first selected, so it can't resolve after this point
+      // and overwrite saveVerseEdit's own fresh (post-edit) findings with a
+      // stale pre-edit wildebeest result.
       latestLiveCheckByVerse.set(key, ++liveCheckSequence);
-      const findings = await bridge.runVerseChecks(chapter, verse, ["local", "greekroom"]);
-      findingsByVerse.update((map) => ({ ...map, [key]: findings }));
-      checkStatusByVerse.update((map) => ({ ...map, [key]: "succeeded" }));
-      recheckingKey = "";
-      recheckedKey = key;
-      if (editResult.issueResolutionsNeedingRecheck > 0) {
+      if ($selectedVerse && verseKey($currentChapter, $selectedVerse) === key) {
+        void translationHelpsReview?.refresh();
+      }
+      if (issueResolutionsNeedingRecheck > 0) {
         // A saved issue can only close against the edited text. Start the
         // evidence-grounded verse review automatically; failures remain visibly
         // stale/retryable and never restore the previous resolved state.
-        await startAIReview("verse", chapter, verse);
+        void startAIReview("verse", chapter, verse);
       }
-      window.setTimeout(() => {
-        if (recheckedKey === key) recheckedKey = "";
-      }, 3500);
-    } catch (e) {
-      recheckingKey = "";
-      checkStatusByVerse.update((map) => ({ ...map, [key]: "failed" }));
-      editError = e instanceof Error ? e.message : String(e);
-      editErrorKey = key;
-    } finally {
-      editSaving = false;
-    }
-  }
+    });
+  });
 
   const severityBadge: Record<string, string> = {
     high: "badge-wrong", medium: "badge-review", low: "badge-review", info: "badge-review",
@@ -415,27 +365,17 @@
       </div>
     </div>
 
-    <div class="panel-scroll">
-      {#if recheckingKey === verseKey($currentChapter, $selectedVerse)}
+    <div class="panel-pinned">
+      {#if $recheckingKey === verseKey($currentChapter, $selectedVerse)}
         <div class="operation-status checking"><span class="spin" /> Verse saved. Re-checking local and Greek Room QA…</div>
-      {:else if recheckedKey === verseKey($currentChapter, $selectedVerse)}
+      {:else if $recheckedKey === verseKey($currentChapter, $selectedVerse)}
         <div class="operation-status saved">✓ Verse saved and re-check completed.</div>
-      {:else if editError && editErrorKey === verseKey($currentChapter, $selectedVerse) && !editing}
-        <div class="operation-status failed">The verse was not fully rechecked: {editError}</div>
+      {:else if $editError && $editErrorKey === verseKey($currentChapter, $selectedVerse) && !$editingChapter}
+        <div class="operation-status failed">The verse was not fully rechecked: {$editError}</div>
       {/if}
 
-      {#if editing}
-        <div class="section">
-          <div class="section-title">Edit verse</div>
-          <textarea bind:value={editText} rows="3" />
-          {#if editError}<p class="edit-error">{editError}</p>{/if}
-          <div class="edit-actions">
-            <button class="accept" on:click={saveEdit} disabled={editSaving || editText.trim() === ""}>
-              {editSaving ? "Saving…" : "Save & re-check"}
-            </button>
-            <button class="cancel" on:click={() => (editing = false)} disabled={editSaving}>Cancel</button>
-          </div>
-        </div>
+      {#if $editingChapter === $currentChapter && $editingVerse === $selectedVerse}
+        <div class="operation-status checking">✎ Editing this verse in the left panel — save or cancel there.</div>
       {/if}
 
       <div class="section ai-review-controls">
@@ -485,7 +425,9 @@
         {/if}
         {#if visibleAIExplainError}<p class="ai-control-error">{visibleAIExplainError}</p>{/if}
       </div>
+    </div>
 
+    <div class="panel-scroll">
       <div class="tabs" role="tablist" aria-label="Verse report">
         <button
           type="button" role="tab" aria-selected={activeTab === "greekroom"}
@@ -536,11 +478,6 @@
                 {/if}
               </div>
               <p class="explain">{f.explanation}</p>
-              <div class="decision-row">
-                <button class="accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
-                <button class="reject" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
-                <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
-              </div>
             </div>
           {:else}
             <p class="none">No local QA findings.</p>
@@ -579,9 +516,13 @@
                     {#each f.evidence as e}<li>{e.label}: {e.value}</li>{/each}
                   </ul>
                 {/if}
-                <div class="decision-row">
-                  <button class="accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
-                  <button class="reject" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
+                <div class="decision-row two-up">
+                  <button
+                    class="edit-inline"
+                    on:click={startEdit}
+                    disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
+                    title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
+                  >✎ Edit verse</button>
                   <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
                 </div>
               </div>
@@ -639,19 +580,19 @@
       <button
         class="align-btn"
         on:click={openAlignment}
-        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey)}
+        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
         title={$checkingProgress.running ? "Wait for background checking to finish before aligning" : "Review word alignment"}
       >⇄ Align words</button>
       <button
         class="edit-btn"
         on:click={startEdit}
-        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey)}
+        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
         title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
       >✎ Edit verse</button>
       <button
         class="ai-explain-btn"
         on:click={() => startAIReview("verse")}
-        disabled={$checkingProgress.running || editing || editSaving || Boolean(recheckingKey) || aiJobBusy}
+        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey) || aiJobBusy}
         title="Run an evidence-grounded AI review for this verse in the background"
       >🤖 AI review</button>
     </div>
@@ -667,6 +608,7 @@
 <style>
   .panel { width: 400px; flex-shrink: 0; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); }
   .panel-header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .panel-pinned { flex-shrink: 0; padding: 14px 16px; border-bottom: 1px solid var(--border); overflow-y: auto; max-height: 60vh; }
   .ref { font-size: 13px; font-weight: 700; color: var(--text); }
   .sub { font-size: 11px; color: var(--text-2); margin-top: 2px; }
   .panel-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; }
@@ -715,18 +657,13 @@
   .explain { font-size: 12px; color: var(--text-2); line-height: 1.6; margin: 0 0 8px; }
   .evidence { font-size: 11px; color: var(--text-2); padding-left: 16px; margin: 0 0 8px; }
   .decision-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .decision-row.two-up { grid-template-columns: 1fr 1fr; }
   .decision-row button { padding: 7px; font-size: 11px; font-weight: 700; border-radius: 6px; border: none; cursor: pointer; }
   .accept { background: var(--success); color: #fff; }
-  .reject { background: var(--danger); color: #fff; }
   .ignore { background: #F5EBFC; color: #9333EA; }
+  .edit-inline { background: var(--accent-bg); color: var(--accent); }
   .none { font-size: 11px; color: var(--text-3); }
-  textarea { width: 100%; font-size: 14px; padding: 8px; border: 1px solid var(--accent); border-radius: 6px; font-family: inherit; margin-bottom: 8px; }
-  .edit-error { color: var(--danger); font-size: 11px; margin: -4px 0 8px; line-height: 1.4; }
-  .edit-actions { display: flex; gap: 6px; }
-  .edit-actions button { flex: 1; padding: 7px; font-size: 11px; font-weight: 700; border-radius: 6px; cursor: pointer; }
-  .edit-actions .accept { border: none; }
-  .cancel { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
-  .decision-row button:disabled, .edit-actions button:disabled { opacity: .55; cursor: not-allowed; }
+  .decision-row button:disabled { opacity: .55; cursor: not-allowed; }
   .footer-actions { padding: 12px 16px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
   .edit-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
   .align-btn, .ai-explain-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
