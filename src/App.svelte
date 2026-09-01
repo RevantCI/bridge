@@ -88,12 +88,22 @@
       } catch (error) {
         console.error("Could not load engine diagnostics", error);
       }
-      const stopLog = await bridge.onEngineLog(appendEngineLog);
-      if (disposed) stopLog();
-      else unlistenLog = stopLog;
-      const stopRespawn = await bridge.onEngineRespawned(() => void handleEngineRespawn());
-      if (disposed) stopRespawn();
-      else unlistenRespawn = stopRespawn;
+      try {
+        const stopLog = await bridge.onEngineLog(appendEngineLog);
+        if (disposed) stopLog();
+        else unlistenLog = stopLog;
+      } catch (error) {
+        // Diagnostics are helpful but must never prevent the engine, settings,
+        // file-drop handling, or project editor from finishing startup.
+        console.error("Could not subscribe to engine diagnostics", error);
+      }
+      try {
+        const stopRespawn = await bridge.onEngineRespawned(() => void handleEngineRespawn());
+        if (disposed) stopRespawn();
+        else unlistenRespawn = stopRespawn;
+      } catch (error) {
+        console.error("Could not subscribe to engine restart events", error);
+      }
 
       try {
         await bridge.ping();
