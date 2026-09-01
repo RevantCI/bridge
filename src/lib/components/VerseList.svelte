@@ -54,7 +54,7 @@
       <div class="vtext">
         {#each segments as seg}
           {#if seg.className}
-            <mark class={seg.className} title={seg.title}>{seg.text}</mark>
+            <mark class={seg.className} title={seg.title}>{seg.text}</mark>{#if seg.numbers.length}<sup class="finding-num">{seg.numbers.join(",")}</sup>{/if}
           {:else}
             {seg.text}
           {/if}
@@ -81,6 +81,7 @@
   .verse.approved .vnum { color: var(--success); }
   .verse.check-failed .vnum { color: var(--danger, #ef4444); }
   .vtext { font-size: 16px; line-height: 1.85; color: var(--text); }
+  .finding-num { font-size: 10px; font-weight: 700; color: var(--accent); margin-left: 1px; }
   .alignment-state { margin-left: auto; flex-shrink: 0; padding-top: 3px; font-size: 11px; color: var(--text-3); }
   .alignment-state.complete { color: var(--success); }
   .alignment-state.partial { color: var(--warning); }

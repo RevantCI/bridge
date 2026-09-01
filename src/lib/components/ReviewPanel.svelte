@@ -4,6 +4,7 @@
   import AlignmentModal from "./AlignmentModal.svelte";
   import TranslationHelpsReview from "./TranslationHelpsReview.svelte";
   import { aiJobAppliesToReference, isAIReviewJobActive } from "../utils/aiJobScope";
+  import { findingNumbers } from "../utils/highlight";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
     verseTexts, checkStatusByVerse, alignmentStatusByVerse, checkingProgress, verseKey,
@@ -386,6 +387,23 @@
   const severityBadge: Record<string, string> = {
     high: "badge-wrong", medium: "badge-review", low: "badge-review", info: "badge-review",
   };
+
+  type ReviewTab = "greekroom" | "tntw" | "ai";
+  let activeTab: ReviewTab = "greekroom";
+  // The three real Greek Room engines (see each adapter's own engine_name:
+  // wildebeest_adapter.py, usfm_adapter.py, names_adapter.py) — everything
+  // else on a finding's `engine` field (tN/tW/alignment's own QAIssue.source,
+  // or "local" as its fallback) is native tC/Bridge QA, not Greek Room.
+  const GREEK_ROOM_ENGINES = new Set(["wildebeest", "usfm", "names"]);
+  function isGreekRoom(engine: string): boolean {
+    return GREEK_ROOM_ENGINES.has(engine);
+  }
+  $: greekRoomOpenCount = $selectedFindings.filter((f) => isGreekRoom(f.engine) && f.status === "open").length;
+  $: tntwOpenCount = $selectedFindings.filter((f) => !isGreekRoom(f.engine) && f.status === "open").length;
+  // Same cross-reference-style numbering shown inline in the verse text
+  // (VerseList.svelte) — both read $selectedFindings for the same verse,
+  // so the numbers line up without any shared state beyond that.
+  $: findingNumberMap = findingNumbers($selectedFindings);
 </script>
 
 <div class="panel">
@@ -468,114 +486,149 @@
         {#if visibleAIExplainError}<p class="ai-control-error">{visibleAIExplainError}</p>{/if}
       </div>
 
-      <TranslationHelpsReview
-        bind:this={translationHelpsReview}
-        chapter={$currentChapter}
-        verse={$selectedVerse}
-        onStateChanged={nativeCheckStateChanged}
-        onRerunAIReview={() => void startAIReview("verse")}
-        aiReviewBusy={$checkingProgress.running || aiJobBusy}
-      />
-
-      <div class="section">
-        <div class="section-title">
+      <div class="tabs" role="tablist" aria-label="Verse report">
+        <button
+          type="button" role="tab" aria-selected={activeTab === "greekroom"}
+          class:active={activeTab === "greekroom"} on:click={() => (activeTab = "greekroom")}
+        >
           Greek Room QA
-          {#if greekRoomChecking}
-            <span class="live"><span class="spin" /> live check</span>
-          {/if}
-        </div>
-        {#each $selectedFindings.filter((f) => f.engine === "wildebeest") as f}
-          <div class="finding">
-            <div class="verdict">
-              <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
-              <span class="check-id">{f.check_type}</span>
-              {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
-              {#if decisionSaveState[f.id] === "saving"}
-                <span class="save-state">Saving…</span>
-              {:else if decisionSaveState[f.id] === "saved"}
-                <span class="save-state saved">✓ Saved</span>
-              {:else if decisionSaveState[f.id] === "error"}
-                <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
-              {/if}
-            </div>
-            <p class="explain">{f.explanation}</p>
-            {#if f.evidence.length > 0}
-              <ul class="evidence">
-                {#each f.evidence as e}<li>{e.label}: {e.value}</li>{/each}
-              </ul>
-            {/if}
-            <div class="decision-row">
-              <button class="accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
-              <button class="reject" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
-              <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
-            </div>
-          </div>
-        {:else}
-          {#if !greekRoomChecking}<p class="none">No Greek Room findings.</p>{/if}
-        {/each}
+          {#if greekRoomChecking}<span class="tab-live" />{/if}
+          {#if greekRoomOpenCount > 0}<span class="tab-count">{greekRoomOpenCount}</span>{/if}
+        </button>
+        <button
+          type="button" role="tab" aria-selected={activeTab === "tntw"}
+          class:active={activeTab === "tntw"} on:click={() => (activeTab = "tntw")}
+        >
+          tN/tW/Alignment
+          {#if tntwOpenCount > 0}<span class="tab-count">{tntwOpenCount}</span>{/if}
+        </button>
+        <button
+          type="button" role="tab" aria-selected={activeTab === "ai"}
+          class:active={activeTab === "ai"} on:click={() => (activeTab = "ai")}
+        >AI explanation</button>
       </div>
 
-      <div class="section">
-        <div class="section-title">Already computed in background pass</div>
-        {#each $selectedFindings.filter((f) => f.engine !== "wildebeest") as f}
-          <div class="finding">
-            <div class="verdict">
-              <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
-              <span class="check-id">{f.category}</span>
-              {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
-              {#if decisionSaveState[f.id] === "saving"}
-                <span class="save-state">Saving…</span>
-              {:else if decisionSaveState[f.id] === "saved"}
-                <span class="save-state saved">✓ Saved</span>
-              {:else if decisionSaveState[f.id] === "error"}
-                <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
-              {/if}
+      <div class="tab-panel" role="tabpanel" hidden={activeTab !== "tntw"}>
+        <TranslationHelpsReview
+          bind:this={translationHelpsReview}
+          chapter={$currentChapter}
+          verse={$selectedVerse}
+          onStateChanged={nativeCheckStateChanged}
+          onRerunAIReview={() => void startAIReview("verse")}
+          aiReviewBusy={$checkingProgress.running || aiJobBusy}
+        />
+
+        <div class="section">
+          <div class="section-title">Already computed in background pass</div>
+          {#each $selectedFindings.filter((f) => !isGreekRoom(f.engine)) as f}
+            <div class="finding">
+              <div class="verdict">
+                {#if findingNumberMap.has(f.id)}<span class="finding-num-badge" title="Marked in the verse text">{findingNumberMap.get(f.id)}</span>{/if}
+                <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
+                <span class="check-id">{f.category}</span>
+                {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
+                {#if decisionSaveState[f.id] === "saving"}
+                  <span class="save-state">Saving…</span>
+                {:else if decisionSaveState[f.id] === "saved"}
+                  <span class="save-state saved">✓ Saved</span>
+                {:else if decisionSaveState[f.id] === "error"}
+                  <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
+                {/if}
+              </div>
+              <p class="explain">{f.explanation}</p>
+              <div class="decision-row">
+                <button class="accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
+                <button class="reject" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
+                <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
+              </div>
             </div>
-            <p class="explain">{f.explanation}</p>
-            <div class="decision-row">
-              <button class="accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
-              <button class="reject" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
-              <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
-            </div>
-          </div>
-        {:else}
-          <p class="none">No local QA findings.</p>
-        {/each}
+          {:else}
+            <p class="none">No local QA findings.</p>
+          {/each}
+        </div>
       </div>
 
-      {#if visibleAIExplainError}
-        <div class="section ai-explain-section">
-          <div class="section-title">AI explanation</div>
-          <p class="ai-error">{visibleAIExplainError}</p>
-        </div>
-      {:else if aiExplainResult}
-        <div class="section ai-explain-section">
-          <div class="section-title">
-            AI explanation
-            <span class="ai-cost">~${aiExplainResult.usage.estimatedCostUSD.toFixed(4)}</span>
+      {#if activeTab === "greekroom"}
+        <div class="tab-panel" role="tabpanel">
+          <div class="section">
+            <div class="section-title">
+              Greek Room QA
+              {#if greekRoomChecking}
+                <span class="live"><span class="spin" /> live check</span>
+              {/if}
+            </div>
+            {#each $selectedFindings.filter((f) => isGreekRoom(f.engine)) as f}
+              <div class="finding">
+                <div class="verdict">
+                  {#if findingNumberMap.has(f.id)}<span class="finding-num-badge" title="Marked in the verse text">{findingNumberMap.get(f.id)}</span>{/if}
+                  <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
+                  <span class="engine-badge">{f.engine}</span>
+                  <span class="check-id">{f.check_type}</span>
+                  {#if f.status !== "open"}<span class="badge badge-decided">{f.status}</span>{/if}
+                  {#if decisionSaveState[f.id] === "saving"}
+                    <span class="save-state">Saving…</span>
+                  {:else if decisionSaveState[f.id] === "saved"}
+                    <span class="save-state saved">✓ Saved</span>
+                  {:else if decisionSaveState[f.id] === "error"}
+                    <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
+                  {/if}
+                </div>
+                <p class="explain">{f.explanation}</p>
+                {#if f.evidence.length > 0}
+                  <ul class="evidence">
+                    {#each f.evidence as e}<li>{e.label}: {e.value}</li>{/each}
+                  </ul>
+                {/if}
+                <div class="decision-row">
+                  <button class="accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "accepted")}>✓ Accept</button>
+                  <button class="reject" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "rejected")}>✗ Reject</button>
+                  <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
+                </div>
+              </div>
+            {:else}
+              {#if !greekRoomChecking}<p class="none">No Greek Room findings.</p>{/if}
+            {/each}
           </div>
-          <p class="ai-summary">{aiExplainResult.summary}</p>
-          {#each aiExplainResult.checkReviews as review}
-            <div class="finding ai-check-review">
-              <div class="verdict">
-                <span class="badge {severityBadge[review.severity] ?? 'badge-review'}">{review.verdict}</span>
-                <span class="check-id">{review.tool}{review.group_id ? ` · ${review.group_id}` : ""}</span>
-              </div>
-              <p class="explain">{review.rationale}</p>
-              {#if review.suggested_correction}<p class="ai-suggestion">Suggested: {review.suggested_correction}</p>{/if}
+        </div>
+      {:else if activeTab === "ai"}
+        <div class="tab-panel" role="tabpanel">
+          {#if visibleAIExplainError}
+            <div class="section ai-explain-section">
+              <div class="section-title">AI explanation</div>
+              <p class="ai-error">{visibleAIExplainError}</p>
             </div>
-          {/each}
-          {#each aiExplainResult.qaIssues as issue}
-            <div class="finding ai-qa-issue">
-              <div class="verdict">
-                <span class="badge {severityBadge[issue.severity] ?? 'badge-review'}">{issue.severity}</span>
-                <span class="check-id">{issue.title}</span>
+          {:else if aiExplainResult}
+            <div class="section ai-explain-section">
+              <div class="section-title">
+                AI explanation
+                <span class="ai-cost">~${aiExplainResult.usage.estimatedCostUSD.toFixed(4)}</span>
               </div>
-              <p class="explain">{issue.detail}</p>
+              <p class="ai-summary">{aiExplainResult.summary}</p>
+              {#each aiExplainResult.checkReviews as review}
+                <div class="finding ai-check-review">
+                  <div class="verdict">
+                    <span class="badge {severityBadge[review.severity] ?? 'badge-review'}">{review.verdict}</span>
+                    <span class="check-id">{review.tool}{review.group_id ? ` · ${review.group_id}` : ""}</span>
+                  </div>
+                  <p class="explain">{review.rationale}</p>
+                  {#if review.suggested_correction}<p class="ai-suggestion">Suggested: {review.suggested_correction}</p>{/if}
+                </div>
+              {/each}
+              {#each aiExplainResult.qaIssues as issue}
+                <div class="finding ai-qa-issue">
+                  <div class="verdict">
+                    <span class="badge {severityBadge[issue.severity] ?? 'badge-review'}">{issue.severity}</span>
+                    <span class="check-id">{issue.title}</span>
+                  </div>
+                  <p class="explain">{issue.detail}</p>
+                </div>
+              {/each}
+              {#if aiExplainResult.checkReviews.length === 0 && aiExplainResult.qaIssues.length === 0}
+                <p class="none">AI found nothing to flag for this verse.</p>
+              {/if}
             </div>
-          {/each}
-          {#if aiExplainResult.checkReviews.length === 0 && aiExplainResult.qaIssues.length === 0}
-            <p class="none">AI found nothing to flag for this verse.</p>
+          {:else}
+            <p class="none">No AI explanation yet for this verse — run "AI review" below.</p>
           {/if}
         </div>
       {/if}
@@ -621,6 +674,22 @@
   .operation-status.checking { color: var(--accent); background: var(--accent-bg); }
   .operation-status.saved { color: var(--success); background: var(--success-bg); }
   .operation-status.failed { color: var(--danger); background: var(--danger-bg); }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+  .tabs button {
+    flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 8px 6px; font-size: 10.5px; font-weight: 700; color: var(--text-2);
+    background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+    cursor: pointer;
+  }
+  .tabs button:hover:not(.active) { color: var(--text); }
+  .tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-count {
+    font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+    background: var(--accent-bg); color: var(--accent);
+  }
+  .tabs button.active .tab-count { background: var(--accent); color: white; }
+  .tab-live { width: 6px; height: 6px; border-radius: 50%; background: var(--gr); flex-shrink: 0; }
+  .tab-panel:empty { display: none; }
   .section { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
   .section-title { font-size: 11px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .live { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; color: var(--gr); }
@@ -628,12 +697,18 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .finding { border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 10px; }
   .finding:first-child { border-top: none; padding-top: 0; margin-top: 0; }
-  .verdict { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 5px; }
+  .verdict { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 6px; }
+  .badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 5px; flex-shrink: 0; }
   .badge-wrong { background: var(--danger-bg); color: var(--danger); }
   .badge-review { background: var(--warning-bg); color: var(--warning); }
   .badge-decided { background: var(--success-bg); color: var(--success); text-transform: capitalize; }
-  .check-id { font-size: 11px; color: var(--text-3); }
+  .check-id { font-size: 11px; color: var(--text-3); min-width: 0; overflow-wrap: anywhere; }
+  .engine-badge { font-size: 9px; font-weight: 700; text-transform: capitalize; color: var(--accent); background: var(--accent-bg); padding: 2px 7px; border-radius: 999px; flex-shrink: 0; }
+  .finding-num-badge {
+    display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+    font-size: 9px; font-weight: 800; color: white; background: var(--accent); border-radius: 50%;
+    flex-shrink: 0;
+  }
   .save-state { margin-left: auto; font-size: 10px; color: var(--text-3); white-space: nowrap; }
   .save-state.saved { color: var(--success); }
   .save-state.failed { color: var(--danger); }
