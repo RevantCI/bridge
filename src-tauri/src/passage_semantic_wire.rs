@@ -812,6 +812,106 @@ pub struct Exportability {
     pub revision: u64,
 }
 
+wire_enum!(SourceInventoryCacheStatus { Miss, Hit });
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SourceResourceLanguageId {
+    #[serde(rename = "hbo")]
+    BiblicalHebrew,
+    #[serde(rename = "el-x-koine")]
+    KoineGreek,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SourceTokenLanguageId {
+    #[serde(rename = "hbo")]
+    BiblicalHebrew,
+    #[serde(rename = "arc")]
+    BiblicalAramaic,
+    #[serde(rename = "el-x-koine")]
+    KoineGreek,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SourceResourceId {
+    #[serde(rename = "uhb")]
+    Uhb,
+    #[serde(rename = "ugnt")]
+    Ugnt,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceInventoryToken {
+    #[serde(flatten)]
+    pub token: TokenInstance,
+    pub language_id: SourceTokenLanguageId,
+    pub upstream_identity: String,
+    #[serde(default)]
+    pub translation_word_concept_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceInventoryCoverageAccount {
+    pub id: String,
+    pub audit_owner_unit_id: String,
+    pub member_unit_ids: Vec<String>,
+    pub coverage_dimension: CoverageDimension,
+    pub semantic_fingerprint: String,
+    pub excluded_duplicate_unit_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceInventoryDiagnostics {
+    pub source_token_instances: u64,
+    pub source_tokens_represented: u64,
+    pub required_semantic_obligations: u64,
+    pub conditional_obligations: u64,
+    pub grammatical_obligations: u64,
+    pub derived_aggregate_units: u64,
+    pub excluded_units: u64,
+    pub review_only_units: u64,
+    pub resource_enriched_units: u64,
+    pub resource_conflicts: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceInventoryResource {
+    pub language_id: SourceResourceLanguageId,
+    pub resource_id: SourceResourceId,
+    pub version: String,
+    pub owner: String,
+    pub commit: String,
+    pub release: String,
+    pub license: String,
+    pub provenance_sha256: String,
+    pub license_sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceSemanticInventory {
+    pub id: String,
+    pub book: String,
+    pub range_key: String,
+    pub canonical_references: Vec<String>,
+    pub fingerprint: String,
+    pub source_semantic_fingerprint: String,
+    pub source_resource: SourceInventoryResource,
+    pub inventory_engine_version: String,
+    pub source_tokenization_version: String,
+    pub policy_binding: PolicyBinding,
+    pub tokens: Vec<SourceInventoryToken>,
+    pub units: Vec<SemanticUnit>,
+    pub coverage_accounts: Vec<SourceInventoryCoverageAccount>,
+    pub evidence: Vec<EvidenceRecord>,
+    pub diagnostics: SourceInventoryDiagnostics,
+    pub cache_status: SourceInventoryCacheStatus,
+}
+
 pub fn codepoint_span(text: &str, start: usize, end: usize) -> Result<String, String> {
     let points: Vec<char> = text.chars().collect();
     if start > end || end > points.len() {

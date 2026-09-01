@@ -862,6 +862,79 @@ pub async fn passage_semantic_rebuild_passage(
 }
 
 #[tauri::command]
+pub async fn source_semantic_build_range(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    end_chapter: Option<String>,
+    end_verse: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "sourceSemantic.buildRange",
+            serde_json::json!({
+                "chapter": chapter,
+                "verse": verse,
+                "endChapter": end_chapter.unwrap_or_default(),
+                "endVerse": end_verse.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn source_semantic_get_range(
+    sidecar: State<'_, EngineSidecar>,
+    inventory_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "sourceSemantic.getRange",
+            serde_json::json!({"inventoryId": inventory_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn source_semantic_get_unit(
+    sidecar: State<'_, EngineSidecar>,
+    unit_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "sourceSemantic.getUnit",
+            serde_json::json!({"unitId": unit_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn source_semantic_get_coverage_accounts(
+    sidecar: State<'_, EngineSidecar>,
+    inventory_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "sourceSemantic.getCoverageAccounts",
+            serde_json::json!({"inventoryId": inventory_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn source_semantic_get_diagnostics(
+    sidecar: State<'_, EngineSidecar>,
+    inventory_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "sourceSemantic.getDiagnostics",
+            serde_json::json!({"inventoryId": inventory_id}),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn paratext_get_state(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar
         .send_request("paratext.getState", serde_json::json!({}))

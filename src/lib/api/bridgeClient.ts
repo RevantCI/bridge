@@ -12,6 +12,10 @@ import type {
   PassageSemanticProjectMetadata,
   PassageSemanticRuntimeStatus,
   PassageSemanticStaleSummary,
+  SemanticUnit,
+  SourceInventoryCoverageAccount,
+  SourceInventoryDiagnostics,
+  SourceSemanticInventory,
 } from "../types/passageSemanticV1";
 
 /**
@@ -417,6 +421,28 @@ export const bridge = {
     return call("passage_semantic_rebuild_passage", {
       chapter, verse, ...options,
     });
+  },
+
+  sourceSemanticBuildRange(
+    chapter: string, verse: string, endChapter?: string, endVerse?: string,
+  ): Promise<SourceSemanticInventory> {
+    return call("source_semantic_build_range", { chapter, verse, endChapter, endVerse });
+  },
+
+  sourceSemanticGetRange(inventoryId: string): Promise<SourceSemanticInventory> {
+    return call("source_semantic_get_range", { inventoryId });
+  },
+
+  sourceSemanticGetUnit(unitId: string): Promise<SemanticUnit> {
+    return call("source_semantic_get_unit", { unitId });
+  },
+
+  sourceSemanticGetCoverageAccounts(inventoryId: string): Promise<SourceInventoryCoverageAccount[]> {
+    return call("source_semantic_get_coverage_accounts", { inventoryId });
+  },
+
+  sourceSemanticGetDiagnostics(inventoryId: string): Promise<SourceInventoryDiagnostics> {
+    return call("source_semantic_get_diagnostics", { inventoryId });
   },
 
   paratextGetState(): Promise<DesktopConnectorState> {

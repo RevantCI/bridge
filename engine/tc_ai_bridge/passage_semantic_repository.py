@@ -43,7 +43,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 2
+DATABASE_SCHEMA_VERSION = 3
 
 
 class FoundationError(RuntimeError):
@@ -405,6 +405,48 @@ CREATE TABLE runtime_diagnostics (
 """
 
 
+_MIGRATION_V3 = r"""
+CREATE TABLE source_inventory_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    book TEXT NOT NULL,
+    range_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    source_resource_id TEXT NOT NULL,
+    source_resource_version TEXT NOT NULL,
+    source_resource_hash TEXT NOT NULL,
+    audit_policy_version TEXT NOT NULL,
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    diagnostics_json TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, book, range_key, fingerprint)
+);
+CREATE INDEX ix_source_inventory_range
+ON source_inventory_runs(project_id, book, range_key, lifecycle_status);
+
+CREATE TABLE source_inventory_tokens (
+    inventory_id TEXT NOT NULL REFERENCES source_inventory_runs(id) ON DELETE CASCADE,
+    token_instance_id TEXT NOT NULL REFERENCES token_instances(id),
+    language_id TEXT NOT NULL,
+    upstream_identity TEXT NOT NULL,
+    PRIMARY KEY(inventory_id, token_instance_id)
+);
+
+CREATE TABLE source_inventory_units (
+    inventory_id TEXT NOT NULL REFERENCES source_inventory_runs(id) ON DELETE CASCADE,
+    semantic_unit_id TEXT NOT NULL REFERENCES semantic_units(id),
+    PRIMARY KEY(inventory_id, semantic_unit_id)
+);
+
+CREATE TABLE source_inventory_evidence (
+    inventory_id TEXT NOT NULL REFERENCES source_inventory_runs(id) ON DELETE CASCADE,
+    evidence_id TEXT NOT NULL REFERENCES evidence_records(id),
+    PRIMARY KEY(inventory_id, evidence_id)
+);
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -445,6 +487,10 @@ class FoundationRepository:
             if current < 2:
                 self._backup_before_migration(conn, current, 2)
                 self._apply_migration(conn, 2, _MIGRATION_V2)
+                current = 2
+            if current < 3:
+                self._backup_before_migration(conn, current, 3)
+                self._apply_migration(conn, 3, _MIGRATION_V3)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -905,6 +951,19 @@ class FoundationRepository:
                     raise FoundationValidationError(
                         f"Semantic-unit side does not match token instance: {token_id}"
                     )
+            if unit.audit_owner_unit_id != unit.id and conn.execute(
+                "SELECT 1 FROM semantic_units WHERE id=?", (unit.audit_owner_unit_id,)
+            ).fetchone() is None:
+                raise FoundationValidationError(
+                    f"Unknown semantic-unit audit owner: {unit.audit_owner_unit_id}"
+                )
+            for evidence_id in unit.evidence_ids:
+                if conn.execute(
+                    "SELECT 1 FROM evidence_records WHERE id=?", (evidence_id,)
+                ).fetchone() is None:
+                    raise FoundationValidationError(
+                        f"Unknown semantic-unit evidence record: {evidence_id}"
+                    )
             conn.execute(
                 "INSERT INTO semantic_units VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (unit.id, unit.project_id, unit.side.value, unit.kind.value, unit.audit_owner_unit_id,
@@ -925,6 +984,19 @@ class FoundationRepository:
         payload = to_wire(account)
         with self._connect() as conn:
             try:
+                if conn.execute(
+                    "SELECT 1 FROM semantic_units WHERE id=?", (account.audit_owner_unit_id,)
+                ).fetchone() is None:
+                    raise FoundationValidationError(
+                        f"Unknown coverage-account audit owner: {account.audit_owner_unit_id}"
+                    )
+                for unit_id in account.member_unit_ids:
+                    if conn.execute(
+                        "SELECT 1 FROM semantic_units WHERE id=?", (unit_id,)
+                    ).fetchone() is None:
+                        raise FoundationValidationError(
+                            f"Unknown coverage-account member: {unit_id}"
+                        )
                 conn.execute(
                     "INSERT INTO coverage_accounts VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                     (account.id, account.project_id, account.passage_id, account.direction.value,
@@ -935,6 +1007,106 @@ class FoundationRepository:
                 conn.commit()
             except sqlite3.IntegrityError as exc:
                 raise FoundationConflict(f"Coverage account conflicts with an active obligation: {exc}") from exc
+
+    def save_source_inventory(
+        self, *, inventory_id: str, project_id: str, book: str, range_key: str,
+        fingerprint: str, source_resource_id: str, source_resource_version: str,
+        source_resource_hash: str, audit_policy_version: str,
+        diagnostics: dict[str, Any], payload: dict[str, Any], token_rows: list[tuple[str, str, str]],
+        unit_ids: list[str], evidence_ids: list[str],
+    ) -> None:
+        """Atomically publish one immutable, content-addressed source inventory."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            lock = conn.execute(
+                "SELECT resource_id,resource_version,resource_hash,lifecycle_status "
+                "FROM source_resource_locks WHERE project_id=? AND book=?",
+                (project_id, book),
+            ).fetchone()
+            if lock is None or lock["lifecycle_status"] != "ACTIVE" or (
+                lock["resource_id"], lock["resource_version"], lock["resource_hash"]
+            ) != (source_resource_id, source_resource_version, source_resource_hash):
+                raise FoundationValidationError(
+                    "Source inventory does not match the active project source resource lock"
+                )
+            conn.execute(
+                "UPDATE source_inventory_runs SET lifecycle_status='SUPERSEDED' "
+                "WHERE project_id=? AND book=? AND range_key=? AND lifecycle_status='ACTIVE' "
+                "AND fingerprint<>?",
+                (project_id, book, range_key, fingerprint),
+            )
+            conn.execute(
+                "INSERT INTO source_inventory_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (inventory_id, project_id, book, range_key, fingerprint,
+                 source_resource_id, source_resource_version, source_resource_hash,
+                 audit_policy_version, "ACTIVE", json.dumps(diagnostics, ensure_ascii=False),
+                 json.dumps(payload, ensure_ascii=False), self._now()),
+            )
+            conn.executemany(
+                "INSERT INTO source_inventory_tokens VALUES(?,?,?,?)",
+                [(inventory_id, token_id, language_id, upstream_identity)
+                 for token_id, language_id, upstream_identity in token_rows],
+            )
+            conn.executemany(
+                "INSERT INTO source_inventory_units VALUES(?,?)",
+                [(inventory_id, unit_id) for unit_id in unit_ids],
+            )
+            conn.executemany(
+                "INSERT INTO source_inventory_evidence VALUES(?,?)",
+                [(inventory_id, evidence_id) for evidence_id in evidence_ids],
+            )
+            conn.commit()
+
+    def source_inventory_for_fingerprint(
+        self, project_id: str, book: str, range_key: str, fingerprint: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM source_inventory_runs WHERE project_id=? AND book=? "
+                "AND range_key=? AND fingerprint=? AND lifecycle_status='ACTIVE'",
+                (project_id, book, range_key, fingerprint),
+            ).fetchone()
+        return None if row is None else json.loads(row[0])
+
+    def source_inventory(self, inventory_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json,source_resource_id,source_resource_version,source_resource_hash,"
+                "project_id,book,lifecycle_status FROM source_inventory_runs WHERE id=?",
+                (inventory_id,),
+            ).fetchone()
+            if row is None:
+                raise FoundationValidationError(f"Unknown source inventory: {inventory_id}")
+            lock = conn.execute(
+                "SELECT resource_id,resource_version,resource_hash,lifecycle_status "
+                "FROM source_resource_locks WHERE project_id=? AND book=?",
+                (row["project_id"], row["book"]),
+            ).fetchone()
+        if row["lifecycle_status"] != "ACTIVE" or lock is None or lock["lifecycle_status"] != "ACTIVE" or (
+            row["source_resource_id"], row["source_resource_version"], row["source_resource_hash"]
+        ) != (lock["resource_id"], lock["resource_version"], lock["resource_hash"]):
+            raise FoundationValidationError(
+                "Cached source inventory is stale or does not match the active source resource lock"
+            )
+        return json.loads(row["payload_json"])
+
+    def quarantine_source_inventory(
+        self, inventory_id: str, reason: str, payload: dict[str, Any],
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE source_inventory_runs SET lifecycle_status='QUARANTINED' WHERE id=?",
+                (inventory_id,),
+            )
+            conn.execute(
+                "INSERT INTO migration_quarantine VALUES(?,?,?,?,?,?)",
+                (str(uuid.uuid4()), "sourceSemantic.inventory",
+                 inventory_id, "INVALID_SOURCE_INVENTORY",
+                 json.dumps({"error": reason, "originalRecord": payload}, ensure_ascii=False),
+                 self._now()),
+            )
+            conn.commit()
 
     def save_semantic_relationship(self, relationship: SemanticRelationship) -> None:
         payload = to_wire(relationship)
@@ -1368,6 +1540,12 @@ class FoundationRepository:
                 changed = True
                 dependency_id = self.source_dependency_id(project_id, book, row["resource_hash"])
                 staled = self._stale_generic_dependencies(conn, "SOURCE_RESOURCE", dependency_id)
+                inventory_staled = conn.execute(
+                    "UPDATE source_inventory_runs SET lifecycle_status='STALE' "
+                    "WHERE project_id=? AND book=? AND lifecycle_status='ACTIVE'",
+                    (project_id, book),
+                ).rowcount
+                staled += int(inventory_staled)
                 conn.execute(
                     "UPDATE source_resource_locks SET resource_id=?,resource_version=?,resource_hash=?,"
                     "lifecycle_status='ACTIVE',revision=revision+1,updated_at=? "

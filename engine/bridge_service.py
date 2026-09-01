@@ -286,6 +286,11 @@ class Methods:
     PASSAGE_SEMANTIC_STALE_SUMMARY = "passageSemantic.getStaleSummary"
     PASSAGE_SEMANTIC_MIGRATION_REPORT = "passageSemantic.getMigrationReport"
     PASSAGE_SEMANTIC_REBUILD_PASSAGE = "passageSemantic.rebuildCurrentPassage"
+    SOURCE_SEMANTIC_BUILD_RANGE = "sourceSemantic.buildRange"
+    SOURCE_SEMANTIC_GET_RANGE = "sourceSemantic.getRange"
+    SOURCE_SEMANTIC_GET_UNIT = "sourceSemantic.getUnit"
+    SOURCE_SEMANTIC_GET_COVERAGE_ACCOUNTS = "sourceSemantic.getCoverageAccounts"
+    SOURCE_SEMANTIC_GET_DIAGNOSTICS = "sourceSemantic.getDiagnostics"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -1743,6 +1748,25 @@ class BridgeEngine:
             chapter, verse, end_chapter, end_verse, tokenizer_profile,
         )
 
+    def source_semantic_build_range(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().build_source_semantic_range(
+            chapter, verse, end_chapter, end_verse,
+        )
+
+    def source_semantic_get_range(self, inventory_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().source_semantic_range(inventory_id)
+
+    def source_semantic_get_unit(self, unit_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().source_semantic_unit(unit_id)
+
+    def source_semantic_get_coverage_accounts(self, inventory_id: str) -> list[dict[str, Any]]:
+        return self._require_passage_semantic_runtime().source_semantic_coverage_accounts(inventory_id)
+
+    def source_semantic_get_diagnostics(self, inventory_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().source_semantic_diagnostics(inventory_id)
+
     # -- live desktop connectors (Paratext/Logos) --------------------------
     #
     # Direct pass-through calls only in this pass: read the connector's current
@@ -3135,6 +3159,27 @@ class BridgeEngine:
                     str(p.get("chapter") or ""), str(p.get("verse") or ""),
                     str(p.get("endChapter") or ""), str(p.get("endVerse") or ""),
                     str(p.get("tokenizerProfile") or "bridge-unicode-word-v1"),
+                ))
+            if m == Methods.SOURCE_SEMANTIC_BUILD_RANGE:
+                return EngineResponse.ok(request.id, result=self.source_semantic_build_range(
+                    str(p.get("chapter") or ""), str(p.get("verse") or ""),
+                    str(p.get("endChapter") or ""), str(p.get("endVerse") or ""),
+                ))
+            if m == Methods.SOURCE_SEMANTIC_GET_RANGE:
+                return EngineResponse.ok(
+                    request.id, result=self.source_semantic_get_range(str(p.get("inventoryId") or "")),
+                )
+            if m == Methods.SOURCE_SEMANTIC_GET_UNIT:
+                return EngineResponse.ok(
+                    request.id, result=self.source_semantic_get_unit(str(p.get("unitId") or "")),
+                )
+            if m == Methods.SOURCE_SEMANTIC_GET_COVERAGE_ACCOUNTS:
+                return EngineResponse.ok(request.id, result=self.source_semantic_get_coverage_accounts(
+                    str(p.get("inventoryId") or ""),
+                ))
+            if m == Methods.SOURCE_SEMANTIC_GET_DIAGNOSTICS:
+                return EngineResponse.ok(request.id, result=self.source_semantic_get_diagnostics(
+                    str(p.get("inventoryId") or ""),
                 ))
             if m == Methods.ISSUE_RESOLUTION_LIST:
                 return EngineResponse.ok(

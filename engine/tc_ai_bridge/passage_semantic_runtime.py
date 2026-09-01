@@ -51,6 +51,7 @@ from .passage_semantic_repository import (
 from .unicode_coordinates import grapheme_boundaries
 from .usfm_passages import PassageWindow, TargetSegment, UsfmPassageIndex
 from . import versification
+from .source_semantic_inventory import SourceSemanticInventory
 
 
 RUNTIME_VERSION = "stage4-runtime-v1"
@@ -474,6 +475,7 @@ class PassageSemanticRuntime:
         self.replayed_invalidations = self.replay_pending_invalidations()
         self.synchronize_current_text()
         self._synchronize_source_lock()
+        self.source_semantic = SourceSemanticInventory(self)
         self._migrate_legacy_companions()
 
     def _identity_fingerprint(self) -> str:
@@ -1169,3 +1171,20 @@ class PassageSemanticRuntime:
 
     def migration_report(self) -> dict[str, Any]:
         return self.repository.migration_report(self.project_id)
+
+    def build_source_semantic_range(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+    ) -> dict[str, Any]:
+        return self.source_semantic.build_range(chapter, verse, end_chapter, end_verse)
+
+    def source_semantic_range(self, inventory_id: str) -> dict[str, Any]:
+        return self.source_semantic.get_range(inventory_id)
+
+    def source_semantic_unit(self, unit_id: str) -> dict[str, Any]:
+        return self.source_semantic.get_unit(unit_id)
+
+    def source_semantic_coverage_accounts(self, inventory_id: str) -> list[dict[str, Any]]:
+        return self.source_semantic.get_coverage_accounts(inventory_id)
+
+    def source_semantic_diagnostics(self, inventory_id: str) -> dict[str, Any]:
+        return self.source_semantic.get_diagnostics(inventory_id)

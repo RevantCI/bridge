@@ -460,6 +460,63 @@ export interface Exportability {
   revision: number;
 }
 
+export interface SourceInventoryToken extends TokenInstance {
+  languageId: "hbo" | "arc" | "el-x-koine";
+  upstreamIdentity: string;
+  translationWordConceptIds?: string[];
+}
+
+export interface SourceInventoryCoverageAccount {
+  id: string;
+  auditOwnerUnitId: string;
+  memberUnitIds: string[];
+  coverageDimension: CoverageDimension;
+  semanticFingerprint: string;
+  excludedDuplicateUnitIds: string[];
+}
+
+export interface SourceInventoryDiagnostics {
+  sourceTokenInstances: number;
+  sourceTokensRepresented: number;
+  requiredSemanticObligations: number;
+  conditionalObligations: number;
+  grammaticalObligations: number;
+  derivedAggregateUnits: number;
+  excludedUnits: number;
+  reviewOnlyUnits: number;
+  resourceEnrichedUnits: number;
+  resourceConflicts: number;
+}
+
+export interface SourceSemanticInventory {
+  id: string;
+  book: string;
+  rangeKey: string;
+  canonicalReferences: string[];
+  fingerprint: string;
+  sourceSemanticFingerprint: string;
+  sourceResource: {
+    languageId: "hbo" | "el-x-koine";
+    resourceId: "uhb" | "ugnt";
+    version: string;
+    owner: string;
+    commit: string;
+    release: string;
+    license: "CC BY-SA 4.0";
+    provenanceSha256: string;
+    licenseSha256: string;
+  };
+  inventoryEngineVersion: string;
+  sourceTokenizationVersion: string;
+  policyBinding: PolicyBinding;
+  tokens: SourceInventoryToken[];
+  units: SemanticUnit[];
+  coverageAccounts: SourceInventoryCoverageAccount[];
+  evidence: EvidenceRecord[];
+  diagnostics: SourceInventoryDiagnostics;
+  cacheStatus: "MISS" | "HIT";
+}
+
 /** Convert canonical code-point offsets to the UTF-16 offsets used by DOM APIs. */
 export function codePointToUtf16Offset(text: string, offset: number): number {
   const codePoints = Array.from(text);
