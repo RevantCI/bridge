@@ -169,6 +169,120 @@ export interface PassageRecord {
   revision: number;
 }
 
+// Stage 4 runtime envelopes. Canonical entity payloads above remain schema v1;
+// these types describe the minimal project-lifecycle API around them.
+export type PassageSemanticRuntimeState =
+  | "NO_PROJECT"
+  | "READY"
+  | "UNAVAILABLE"
+  | "RECOVERY_REQUIRED";
+
+export type PassageReferenceMappingKind =
+  | "SAME"
+  | "MAPPED"
+  | "MERGE"
+  | "SPLIT"
+  | "PSALM_TITLE"
+  | "VERSE_BRIDGE"
+  | "CHAPTER_SHIFT"
+  | "AMBIGUOUS_SEGMENT";
+
+export interface PassageReferenceMapping {
+  displayedReference: string;
+  projectVersification: string;
+  canonicalReferences: string[];
+  mappingKind: PassageReferenceMappingKind;
+  ordinal: number;
+}
+
+export interface PassageSemanticRecoveryStatus {
+  ok: boolean;
+  readOnly: boolean;
+  problems: string[];
+  schemaVersion: number;
+}
+
+export interface PassageSemanticRuntimeStatus {
+  state: PassageSemanticRuntimeState;
+  available: boolean;
+  readOnly: boolean;
+  databaseSchemaVersion?: number;
+  databasePath?: string;
+  projectId?: string;
+  book?: string;
+  replayedInvalidations?: number;
+  recovery?: PassageSemanticRecoveryStatus;
+  error?: string;
+}
+
+export interface PassageSemanticProjectMetadata {
+  projectId: string;
+  identityFingerprint: string;
+  book: string;
+  targetLanguageId: string;
+  resourceId: string;
+  pathHistory: string[];
+  createdAt: string;
+  updatedAt: string;
+  lifecycleStatus: LifecycleStatus;
+  revision: number;
+  sourceLock: {
+    projectId: string;
+    book: string;
+    resourceId: string;
+    resourceVersion: string;
+    resourceHash: string;
+    lifecycleStatus: LifecycleStatus;
+    revision: number;
+    updatedAt: string;
+  } | null;
+}
+
+export interface CurrentPassageSnapshot extends PassageRecord {
+  referenceMappings: PassageReferenceMapping[];
+  targetTokenInstanceIds: string[];
+  structureStatus: "CURRENT" | "STRUCTURE_TEXT_MISMATCH";
+  structureDiagnostics: Array<{
+    code: "STRUCTURE_TEXT_MISMATCH";
+    reference?: string;
+    detail: string;
+  }>;
+  tokenizerProfile: "bridge-unicode-word-v1" | "tc-whitespace-v1";
+}
+
+export interface PassageSemanticStaleSummary {
+  counts: {
+    passages: number;
+    tokens: number;
+    semanticUnits: number;
+    semanticRelationships: number;
+    coverageAccounts: number;
+    qaFindings: number;
+    lexicalSolutions: number;
+    correctionProposals: number;
+    evidence: number;
+    exportability: number;
+  };
+  pendingInvalidations: number;
+  quarantined: number;
+}
+
+export interface PassageSemanticMigrationRun {
+  id: string;
+  sourcePath: string;
+  sourceHash: string;
+  sourceSchema: string;
+  status: "IMPORTED" | "QUARANTINED" | "SKIPPED" | "FAILED";
+  startedAt: string;
+  completedAt: string;
+  report: Record<string, unknown>;
+}
+
+export interface PassageSemanticMigrationReport {
+  runs: PassageSemanticMigrationRun[];
+  quarantineByReason: Record<string, number>;
+}
+
 export interface EvidenceRecord {
   id: string;
   projectId: string;

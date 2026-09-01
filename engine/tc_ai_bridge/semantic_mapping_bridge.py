@@ -16,6 +16,7 @@ from .semantic_mapping import (
     SemanticSourceRepository, SourceSemanticUnit, mapping_state_for_review,
 )
 from .usfm_passages import UsfmPassageIndex
+from .passage_semantic_runtime import project_current_passage_index
 
 _SOURCE_DB_NAME = "bridge_semantic_source_v0.3.sqlite"
 
@@ -54,22 +55,9 @@ def default_semantic_source_db_path() -> Path:
 
 
 def project_passage_index(project: Any) -> UsfmPassageIndex:
-    path = project.usfm_path()
-    if path is not None and Path(path).exists():
-        return UsfmPassageIndex.from_path(path, book_hint=str(project.book_id).upper())
-
-    # Raw translationCore projects can have no USFM after import. Build a minimal
-    # synthetic USFM from canonical target chapter JSON. This loses paragraph
-    # boundaries but remains safe because windows are retrieval hints only and
-    # adaptive expansion never treats a search boundary as an omission verdict.
-    lines = [f"\\id {str(project.book_id).upper()}"]
-    for chapter in project.chapters():
-        lines.append(f"\\c {chapter}")
-        for verse in project.verses(chapter):
-            if verse == "front":
-                continue
-            lines.append(f"\\v {verse} {project.target_verse_text(chapter, verse)}")
-    return UsfmPassageIndex.from_text("\n".join(lines), book_hint=str(project.book_id).upper())
+    # Stage 4 hard invariant: preserved imported USFM contributes structure
+    # only. Current editable chapter JSON is the sole Scripture wording source.
+    return project_current_passage_index(project)
 
 
 def _context_for_check(c: dict[str, Any]) -> dict[str, Any]:

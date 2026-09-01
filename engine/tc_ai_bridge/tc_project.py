@@ -80,6 +80,12 @@ class TranslationCoreProject:
         self._index_cache: dict[str, list[dict[str, Any]]] = {}
         self._checks_by_verse_cache: dict[tuple[str, str], list[dict[str, Any]]] | None = None
         self.journal = TransactionJournal(self.path, self.companion_dir())
+        # Stage 4 attaches an advisory companion runtime after project identity
+        # is resolved. Direct TranslationCoreProject users remain unchanged.
+        self.passage_semantic_runtime: Any | None = None
+
+    def attach_passage_semantic_runtime(self, runtime: Any | None) -> None:
+        self.passage_semantic_runtime = runtime
 
     @property
     def summary(self) -> ProjectSummary:
@@ -1885,6 +1891,17 @@ class TranslationCoreProject:
         old_text = str(chapter_data.get(str(verse), ''))
         if old_text == new_text:
             raise ProjectError('No Scripture text change detected.')
+        semantic_intent = ''
+        if self.passage_semantic_runtime is not None:
+            try:
+                semantic_intent = self.passage_semantic_runtime.prepare_target_edit(
+                    str(chapter), str(verse), old_text, new_text,
+                )
+            except Exception:
+                # Semantic companion failure must never block the authorized
+                # Scripture edit. Startup hash reconciliation remains a second
+                # independent stale-safety boundary.
+                semantic_intent = ''
         alignment_path = self.chapter_path(chapter)
         checks = self.checks_for_verse(chapter, verse)
         index_paths: list[Path] = []
@@ -1932,12 +1949,26 @@ class TranslationCoreProject:
                     if changed:
                         _write_json_atomic(ip, arr); touched.append(str(ip))
         except Exception as e:
+            if semantic_intent and self.passage_semantic_runtime is not None:
+                try:
+                    self.passage_semantic_runtime.cancel_target_edit(semantic_intent, str(e))
+                except Exception:
+                    pass
             try: self._rollback_paths(backup,tx_paths,existed)
             finally:
                 try: self.journal.rollback(journal_tx,str(e))
                 except Exception: pass
             self._index_cache.clear(); self._checks_by_verse_cache = None; raise
         self.journal.commit(journal_tx,{'operation':'scriptureEdit','chapter':str(chapter),'verse':str(verse)})
+        semantic_invalidation: dict[str, Any] = {}
+        if semantic_intent and self.passage_semantic_runtime is not None:
+            try:
+                semantic_invalidation = self.passage_semantic_runtime.complete_target_edit(
+                    semantic_intent, str(chapter), str(verse),
+                )
+            except Exception as exc:
+                # Leave PREPARED intent on disk for startup replay when possible.
+                semantic_invalidation = {"state": "PENDING_REPLAY", "error": str(exc)}
         self._index_cache.clear(); self._checks_by_verse_cache = None
         # Companion state is advisory/audit; project transaction is already durable here.
         try:
@@ -1952,7 +1983,7 @@ class TranslationCoreProject:
             _write_json_atomic(audit, {'operation':'scriptureEdit','verseBefore':old_text,'verseAfter':new_text,'tags':list(tags or ['meaning']),'username':username,'backup':str(backup),'modifiedTimestamp':iso})
         except Exception:
             pass
-        return {'oldText': old_text, 'newText': new_text, 'backup': str(backup), 'verseEdit': str(edit_path), 'alignmentInvalid': str(invalid), 'indexesTouched': touched}
+        return {'oldText': old_text, 'newText': new_text, 'backup': str(backup), 'verseEdit': str(edit_path), 'alignmentInvalid': str(invalid), 'indexesTouched': touched, 'semanticInvalidation': semantic_invalidation}
 
     def record_qa_decision(self, chapter: str | int, verse: str | int, issue_key: str, decision: str, note: str = '', issue: dict[str, Any] | None = None) -> Path:
         iso, safe = self._timestamp()

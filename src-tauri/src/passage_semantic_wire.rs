@@ -452,6 +452,167 @@ pub struct PassageRecord {
     pub revision: u64,
 }
 
+wire_enum!(PassageSemanticRuntimeState {
+    NoProject,
+    Ready,
+    Unavailable,
+    RecoveryRequired
+});
+wire_enum!(PassageReferenceMappingKind {
+    Same,
+    Mapped,
+    Merge,
+    Split,
+    PsalmTitle,
+    VerseBridge,
+    ChapterShift,
+    AmbiguousSegment
+});
+wire_enum!(StructureSnapshotStatus {
+    Current,
+    StructureTextMismatch
+});
+wire_enum!(MigrationRunStatus {
+    Imported,
+    Quarantined,
+    Skipped,
+    Failed
+});
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum CompanionTokenizerProfile {
+    #[serde(rename = "bridge-unicode-word-v1")]
+    BridgeUnicodeWordV1,
+    #[serde(rename = "tc-whitespace-v1")]
+    TcWhitespaceV1,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageReferenceMapping {
+    pub displayed_reference: String,
+    pub project_versification: String,
+    pub canonical_references: Vec<String>,
+    pub mapping_kind: PassageReferenceMappingKind,
+    pub ordinal: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageSemanticRecoveryStatus {
+    pub ok: bool,
+    pub read_only: bool,
+    pub problems: Vec<String>,
+    pub schema_version: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageSemanticRuntimeStatus {
+    pub state: PassageSemanticRuntimeState,
+    pub available: bool,
+    pub read_only: bool,
+    pub database_schema_version: Option<u64>,
+    pub database_path: Option<String>,
+    pub project_id: Option<String>,
+    pub book: Option<String>,
+    pub replayed_invalidations: Option<u64>,
+    pub recovery: Option<PassageSemanticRecoveryStatus>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StructureDiagnostic {
+    pub code: StructureSnapshotStatus,
+    pub reference: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentPassageSnapshot {
+    #[serde(flatten)]
+    pub passage: PassageRecord,
+    pub reference_mappings: Vec<PassageReferenceMapping>,
+    pub target_token_instance_ids: Vec<String>,
+    pub structure_status: StructureSnapshotStatus,
+    pub structure_diagnostics: Vec<StructureDiagnostic>,
+    pub tokenizer_profile: CompanionTokenizerProfile,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceResourceLock {
+    pub project_id: String,
+    pub book: String,
+    pub resource_id: String,
+    pub resource_version: String,
+    pub resource_hash: String,
+    pub lifecycle_status: LifecycleStatus,
+    pub revision: u64,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageSemanticProjectMetadata {
+    pub project_id: String,
+    pub identity_fingerprint: String,
+    pub book: String,
+    pub target_language_id: String,
+    pub resource_id: String,
+    pub path_history: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub lifecycle_status: LifecycleStatus,
+    pub revision: u64,
+    pub source_lock: Option<SourceResourceLock>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageSemanticStaleCounts {
+    pub passages: u64,
+    pub tokens: u64,
+    pub semantic_units: u64,
+    pub semantic_relationships: u64,
+    pub coverage_accounts: u64,
+    pub qa_findings: u64,
+    pub lexical_solutions: u64,
+    pub correction_proposals: u64,
+    pub evidence: u64,
+    pub exportability: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageSemanticStaleSummary {
+    pub counts: PassageSemanticStaleCounts,
+    pub pending_invalidations: u64,
+    pub quarantined: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageSemanticMigrationRun {
+    pub id: String,
+    pub source_path: String,
+    pub source_hash: String,
+    pub source_schema: String,
+    pub status: MigrationRunStatus,
+    pub started_at: String,
+    pub completed_at: String,
+    pub report: serde_json::Value,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PassageSemanticMigrationReport {
+    pub runs: Vec<PassageSemanticMigrationRun>,
+    pub quarantine_by_reason: HashMap<String, u64>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct EvidenceRecord {

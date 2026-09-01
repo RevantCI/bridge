@@ -783,6 +783,85 @@ pub async fn semantic_validation_decide(
 }
 
 #[tauri::command]
+pub async fn passage_semantic_status(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+    sidecar
+        .send_request("passageSemantic.status", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn passage_semantic_project_metadata(
+    sidecar: State<'_, EngineSidecar>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("passageSemantic.getProjectMetadata", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn passage_semantic_current_passage(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    end_chapter: Option<String>,
+    end_verse: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "passageSemantic.getCurrentPassage",
+            serde_json::json!({
+                "chapter": chapter,
+                "verse": verse,
+                "endChapter": end_chapter.unwrap_or_default(),
+                "endVerse": end_verse.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn passage_semantic_stale_summary(
+    sidecar: State<'_, EngineSidecar>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("passageSemantic.getStaleSummary", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn passage_semantic_migration_report(
+    sidecar: State<'_, EngineSidecar>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("passageSemantic.getMigrationReport", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn passage_semantic_rebuild_passage(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    end_chapter: Option<String>,
+    end_verse: Option<String>,
+    tokenizer_profile: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "passageSemantic.rebuildCurrentPassage",
+            serde_json::json!({
+                "chapter": chapter,
+                "verse": verse,
+                "endChapter": end_chapter.unwrap_or_default(),
+                "endVerse": end_verse.unwrap_or_default(),
+                "tokenizerProfile": tokenizer_profile
+                    .unwrap_or_else(|| "bridge-unicode-word-v1".to_owned()),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn paratext_get_state(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar
         .send_request("paratext.getState", serde_json::json!({}))

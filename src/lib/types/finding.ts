@@ -431,6 +431,13 @@ export interface ProjectInfo {
     message?: string;
   };
   importedProjects?: ImportedProject[];
+  passageSemantic?: {
+    state: "NO_PROJECT" | "READY" | "UNAVAILABLE" | "RECOVERY_REQUIRED";
+    available: boolean;
+    readOnly: boolean;
+    error?: string;
+    [key: string]: unknown;
+  };
 }
 
 export interface ImportBook {

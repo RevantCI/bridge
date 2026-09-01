@@ -46,7 +46,8 @@ from tc_ai_bridge.project_import import (
 from tc_ai_bridge.original_language_resources import resource_inventory
 from tc_ai_bridge.lexicon_resources import lexicon_entry_for_strong, HEBREW_PREFIX_LABELS
 from tc_ai_bridge.morphology_codes import decode_morph
-from tc_ai_bridge.project_registry import ProjectRegistry, source_fingerprints
+from tc_ai_bridge.project_registry import ProjectIdentityError, ProjectRegistry, source_fingerprints
+from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime
 from tc_ai_bridge.local_checks import run_local_qa
 from tc_ai_bridge.alignment_engine import (
     AlignmentError, apply_proposal, make_inventory, realign, unalign_bottom,
@@ -257,6 +258,12 @@ class Methods:
     SEMANTIC_MAPPING_RERUN_FOR_VERSE = "semanticMapping.rerunForVerse"
     SEMANTIC_VALIDATION_LIST = "semanticValidation.list"
     SEMANTIC_VALIDATION_DECIDE = "semanticValidation.decide"
+    PASSAGE_SEMANTIC_STATUS = "passageSemantic.status"
+    PASSAGE_SEMANTIC_PROJECT_METADATA = "passageSemantic.getProjectMetadata"
+    PASSAGE_SEMANTIC_CURRENT_PASSAGE = "passageSemantic.getCurrentPassage"
+    PASSAGE_SEMANTIC_STALE_SUMMARY = "passageSemantic.getStaleSummary"
+    PASSAGE_SEMANTIC_MIGRATION_REPORT = "passageSemantic.getMigrationReport"
+    PASSAGE_SEMANTIC_REBUILD_PASSAGE = "passageSemantic.rebuildCurrentPassage"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -288,6 +295,10 @@ class BridgeEngine:
         self._logos_client: Optional[LogosConnectorClient] = None
         self.greek_room = GreekRoomEngine()
         self.project: Optional[TranslationCoreProject] = None
+        self.passage_semantic_runtime: PassageSemanticRuntime | None = None
+        self._passage_semantic_status: dict[str, Any] = {
+            "available": False, "readOnly": True, "state": "NO_PROJECT",
+        }
         # USFM structural checks run once per whole book (not once per
         # verse — each run spawns a subprocess loading a real tag/Unicode
         # database, far too slow to repeat per verse.runChecks call). Keyed
@@ -398,16 +409,37 @@ class BridgeEngine:
                     raise ProjectError(
                         "The selected folder has a different target language from the missing project."
                     )
+        try:
+            registered = self.project_registry.register(path, touch=True, project_id=project_id)
+        except ProjectIdentityError as exc:
+            raise ProjectError(str(exc)) from exc
         self.project = candidate
+        self.passage_semantic_runtime = None
+        self._passage_semantic_status = {
+            "available": False, "readOnly": True, "state": "UNAVAILABLE",
+        }
+        try:
+            runtime = PassageSemanticRuntime(candidate, str(registered["projectId"]))
+            candidate.attach_passage_semantic_runtime(runtime)
+            self.passage_semantic_runtime = runtime
+            self._passage_semantic_status = {"state": "READY", **runtime.status()}
+        except Exception as exc:
+            # Scripture/tC access remains fully usable. Semantic APIs expose the
+            # recovery diagnostic rather than making project.open fail.
+            candidate.attach_passage_semantic_runtime(None)
+            self._passage_semantic_status = {
+                "available": False, "readOnly": True,
+                "state": "RECOVERY_REQUIRED", "error": str(exc),
+            }
         info = self._project_info()
         siblings = collection_projects(path)
         if siblings:
             info["importedProjects"] = siblings
-        registered = self.project_registry.register(path, touch=True, project_id=project_id)
         info.update({
             "projectId": registered["projectId"],
             "collectionId": registered.get("collectionId", ""),
             "managed": registered.get("managed", False),
+            "passageSemantic": dict(self._passage_semantic_status),
         })
         return info
 
@@ -1651,6 +1683,50 @@ class BridgeEngine:
         return decide_semantic_validation_candidate(
             self.project, candidate_id=candidate_id, decision=decision,
             reviewer=reviewer, note=note, corrected_mapping=corrected_mapping,
+        )
+
+    # -- passage-semantic runtime foundation -----------------------------
+
+    def passage_semantic_status(self) -> dict[str, Any]:
+        if self.passage_semantic_runtime is None:
+            return dict(self._passage_semantic_status)
+        self._passage_semantic_status = {
+            "state": "READY", **self.passage_semantic_runtime.status(),
+        }
+        return dict(self._passage_semantic_status)
+
+    def _require_passage_semantic_runtime(self) -> PassageSemanticRuntime:
+        self._require_project()
+        if self.passage_semantic_runtime is None:
+            error = str(self._passage_semantic_status.get("error") or "")
+            raise ProjectError(
+                "Passage-semantic companion storage is unavailable."
+                + (f" Recovery detail: {error}" if error else "")
+            )
+        return self.passage_semantic_runtime
+
+    def passage_semantic_project_metadata(self) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().project_metadata()
+
+    def passage_semantic_current_passage(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().get_current_passage(
+            chapter, verse, end_chapter, end_verse,
+        )
+
+    def passage_semantic_stale_summary(self) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().stale_summary()
+
+    def passage_semantic_migration_report(self) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().migration_report()
+
+    def passage_semantic_rebuild_passage(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+        tokenizer_profile: str = "bridge-unicode-word-v1",
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().rebuild_current_passage(
+            chapter, verse, end_chapter, end_verse, tokenizer_profile,
         )
 
     # -- live desktop connectors (Paratext/Logos) --------------------------
@@ -3058,6 +3134,31 @@ class BridgeEngine:
                     str(p.get("candidateId") or ""), str(p.get("decision") or ""),
                     str(p.get("reviewer") or ""), str(p.get("note") or ""),
                     p.get("correctedMapping"),
+                ))
+            if m == Methods.PASSAGE_SEMANTIC_STATUS:
+                return EngineResponse.ok(request.id, result=self.passage_semantic_status())
+            if m == Methods.PASSAGE_SEMANTIC_PROJECT_METADATA:
+                return EngineResponse.ok(
+                    request.id, result=self.passage_semantic_project_metadata(),
+                )
+            if m == Methods.PASSAGE_SEMANTIC_CURRENT_PASSAGE:
+                return EngineResponse.ok(request.id, result=self.passage_semantic_current_passage(
+                    str(p.get("chapter") or ""), str(p.get("verse") or ""),
+                    str(p.get("endChapter") or ""), str(p.get("endVerse") or ""),
+                ))
+            if m == Methods.PASSAGE_SEMANTIC_STALE_SUMMARY:
+                return EngineResponse.ok(
+                    request.id, result=self.passage_semantic_stale_summary(),
+                )
+            if m == Methods.PASSAGE_SEMANTIC_MIGRATION_REPORT:
+                return EngineResponse.ok(
+                    request.id, result=self.passage_semantic_migration_report(),
+                )
+            if m == Methods.PASSAGE_SEMANTIC_REBUILD_PASSAGE:
+                return EngineResponse.ok(request.id, result=self.passage_semantic_rebuild_passage(
+                    str(p.get("chapter") or ""), str(p.get("verse") or ""),
+                    str(p.get("endChapter") or ""), str(p.get("endVerse") or ""),
+                    str(p.get("tokenizerProfile") or "bridge-unicode-word-v1"),
                 ))
             if m == Methods.ISSUE_RESOLUTION_LIST:
                 return EngineResponse.ok(

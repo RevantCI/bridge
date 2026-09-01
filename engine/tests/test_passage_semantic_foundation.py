@@ -61,9 +61,11 @@ from tc_ai_bridge.passage_semantic_models import (
     TokenLayer,
 )
 from tc_ai_bridge.passage_semantic_repository import (
+    DATABASE_SCHEMA_VERSION,
     FoundationConflict,
     FoundationRepository,
     FoundationValidationError,
+    _MIGRATION_V1,
 )
 from tc_ai_bridge.unicode_coordinates import (
     codepoint_span,
@@ -525,9 +527,39 @@ def test_migration_is_idempotent_and_preserves_unrelated_legacy_table(tmp_path: 
         conn.execute("INSERT INTO legacy_marker VALUES('preserve-me')")
     first = FoundationRepository(db)
     second = FoundationRepository(db)
-    assert first.schema_version() == second.schema_version() == 1
+    assert first.schema_version() == second.schema_version() == DATABASE_SCHEMA_VERSION
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT value FROM legacy_marker").fetchone()[0] == "preserve-me"
+
+
+def test_v1_database_upgrade_creates_automatic_pre_migration_backup(tmp_path: Path) -> None:
+    import sqlite3
+
+    db = tmp_path / "passageSemantic" / "bridge-semantic.sqlite3"
+    db.parent.mkdir(parents=True)
+    with sqlite3.connect(db) as conn:
+        conn.executescript(_MIGRATION_V1)
+        conn.execute(
+            "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, schema_id TEXT NOT NULL, applied_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO schema_migrations VALUES(1,?,?)",
+            (SCHEMA_ID, "2026-09-01T00:00:00+00:00"),
+        )
+        conn.execute("PRAGMA user_version = 1")
+
+    repo = FoundationRepository(db)
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION
+    backups = list((db.parent / "backups").glob("pre-schema-v2-*/backup-manifest.json"))
+    assert len(backups) == 1
+    manifest = json.loads(backups[0].read_text(encoding="utf-8"))
+    assert manifest["databaseSchemaVersion"] == 1
+    assert manifest["targetDatabaseSchemaVersion"] == 2
+    repo.create_qa_finding("post-upgrade-only", "project-1")
+    repo.restore(backups[0].parent)
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION
+    with pytest.raises(FoundationValidationError, match="Unknown QA finding"):
+        repo.qa_finding("post-upgrade-only")
 
 
 def test_ambiguous_legacy_alignment_can_be_quarantined_without_mutation(tmp_path: Path) -> None:

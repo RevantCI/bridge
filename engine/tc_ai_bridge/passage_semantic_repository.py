@@ -1,7 +1,8 @@
-"""SQLite persistence for the Stage 3 passage-semantic data foundation.
+"""SQLite persistence for Bridge's passage-semantic companion foundation.
 
-This repository is intentionally not connected to current Bridge project or
-translationCore write paths yet.  It owns only the new companion database.
+The canonical record schema remains v1. Database migration v2 adds Stage 4
+runtime identity, revision, invalidation, reference, and migration metadata.
+The database never owns or rewrites Scripture or native translationCore data.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import time
 from typing import Any, Iterator
 import uuid
 
@@ -39,6 +41,9 @@ from .passage_semantic_models import (
     TokenLayer,
     to_wire,
 )
+
+
+DATABASE_SCHEMA_VERSION = 2
 
 
 class FoundationError(RuntimeError):
@@ -301,6 +306,105 @@ CREATE TABLE migration_quarantine (
 """
 
 
+_MIGRATION_V2 = r"""
+CREATE TABLE project_metadata (
+    project_id TEXT PRIMARY KEY,
+    identity_fingerprint TEXT NOT NULL,
+    book TEXT NOT NULL,
+    target_language_id TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    path_history_json TEXT NOT NULL,
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    payload_json TEXT NOT NULL
+);
+
+CREATE TABLE current_target_revisions (
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    book TEXT NOT NULL,
+    displayed_reference TEXT NOT NULL,
+    text_hash TEXT NOT NULL,
+    text_revision TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(project_id, book, displayed_reference)
+);
+
+CREATE TABLE pending_invalidations (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    book TEXT NOT NULL,
+    displayed_reference TEXT NOT NULL,
+    previous_text_hash TEXT NOT NULL,
+    expected_text_hash TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('PREPARED','APPLIED','CANCELLED','FAILED')),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX ix_pending_invalidations_state
+ON pending_invalidations(project_id, state, created_at);
+
+CREATE TABLE source_resource_locks (
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    book TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    resource_version TEXT NOT NULL,
+    resource_hash TEXT NOT NULL,
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(project_id, book)
+);
+
+CREATE TABLE passage_reference_records (
+    passage_id TEXT NOT NULL REFERENCES passage_records(id),
+    displayed_reference TEXT NOT NULL,
+    project_versification TEXT NOT NULL,
+    canonical_references_json TEXT NOT NULL,
+    mapping_kind TEXT NOT NULL CHECK(mapping_kind IN ('SAME','MAPPED','MERGE','SPLIT','PSALM_TITLE','VERSE_BRIDGE','CHAPTER_SHIFT','AMBIGUOUS_SEGMENT')),
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+    PRIMARY KEY(passage_id, displayed_reference)
+);
+
+CREATE TABLE token_lineage_candidates (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    old_instance_id TEXT NOT NULL REFERENCES token_instances(id),
+    new_instance_id TEXT NOT NULL REFERENCES token_instances(id),
+    relation TEXT NOT NULL CHECK(relation IN ('SAME_LINEAGE','POSSIBLE_SUCCESSOR','SPLIT_FROM','MERGED_FROM','NO_CORRESPONDENCE')),
+    confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+    reason_code TEXT NOT NULL,
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    payload_json TEXT NOT NULL,
+    UNIQUE(old_instance_id, new_instance_id, relation)
+);
+
+CREATE TABLE migration_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    source_path TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    source_schema TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('IMPORTED','QUARANTINED','SKIPPED','FAILED')),
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    report_json TEXT NOT NULL,
+    UNIQUE(project_id, source_path, source_hash)
+);
+
+CREATE TABLE runtime_diagnostics (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    code TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK(severity IN ('INFO','WARNING','ERROR')),
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -331,19 +435,56 @@ class FoundationRepository:
         with self._connect() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, schema_id TEXT NOT NULL, applied_at TEXT NOT NULL)")
             current = conn.execute("SELECT COALESCE(MAX(version),0) FROM schema_migrations").fetchone()[0]
-            if current > SCHEMA_VERSION:
-                raise FoundationError(f"Companion schema {current} is newer than supported v{SCHEMA_VERSION}")
-            if current < 1:
-                schema_id = SCHEMA_ID.replace("'", "''")
-                applied_at = self._now().replace("'", "''")
-                conn.executescript(
-                    "BEGIN IMMEDIATE;\n"
-                    + _MIGRATION_V1
-                    + f"\nINSERT INTO schema_migrations(version,schema_id,applied_at) "
-                      f"VALUES(1,'{schema_id}','{applied_at}');\n"
-                    + "PRAGMA user_version = 1;\nCOMMIT;"
+            if current > DATABASE_SCHEMA_VERSION:
+                raise FoundationError(
+                    f"Companion schema {current} is newer than supported v{DATABASE_SCHEMA_VERSION}"
                 )
+            if current < 1:
+                self._apply_migration(conn, 1, _MIGRATION_V1)
+                current = 1
+            if current < 2:
+                self._backup_before_migration(conn, current, 2)
+                self._apply_migration(conn, 2, _MIGRATION_V2)
         self._ensure_policy(PolicyBinding.foundation_v1())
+
+    def _backup_before_migration(
+        self, conn: sqlite3.Connection, current: int, target: int,
+    ) -> None:
+        """Create a consistent, inspectable backup before upgrading an existing DB."""
+        if current <= 0 or not self.path.is_file():
+            return
+        root = self.path.parent / "backups"
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        directory = root / f"pre-schema-v{target}-{stamp}"
+        directory.mkdir(parents=True, exist_ok=False)
+        backup_db = directory / "bridge-semantic-v1.sqlite3"
+        destination = sqlite3.connect(str(backup_db))
+        try:
+            conn.backup(destination)
+        finally:
+            destination.close()
+        digest = hashlib.sha256(backup_db.read_bytes()).hexdigest()
+        manifest = {
+            "reason": f"automatic backup before database migration v{current} to v{target}",
+            "schemaId": SCHEMA_ID, "schemaVersion": current,
+            "source": str(self.path), "sourceDatabase": str(self.path),
+            "databaseSchemaVersion": current,
+            "targetDatabaseSchemaVersion": target, "sha256": digest, "createdAt": self._now(),
+        }
+        (directory / "backup-manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+        )
+
+    def _apply_migration(self, conn: sqlite3.Connection, version: int, script: str) -> None:
+        schema_id = SCHEMA_ID.replace("'", "''")
+        applied_at = self._now().replace("'", "''")
+        conn.executescript(
+            "BEGIN IMMEDIATE;\n"
+            + script
+            + f"\nINSERT INTO schema_migrations(version,schema_id,applied_at) "
+              f"VALUES({version},'{schema_id}','{applied_at}');\n"
+            + f"PRAGMA user_version = {version};\nCOMMIT;"
+        )
 
     @staticmethod
     def _now() -> str:
@@ -367,6 +508,236 @@ class FoundationRepository:
     def schema_version(self) -> int:
         with self._connect() as conn:
             return int(conn.execute("SELECT COALESCE(MAX(version),0) FROM schema_migrations").fetchone()[0])
+
+    def bind_project_metadata(
+        self, *, project_id: str, identity_fingerprint: str, book: str,
+        target_language_id: str, resource_id: str, path: str,
+    ) -> dict[str, Any]:
+        now = self._now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute("SELECT * FROM project_metadata").fetchall()
+            if rows and all(row["project_id"] != project_id for row in rows):
+                raise FoundationConflict(
+                    "Companion database belongs to a different Bridge project; refusing to merge identities"
+                )
+            row = next((item for item in rows if item["project_id"] == project_id), None)
+            if row is None:
+                paths = [path]
+                payload = {
+                    "projectId": project_id, "identityFingerprint": identity_fingerprint,
+                    "book": book, "targetLanguageId": target_language_id,
+                    "resourceId": resource_id, "pathHistory": paths,
+                    "createdAt": now, "updatedAt": now,
+                    "lifecycleStatus": "ACTIVE", "revision": 1,
+                }
+                conn.execute(
+                    "INSERT INTO project_metadata VALUES(?,?,?,?,?,?,?,?,?)",
+                    (project_id, identity_fingerprint, book, target_language_id, resource_id,
+                     json.dumps(paths, ensure_ascii=False), "ACTIVE", 1,
+                     json.dumps(payload, ensure_ascii=False)),
+                )
+            else:
+                if row["identity_fingerprint"] != identity_fingerprint:
+                    raise FoundationConflict(
+                        "Project identity metadata conflicts with this companion database"
+                    )
+                paths = json.loads(row["path_history_json"])
+                path_added = path not in paths
+                if path not in paths:
+                    paths.append(path)
+                metadata_changed = (
+                    row["book"] != book
+                    or row["target_language_id"] != target_language_id
+                    or row["resource_id"] != resource_id
+                )
+                if path_added or metadata_changed:
+                    payload = json.loads(row["payload_json"])
+                    payload.update({
+                        "book": book, "targetLanguageId": target_language_id,
+                        "resourceId": resource_id, "pathHistory": paths,
+                        "updatedAt": now, "revision": int(row["revision"]) + 1,
+                    })
+                    conn.execute(
+                        "UPDATE project_metadata SET book=?,target_language_id=?,resource_id=?,"
+                        "path_history_json=?,revision=revision+1,payload_json=? WHERE project_id=?",
+                        (book, target_language_id, resource_id, json.dumps(paths, ensure_ascii=False),
+                         json.dumps(payload, ensure_ascii=False), project_id),
+                    )
+            conn.commit()
+        return self.project_metadata(project_id)
+
+    def project_metadata(self, project_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM project_metadata WHERE project_id=?", (project_id,)
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(f"Unknown semantic project identity: {project_id}")
+        return json.loads(row[0])
+
+    def current_target_revision(
+        self, project_id: str, book: str, displayed_reference: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM current_target_revisions WHERE project_id=? AND book=? "
+                "AND displayed_reference=?", (project_id, book, displayed_reference),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "projectId": row["project_id"], "book": row["book"],
+            "displayedReference": row["displayed_reference"], "textHash": row["text_hash"],
+            "textRevision": row["text_revision"], "updatedAt": row["updated_at"],
+        }
+
+    def current_target_revisions(self, project_id: str, book: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM current_target_revisions WHERE project_id=? AND book=? "
+                "ORDER BY displayed_reference", (project_id, book),
+            ).fetchall()
+        return [{
+            "projectId": row["project_id"], "book": row["book"],
+            "displayedReference": row["displayed_reference"], "textHash": row["text_hash"],
+            "textRevision": row["text_revision"], "updatedAt": row["updated_at"],
+        } for row in rows]
+
+    def establish_target_revision(
+        self, *, project_id: str, book: str, displayed_reference: str,
+        text_hash: str, text_revision: str,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO current_target_revisions VALUES(?,?,?,?,?,?) "
+                "ON CONFLICT(project_id,book,displayed_reference) DO UPDATE SET "
+                "text_hash=excluded.text_hash,text_revision=excluded.text_revision,updated_at=excluded.updated_at",
+                (project_id, book, displayed_reference, text_hash, text_revision, self._now()),
+            )
+            conn.commit()
+
+    def prepare_target_invalidation(
+        self, *, project_id: str, book: str, displayed_reference: str,
+        previous_text_hash: str, expected_text_hash: str,
+    ) -> str:
+        intent_id = str(uuid.uuid4())
+        now = self._now()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO pending_invalidations VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (intent_id, project_id, book, displayed_reference, previous_text_hash,
+                 expected_text_hash, "PREPARED", 0, "", now, now),
+            )
+            conn.commit()
+        return intent_id
+
+    def cancel_target_invalidation(self, intent_id: str, reason: str = "") -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE pending_invalidations SET state='CANCELLED',last_error=?,updated_at=? "
+                "WHERE id=? AND state='PREPARED'", (reason, self._now(), intent_id),
+            )
+            conn.commit()
+
+    def apply_target_invalidation(
+        self, intent_id: str, *, actual_text_hash: str, text_revision: str,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM pending_invalidations WHERE id=?", (intent_id,)).fetchone()
+            if row is None:
+                raise FoundationValidationError(f"Unknown pending invalidation: {intent_id}")
+            if row["state"] == "APPLIED":
+                return {"intentId": intent_id, "state": "APPLIED", "staled": 0}
+            if row["state"] != "PREPARED":
+                raise FoundationConflict(f"Pending invalidation is already {row['state']}")
+            current = conn.execute(
+                "SELECT text_hash FROM current_target_revisions WHERE project_id=? AND book=? "
+                "AND displayed_reference=?",
+                (row["project_id"], row["book"], row["displayed_reference"]),
+            ).fetchone()
+            if current is not None and current["text_hash"] != row["previous_text_hash"]:
+                conn.execute(
+                    "UPDATE pending_invalidations SET state='FAILED',attempt_count=attempt_count+1,"
+                    "last_error=?,updated_at=? WHERE id=?",
+                    ("Target revision changed after invalidation intent was prepared", self._now(), intent_id),
+                )
+                conn.commit()
+                raise FoundationConflict(
+                    "Target revision changed after invalidation intent was prepared"
+                )
+            if actual_text_hash != row["expected_text_hash"]:
+                conn.execute(
+                    "UPDATE pending_invalidations SET state='FAILED',attempt_count=attempt_count+1,"
+                    "last_error=?,updated_at=? WHERE id=?",
+                    ("Current target hash does not match the prepared edit", self._now(), intent_id),
+                )
+                conn.commit()
+                raise FoundationConflict("Current target hash does not match the prepared edit")
+            dependency_id = self.target_dependency_id(
+                row["project_id"], row["book"], row["displayed_reference"]
+            )
+            staled = self._stale_generic_dependencies(
+                conn, "TARGET_REFERENCE", dependency_id
+            )
+            conn.execute(
+                "INSERT INTO current_target_revisions VALUES(?,?,?,?,?,?) "
+                "ON CONFLICT(project_id,book,displayed_reference) DO UPDATE SET "
+                "text_hash=excluded.text_hash,text_revision=excluded.text_revision,updated_at=excluded.updated_at",
+                (row["project_id"], row["book"], row["displayed_reference"],
+                 actual_text_hash, text_revision, self._now()),
+            )
+            conn.execute(
+                "UPDATE pending_invalidations SET state='APPLIED',attempt_count=attempt_count+1,"
+                "last_error='',updated_at=? WHERE id=?", (self._now(), intent_id),
+            )
+            conn.commit()
+        return {"intentId": intent_id, "state": "APPLIED", "staled": staled}
+
+    def pending_invalidations(self, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM pending_invalidations WHERE project_id=? AND state='PREPARED' "
+                "ORDER BY created_at,id", (project_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    @staticmethod
+    def target_dependency_id(project_id: str, book: str, displayed_reference: str) -> str:
+        return "\u241f".join((project_id, book.upper(), displayed_reference))
+
+    @staticmethod
+    def source_dependency_id(project_id: str, book: str, resource_hash: str) -> str:
+        return "\u241f".join((project_id, book.upper(), resource_hash))
+
+    def save_passage_references(
+        self, passage_id: str, references: list[dict[str, Any]],
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DELETE FROM passage_reference_records WHERE passage_id=?", (passage_id,))
+            for ordinal, reference in enumerate(references):
+                conn.execute(
+                    "INSERT INTO passage_reference_records VALUES(?,?,?,?,?,?)",
+                    (passage_id, reference["displayedReference"], reference["projectVersification"],
+                     json.dumps(reference["canonicalReferences"], ensure_ascii=False),
+                     reference["mappingKind"], ordinal),
+                )
+            conn.commit()
+
+    def passage_references(self, passage_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM passage_reference_records WHERE passage_id=? ORDER BY ordinal",
+                (passage_id,),
+            ).fetchall()
+        return [{
+            "displayedReference": row["displayed_reference"],
+            "projectVersification": row["project_versification"],
+            "canonicalReferences": json.loads(row["canonical_references_json"]),
+            "mappingKind": row["mapping_kind"],
+        } for row in rows]
 
     def save_token_lineage(self, lineage: TokenLineage) -> None:
         payload = to_wire(lineage)
@@ -413,6 +784,53 @@ class FoundationRepository:
         if row is None:
             raise FoundationValidationError(f"Unknown token instance: {instance_id}")
         return json.loads(row[0])
+
+    def token_instances_for_reference(
+        self, *, project_id: str, book: str, displayed_reference: str,
+        text_revision: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM token_instances WHERE side='TARGET' "
+                "AND (? IS NULL OR text_revision=?) ORDER BY id",
+                (text_revision, text_revision),
+            ).fetchall()
+        result = []
+        for row in rows:
+            payload = json.loads(row[0])
+            if (
+                payload.get("projectId") == project_id
+                and str(payload.get("book") or "").upper() == book.upper()
+                and payload.get("displayedReference") == displayed_reference
+            ):
+                result.append(payload)
+        return sorted(result, key=lambda item: int(item.get("index") or 0))
+
+    def save_token_lineage_candidate(
+        self, *, candidate_id: str, project_id: str, old_instance_id: str,
+        new_instance_id: str, relation: str, confidence: float, reason_code: str,
+    ) -> None:
+        payload = {
+            "id": candidate_id, "projectId": project_id,
+            "oldInstanceId": old_instance_id, "newInstanceId": new_instance_id,
+            "relation": relation, "confidence": confidence, "reasonCode": reason_code,
+            "lifecycleStatus": "INACTIVE",
+        }
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO token_lineage_candidates VALUES(?,?,?,?,?,?,?,?,?)",
+                (candidate_id, project_id, old_instance_id, new_instance_id, relation,
+                 confidence, reason_code, "INACTIVE", json.dumps(payload, ensure_ascii=False)),
+            )
+            conn.commit()
+
+    def token_lineage_candidates(self, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM token_lineage_candidates WHERE project_id=? ORDER BY id",
+                (project_id,),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
 
     @staticmethod
     def target_content_hash(target_text_by_displayed_reference: dict[str, str]) -> str:
@@ -889,7 +1307,10 @@ class FoundationRepository:
 
     def add_record_dependency(self, record_type: str, record_id: str, depends_on_type: str, depends_on_id: str) -> None:
         with self._connect() as conn:
-            conn.execute("INSERT INTO record_dependencies VALUES(?,?,?,?)", (record_type, record_id, depends_on_type, depends_on_id))
+            conn.execute(
+                "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)",
+                (record_type, record_id, depends_on_type, depends_on_id),
+            )
             conn.commit()
 
     def quarantine_migration_record(
@@ -920,19 +1341,196 @@ class FoundationRepository:
             for row in rows
         ]
 
+    def synchronize_source_lock(
+        self, *, project_id: str, book: str, resource_id: str,
+        resource_version: str, resource_hash: str,
+    ) -> dict[str, Any]:
+        now = self._now()
+        changed = False
+        staled = 0
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM source_resource_locks WHERE project_id=? AND book=?",
+                (project_id, book),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO source_resource_locks VALUES(?,?,?,?,?,?,?,?)",
+                    (project_id, book, resource_id, resource_version, resource_hash,
+                     "ACTIVE", 1, now),
+                )
+            elif (
+                row["resource_id"] != resource_id
+                or row["resource_version"] != resource_version
+                or row["resource_hash"] != resource_hash
+            ):
+                changed = True
+                dependency_id = self.source_dependency_id(project_id, book, row["resource_hash"])
+                staled = self._stale_generic_dependencies(conn, "SOURCE_RESOURCE", dependency_id)
+                conn.execute(
+                    "UPDATE source_resource_locks SET resource_id=?,resource_version=?,resource_hash=?,"
+                    "lifecycle_status='ACTIVE',revision=revision+1,updated_at=? "
+                    "WHERE project_id=? AND book=?",
+                    (resource_id, resource_version, resource_hash, now, project_id, book),
+                )
+            conn.commit()
+        return {
+            "changed": changed, "staled": staled, "resourceId": resource_id,
+            "resourceVersion": resource_version, "resourceHash": resource_hash,
+        }
+
+    def source_lock(self, project_id: str, book: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM source_resource_locks WHERE project_id=? AND book=?",
+                (project_id, book),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def migration_run_for(
+        self, project_id: str, source_path: str, source_hash: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM migration_runs WHERE project_id=? AND source_path=? AND source_hash=?",
+                (project_id, source_path, source_hash),
+            ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["report"] = json.loads(result.pop("report_json"))
+        return result
+
+    def save_migration_run(
+        self, *, run_id: str, project_id: str, source_path: str, source_hash: str,
+        source_schema: str, status: str, started_at: str, report: dict[str, Any],
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO migration_runs VALUES(?,?,?,?,?,?,?,?,?)",
+                (run_id, project_id, source_path, source_hash, source_schema, status,
+                 started_at, self._now(), json.dumps(report, ensure_ascii=False)),
+            )
+            conn.commit()
+
+    def migration_report(self, project_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            runs = conn.execute(
+                "SELECT * FROM migration_runs WHERE project_id=? ORDER BY started_at,id",
+                (project_id,),
+            ).fetchall()
+            quarantine = conn.execute(
+                "SELECT reason_code,COUNT(*) AS count FROM migration_quarantine "
+                "GROUP BY reason_code ORDER BY reason_code"
+            ).fetchall()
+        return {
+            "runs": [{
+                "id": row["id"], "sourcePath": row["source_path"],
+                "sourceHash": row["source_hash"], "sourceSchema": row["source_schema"],
+                "status": row["status"], "startedAt": row["started_at"],
+                "completedAt": row["completed_at"], "report": json.loads(row["report_json"]),
+            } for row in runs],
+            "quarantineByReason": {row["reason_code"]: row["count"] for row in quarantine},
+        }
+
+    def record_runtime_diagnostic(
+        self, *, project_id: str, code: str, severity: str, payload: dict[str, Any],
+    ) -> str:
+        diagnostic_id = str(uuid.uuid4())
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO runtime_diagnostics VALUES(?,?,?,?,?,?,NULL)",
+                (diagnostic_id, project_id, code, severity,
+                 json.dumps(payload, ensure_ascii=False), self._now()),
+            )
+            conn.commit()
+        return diagnostic_id
+
+    def stale_summary(self, project_id: str) -> dict[str, Any]:
+        tables = {
+            "passages": "passage_records", "tokens": "token_lineages",
+            "semanticUnits": "semantic_units", "semanticRelationships": "semantic_relationships",
+            "coverageAccounts": "coverage_accounts", "qaFindings": "qa_findings",
+            "lexicalSolutions": "lexical_solutions", "correctionProposals": "correction_proposals",
+            "evidence": "evidence_records", "exportability": "exportability_records",
+        }
+        counts: dict[str, int] = {}
+        with self._connect() as conn:
+            for label, table in tables.items():
+                if table == "token_lineages":
+                    counts[label] = int(conn.execute(
+                        "SELECT COUNT(*) FROM token_lineages WHERE project_id=? AND lifecycle_status='STALE'",
+                        (project_id,),
+                    ).fetchone()[0])
+                else:
+                    counts[label] = int(conn.execute(
+                        f"SELECT COUNT(*) FROM {table} WHERE project_id=? AND lifecycle_status='STALE'",
+                        (project_id,),
+                    ).fetchone()[0]) if table not in {"exportability_records"} else int(conn.execute(
+                        "SELECT COUNT(*) FROM exportability_records e JOIN semantic_relationships r "
+                        "ON r.id=e.relationship_id WHERE r.project_id=? AND e.lifecycle_status='STALE'",
+                        (project_id,),
+                    ).fetchone()[0])
+            pending = int(conn.execute(
+                "SELECT COUNT(*) FROM pending_invalidations WHERE project_id=? AND state='PREPARED'",
+                (project_id,),
+            ).fetchone()[0])
+            quarantined = int(conn.execute(
+                "SELECT COUNT(*) FROM migration_quarantine"
+            ).fetchone()[0])
+        return {"counts": counts, "pendingInvalidations": pending, "quarantined": quarantined}
+
     @staticmethod
-    def _stale_generic_dependencies(conn: sqlite3.Connection, dependency_type: str, dependency_id: str) -> None:
-        tables = {"SEMANTIC_RELATIONSHIP": "semantic_relationships", "COVERAGE_ACCOUNT": "coverage_accounts", "QA_FINDING": "qa_findings", "LEXICAL_SOLUTION": "lexical_solutions"}
-        rows = conn.execute("SELECT record_type,record_id FROM record_dependencies WHERE depends_on_type=? AND depends_on_id=?", (dependency_type, dependency_id)).fetchall()
-        for row in rows:
-            table = tables.get(row["record_type"])
-            if not table:
+    def _stale_generic_dependencies(
+        conn: sqlite3.Connection, dependency_type: str, dependency_id: str,
+    ) -> int:
+        tables = {
+            "PASSAGE_RECORD": "passage_records",
+            "EVIDENCE_RECORD": "evidence_records",
+            "SEMANTIC_RELATIONSHIP": "semantic_relationships",
+            "COVERAGE_ACCOUNT": "coverage_accounts",
+            "QA_FINDING": "qa_findings",
+            "LEXICAL_SOLUTION": "lexical_solutions",
+            "CORRECTION_PROPOSAL": "correction_proposals",
+            "EXPORTABILITY": "exportability_records",
+        }
+        queue: list[tuple[str, str]] = [(dependency_type, dependency_id)]
+        visited: set[tuple[str, str]] = set()
+        changed = 0
+        while queue:
+            current_type, current_id = queue.pop(0)
+            if (current_type, current_id) in visited:
                 continue
-            record = conn.execute(f"SELECT payload_json FROM {table} WHERE id=?", (row["record_id"],)).fetchone()
-            if record is None:
-                continue
-            payload = json.loads(record[0]); payload["lifecycleStatus"] = "STALE"; payload["revision"] = int(payload.get("revision", 1)) + 1
-            conn.execute(f"UPDATE {table} SET lifecycle_status='STALE',revision=revision+1,payload_json=? WHERE id=?", (json.dumps(payload), row["record_id"]))
+            visited.add((current_type, current_id))
+            rows = conn.execute(
+                "SELECT record_type,record_id FROM record_dependencies "
+                "WHERE depends_on_type=? AND depends_on_id=?",
+                (current_type, current_id),
+            ).fetchall()
+            for row in rows:
+                record_type, record_id = row["record_type"], row["record_id"]
+                table = tables.get(record_type)
+                if not table:
+                    continue
+                record = conn.execute(
+                    f"SELECT payload_json FROM {table} WHERE id=?", (record_id,),
+                ).fetchone()
+                if record is None:
+                    continue
+                payload = json.loads(record[0])
+                payload["lifecycleStatus"] = "STALE"
+                payload["revision"] = int(payload.get("revision", 1)) + 1
+                updated = conn.execute(
+                    f"UPDATE {table} SET lifecycle_status='STALE',revision=revision+1,payload_json=? "
+                    "WHERE id=? AND lifecycle_status<>'STALE'",
+                    (json.dumps(payload, ensure_ascii=False), record_id),
+                ).rowcount
+                changed += updated
+                # Dependency propagation is independent of whether this record
+                # was already stale. A downstream record must not remain current.
+                queue.append((record_type, record_id))
+        return changed
 
     def _append_review(self, conn: sqlite3.Connection, entity_type: str, entity_id: str,
                        previous_review: str | None, new_review: str, previous_lifecycle: str | None,
@@ -965,6 +1563,22 @@ class FoundationRepository:
             for row in rows
         ]
 
+    def import_review_record(
+        self, *, record_id: str, entity_type: str, entity_id: str,
+        review_status: ReviewStatus, lifecycle_status: LifecycleStatus,
+        actor_type: ActorType, actor_id: str, note: str, created_at: str,
+        qa_disposition: QaDisposition | None = None,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO review_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (record_id, entity_type, entity_id, None, review_status.value, None,
+                 lifecycle_status.value, None,
+                 qa_disposition.value if qa_disposition is not None else None,
+                 actor_type.value, actor_id, note, 1, created_at),
+            )
+            conn.commit()
+
     def recovery_check(self) -> dict[str, Any]:
         problems: list[str] = []
         with self._connect() as conn:
@@ -988,6 +1602,39 @@ class FoundationRepository:
                 "IFNULL(target_layer,'<NULL>') HAVING COUNT(*)>1"
             ).fetchall()
             problems.extend(f"competing-authoritative-solution:{tuple(row)}" for row in competing)
+            known_record_tables = {
+                "PASSAGE_RECORD": "passage_records",
+                "EVIDENCE_RECORD": "evidence_records",
+                "SEMANTIC_RELATIONSHIP": "semantic_relationships",
+                "COVERAGE_ACCOUNT": "coverage_accounts",
+                "QA_FINDING": "qa_findings",
+                "LEXICAL_SOLUTION": "lexical_solutions",
+                "CORRECTION_PROPOSAL": "correction_proposals",
+                "EXPORTABILITY": "exportability_records",
+            }
+            dependencies = conn.execute(
+                "SELECT record_type,record_id,depends_on_type,depends_on_id FROM record_dependencies"
+            ).fetchall()
+            for dependency in dependencies:
+                table = known_record_tables.get(dependency["record_type"])
+                if table is None:
+                    problems.append(
+                        f"unknown-record-dependency-type:{dependency['record_type']}:{dependency['record_id']}"
+                    )
+                    continue
+                if conn.execute(
+                    f"SELECT 1 FROM {table} WHERE id=?", (dependency["record_id"],)
+                ).fetchone() is None:
+                    problems.append(
+                        f"dangling-record-dependency:{dependency['record_type']}:{dependency['record_id']}"
+                    )
+                upstream_table = known_record_tables.get(dependency["depends_on_type"])
+                if upstream_table is not None and conn.execute(
+                    f"SELECT 1 FROM {upstream_table} WHERE id=?", (dependency["depends_on_id"],)
+                ).fetchone() is None:
+                    problems.append(
+                        f"dangling-upstream-dependency:{dependency['depends_on_type']}:{dependency['depends_on_id']}"
+                    )
             for row in conn.execute(
                 "SELECT id,target_content_hash,payload_json FROM passage_records"
             ).fetchall():
@@ -1056,8 +1703,41 @@ class FoundationRepository:
             companion = Path(str(self.path) + suffix)
             if companion.exists():
                 companion.unlink()
-        os.replace(temp, self.path)
+        last_replace_error: PermissionError | None = None
+        for attempt in range(6):
+            try:
+                os.replace(temp, self.path)
+                last_replace_error = None
+                break
+            except PermissionError as exc:
+                last_replace_error = exc
+                if attempt < 5:
+                    time.sleep(0.05 * (attempt + 1))
+        if last_replace_error is not None:
+            # Windows can deny atomic replacement of a recently opened SQLite
+            # file even after every Bridge connection is closed. SQLite's own
+            # online-backup API is the transaction-safe fallback; the safety
+            # backup above still makes the operation recoverable.
+            source = sqlite3.connect(str(temp))
+            destination = sqlite3.connect(str(self.path))
+            try:
+                source.backup(destination)
+                destination.commit()
+            except sqlite3.Error as exc:
+                raise FoundationValidationError(
+                    "Restored database could not replace the live companion store"
+                ) from exc
+            finally:
+                destination.close()
+                source.close()
+            try:
+                temp.unlink()
+            except OSError:
+                pass
         self.read_only = False
+        # Backups from an older operational schema are restored losslessly and
+        # then migrated through the same guarded path before becoming writable.
+        self._migrate()
         check = self.recovery_check()
         if not check["ok"]:
             raise FoundationValidationError(f"Restored backup failed recovery checks: {check['problems']}")

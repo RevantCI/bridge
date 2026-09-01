@@ -6,6 +6,13 @@ import type {
   IssueResolutionHandoffResult, IssueResolutionListResponse, IssueResolutionRecord,
   ProjectReport, CollectionReport, SemanticValidationCorrection, SemanticValidationQueue,
 } from "../types/finding";
+import type {
+  CurrentPassageSnapshot,
+  PassageSemanticMigrationReport,
+  PassageSemanticProjectMetadata,
+  PassageSemanticRuntimeStatus,
+  PassageSemanticStaleSummary,
+} from "../types/passageSemanticV1";
 
 /**
  * Thin wrapper around Tauri's invoke() calling the real commands defined
@@ -371,6 +378,44 @@ export const bridge = {
   ): Promise<{ saved: boolean; event: Record<string, unknown>; auditPath: string }> {
     return call("semantic_validation_decide", {
       candidateId, decision, reviewer, note, correctedMapping,
+    });
+  },
+
+  passageSemanticStatus(): Promise<PassageSemanticRuntimeStatus> {
+    return call("passage_semantic_status");
+  },
+
+  passageSemanticProjectMetadata(): Promise<PassageSemanticProjectMetadata> {
+    return call("passage_semantic_project_metadata");
+  },
+
+  passageSemanticCurrentPassage(
+    chapter: string, verse: string, endChapter?: string, endVerse?: string,
+  ): Promise<CurrentPassageSnapshot> {
+    return call("passage_semantic_current_passage", {
+      chapter, verse, endChapter, endVerse,
+    });
+  },
+
+  passageSemanticStaleSummary(): Promise<PassageSemanticStaleSummary> {
+    return call("passage_semantic_stale_summary");
+  },
+
+  passageSemanticMigrationReport(): Promise<PassageSemanticMigrationReport> {
+    return call("passage_semantic_migration_report");
+  },
+
+  passageSemanticRebuildPassage(
+    chapter: string,
+    verse: string,
+    options: {
+      endChapter?: string;
+      endVerse?: string;
+      tokenizerProfile?: "bridge-unicode-word-v1" | "tc-whitespace-v1";
+    } = {},
+  ): Promise<CurrentPassageSnapshot> {
+    return call("passage_semantic_rebuild_passage", {
+      chapter, verse, ...options,
     });
   },
 

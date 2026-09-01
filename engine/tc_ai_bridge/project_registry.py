@@ -26,6 +26,10 @@ _LAZY_IMPORT_PATH = Path(".bridge") / "lazy-import.json"
 _COLLECTION_PATH = Path(".bridge") / "collection.json"
 
 
+class ProjectIdentityError(RuntimeError):
+    """Raised when project identity evidence would merge distinct projects."""
+
+
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -233,25 +237,49 @@ class ProjectRegistry:
         identity_path = project_path / _IDENTITY_PATH
         identity = _read_json(identity_path)
         project_id = str(project_id or identity.get("projectId") or "")
+        metadata = self._project_metadata(project_path)
         collection = _read_json(project_path / _COLLECTION_PATH)
         collection_id = str(collection_id or identity.get("collectionId") or collection.get("collectionId") or "")
         if not collection_id:
             collection_id = self._legacy_collection_id(collection)
+        by_path = self._find(path=project_path)
+        # Backward compatibility: registries created before external projects
+        # received .bridge/project.json are authoritative for that same path.
+        if not project_id and by_path is not None:
+            project_id = str(by_path.get("projectId") or "")
         if not project_id:
             project_id = str(uuid.uuid4())
-        if managed:
-            created_at = str(identity.get("createdAt") or _utc_now())
-            new_identity = {
-                "schemaVersion": IDENTITY_SCHEMA_VERSION,
-                "projectId": project_id,
-                "collectionId": collection_id,
-                "sourceFingerprint": source_fingerprint or self._source_fingerprint(project_path, identity),
-                "createdAt": created_at,
-            }
-            if new_identity != identity:
-                _write_json_atomic(identity_path, new_identity)
-                self._dirty = True
-            identity = new_identity
+        by_id = self._find(project_id=project_id)
+        if by_path is not None and str(by_path.get("projectId") or "") != project_id:
+            raise ProjectIdentityError(
+                "The selected folder and supplied Bridge project identity disagree; refusing to merge them."
+            )
+        if by_id is not None and canonical_path_key(str(by_id.get("path") or "")) != canonical_path_key(project_path):
+            prior_path = Path(str(by_id.get("path") or ""))
+            if prior_path.exists():
+                raise ProjectIdentityError(
+                    "The same Bridge project identity exists at two accessible paths; choose which copy is authoritative."
+                )
+            if (
+                str(by_id.get("bookId") or "").lower() not in {"", metadata["bookId"].lower()}
+                or str(by_id.get("targetLanguageId") or "").lower()
+                not in {"", metadata["targetLanguageId"].lower()}
+            ):
+                raise ProjectIdentityError(
+                    "Relocated project metadata conflicts with the saved Bridge identity."
+                )
+        created_at = str(identity.get("createdAt") or (by_id or {}).get("createdAt") or _utc_now())
+        new_identity = {
+            "schemaVersion": IDENTITY_SCHEMA_VERSION,
+            "projectId": project_id,
+            "collectionId": collection_id,
+            "sourceFingerprint": source_fingerprint or self._source_fingerprint(project_path, identity),
+            "createdAt": created_at,
+        }
+        if new_identity != identity:
+            _write_json_atomic(identity_path, new_identity)
+            self._dirty = True
+        identity = new_identity
 
         entry = self._find(path=project_path, project_id=project_id)
         is_new = entry is None
@@ -259,7 +287,6 @@ class ProjectRegistry:
             entry = {"projectId": project_id, "createdAt": _utc_now(), "lastOpenedAt": ""}
             self._data["projects"].append(entry)
         snapshot = None if is_new else dict(entry)
-        metadata = self._project_metadata(project_path)
         entry.update({
             "projectId": project_id,
             "collectionId": collection_id,
