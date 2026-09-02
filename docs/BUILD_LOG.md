@@ -10,6 +10,58 @@ Updated: 2026-09-02
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
 
+## Flag for Benz: nothing in the app can produce Stage 5-8 analysis (2026-09-02)
+
+Found by opening Alignment Review on a real project (`irv` Hindi, Ruth) after
+Stage 9A landed: the QA queue is empty, and there is no way to populate it
+from inside Bridge.
+
+**This is not a Stage 9A defect.** Stage 9A's stop condition is a reviewer
+being able to inspect and classify *existing* findings, and that works. The
+spec never asked for a control that generates them; it assumed the analysis
+was already there. But nothing in the product puts it there, so on any real
+project the review surface will always look exactly as it did here - a
+correctly-rendered, permanently empty queue.
+
+**Confirmed, not inferred.** `irv`'s companion database
+(`.apps/translationCoreAI/passageSemantic/bridge-semantic.sqlite3`) has zero
+rows in `qa_findings`, `qa_audit_runs`, `meaning_analysis_runs`,
+`semantic_location_runs`, `source_inventory_runs` and
+`target_inventory_runs`. Nothing under `src/` calls `qaAuditRunRange`,
+`semanticLocationRunRange` or `meaningAnalysisRunRange` - the Tauri commands
+and client methods exist (added in Stage 9A.1), but no UI invokes them.
+
+The only ways to populate a project today are
+`scripts/seed_review_fixture.py` or driving `qaAudit.runRange` over the raw
+sidecar protocol. `qaAudit.runRange` cascades the whole chain
+(Stage 5 -> 6A -> 6B -> 7 -> 8), so the backend work is done; what is missing
+is purely the decision about where a reviewer triggers it and over what
+scope.
+
+**Why it matters beyond 9A:** Stage 9B's correction workflow operates on
+findings, so it inherits the same problem. Whatever answers this for 9A
+answers it for 9B.
+
+**Two things worth deciding together:**
+
+1. *Where does a run get triggered, and over what scope?* Per chapter, per
+   passage range, or per book. Stage 8 is persistence-bound (81-92% of its
+   runtime is SQLite writes - see the Stage 9A.0 entry), so a whole-book run
+   is minutes of mostly-commit time and probably wants the existing
+   background-job treatment rather than a synchronous call.
+
+2. *What will the results actually look like on a real project?*
+   `SemanticEmbeddingProvider.available` is `False` in the shipped app, so
+   Stage 6B location falls back to lexical and structural evidence only. The
+   Philippians fixture's 28 relationships and 12 cross-verse realizations come
+   from a test-injected embedding provider; a real Hindi or Tamil project will
+   be substantially sparser. Adding a run control without addressing this
+   would give reviewers a working button that produces thin results, which is
+   arguably worse than no button.
+
+Deliberately **not** implemented in Stage 9A: adding a run control is new
+scope against a spec that was explicit about its boundaries.
+
 ## Stage 9A.3 — PHP 1:3-6 review fixture, and a Stage 8 read-only bug (2026-09-02)
 
 Closes Stage 9A: a seeded fixture project a human can actually open, the
