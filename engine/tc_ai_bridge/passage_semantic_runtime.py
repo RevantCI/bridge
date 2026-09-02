@@ -56,6 +56,7 @@ from .target_semantic_inventory import TargetSemanticInventory
 from .semantic_location import SemanticLocationEngine
 from .meaning_analysis import MeaningAnalysisEngine
 from .qa_audit import QaAuditEngine
+from .qa_review import QaReviewService
 
 
 RUNTIME_VERSION = "stage4-runtime-v1"
@@ -484,6 +485,7 @@ class PassageSemanticRuntime:
         self.semantic_location = SemanticLocationEngine(self)
         self.meaning_analysis = MeaningAnalysisEngine(self)
         self.qa_audit = QaAuditEngine(self)
+        self.qa_review = QaReviewService(self)
         self._migrate_legacy_companions()
 
     def _identity_fingerprint(self) -> str:
@@ -1291,3 +1293,30 @@ class PassageSemanticRuntime:
 
     def qa_audit_diagnostics(self, run_id: str) -> dict[str, Any]:
         return self.qa_audit.get_diagnostics(run_id)
+
+    # -- Stage 9A human review (never re-runs analysis) --------------------
+
+    def qa_review_queue(self, **filters: Any) -> dict[str, Any]:
+        return self.qa_review.get_queue(**filters)
+
+    def qa_review_finding(self, finding_id: str) -> dict[str, Any]:
+        return self.qa_review.get_finding(finding_id)
+
+    def qa_review_decide(self, finding_id: str, disposition: str, **options: Any) -> dict[str, Any]:
+        return self.qa_review.decide_finding(finding_id, disposition, **options)
+
+    def qa_review_add_note(self, entity_type: str, entity_id: str, note: str) -> dict[str, Any]:
+        return self.qa_review.add_note(entity_type, entity_id, note)
+
+    def semantic_review_decide_location(
+        self, relationship_id: str, decision: str, **options: Any,
+    ) -> dict[str, Any]:
+        return self.qa_review.decide_location(relationship_id, decision, **options)
+
+    def semantic_review_decide_meaning(
+        self, assessment_id: str, meaning_status: str, **options: Any,
+    ) -> dict[str, Any]:
+        return self.qa_review.decide_meaning(assessment_id, meaning_status, **options)
+
+    def review_history(self, entity_type: str, entity_id: str) -> dict[str, Any]:
+        return self.qa_review.get_entity_history(entity_type, entity_id)

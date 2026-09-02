@@ -407,6 +407,7 @@ class QaAuditEngine:
                             kind=kind, direction=AuditDirection.SOURCE_COVERAGE,
                             source_unit_ids=(owner_id,), target_unit_ids=(),
                             relationship_ids=(), account_ids=(account["id"],),
+                            dimension=str(dimension),
                             meaning_assessment_ids=(), location_outcome="NOT_LOCATED",
                             meaning_status="", explanation=reason, confidence=0.75,
                             resource_evidence_ids=tuple((owner_unit or {}).get("evidenceIds", [])),
@@ -446,6 +447,7 @@ class QaAuditEngine:
                         source_unit_ids=tuple(relationship.get("sourceSemanticUnitIds", [])),
                         target_unit_ids=tuple(relationship.get("targetSemanticUnitIds", [])),
                         relationship_ids=(semantic_relationship_id,), account_ids=(),
+                        dimension=str(assessment.get("coverageDimension") or ""),
                         meaning_assessment_ids=(assessment["id"],),
                         location_outcome=relationship["locationOutcome"],
                         meaning_status=assessment.get("meaningStatus", ""),
@@ -476,6 +478,7 @@ class QaAuditEngine:
                             kind=QaFindingKind.POSSIBLE_ADDITION, direction=AuditDirection.TARGET_SUPPORT,
                             source_unit_ids=(), target_unit_ids=(unit["id"],),
                             relationship_ids=(), account_ids=(account.id,),
+                            dimension=account.coverage_dimension.value,
                             meaning_assessment_ids=(), location_outcome="", meaning_status="",
                             explanation=reason, confidence=0.7,
                             resource_evidence_ids=(), supporting_evidence_ids=(), conflicting_evidence_ids=(),
@@ -577,18 +580,74 @@ class QaAuditEngine:
             coverage_status=status.value,
         )
 
+    @staticmethod
+    def _finding_anchors(
+        source_unit_ids: tuple[str, ...], target_unit_ids: tuple[str, ...],
+        source: dict[str, Any], target: dict[str, Any],
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Displayed references for the finding, and stable target anchors.
+
+        A target unit's id embeds the per-verse targetRevision, so it changes
+        whenever its verse is edited.  Anchoring instead on
+        reference + normalized surface + occurrence keeps a target-support
+        finding's identity stable when an unrelated word in the same verse
+        changes, and only breaks it when the word the finding is actually
+        about changes -- at which point it genuinely is a different finding.
+        """
+        references: list[str] = []
+        anchors: list[str] = []
+        by_id = {unit["id"]: unit for unit in source.get("units", ())}
+        by_id.update({unit["id"]: unit for unit in target.get("units", ())})
+        occurrences: Counter[str] = Counter()
+        for unit_id in (*source_unit_ids, *target_unit_ids):
+            unit = by_id.get(unit_id)
+            if unit is None:
+                continue
+            references.extend(unit.get("displayedReferences") or ())
+            if unit_id in target_unit_ids:
+                reference = next(iter(unit.get("displayedReferences") or ()), "")
+                surface = str(unit.get("normalizedSurface") or unit.get("rawSurface") or "")
+                key = f"{reference}␟{surface}␟{unit.get('kind', '')}"
+                occurrences[key] += 1
+                anchors.append(f"{key}␟{occurrences[key]}")
+        return tuple(dict.fromkeys(references)), tuple(anchors)
+
+    @staticmethod
+    def _stable_finding_id(
+        *, kind: QaFindingKind, direction: AuditDirection,
+        source_unit_ids: tuple[str, ...], target_anchors: tuple[str, ...],
+        dimension: str = "",
+    ) -> str:
+        """Identity that survives a re-run, so human review survives with it.
+
+        Deliberately excludes the run fingerprint and the engine/policy
+        versions.  Keying on the run made every re-run mint new ids, orphaning
+        every prior human decision; keying on policy would do the same on any
+        policy bump.  Both are recorded as fields on the finding instead.
+        Source unit ids are content-derived from the locked source resource,
+        so they are stable across target edits by construction.
+        """
+        return "qa-finding-" + _json_hash({
+            "kind": kind.value, "direction": direction.value, "dimension": dimension,
+            "source": sorted(source_unit_ids), "target": list(target_anchors),
+        })[:32]
+
     def _build_finding(
         self, *, kind: QaFindingKind, direction: AuditDirection, source_unit_ids: tuple[str, ...],
         target_unit_ids: tuple[str, ...], relationship_ids: tuple[str, ...], account_ids: tuple[str, ...],
         meaning_assessment_ids: tuple[str, ...], location_outcome: str, meaning_status: str,
         explanation: str, confidence: float, resource_evidence_ids: tuple[str, ...],
+        dimension: str = "",
         supporting_evidence_ids: tuple[str, ...], conflicting_evidence_ids: tuple[str, ...],
         source: dict[str, Any], target: dict[str, Any], fingerprint: str, policy_binding: PolicyBinding,
     ) -> dict[str, Any]:
-        finding_id = "qa-finding-" + _json_hash({
-            "kind": kind.value, "source": source_unit_ids, "target": target_unit_ids,
-            "relationships": relationship_ids, "accounts": account_ids, "run": fingerprint,
-        })[:32]
+        references, target_anchors = self._finding_anchors(
+            source_unit_ids, target_unit_ids, source, target,
+        )
+        finding_id = self._stable_finding_id(
+            kind=kind, direction=direction, source_unit_ids=source_unit_ids,
+            target_anchors=target_anchors, dimension=dimension,
+        )
         severity = self.policy.severity_for(kind, confidence)
         return {
             "id": finding_id, "projectId": self.project_id, "book": self.book,
@@ -604,6 +663,7 @@ class QaAuditEngine:
                 "calibrationVersion": QA_CALIBRATION_VERSION,
             },
             "currentTargetRevision": target.get("targetRevision", ""),
+            "displayedReferences": list(references),
             "resourceEvidenceIds": list(resource_evidence_ids),
             "supportingEvidenceIds": list(supporting_evidence_ids),
             "conflictingEvidenceIds": list(conflicting_evidence_ids),
@@ -658,6 +718,7 @@ class QaAuditEngine:
             source_resource_hashes=tuple(finding["sourceResourceHashes"]),
             qa_engine_version=finding["qaEngineVersion"], qa_policy_version=finding["qaPolicyVersion"],
             fingerprint=finding["fingerprint"], revision=finding["revision"],
+            displayed_references=tuple(finding.get("displayedReferences") or ()),
         )
 
     @staticmethod

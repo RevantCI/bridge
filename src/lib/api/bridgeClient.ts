@@ -7,6 +7,19 @@ import type {
   ProjectReport, CollectionReport, SemanticValidationCorrection, SemanticValidationQueue,
 } from "../types/finding";
 import type {
+  DecideFindingResult,
+  DecideLocationResult,
+  DecideMeaningResult,
+  EntityHistory,
+  MeaningStatus,
+  QaFindingDetail,
+  ReviewEntityType,
+  ReviewQueueFilters,
+  ReviewQueuePage,
+  ReviewRecord,
+  ReviewerDecision,
+} from "../types/qaReview";
+import type {
   CurrentPassageSnapshot,
   PassageSemanticMigrationReport,
   PassageSemanticProjectMetadata,
@@ -575,5 +588,129 @@ export const bridge = {
 
   exportNonAligned(outputPath: string): Promise<{ written: boolean; path: string; chapters: number }> {
     return call("export_non_aligned", { outputPath });
+  },
+
+  // --- Stage 8 QA audit (analysis; read-only) -------------------------------
+
+  qaAuditRunRange(
+    chapter: string, verse: string, endChapter?: string, endVerse?: string,
+    meaningRunId?: string,
+  ): Promise<Record<string, unknown>> {
+    return call("qa_audit_run_range", { chapter, verse, endChapter, endVerse, meaningRunId });
+  },
+
+  qaAuditStatus(runId: string): Promise<Record<string, unknown>> {
+    return call("qa_audit_status", { runId });
+  },
+
+  qaAuditGetRange(runId: string): Promise<Record<string, unknown>> {
+    return call("qa_audit_get_range", { runId });
+  },
+
+  qaAuditGetSourceCoverage(runId: string): Promise<Array<Record<string, unknown>>> {
+    return call("qa_audit_get_source_coverage", { runId });
+  },
+
+  qaAuditGetTargetSupport(runId: string): Promise<Array<Record<string, unknown>>> {
+    return call("qa_audit_get_target_support", { runId });
+  },
+
+  qaAuditGetFinding(findingId: string): Promise<Record<string, unknown>> {
+    return call("qa_audit_get_finding", { findingId });
+  },
+
+  qaAuditGetDiagnostics(runId: string): Promise<Record<string, unknown>> {
+    return call("qa_audit_get_diagnostics", { runId });
+  },
+
+  // --- Stage 9A human review (decisions only; never edits Scripture) --------
+
+  qaReviewGetQueue(filters: ReviewQueueFilters = {}): Promise<ReviewQueuePage> {
+    return call("qa_review_get_queue", {
+      book: filters.book,
+      chapter: filters.chapter,
+      kinds: filters.kinds,
+      severities: filters.severities,
+      dispositions: filters.dispositions,
+      reviewStatuses: filters.reviewStatuses,
+      lifecycleStatuses: filters.lifecycleStatuses,
+      order: filters.order,
+      limit: filters.limit,
+      cursor: filters.cursor,
+    });
+  },
+
+  qaReviewGetFinding(findingId: string): Promise<QaFindingDetail> {
+    return call("qa_review_get_finding", { findingId });
+  },
+
+  /**
+   * Record a reviewer's conclusion. `expectedEntityRevision` and
+   * `expectedTargetContentHashes` are what make this safe: the engine rejects
+   * the write with a `revision_conflict` error rather than clobbering a
+   * decision made elsewhere, or accepting one made against text that has since
+   * changed. `promote` is the only route from POSSIBLY_MISSING to MISSING.
+   */
+  qaReviewDecideFinding(
+    findingId: string,
+    disposition: ReviewerDecision,
+    expectedEntityRevision: number,
+    options: {
+      note?: string;
+      promote?: boolean;
+      expectedTargetContentHashes?: string[];
+    } = {},
+  ): Promise<DecideFindingResult> {
+    return call("qa_review_decide_finding", {
+      findingId,
+      disposition,
+      expectedEntityRevision,
+      expectedTargetContentHashes: options.expectedTargetContentHashes,
+      note: options.note,
+      promote: options.promote,
+    });
+  },
+
+  qaReviewAddNote(
+    entityType: ReviewEntityType, entityId: string, note: string,
+  ): Promise<{ history: ReviewRecord[] }> {
+    return call("qa_review_add_note", { entityType, entityId, note });
+  },
+
+  /**
+   * Approve or reject a Stage 6B location. This is a mapping verdict, not a
+   * translation verdict: rejecting says Bridge looked in the wrong place, and
+   * leaves the QA disposition untouched.
+   */
+  semanticReviewDecideLocation(
+    relationshipId: string,
+    decision: "APPROVE" | "REJECT",
+    expectedEntityRevision: number,
+    options: { note?: string; selectedCandidateId?: string } = {},
+  ): Promise<DecideLocationResult> {
+    return call("semantic_review_decide_location", {
+      relationshipId,
+      decision,
+      expectedEntityRevision,
+      note: options.note,
+      selectedCandidateId: options.selectedCandidateId,
+    });
+  },
+
+  semanticReviewDecideMeaning(
+    assessmentId: string,
+    meaningStatus: MeaningStatus,
+    expectedEntityRevision: number,
+    note?: string,
+  ): Promise<DecideMeaningResult> {
+    return call("semantic_review_decide_meaning", {
+      assessmentId, meaningStatus, expectedEntityRevision, note,
+    });
+  },
+
+  reviewHistoryGetEntityHistory(
+    entityType: ReviewEntityType, entityId: string,
+  ): Promise<EntityHistory> {
+    return call("review_history_get_entity_history", { entityType, entityId });
   },
 };

@@ -763,6 +763,9 @@ class QaFinding:
     qa_policy_version: str
     fingerprint: str
     revision: int = 1
+    # Denormalized so the Stage 9A review queue can order and filter by
+    # canonical position without resolving relationships and units first.
+    displayed_references: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

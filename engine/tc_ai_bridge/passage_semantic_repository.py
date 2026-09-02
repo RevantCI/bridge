@@ -50,6 +50,27 @@ DATABASE_SCHEMA_VERSION = 8
 # Review priority, not alphabetical order — see _MIGRATION_V8.
 _SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
+# The fields a human owns on a QA finding.  A Stage 8 re-run refreshes
+# everything else and must leave these exactly as the reviewer left them.
+_HUMAN_FINDING_FIELDS = ("qaDisposition", "reviewStatus", "revision")
+
+
+def _machine_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in payload.items() if k not in _HUMAN_FINDING_FIELDS}
+
+
+# Entities a human reviewer may decide on directly.  Stage 6B locations and
+# Stage 7 meaning assessments are reviewable independently of the Stage 8
+# finding synthesized from them, so a reviewer who disagrees with the
+# underlying judgement is not forced to accept or reject the QA conclusion.
+_REVIEWABLE_TABLES = {
+    "QA_FINDING": "qa_findings",
+    "LOCATION_RELATIONSHIP": "semantic_location_relationships",
+    "MEANING_ASSESSMENT": "meaning_assessments",
+    "COVERAGE_ACCOUNT": "coverage_accounts",
+    "SEMANTIC_RELATIONSHIP": "semantic_relationships",
+}
+
 
 def _queue_sort_key(finding: QaFinding) -> tuple[int, int, str]:
     """Canonical-order sort key for the Stage 9A review queue.
@@ -2203,18 +2224,57 @@ class FoundationRepository:
                 if conn.execute("SELECT 1 FROM evidence_records WHERE id=?", (evidence_id,)).fetchone() is None:
                     raise FoundationValidationError(f"Unknown QA evidence record: {evidence_id}")
             chapter, verse, reference = _queue_sort_key(finding)
+            rank = _SEVERITY_RANK.get(finding.severity.value, 99)
+            existing = conn.execute(
+                "SELECT * FROM qa_findings WHERE id=?", (finding.id,),
+            ).fetchone()
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO qa_findings"
+                    "(id,project_id,qa_disposition,policy_binding_id,review_status,lifecycle_status,"
+                    "revision,payload_json,book,kind,direction,severity,severity_rank,"
+                    "sort_chapter,sort_verse,displayed_reference) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (finding.id, finding.project_id, finding.qa_disposition.value, policy_id,
+                     finding.review_status.value, finding.lifecycle_status.value, finding.revision,
+                     json.dumps(payload, ensure_ascii=False), finding.book, finding.kind.value,
+                     finding.direction.value, finding.severity.value,
+                     rank, chapter, verse, reference),
+                )
+                conn.commit()
+                return
+
+            # Finding ids are stable across re-runs, so a re-run reaches an
+            # existing row.  It refreshes the machine analysis and must never
+            # overwrite the human decision recorded against it.
+            stored = json.loads(existing["payload_json"])
+            merged = dict(payload)
+            for field in _HUMAN_FINDING_FIELDS:
+                if field in stored:
+                    merged[field] = stored[field]
+            if _machine_fields(stored) == _machine_fields(merged):
+                return  # Nothing the machine produced actually changed.
+            merged["revision"] = int(stored.get("revision", 1)) + 1
             conn.execute(
-                "INSERT INTO qa_findings"
-                "(id,project_id,qa_disposition,policy_binding_id,review_status,lifecycle_status,"
-                "revision,payload_json,book,kind,direction,severity,severity_rank,"
-                "sort_chapter,sort_verse,displayed_reference) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (finding.id, finding.project_id, finding.qa_disposition.value, policy_id,
-                 finding.review_status.value, finding.lifecycle_status.value, finding.revision,
-                 json.dumps(payload, ensure_ascii=False), finding.book, finding.kind.value,
-                 finding.direction.value, finding.severity.value,
-                 _SEVERITY_RANK.get(finding.severity.value, 99), chapter, verse, reference),
+                "UPDATE qa_findings SET policy_binding_id=?,lifecycle_status=?,revision=?,"
+                "payload_json=?,book=?,kind=?,direction=?,severity=?,severity_rank=?,"
+                "sort_chapter=?,sort_verse=?,displayed_reference=? WHERE id=?",
+                (policy_id, finding.lifecycle_status.value, merged["revision"],
+                 json.dumps(merged, ensure_ascii=False), finding.book, finding.kind.value,
+                 finding.direction.value, finding.severity.value, rank, chapter, verse,
+                 reference, finding.id),
             )
+            if stored.get("qaDisposition") != QaDisposition.UNRESOLVED.value:
+                # Leave an audit trail that a human-decided finding was
+                # re-analysed, so the decision can be re-checked against it.
+                self._append_review(
+                    conn, "QA_FINDING", finding.id, stored.get("reviewStatus"),
+                    str(merged.get("reviewStatus")), existing["lifecycle_status"],
+                    finding.lifecycle_status.value, stored.get("qaDisposition"),
+                    str(merged.get("qaDisposition")), ActorType.SYSTEM, "qa-audit",
+                    int(stored.get("revision", 1)),
+                    "Machine analysis refreshed; the existing human decision was preserved.",
+                )
             conn.commit()
 
     def qa_finding(self, finding_id: str) -> dict[str, Any]:
@@ -2223,6 +2283,85 @@ class FoundationRepository:
         if row is None:
             raise FoundationValidationError(f"Unknown QA finding: {finding_id}")
         return json.loads(row[0])
+
+    def record_human_review(
+        self, entity_type: str, entity_id: str, *, review_status: ReviewStatus,
+        expected_revision: int, actor_id: str = "human", note: str = "",
+        lifecycle_status: LifecycleStatus | None = None,
+        payload_updates: dict[str, Any] | None = None,
+        invalidate_dependents: bool = False,
+    ) -> dict[str, Any]:
+        """Apply one human review decision to any reviewable entity.
+
+        Optimistic concurrency only — a stale ``expected_revision`` is rejected
+        rather than overwritten, because a human decision must never be
+        last-write-wins.  ``invalidate_dependents`` marks everything downstream
+        STALE (a rejected Stage 6B location invalidates the Stage 7 meaning and
+        Stage 8 findings built on it) without rewriting their history.
+        """
+        table = _REVIEWABLE_TABLES.get(entity_type)
+        if table is None:
+            raise FoundationValidationError(f"Entity type is not reviewable: {entity_type}")
+        review_status = ReviewStatus(review_status)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(f"SELECT * FROM {table} WHERE id=?", (entity_id,)).fetchone()
+            if row is None:
+                raise FoundationValidationError(f"Unknown {entity_type}: {entity_id}")
+            if int(row["revision"]) != expected_revision:
+                raise FoundationConflict(f"{entity_type} revision conflict")
+            new_lifecycle = (
+                lifecycle_status.value if lifecycle_status is not None
+                else row["lifecycle_status"]
+            )
+            payload = json.loads(row["payload_json"])
+            payload.update(payload_updates or {})
+            payload.update({
+                "reviewStatus": review_status.value, "lifecycleStatus": new_lifecycle,
+                "revision": expected_revision + 1,
+            })
+            changed = conn.execute(
+                f"UPDATE {table} SET review_status=?,lifecycle_status=?,revision=revision+1,"
+                "payload_json=? WHERE id=? AND revision=?",
+                (review_status.value, new_lifecycle,
+                 json.dumps(payload, ensure_ascii=False), entity_id, expected_revision),
+            ).rowcount
+            if changed != 1:
+                raise FoundationConflict(f"{entity_type} revision conflict")
+            self._append_review(
+                conn, entity_type, entity_id, row["review_status"], review_status.value,
+                row["lifecycle_status"], new_lifecycle,
+                (row["qa_disposition"] if "qa_disposition" in row.keys() else None),
+                (row["qa_disposition"] if "qa_disposition" in row.keys() else None),
+                ActorType.HUMAN, actor_id, expected_revision, note,
+            )
+            if invalidate_dependents:
+                self._stale_generic_dependencies(conn, entity_type, entity_id)
+            conn.commit()
+        return payload
+
+    def append_standalone_note(
+        self, entity_type: str, entity_id: str, *, actor_id: str, note: str,
+    ) -> None:
+        """Record a reviewer note that changes no decision.
+
+        The entity's own review/lifecycle state is deliberately unchanged and
+        its revision is not bumped: commenting is not deciding.
+        """
+        table = _REVIEWABLE_TABLES.get(entity_type)
+        if table is None:
+            raise FoundationValidationError(f"Entity type is not reviewable: {entity_type}")
+        with self._connect() as conn:
+            row = conn.execute(f"SELECT * FROM {table} WHERE id=?", (entity_id,)).fetchone()
+            if row is None:
+                raise FoundationValidationError(f"Unknown {entity_type}: {entity_id}")
+            disposition = row["qa_disposition"] if "qa_disposition" in row.keys() else None
+            self._append_review(
+                conn, entity_type, entity_id, row["review_status"], row["review_status"],
+                row["lifecycle_status"], row["lifecycle_status"], disposition, disposition,
+                ActorType.HUMAN, actor_id, int(row["revision"]), note,
+            )
+            conn.commit()
 
     def query_qa_findings(
         self, project_id: str, *, book: str = "", chapter: int | None = None,
@@ -2309,10 +2448,15 @@ class FoundationRepository:
             raise FoundationValidationError("Review queue cursor does not match this ordering")
         return key
 
-    def update_qa_disposition(self, finding_id: str, disposition: QaDisposition, expected_revision: int, reviewer: str, note: str = "") -> None:
+    def update_qa_disposition(self, finding_id: str, disposition: QaDisposition, expected_revision: int, reviewer: str, note: str = "", review_status: ReviewStatus | None = None) -> None:
         disposition = QaDisposition(disposition)
-        review = ReviewStatus.NEEDS_DISCUSSION if disposition == QaDisposition.NEEDS_DISCUSSION else (
-            ReviewStatus.UNREVIEWED if disposition == QaDisposition.UNRESOLVED else ReviewStatus.HUMAN_APPROVED
+        # The caller may state the review status explicitly; Stage 9A does, so
+        # that FALSE_POSITIVE records HUMAN_REJECTED rather than being folded
+        # into HUMAN_APPROVED with every other decided disposition.
+        review = ReviewStatus(review_status) if review_status is not None else (
+            ReviewStatus.NEEDS_DISCUSSION if disposition == QaDisposition.NEEDS_DISCUSSION else (
+                ReviewStatus.UNREVIEWED if disposition == QaDisposition.UNRESOLVED else ReviewStatus.HUMAN_APPROVED
+            )
         )
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -2587,6 +2731,7 @@ class FoundationRepository:
             "LOCATION_RUN": "semantic_location_runs",
             "MEANING_RUN": "meaning_analysis_runs",
             "MEANING_ASSESSMENT": "meaning_assessments",
+            "LOCATION_RELATIONSHIP": "semantic_location_relationships",
             "QA_RUN": "qa_audit_runs",
         }
         queue: list[tuple[str, str]] = [(dependency_type, dependency_id)]

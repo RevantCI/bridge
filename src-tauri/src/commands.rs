@@ -1197,6 +1197,254 @@ pub async fn meaning_analysis_get_diagnostics(
         .await
 }
 
+// --- Stage 8 QA audit (analysis, read-only) --------------------------------
+
+#[tauri::command]
+pub async fn qa_audit_run_range(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    end_chapter: Option<String>,
+    end_verse: Option<String>,
+    meaning_run_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "qaAudit.runRange",
+            serde_json::json!({
+                "chapter": chapter,
+                "verse": verse,
+                "endChapter": end_chapter.unwrap_or_default(),
+                "endVerse": end_verse.unwrap_or_default(),
+                "meaningRunId": meaning_run_id.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn qa_audit_status(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("qaAudit.status", serde_json::json!({"runId": run_id}))
+        .await
+}
+
+#[tauri::command]
+pub async fn qa_audit_get_range(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("qaAudit.getRange", serde_json::json!({"runId": run_id}))
+        .await
+}
+
+#[tauri::command]
+pub async fn qa_audit_get_source_coverage(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "qaAudit.getSourceCoverage",
+            serde_json::json!({"runId": run_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn qa_audit_get_target_support(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "qaAudit.getTargetSupport",
+            serde_json::json!({"runId": run_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn qa_audit_get_finding(
+    sidecar: State<'_, EngineSidecar>,
+    finding_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "qaAudit.getFinding",
+            serde_json::json!({"findingId": finding_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn qa_audit_get_diagnostics(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("qaAudit.getDiagnostics", serde_json::json!({"runId": run_id}))
+        .await
+}
+
+// --- Stage 9A human review (writes decisions, never Scripture) -------------
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn qa_review_get_queue(
+    sidecar: State<'_, EngineSidecar>,
+    book: Option<String>,
+    chapter: Option<i64>,
+    kinds: Option<Vec<String>>,
+    severities: Option<Vec<String>>,
+    dispositions: Option<Vec<String>>,
+    review_statuses: Option<Vec<String>>,
+    lifecycle_statuses: Option<Vec<String>>,
+    order: Option<String>,
+    limit: Option<u32>,
+    cursor: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "qaReview.getQueue",
+            serde_json::json!({
+                "book": book.unwrap_or_default(),
+                "chapter": chapter,
+                "kinds": kinds.unwrap_or_default(),
+                "severities": severities.unwrap_or_default(),
+                "dispositions": dispositions.unwrap_or_default(),
+                "reviewStatuses": review_statuses.unwrap_or_default(),
+                "lifecycleStatuses": lifecycle_statuses.unwrap_or_default(),
+                "order": order.unwrap_or_else(|| "CANONICAL".to_string()),
+                "limit": limit.unwrap_or(50),
+                "cursor": cursor.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn qa_review_get_finding(
+    sidecar: State<'_, EngineSidecar>,
+    finding_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "qaReview.getFinding",
+            serde_json::json!({"findingId": finding_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn qa_review_decide_finding(
+    sidecar: State<'_, EngineSidecar>,
+    finding_id: String,
+    disposition: String,
+    expected_entity_revision: i64,
+    expected_target_content_hashes: Option<Vec<String>>,
+    note: Option<String>,
+    promote: Option<bool>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "qaReview.decideFinding",
+            serde_json::json!({
+                "findingId": finding_id,
+                "disposition": disposition,
+                "expectedEntityRevision": expected_entity_revision,
+                "expectedTargetContentHashes": expected_target_content_hashes.unwrap_or_default(),
+                "note": note.unwrap_or_default(),
+                "promote": promote.unwrap_or(false),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn qa_review_add_note(
+    sidecar: State<'_, EngineSidecar>,
+    entity_type: String,
+    entity_id: String,
+    note: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "qaReview.addNote",
+            serde_json::json!({
+                "entityType": entity_type,
+                "entityId": entity_id,
+                "note": note,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn semantic_review_decide_location(
+    sidecar: State<'_, EngineSidecar>,
+    relationship_id: String,
+    decision: String,
+    expected_entity_revision: i64,
+    note: Option<String>,
+    selected_candidate_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "semanticReview.decideLocation",
+            serde_json::json!({
+                "relationshipId": relationship_id,
+                "decision": decision,
+                "expectedEntityRevision": expected_entity_revision,
+                "note": note.unwrap_or_default(),
+                "selectedCandidateId": selected_candidate_id.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn semantic_review_decide_meaning(
+    sidecar: State<'_, EngineSidecar>,
+    assessment_id: String,
+    meaning_status: String,
+    expected_entity_revision: i64,
+    note: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "semanticReview.decideMeaning",
+            serde_json::json!({
+                "assessmentId": assessment_id,
+                "meaningStatus": meaning_status,
+                "expectedEntityRevision": expected_entity_revision,
+                "note": note.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn review_history_get_entity_history(
+    sidecar: State<'_, EngineSidecar>,
+    entity_type: String,
+    entity_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "reviewHistory.getEntityHistory",
+            serde_json::json!({
+                "entityType": entity_type,
+                "entityId": entity_id,
+            }),
+        )
+        .await
+}
+
 #[tauri::command]
 pub async fn paratext_get_state(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar

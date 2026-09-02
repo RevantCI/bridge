@@ -428,6 +428,8 @@ export interface QaFinding {
   qaEngineVersion: string;
   qaPolicyVersion: string;
   fingerprint: string;
+  /** Denormalized so the review queue can order by canonical position. */
+  displayedReferences: string[];
 }
 
 export interface CorrectionProposal {

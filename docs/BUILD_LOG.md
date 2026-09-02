@@ -10,6 +10,139 @@ Updated: 2026-09-02
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
 
+## Stage 9A.1 — Stable finding identity and the human review APIs (2026-09-02)
+
+Backend half of Stage 9A. A reviewer can now be given a deterministic queue,
+layered evidence, and four decisions to make, with none of it touching
+Scripture. No UI yet.
+
+### Finding ids are re-keyed off stable semantic identity
+
+Stage 8 hashed the *run fingerprint* into every finding id
+(`_build_finding`), so any upstream change — a target edit, a policy bump —
+minted brand-new ids and orphaned every human decision recorded against the
+old ones. That made the spec's "a stale human-confirmed issue is preserved
+and re-evaluated" unimplementable: after an edit there was no identity left
+to preserve it against. This is the same lesson `_stable_finding_id()` in
+`bridge_service.py` already encodes for the Greek Room findings (CLAUDE.md
+gotcha 3); Stage 8 had not applied it.
+
+`QaAuditEngine._stable_finding_id()` now keys on
+kind + direction + coverage dimension + source unit ids + target anchors, and
+deliberately excludes the run fingerprint **and** the engine/policy versions —
+keying on policy would orphan decisions on every policy bump. Both are still
+recorded as fields.
+
+Verified before relying on it, rather than assumed:
+
+- **Source unit ids are stable.** `source-unit-<fingerprint>` hashes
+  kind + token ids + rule + policy, and the source resource is locked, so
+  they survive target edits by construction.
+- **Target unit ids are not.** `target-unit-<fingerprint>` includes
+  `targetRevision`, and `PassageSemanticRuntime.text_revision()` is
+  per-verse — so editing one verse re-ids every target unit in it. Target
+  support findings therefore anchor on
+  reference + normalized surface + occurrence instead
+  (`_finding_anchors`), which holds an addition finding's identity steady
+  when an unrelated word in the same verse changes, and breaks it only when
+  the word the finding is actually about changes — at which point it
+  genuinely is a different finding.
+- **Relationship ids embed the run fingerprint** and are correctly excluded.
+- **Coverage account ids** derive from the source inventory fingerprint, so
+  they are stable across target edits; the dimension is used rather than the
+  id itself.
+
+No golden fixture had to change: there is no Stage 8 golden file, and
+`test_qa_audit_stage8.py` never asserts a literal finding id — it derives
+`finding["id"]` at runtime everywhere.
+
+### save_qa_finding became an upsert that cannot overwrite a decision
+
+Stable ids mean a re-run now reaches an existing row instead of inserting a
+fresh one. `save_qa_finding` merges the machine fields and preserves
+`qaDisposition` / `reviewStatus` / `revision` exactly as the reviewer left
+them (`_HUMAN_FINDING_FIELDS`). If nothing the machine produced actually
+changed it writes nothing at all, so re-runs do not churn revisions. When it
+does refresh a finding that already carries a human decision it appends a
+SYSTEM ReviewRecord, leaving an audit trail rather than a silent overwrite.
+
+Measured end to end: confirm a finding → edit the target verse → the finding
+goes STALE with the decision intact → re-run → same id, back to ACTIVE,
+decision still intact, history `[HUMAN, SYSTEM]`. A wording change never
+becomes CORRECTED on its own; only a future Stage 9B recheck may conclude
+that.
+
+### Review APIs
+
+New `engine/tc_ai_bridge/qa_review.py` (`QaReviewService`), deliberately
+separate from the `qaAudit.*` analysis methods so that analysis stays
+read-only and every human write leaves a ReviewRecord:
+
+`qaReview.getQueue` · `qaReview.getFinding` · `qaReview.decideFinding` ·
+`qaReview.addNote` · `semanticReview.decideLocation` ·
+`semanticReview.decideMeaning` · `reviewHistory.getEntityHistory`
+
+- **Disposition → review status is now explicit.** The old derivation folded
+  everything decided into HUMAN_APPROVED. FALSE_POSITIVE is the one case
+  where the human rejects the machine's claim outright, so it is the only
+  disposition yielding HUMAN_REJECTED; ACCEPTABLE_TRANSLATION still approves
+  the *observation* and carries its nuance in the disposition.
+- **Promotion is opt-in only.** POSSIBLY_MISSING → MISSING and
+  POSSIBLY_UNSUPPORTED → UNSUPPORTED happen only via `promote: true`
+  alongside CONFIRMED_TRANSLATION_ERROR, and are expressed on the coverage
+  account rather than by adding bare OMISSION/ADDITION finding kinds.
+  Opening or deciding a finding never promotes.
+- **Mapping and meaning are reviewable independently.** Rejecting a Stage 6B
+  location marks it HUMAN_REJECTED (or HUMAN_MODIFIED when an alternative
+  candidate is chosen) and invalidates dependent Stage 7/8 records without
+  rewriting their history; the QA disposition is untouched, because a mapping
+  verdict decides nothing about whether the translation is wrong. Overriding
+  a Stage 7 meaning assessment works the same way.
+- **Notes do not decide.** `append_standalone_note` records a note against
+  the entity without touching its review state or bumping its revision.
+
+`record_human_review()` is the single generic write path (CAS + ReviewRecord
++ optional dependent invalidation) for every reviewable entity;
+`_REVIEWABLE_TABLES` names them.
+
+### Concurrency
+
+`decideFinding` takes both `expectedEntityRevision` and
+`expectedTargetContentHashes`. `FoundationConflict` and
+`FoundationValidationError` now have explicit handlers at the protocol
+boundary and surface as `revision_conflict` / `semantic_validation_error`
+instead of falling through to `internal_error`.
+
+### Found by running it: Stage 7 evidence is not in evidence_records
+
+`qaReview.getFinding` crashed on `Unknown evidence record:
+meaning-evidence-…`. Stage 7 synthesizes per-component `meaning-evidence-*`
+ids *inside* the assessment payload and never writes them to the
+`evidence_records` table, but Stage 8 copies those ids onto the finding's
+supporting/conflicting evidence lists. The resolver now reads both stores and
+tags each item `EVIDENCE_RECORD` / `MEANING_ASSESSMENT` / `UNRESOLVED` — a
+reviewer should see that a piece of evidence is missing, not be blocked from
+reviewing the finding at all.
+
+### Command layer
+
+Stage 8 shipped no Tauri commands, so its methods were unreachable from the
+UI. Added all seven `qa_audit_*` commands plus the seven review commands to
+`commands.rs`, registered in `main.rs`, with matching `bridgeClient.ts`
+methods and a new `src/lib/types/qaReview.ts`. Stage 9A.2 is therefore pure
+Svelte. (`passage_semantic_wire.rs` holds schema-validation serde types, not
+the command layer — no additions needed there.)
+
+**Files:** `engine/tc_ai_bridge/qa_review.py` (new),
+`engine/tc_ai_bridge/qa_audit.py`,
+`engine/tc_ai_bridge/passage_semantic_repository.py`,
+`engine/tc_ai_bridge/passage_semantic_models.py`,
+`engine/tc_ai_bridge/passage_semantic_runtime.py`,
+`engine/bridge_service.py`, `src-tauri/src/commands.rs`,
+`src-tauri/src/main.rs`, `src/lib/api/bridgeClient.ts`,
+`src/lib/types/qaReview.ts` (new),
+`engine/tests/test_qa_review_service_stage9a.py` (new, 37 tests).
+
 ## Stage 9A.0 — Review-queue storage preflight (2026-09-02)
 
 Preflight for Stage 9A (human QA review). No review API and no UI yet; this

@@ -348,7 +348,7 @@
     },
     "QaFinding": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "projectId", "book", "passageId", "kind", "direction", "sourceSemanticUnitIds", "targetSemanticUnitIds", "semanticRelationshipIds", "evidenceIds", "explanation", "confidence", "currentTargetRevision", "qaDisposition", "policyBinding", "reviewStatus", "lifecycleStatus", "revision", "severity", "meaningAssessmentIds", "coverageAccountIds", "locationOutcomeSnapshot", "meaningStatusSnapshot", "supportingEvidenceIds", "conflictingEvidenceIds", "resourceEvidenceIds", "targetContentHashes", "sourceResourceHashes", "qaEngineVersion", "qaPolicyVersion", "fingerprint"],
+      "required": ["id", "projectId", "book", "passageId", "kind", "direction", "sourceSemanticUnitIds", "targetSemanticUnitIds", "semanticRelationshipIds", "evidenceIds", "explanation", "confidence", "currentTargetRevision", "qaDisposition", "policyBinding", "reviewStatus", "lifecycleStatus", "revision", "severity", "meaningAssessmentIds", "coverageAccountIds", "locationOutcomeSnapshot", "meaningStatusSnapshot", "supportingEvidenceIds", "conflictingEvidenceIds", "resourceEvidenceIds", "targetContentHashes", "sourceResourceHashes", "qaEngineVersion", "qaPolicyVersion", "fingerprint", "displayedReferences"],
       "properties": {
         "id": { "type": "string" }, "projectId": { "type": "string" }, "book": { "type": "string" }, "passageId": { "type": "string" },
         "kind": { "$ref": "#/$defs/QaFindingKind" }, "direction": { "$ref": "#/$defs/AuditDirection" },
@@ -369,7 +369,8 @@
         "resourceEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "targetContentHashes": { "type": "array", "items": { "type": "string" } },
         "sourceResourceHashes": { "type": "array", "items": { "type": "string" } },
-        "qaEngineVersion": { "type": "string" }, "qaPolicyVersion": { "type": "string" }, "fingerprint": { "type": "string" }
+        "qaEngineVersion": { "type": "string" }, "qaPolicyVersion": { "type": "string" }, "fingerprint": { "type": "string" },
+        "displayedReferences": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
       }
     },
     "CorrectionProposal": {

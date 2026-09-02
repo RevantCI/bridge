@@ -47,6 +47,10 @@ from tc_ai_bridge.original_language_resources import resource_inventory
 from tc_ai_bridge.lexicon_resources import lexicon_entry_for_strong, HEBREW_PREFIX_LABELS
 from tc_ai_bridge.morphology_codes import decode_morph
 from tc_ai_bridge.project_registry import ProjectIdentityError, ProjectRegistry, source_fingerprints
+from tc_ai_bridge.passage_semantic_repository import (
+    FoundationConflict,
+    FoundationValidationError,
+)
 from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime
 from tc_ai_bridge.local_checks import run_local_qa
 from tc_ai_bridge.alignment_engine import (
@@ -316,6 +320,13 @@ class Methods:
     QA_AUDIT_GET_TARGET_SUPPORT = "qaAudit.getTargetSupport"
     QA_AUDIT_GET_FINDING = "qaAudit.getFinding"
     QA_AUDIT_GET_DIAGNOSTICS = "qaAudit.getDiagnostics"
+    QA_REVIEW_GET_QUEUE = "qaReview.getQueue"
+    QA_REVIEW_GET_FINDING = "qaReview.getFinding"
+    QA_REVIEW_DECIDE_FINDING = "qaReview.decideFinding"
+    QA_REVIEW_ADD_NOTE = "qaReview.addNote"
+    SEMANTIC_REVIEW_DECIDE_LOCATION = "semanticReview.decideLocation"
+    SEMANTIC_REVIEW_DECIDE_MEANING = "semanticReview.decideMeaning"
+    REVIEW_HISTORY_GET_ENTITY_HISTORY = "reviewHistory.getEntityHistory"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -1890,6 +1901,45 @@ class BridgeEngine:
     def qa_audit_get_diagnostics(self, run_id: str) -> dict[str, Any]:
         return self._require_passage_semantic_runtime().qa_audit_diagnostics(run_id)
 
+    # -- Stage 9A human review --------------------------------------------
+    # Deliberately separate from the qaAudit.* analysis methods above: these
+    # write human decisions, those only read machine analysis.
+
+    def qa_review_get_queue(self, **filters: Any) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().qa_review_queue(**filters)
+
+    def qa_review_get_finding(self, finding_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().qa_review_finding(finding_id)
+
+    def qa_review_decide_finding(
+        self, finding_id: str, disposition: str, **options: Any,
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().qa_review_decide(
+            finding_id, disposition, **options)
+
+    def qa_review_add_note(
+        self, entity_type: str, entity_id: str, note: str,
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().qa_review_add_note(
+            entity_type, entity_id, note)
+
+    def semantic_review_decide_location(
+        self, relationship_id: str, decision: str, **options: Any,
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().semantic_review_decide_location(
+            relationship_id, decision, **options)
+
+    def semantic_review_decide_meaning(
+        self, assessment_id: str, meaning_status: str, **options: Any,
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().semantic_review_decide_meaning(
+            assessment_id, meaning_status, **options)
+
+    def review_history_get_entity_history(
+        self, entity_type: str, entity_id: str,
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().review_history(entity_type, entity_id)
+
     # -- live desktop connectors (Paratext/Logos) --------------------------
     #
     # Direct pass-through calls only in this pass: read the connector's current
@@ -3438,6 +3488,51 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.qa_audit_get_diagnostics(
                     str(p.get("runId") or ""),
                 ))
+            if m == Methods.QA_REVIEW_GET_QUEUE:
+                return EngineResponse.ok(request.id, result=self.qa_review_get_queue(
+                    book=str(p.get("book") or ""),
+                    chapter=(int(p["chapter"]) if p.get("chapter") not in (None, "") else None),
+                    kinds=tuple(p.get("kinds") or ()),
+                    severities=tuple(p.get("severities") or ()),
+                    dispositions=tuple(p.get("dispositions") or ()),
+                    review_statuses=tuple(p.get("reviewStatuses") or ()),
+                    lifecycle_statuses=tuple(p.get("lifecycleStatuses") or ()),
+                    order=str(p.get("order") or "CANONICAL"),
+                    limit=int(p.get("limit") or 50), cursor=str(p.get("cursor") or ""),
+                ))
+            if m == Methods.QA_REVIEW_GET_FINDING:
+                return EngineResponse.ok(request.id, result=self.qa_review_get_finding(
+                    str(p.get("findingId") or ""),
+                ))
+            if m == Methods.QA_REVIEW_DECIDE_FINDING:
+                return EngineResponse.ok(request.id, result=self.qa_review_decide_finding(
+                    str(p.get("findingId") or ""), str(p.get("disposition") or ""),
+                    expected_revision=int(p.get("expectedEntityRevision") or 0),
+                    expected_target_content_hashes=tuple(p.get("expectedTargetContentHashes") or ()),
+                    note=str(p.get("note") or ""), promote=bool(p.get("promote") or False),
+                ))
+            if m == Methods.QA_REVIEW_ADD_NOTE:
+                return EngineResponse.ok(request.id, result=self.qa_review_add_note(
+                    str(p.get("entityType") or ""), str(p.get("entityId") or ""),
+                    str(p.get("note") or ""),
+                ))
+            if m == Methods.SEMANTIC_REVIEW_DECIDE_LOCATION:
+                return EngineResponse.ok(request.id, result=self.semantic_review_decide_location(
+                    str(p.get("relationshipId") or ""), str(p.get("decision") or ""),
+                    expected_revision=int(p.get("expectedEntityRevision") or 0),
+                    note=str(p.get("note") or ""),
+                    selected_candidate_id=str(p.get("selectedCandidateId") or ""),
+                ))
+            if m == Methods.SEMANTIC_REVIEW_DECIDE_MEANING:
+                return EngineResponse.ok(request.id, result=self.semantic_review_decide_meaning(
+                    str(p.get("assessmentId") or ""), str(p.get("meaningStatus") or ""),
+                    expected_revision=int(p.get("expectedEntityRevision") or 0),
+                    note=str(p.get("note") or ""),
+                ))
+            if m == Methods.REVIEW_HISTORY_GET_ENTITY_HISTORY:
+                return EngineResponse.ok(request.id, result=self.review_history_get_entity_history(
+                    str(p.get("entityType") or ""), str(p.get("entityId") or ""),
+                ))
             if m == Methods.ISSUE_RESOLUTION_LIST:
                 return EngineResponse.ok(
                     request.id, result=self.list_issue_resolutions(p["chapter"], p["verse"]),
@@ -3505,5 +3600,11 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "sweep_conflict", str(exc))
         except SweepError as exc:
             return EngineResponse.fail(request.id, "sweep_error", str(exc))
+        except FoundationConflict as exc:
+            # Optimistic concurrency: a human review decision written against a
+            # revision that has since moved is rejected, never merged blindly.
+            return EngineResponse.fail(request.id, "revision_conflict", str(exc))
+        except FoundationValidationError as exc:
+            return EngineResponse.fail(request.id, "semantic_validation_error", str(exc))
         except Exception as exc:  # noqa: BLE001 - protocol boundary must never crash the sidecar
             return EngineResponse.fail(request.id, "internal_error", str(exc))
