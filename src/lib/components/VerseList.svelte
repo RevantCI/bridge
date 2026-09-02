@@ -26,6 +26,22 @@
     const key = $selectedVerse ? verseKey($currentChapter, $selectedVerse) : "";
     if (key && scrollContainer && key !== lastScrolledKey) void scrollSelectedToTop(key);
   }
+
+  // Grows the edit textarea to fit its full content (1, 2, or more lines)
+  // with no scrollbar, plus one blank line of buffer at the bottom — rather
+  // than a fixed rows="2" that scrolls for longer verses and wastes space
+  // for short ones.
+  function autosize(node: HTMLTextAreaElement) {
+    const resize = () => {
+      node.style.height = "auto";
+      const lineHeight = parseFloat(getComputedStyle(node).lineHeight) || 20;
+      const borderHeight = node.offsetHeight - node.clientHeight;
+      node.style.height = `${node.scrollHeight + lineHeight + borderHeight}px`;
+    };
+    resize();
+    node.addEventListener("input", resize);
+    return { destroy: () => node.removeEventListener("input", resize) };
+  }
 </script>
 
 <div class="editor-scroll" class:show-source={$showSource} bind:this={scrollContainer}>
@@ -37,7 +53,8 @@
     {@const checkStatus = $checkStatusByVerse[key]}
     {@const alignmentStatus = $alignmentStatusByVerse[key] ?? "untouched"}
     {@const openCount = findings.filter((f) => f.status === "open").length}
-    {@const segments = buildSegments($verseTexts[key] ?? "", findings, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [])}
+    {@const highlightFindings = findings.filter((f) => f.status !== "ignored" && f.status !== "accepted")}
+    {@const segments = buildSegments($verseTexts[key] ?? "", highlightFindings, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [])}
     {@const isEditingThis = $editingChapter === $currentChapter && $editingVerse === v}
     <div
       class="verse"
@@ -56,14 +73,18 @@
       </div>
       {#if isEditingThis}
         <div class="vedit" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
-          <textarea bind:value={$editText} rows="2" disabled={$editSaving} />
-          {#if $editError}<p class="edit-error">{$editError}</p>{/if}
-          <div class="edit-actions">
-            <button class="save" on:click={() => void saveVerseEdit()} disabled={$editSaving || $editText.trim() === ""}>
-              {$editSaving ? "Saving…" : "Save & re-check"}
-            </button>
-            <button class="cancel" on:click={cancelVerseEdit} disabled={$editSaving}>Cancel</button>
+          <div class="vedit-row">
+            <textarea use:autosize bind:value={$editText} disabled={$editSaving} />
+            <div class="edit-actions">
+              <button
+                class="icon-btn save" on:click={() => void saveVerseEdit()}
+                disabled={$editSaving || $editText.trim() === ""}
+                title={$editSaving ? "Saving…" : "Save & re-check"}
+              >{#if $editSaving}<span class="spin-sm" />{:else}✓{/if}</button>
+              <button class="icon-btn cancel" on:click={cancelVerseEdit} disabled={$editSaving} title="Cancel">✕</button>
+            </div>
           </div>
+          {#if $editError}<p class="edit-error">{$editError}</p>{/if}
         </div>
       {:else}
         <div class="vtext">
@@ -105,16 +126,22 @@
   .empty { color: var(--text-3); font-size: 13px; }
   .verse.editing-row { cursor: default; background: var(--surface); border-color: var(--accent); }
   .vedit { flex: 1; min-width: 0; cursor: default; }
+  .vedit-row { display: flex; align-items: flex-start; gap: 8px; }
   .vedit textarea {
-    width: 100%; box-sizing: border-box; font-size: 16px; line-height: 1.7; color: var(--text);
+    flex: 1; min-width: 0; box-sizing: border-box; font-size: 16px; line-height: 1.7; color: var(--text);
     font-family: inherit; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px;
-    resize: vertical; margin-bottom: 8px;
+    resize: none; overflow-y: hidden;
   }
   .vedit textarea:disabled { opacity: .6; }
-  .edit-error { color: var(--danger); font-size: 11px; margin: -4px 0 8px; line-height: 1.4; }
-  .edit-actions { display: flex; gap: 8px; }
-  .edit-actions button { padding: 8px 14px; font-size: 12px; font-weight: 700; border-radius: 7px; border: none; cursor: pointer; }
-  .edit-actions .save { background: var(--accent); color: white; }
-  .edit-actions .cancel { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
-  .edit-actions button:disabled { opacity: .55; cursor: not-allowed; }
+  .edit-error { color: var(--danger); font-size: 11px; margin: 6px 0 0; line-height: 1.4; }
+  .edit-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+  .icon-btn {
+    width: 32px; height: 32px; padding: 0; font-size: 15px; font-weight: 800; border-radius: 7px;
+    border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .icon-btn.save { background: var(--accent); color: white; }
+  .icon-btn.cancel { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
+  .icon-btn:disabled { opacity: .55; cursor: not-allowed; }
+  .spin-sm { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; animation: spin-sm 0.8s linear infinite; }
+  @keyframes spin-sm { to { transform: rotate(360deg); } }
 </style>

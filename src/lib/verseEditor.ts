@@ -22,7 +22,9 @@ export const recheckingKey = writable("");
 export const recheckedKey = writable("");
 
 let onSaved:
-  | ((info: { chapter: string; verse: string; issueResolutionsNeedingRecheck: number }) => void)
+  | ((info: {
+      chapter: string; verse: string; issueResolutionsNeedingRecheck: number; acceptFindingId: string;
+    }) => void)
   | null = null;
 
 /** ReviewPanel registers its own follow-up (refresh translation helps,
@@ -32,6 +34,19 @@ export function setVerseEditSavedHook(hook: typeof onSaved): void {
   onSaved = hook;
 }
 
+// Set by ReviewPanel's "Accept and edit" (as opposed to a plain "Edit
+// verse") right after starting an edit session, so a successful save can
+// report which specific finding to mark "accepted" — cleared by
+// startVerseEdit (a fresh edit session starts clean) and by cancelVerseEdit
+// (a true cancel drops the accept intent too), but saveVerseEdit captures
+// its value into a local const before its own internal cancelVerseEdit()
+// call clears it, so a successful save still has it for the onSaved payload.
+let pendingAcceptFindingId = "";
+
+export function setPendingAcceptFinding(findingId: string): void {
+  pendingAcceptFindingId = findingId;
+}
+
 export function startVerseEdit(chapter: string, verse: string): boolean {
   if (!verse || get(checkingProgress).running || get(editSaving) || get(recheckingKey)) return false;
   editingChapter.set(chapter);
@@ -39,12 +54,14 @@ export function startVerseEdit(chapter: string, verse: string): boolean {
   editText.set(get(verseTexts)[verseKey(chapter, verse)] ?? "");
   editError.set("");
   editErrorKey.set("");
+  pendingAcceptFindingId = "";
   return true;
 }
 
 export function cancelVerseEdit(): void {
   editingChapter.set("");
   editingVerse.set("");
+  pendingAcceptFindingId = "";
 }
 
 export async function saveVerseEdit(): Promise<void> {
@@ -59,6 +76,7 @@ export async function saveVerseEdit(): Promise<void> {
     cancelVerseEdit();
     return;
   }
+  const acceptFindingId = pendingAcceptFindingId;
   editError.set("");
   editSaving.set(true);
   try {
@@ -84,7 +102,10 @@ export async function saveVerseEdit(): Promise<void> {
     checkStatusByVerse.update((map) => ({ ...map, [key]: "succeeded" }));
     recheckingKey.set("");
     recheckedKey.set(key);
-    onSaved?.({ chapter, verse, issueResolutionsNeedingRecheck: editResult.issueResolutionsNeedingRecheck });
+    onSaved?.({
+      chapter, verse, issueResolutionsNeedingRecheck: editResult.issueResolutionsNeedingRecheck,
+      acceptFindingId,
+    });
     window.setTimeout(() => {
       if (get(recheckedKey) === key) recheckedKey.set("");
     }, 3500);

@@ -13,6 +13,7 @@
   import {
     editingChapter, editingVerse, editText, editSaving, editError, editErrorKey,
     recheckingKey, recheckedKey, startVerseEdit, cancelVerseEdit, setVerseEditSavedHook,
+    setPendingAcceptFinding,
   } from "../verseEditor";
   import type { AiExplainResult, AIReviewJobSnapshot, FindingStatus } from "../types/finding";
 
@@ -314,8 +315,18 @@
     startVerseEdit($currentChapter, $selectedVerse ?? "");
   }
 
+  // "Accept and edit" on a specific Greek Room finding: same edit session
+  // as startEdit, but remembers which finding this was so a successful
+  // save can record it as "accepted" (see setVerseEditSavedHook below)
+  // rather than leaving it open for the next recheck to silently re-decide.
+  function acceptAndEdit(findingId: string) {
+    if (startVerseEdit($currentChapter, $selectedVerse ?? "")) {
+      setPendingAcceptFinding(findingId);
+    }
+  }
+
   onMount(() => {
-    setVerseEditSavedHook(({ chapter, verse, issueResolutionsNeedingRecheck }) => {
+    setVerseEditSavedHook(({ chapter, verse, issueResolutionsNeedingRecheck, acceptFindingId }) => {
       const key = verseKey(chapter, verse);
       // Invalidate any live Greek-Room-only check still in flight from when
       // this verse was first selected, so it can't resolve after this point
@@ -324,6 +335,13 @@
       latestLiveCheckByVerse.set(key, ++liveCheckSequence);
       if ($selectedVerse && verseKey($currentChapter, $selectedVerse) === key) {
         void translationHelpsReview?.refresh();
+        // Record the human decision unconditionally — the same "a decision
+        // persists even if the finding somehow still recurs" behavior
+        // Ignore already relies on. Usually the edit actually fixed the
+        // underlying text, so this specific finding id won't even reappear
+        // in the fresh recheck results at all; this just makes sure it's
+        // filed as accepted for the case where it does.
+        if (acceptFindingId) void decide(acceptFindingId, "accepted");
       }
       if (issueResolutionsNeedingRecheck > 0) {
         // A saved issue can only close against the edited text. Start the
@@ -351,9 +369,18 @@
   $: greekRoomOpenCount = $selectedFindings.filter((f) => isGreekRoom(f.engine) && f.status === "open").length;
   $: tntwOpenCount = $selectedFindings.filter((f) => !isGreekRoom(f.engine) && f.status === "open").length;
   // Same cross-reference-style numbering shown inline in the verse text
-  // (VerseList.svelte) — both read $selectedFindings for the same verse,
-  // so the numbers line up without any shared state beyond that.
-  $: findingNumberMap = findingNumbers($selectedFindings);
+  // (VerseList.svelte) — both read $selectedFindings for the same verse
+  // and both exclude ignored/accepted findings before numbering (VerseList
+  // excludes them from buildSegments' highlighting too), so the numbers
+  // line up without any shared state beyond that.
+  $: findingNumberMap = findingNumbers(
+    $selectedFindings.filter((f) => f.status !== "ignored" && f.status !== "accepted"),
+  );
+  function byFindingNumber(a: { id: string }, b: { id: string }): number {
+    const na = findingNumberMap.get(a.id) ?? Infinity;
+    const nb = findingNumberMap.get(b.id) ?? Infinity;
+    return na - nb;
+  }
 </script>
 
 <div class="panel">
@@ -450,6 +477,7 @@
         >AI explanation</button>
       </div>
 
+      <div class="tab-content">
       <div class="tab-panel" role="tabpanel" hidden={activeTab !== "tntw"}>
         <TranslationHelpsReview
           bind:this={translationHelpsReview}
@@ -486,6 +514,10 @@
       </div>
 
       {#if activeTab === "greekroom"}
+        {@const grFindings = $selectedFindings.filter((f) => isGreekRoom(f.engine))}
+        {@const grOpenFindings = grFindings.filter((f) => f.status !== "ignored" && f.status !== "accepted").sort(byFindingNumber)}
+        {@const grIgnoredFindings = grFindings.filter((f) => f.status === "ignored")}
+        {@const grAcceptedFindings = grFindings.filter((f) => f.status === "accepted")}
         <div class="tab-panel" role="tabpanel">
           <div class="section">
             <div class="section-title">
@@ -494,7 +526,7 @@
                 <span class="live"><span class="spin" /> live check</span>
               {/if}
             </div>
-            {#each $selectedFindings.filter((f) => isGreekRoom(f.engine)) as f}
+            {#each grOpenFindings as f}
               <div class="finding">
                 <div class="verdict">
                   {#if findingNumberMap.has(f.id)}<span class="finding-num-badge" title="Marked in the verse text">{findingNumberMap.get(f.id)}</span>{/if}
@@ -519,17 +551,77 @@
                 <div class="decision-row two-up">
                   <button
                     class="edit-inline"
-                    on:click={startEdit}
+                    on:click={() => acceptAndEdit(f.id)}
                     disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
-                    title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
-                  >✎ Edit verse</button>
+                    title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse and mark this finding accepted"}
+                  >✎ Accept and edit</button>
                   <button class="ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "ignored")}>⊘ Ignore</button>
                 </div>
               </div>
-            {:else}
-              {#if !greekRoomChecking}<p class="none">No Greek Room findings.</p>{/if}
             {/each}
+            {#if grFindings.length === 0 && !greekRoomChecking}<p class="none">No Greek Room findings.</p>{/if}
           </div>
+
+          {#if grAcceptedFindings.length > 0}
+            <details class="section accepted-section">
+              <summary class="section-title ignored-summary">Accepted ({grAcceptedFindings.length})</summary>
+              {#each grAcceptedFindings as f}
+                <div class="finding">
+                  <div class="verdict">
+                    <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
+                    <span class="engine-badge">{f.engine}</span>
+                    <span class="check-id">{f.check_type}</span>
+                    <span class="badge badge-decided">{f.status}</span>
+                    {#if decisionSaveState[f.id] === "saving"}
+                      <span class="save-state">Saving…</span>
+                    {:else if decisionSaveState[f.id] === "saved"}
+                      <span class="save-state saved">✓ Saved</span>
+                    {:else if decisionSaveState[f.id] === "error"}
+                      <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
+                    {/if}
+                  </div>
+                  <p class="explain">{f.explanation}</p>
+                  <div class="decision-row one-up">
+                    <button class="undo-accept" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "open")}>↺ Undo accept</button>
+                  </div>
+                </div>
+              {/each}
+            </details>
+          {/if}
+
+          {#if grIgnoredFindings.length > 0}
+            <details class="section ignored-section">
+              <summary class="section-title ignored-summary">Ignored ({grIgnoredFindings.length})</summary>
+              {#each grIgnoredFindings as f}
+                <div class="finding">
+                  <div class="verdict">
+                    {#if findingNumberMap.has(f.id)}<span class="finding-num-badge" title="Marked in the verse text">{findingNumberMap.get(f.id)}</span>{/if}
+                    <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
+                    <span class="engine-badge">{f.engine}</span>
+                    <span class="check-id">{f.check_type}</span>
+                    <span class="badge badge-decided">{f.status}</span>
+                    {#if decisionSaveState[f.id] === "saving"}
+                      <span class="save-state">Saving…</span>
+                    {:else if decisionSaveState[f.id] === "saved"}
+                      <span class="save-state saved">✓ Saved</span>
+                    {:else if decisionSaveState[f.id] === "error"}
+                      <span class="save-state failed" title={decisionSaveError[f.id]}>Save failed</span>
+                    {/if}
+                  </div>
+                  <p class="explain">{f.explanation}</p>
+                  <div class="decision-row two-up">
+                    <button
+                      class="edit-inline"
+                      on:click={startEdit}
+                      disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
+                      title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
+                    >✎ Edit verse</button>
+                    <button class="undo-ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "open")}>↺ Undo ignore</button>
+                  </div>
+                </div>
+              {/each}
+            </details>
+          {/if}
         </div>
       {:else if activeTab === "ai"}
         <div class="tab-panel" role="tabpanel">
@@ -573,6 +665,7 @@
           {/if}
         </div>
       {/if}
+      </div>
 
     </div>
 
@@ -611,12 +704,13 @@
   .panel-pinned { flex-shrink: 0; padding: 14px 16px; border-bottom: 1px solid var(--border); overflow-y: auto; max-height: 60vh; }
   .ref { font-size: 13px; font-weight: 700; color: var(--text); }
   .sub { font-size: 11px; color: var(--text-2); margin-top: 2px; }
-  .panel-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; }
+  .panel-scroll { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .operation-status { display: flex; align-items: center; gap: 7px; border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; font-size: 11px; line-height: 1.4; }
   .operation-status.checking { color: var(--accent); background: var(--accent-bg); }
   .operation-status.saved { color: var(--success); background: var(--success-bg); }
   .operation-status.failed { color: var(--danger); background: var(--danger-bg); }
-  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); flex-shrink: 0; padding: 14px 16px 0; background: var(--surface); }
+  .tab-content { flex: 1; overflow-y: auto; padding: 14px 16px; }
   .tabs button {
     flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
     padding: 8px 6px; font-size: 10.5px; font-weight: 700; color: var(--text-2);
@@ -634,6 +728,11 @@
   .tab-panel:empty { display: none; }
   .section { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
   .section-title { font-size: 11px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .ignored-summary { cursor: pointer; user-select: none; margin-bottom: 0; list-style: none; }
+  .ignored-summary::-webkit-details-marker { display: none; }
+  .ignored-summary::before { content: "▸"; font-size: 9px; color: var(--text-3); transition: transform 0.15s ease; }
+  .ignored-section[open] .ignored-summary, .accepted-section[open] .ignored-summary { margin-bottom: 8px; }
+  .ignored-section[open] .ignored-summary::before, .accepted-section[open] .ignored-summary::before { transform: rotate(90deg); }
   .live { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; color: var(--gr); }
   .spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--gr-bg); border-top-color: var(--gr); animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -658,9 +757,11 @@
   .evidence { font-size: 11px; color: var(--text-2); padding-left: 16px; margin: 0 0 8px; }
   .decision-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
   .decision-row.two-up { grid-template-columns: 1fr 1fr; }
+  .decision-row.one-up { grid-template-columns: 1fr; }
   .decision-row button { padding: 7px; font-size: 11px; font-weight: 700; border-radius: 6px; border: none; cursor: pointer; }
   .accept { background: var(--success); color: #fff; }
   .ignore { background: #F5EBFC; color: #9333EA; }
+  .undo-ignore, .undo-accept { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
   .edit-inline { background: var(--accent-bg); color: var(--accent); }
   .none { font-size: 11px; color: var(--text-3); }
   .decision-row button:disabled { opacity: .55; cursor: not-allowed; }

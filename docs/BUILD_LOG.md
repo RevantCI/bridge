@@ -1,6 +1,6 @@
 # Build log: Bridge v0.8.0-beta.14
 
-Updated: 2026-08-31
+Updated: 2026-09-02
 
 > **Start with [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) instead** for an
 > oriented, up-to-date summary of the stack decisions, phase roadmap, and
@@ -9,6 +9,54 @@ Updated: 2026-08-31
 > session-by-session narrative that the summary distills. This file is the
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
+
+## Flag for Benz: duplicate-detection fingerprint regression from Stage 4 passage-runtime merge (2026-09-02)
+
+Found while pulling `78fdf4b` (feat(semantic): integrate Stage 4 passage
+runtime and stale invalidation) and re-verifying the frozen sidecar with
+`scripts/smoke_sidecars.py` — the smoke test's own duplicate-classification
+assertion started failing. Reproduced in source mode too (not a
+PyInstaller/freeze artifact), so this is a real regression in the merged
+code, not a packaging issue.
+
+**Root cause:** `project.open` now constructs a `PassageSemanticRuntime`
+after `ProjectRegistry.register()` has already run. That runtime writes new
+state — `.apps/translationCoreAI/passageSemantic/bridge-semantic.sqlite3`
+plus per-migration backup snapshots under `.../passageSemantic/backups/` —
+directly into the project directory. For any project whose identity falls
+back to a whole-tree hash (`_source_fingerprint()` in
+`engine/tc_ai_bridge/project_registry.py:201`, used whenever a project has
+no `.bridge/import.json` provenance — e.g. a hand-placed or externally
+created translationCore project, not one imported through Bridge's own
+`project.import` flow), `register()` snapshots the tree *before* those
+passageSemantic files exist. Any later `project.inspectImport` call
+recomputes the tree hash via `source_fingerprints()`/`_tree_fingerprint()`
+(`project_registry.py:74`) against the *current* tree, which now includes
+the new sqlite/backup files — so the project no longer hashes the same as
+its own stored fingerprint. Effect: re-inspecting a project you already
+opened classifies it as `possibleDuplicate` of itself instead of
+`exactDuplicate`.
+
+`_tree_fingerprint()` already excludes `.bridge/project.json` and
+`.bridge/collection.json` for exactly this kind of reason (Bridge-local
+identity shouldn't affect the project's own source fingerprint) — the new
+`.apps/translationCoreAI/passageSemantic/` tree needs the same treatment,
+or `register()` needs to snapshot the fingerprint after passage-runtime
+attach instead of before. Projects imported through Bridge's normal import
+flow are unaffected (their fingerprint comes from `.bridge/import.json`'s
+stored SHA-256, not a tree hash), so this is scoped to
+externally-created/hand-placed projects — real but not the common path.
+
+Not fixed yet — surfacing this for Benz since it's their in-flight feature;
+did not want to patch someone else's just-landed identity/lineage logic
+without a decision on whether the exclusion belongs in the fingerprint
+function or in ordering `register()` after runtime attach.
+
+Repro: open any tC-shaped project lacking `.bridge/import.json` (e.g. a
+hand-built fixture, as `scripts/smoke_sidecars.py`'s fixture project does),
+then call `project.inspectImport` on the same path again — `classification`
+comes back `possibleDuplicate`/`bookLanguageBible` instead of
+`exactDuplicate`/`sourceFingerprint`.
 
 ## Automatic alignment during AI review; alignment popup goes read/decide-only (2026-08-31)
 

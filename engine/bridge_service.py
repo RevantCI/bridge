@@ -2628,9 +2628,35 @@ class BridgeEngine:
         existing WA_INVALID check), flags touched tN/tW index entries
         verseEdits=True, and runs it all through its own TransactionJournal
         transaction with rollback on failure — undoable and crash-safe.
-        Nothing here reinvents that; it only calls it."""
+        Nothing here reinvents that; it only calls it.
+
+        Also invalidates the in-memory whole-book consistency cache (see
+        _consistency_findings_for_book's own docstring) for THIS book only
+        — cheap, in-memory corpus-stats arithmetic, same cost as the
+        existing invalidation every alignment mutation already does in
+        _finish_alignment_mutation.
+
+        Deliberately does NOT touch the USFM/names caches, even though a
+        finding whose text this edit just fixed (e.g. a
+        names.spelling_similarity correction) will keep reappearing until
+        the project is reopened. Tried clearing them here too and reverted
+        it the same session: saveVerseEdit's post-save runVerseChecks(
+        ["local", "greekroom"]) calls straight into
+        _usfm_findings_for_book/_names_findings_for_book on every edit
+        (see run_verse_checks), and those functions' own docstrings say
+        why they're never invalidated by verse.edit — a real rescan means
+        the isolated USFM checker subprocess (a 120-second hard timeout on
+        its own) and a full whole-book names/vocabulary scan. Popping the
+        cache here made that recheck pay for both, synchronously, inside
+        the single-threaded stdio dispatcher and while holding
+        _checker_lock — so a save could block the sidecar long enough that
+        an unrelated project.report queued behind it timed out client-side
+        (same failure mode as issue #24, just via a different call path).
+        Accepted as a known limitation, same tradeoff as the two functions
+        it depends on."""
         self._require_project()
         result = self.project.apply_scripture_edit(chapter, verse, new_text)
+        self._consistency_findings_by_book.pop(str(self.project.path), None)
         resolutions = self.project.list_issue_resolutions(chapter, verse)
         return {
             "committed": True, "chapter": chapter, "verse": verse,
