@@ -10,10 +10,11 @@ UNSUPPORTED state, and it never generates or applies correction wording.
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager
 import hashlib
 import json
 import time
-from typing import Any
+from typing import Any, Iterator
 
 from .passage_semantic_models import (
     AuditDirection,
@@ -67,6 +68,60 @@ def _confidence(raw: float) -> ConfidenceScore:
         confidence_policy_version=QA_CONFIDENCE_POLICY_VERSION,
         calibration_version=QA_CALIBRATION_VERSION,
     )
+
+
+class PhaseProfiler:
+    """Exclusive wall-clock accounting for the Stage 8 phases.
+
+    Time spent inside a nested phase is subtracted from its parent, so the
+    reported phases sum to the measured total instead of double-counting the
+    persistence and synthesis work that happens inside each audit pass.
+    Purely observational: it reads no QA state and changes no determination.
+    """
+
+    def __init__(self) -> None:
+        self.totals: dict[str, float] = {}
+        self._stack: list[float] = []
+
+    @contextmanager
+    def phase(self, name: str) -> Iterator[None]:
+        self._stack.append(0.0)
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            elapsed = time.perf_counter() - started
+            child = self._stack.pop()
+            self.totals[name] = self.totals.get(name, 0.0) + elapsed - child
+            if self._stack:
+                self._stack[-1] += elapsed
+
+    def report(self) -> dict[str, float]:
+        return {name: round(value, 6) for name, value in sorted(self.totals.items())}
+
+
+class _ProfiledRepository:
+    """Forwards every repository call unchanged, timing only the writes.
+
+    Used so persistence cost is attributed without editing any save call site;
+    because PhaseProfiler is exclusive, this time is subtracted from whichever
+    audit pass is currently running.
+    """
+
+    def __init__(self, repository: Any, profiler: PhaseProfiler):
+        self._repository = repository
+        self._profiler = profiler
+
+    def __getattr__(self, name: str) -> Any:
+        attribute = getattr(self._repository, name)
+        if not callable(attribute) or not name.startswith(("save_", "update_", "create_")):
+            return attribute
+
+        def profiled(*args: Any, **kwargs: Any) -> Any:
+            with self._profiler.phase("persistence"):
+                return attribute(*args, **kwargs)
+
+        return profiled
 
 
 class QaAuditPolicy:
@@ -280,11 +335,14 @@ class QaAuditEngine:
             "engine": QA_ENGINE_VERSION, "policy": self.policy.version,
             "model": QA_MODEL_VERSION, "calibration": QA_CALIBRATION_VERSION,
         })
-        cached = self.repository.qa_audit_for_fingerprint(
-            self.project_id, self.book, location["rangeKey"], fingerprint,
-        )
+        profiler = PhaseProfiler()
+        with profiler.phase("cachedRetrieval"):
+            cached = self.repository.qa_audit_for_fingerprint(
+                self.project_id, self.book, location["rangeKey"], fingerprint,
+            )
         if cached is not None:
             cached["cacheStatus"] = "HIT"
+            cached["phaseProfile"] = profiler.report()
             return cached
         started = time.perf_counter()
 
@@ -312,115 +370,125 @@ class QaAuditEngine:
         seen_owner_dimension: set[tuple[str, str]] = set()
         seen_relationship_finding: set[str] = set()
 
-        # --- Source coverage pass (item 5-9) -------------------------------
-        for account in source.get("coverageAccounts", []):
-            owner_id = account["auditOwnerUnitId"]
-            dimension = account["coverageDimension"]
-            key = (owner_id, dimension)
-            if key in seen_owner_dimension:
-                continue
-            seen_owner_dimension.add(key)
-            owner_unit = source_units.get(owner_id)
-            relationships = relationships_by_source_owner.get(owner_id, [])
-            has_variant_evidence = any(
-                self.repository.evidence_record(evidence_id).get("kind") == "SOURCE_VARIANT"
-                for evidence_id in (owner_unit or {}).get("evidenceIds", [])
-            )
-            status, reason = self.policy.source_coverage_for(
-                owner_unit, relationships, assessments_by_relationship, has_variant_evidence,
-            )
-            covered_by = tuple(
-                relationship["id"] for relationship in relationships
-                if relationship.get("locationOutcome") == _LOCATED
-            )
-            finding_id = None
-            if status == SourceCoverage.POSSIBLY_MISSING:
-                kind = (
-                    QaFindingKind.SOURCE_VARIANT_REVIEW if has_variant_evidence
-                    else QaFindingKind.POSSIBLE_OMISSION
-                )
-                finding = self._build_finding(
-                    kind=kind, direction=AuditDirection.SOURCE_COVERAGE,
-                    source_unit_ids=(owner_id,), target_unit_ids=(),
-                    relationship_ids=(), account_ids=(account["id"],),
-                    meaning_assessment_ids=(), location_outcome="NOT_LOCATED",
-                    meaning_status="", explanation=reason, confidence=0.75,
-                    resource_evidence_ids=tuple((owner_unit or {}).get("evidenceIds", [])),
-                    supporting_evidence_ids=(), conflicting_evidence_ids=(),
-                    source=source, target=target, fingerprint=fingerprint, policy_binding=policy_binding,
-                )
-                self.repository.save_qa_finding(self._finding_to_dataclass(finding))
-                findings.append(finding)
-                finding_id = finding["id"]
-            self.repository.update_coverage_account_status(
-                account["id"], coverage_status=status.value,
-                covered_by_relationship_ids=covered_by, finding_id=finding_id,
-                expected_revision=self.repository.coverage_account(account["id"])["revision"],
-            )
-            source_coverage_ids.append(account["id"])
+        # Persistence is attributed via a transparent proxy so no save call
+        # site changes; the proxy is always restored, profiling or not.
+        real_repository = self.repository
+        self.repository = _ProfiledRepository(real_repository, profiler)
+        try:
+            with profiler.phase("sourceCoverageAudit"):
+                # --- Source coverage pass (item 5-9) -------------------------------
+                for account in source.get("coverageAccounts", []):
+                    owner_id = account["auditOwnerUnitId"]
+                    dimension = account["coverageDimension"]
+                    key = (owner_id, dimension)
+                    if key in seen_owner_dimension:
+                        continue
+                    seen_owner_dimension.add(key)
+                    owner_unit = source_units.get(owner_id)
+                    relationships = relationships_by_source_owner.get(owner_id, [])
+                    has_variant_evidence = any(
+                        self.repository.evidence_record(evidence_id).get("kind") == "SOURCE_VARIANT"
+                        for evidence_id in (owner_unit or {}).get("evidenceIds", [])
+                    )
+                    status, reason = self.policy.source_coverage_for(
+                        owner_unit, relationships, assessments_by_relationship, has_variant_evidence,
+                    )
+                    covered_by = tuple(
+                        relationship["id"] for relationship in relationships
+                        if relationship.get("locationOutcome") == _LOCATED
+                    )
+                    finding_id = None
+                    if status == SourceCoverage.POSSIBLY_MISSING:
+                        kind = (
+                            QaFindingKind.SOURCE_VARIANT_REVIEW if has_variant_evidence
+                            else QaFindingKind.POSSIBLE_OMISSION
+                        )
+                        finding = self._build_finding(
+                            kind=kind, direction=AuditDirection.SOURCE_COVERAGE,
+                            source_unit_ids=(owner_id,), target_unit_ids=(),
+                            relationship_ids=(), account_ids=(account["id"],),
+                            meaning_assessment_ids=(), location_outcome="NOT_LOCATED",
+                            meaning_status="", explanation=reason, confidence=0.75,
+                            resource_evidence_ids=tuple((owner_unit or {}).get("evidenceIds", [])),
+                            supporting_evidence_ids=(), conflicting_evidence_ids=(),
+                            source=source, target=target, fingerprint=fingerprint, policy_binding=policy_binding,
+                        )
+                        self.repository.save_qa_finding(self._finding_to_dataclass(finding))
+                        findings.append(finding)
+                        finding_id = finding["id"]
+                    self.repository.update_coverage_account_status(
+                        account["id"], coverage_status=status.value,
+                        covered_by_relationship_ids=covered_by, finding_id=finding_id,
+                        expected_revision=self.repository.coverage_account(account["id"])["revision"],
+                    )
+                    source_coverage_ids.append(account["id"])
 
-        # --- Meaning-failure pass (item 10-11, 24, 27) ----------------------
-        for relationship in location["relationships"]:
-            if relationship.get("locationOutcome") != _LOCATED:
-                continue
-            if relationship["id"] in seen_relationship_finding:
-                continue
-            assessment = assessments_by_relationship.get(relationship["id"])
-            if assessment is None:
-                continue
-            kind = self.policy.finding_kind_for(assessment)
-            if kind is None:
-                continue
-            seen_relationship_finding.add(relationship["id"])
-            semantic_relationship_id = self._save_semantic_relationship(
-                relationship, assessment, source, target, fingerprint,
-            )
-            confidence = float((assessment.get("meaningConfidence") or {}).get("calibratedValue") or 0.5)
-            finding = self._build_finding(
-                kind=kind, direction=AuditDirection.SOURCE_COVERAGE,
-                source_unit_ids=tuple(relationship.get("sourceSemanticUnitIds", [])),
-                target_unit_ids=tuple(relationship.get("targetSemanticUnitIds", [])),
-                relationship_ids=(semantic_relationship_id,), account_ids=(),
-                meaning_assessment_ids=(assessment["id"],),
-                location_outcome=relationship["locationOutcome"],
-                meaning_status=assessment.get("meaningStatus", ""),
-                explanation=assessment.get("explanation", ""), confidence=confidence,
-                resource_evidence_ids=(), supporting_evidence_ids=tuple(assessment.get("supportingEvidenceIds", [])),
-                conflicting_evidence_ids=tuple(assessment.get("conflictingEvidenceIds", [])),
-                source=source, target=target, fingerprint=fingerprint, policy_binding=policy_binding,
-            )
-            self.repository.save_qa_finding(self._finding_to_dataclass(finding))
-            findings.append(finding)
+            with profiler.phase("meaningFailureAudit"):
+                # --- Meaning-failure pass (item 10-11, 24, 27) ----------------------
+                for relationship in location["relationships"]:
+                    if relationship.get("locationOutcome") != _LOCATED:
+                        continue
+                    if relationship["id"] in seen_relationship_finding:
+                        continue
+                    assessment = assessments_by_relationship.get(relationship["id"])
+                    if assessment is None:
+                        continue
+                    kind = self.policy.finding_kind_for(assessment)
+                    if kind is None:
+                        continue
+                    seen_relationship_finding.add(relationship["id"])
+                    semantic_relationship_id = self._save_semantic_relationship(
+                        relationship, assessment, source, target, fingerprint,
+                    )
+                    confidence = float((assessment.get("meaningConfidence") or {}).get("calibratedValue") or 0.5)
+                    finding = self._build_finding(
+                        kind=kind, direction=AuditDirection.SOURCE_COVERAGE,
+                        source_unit_ids=tuple(relationship.get("sourceSemanticUnitIds", [])),
+                        target_unit_ids=tuple(relationship.get("targetSemanticUnitIds", [])),
+                        relationship_ids=(semantic_relationship_id,), account_ids=(),
+                        meaning_assessment_ids=(assessment["id"],),
+                        location_outcome=relationship["locationOutcome"],
+                        meaning_status=assessment.get("meaningStatus", ""),
+                        explanation=assessment.get("explanation", ""), confidence=confidence,
+                        resource_evidence_ids=(), supporting_evidence_ids=tuple(assessment.get("supportingEvidenceIds", [])),
+                        conflicting_evidence_ids=tuple(assessment.get("conflictingEvidenceIds", [])),
+                        source=source, target=target, fingerprint=fingerprint, policy_binding=policy_binding,
+                    )
+                    self.repository.save_qa_finding(self._finding_to_dataclass(finding))
+                    findings.append(finding)
 
-        # --- Target support pass (item 12-17) -------------------------------
-        for unit in target["units"]:
-            if unit.get("accountingRole") != "PRIMARY" or unit.get("auditEligibility") != "ELIGIBLE":
-                continue
-            relationships = relationships_by_target_unit.get(unit["id"], [])
-            status, reason = self.policy.target_support_for(
-                unit, relationships, assessments_by_relationship,
-            )
-            account = self._build_target_support_account(
-                unit, status, relationships, source, policy_binding,
-            )
-            self.repository.save_coverage_account(account)
-            target_support_ids.append(account.id)
-            if status == TargetSupport.POSSIBLY_UNSUPPORTED:
-                finding = self._build_finding(
-                    kind=QaFindingKind.POSSIBLE_ADDITION, direction=AuditDirection.TARGET_SUPPORT,
-                    source_unit_ids=(), target_unit_ids=(unit["id"],),
-                    relationship_ids=(), account_ids=(account.id,),
-                    meaning_assessment_ids=(), location_outcome="", meaning_status="",
-                    explanation=reason, confidence=0.7,
-                    resource_evidence_ids=(), supporting_evidence_ids=(), conflicting_evidence_ids=(),
-                    source=source, target=target, fingerprint=fingerprint, policy_binding=policy_binding,
-                )
-                self.repository.save_qa_finding(self._finding_to_dataclass(finding))
-                findings.append(finding)
-                self.repository.update_coverage_account_status(
-                    account.id, coverage_status=status.value, covered_by_relationship_ids=(),
-                    finding_id=finding["id"], expected_revision=account.revision,
-                )
+            with profiler.phase("targetSupportAudit"):
+                # --- Target support pass (item 12-17) -------------------------------
+                for unit in target["units"]:
+                    if unit.get("accountingRole") != "PRIMARY" or unit.get("auditEligibility") != "ELIGIBLE":
+                        continue
+                    relationships = relationships_by_target_unit.get(unit["id"], [])
+                    status, reason = self.policy.target_support_for(
+                        unit, relationships, assessments_by_relationship,
+                    )
+                    account = self._build_target_support_account(
+                        unit, status, relationships, source, policy_binding,
+                    )
+                    self.repository.save_coverage_account(account)
+                    target_support_ids.append(account.id)
+                    if status == TargetSupport.POSSIBLY_UNSUPPORTED:
+                        finding = self._build_finding(
+                            kind=QaFindingKind.POSSIBLE_ADDITION, direction=AuditDirection.TARGET_SUPPORT,
+                            source_unit_ids=(), target_unit_ids=(unit["id"],),
+                            relationship_ids=(), account_ids=(account.id,),
+                            meaning_assessment_ids=(), location_outcome="", meaning_status="",
+                            explanation=reason, confidence=0.7,
+                            resource_evidence_ids=(), supporting_evidence_ids=(), conflicting_evidence_ids=(),
+                            source=source, target=target, fingerprint=fingerprint, policy_binding=policy_binding,
+                        )
+                        self.repository.save_qa_finding(self._finding_to_dataclass(finding))
+                        findings.append(finding)
+                        self.repository.update_coverage_account_status(
+                            account.id, coverage_status=status.value, covered_by_relationship_ids=(),
+                            finding_id=finding["id"], expected_revision=account.revision,
+                        )
+        finally:
+            self.repository = real_repository
 
         diagnostics = self._diagnostics(source, target, findings)
         run_id = "qa-run-" + fingerprint[:32]
@@ -437,6 +505,7 @@ class QaAuditEngine:
             "targetSupportAccountIds": target_support_ids,
             "findings": findings, "diagnostics": diagnostics,
             "elapsedSeconds": time.perf_counter() - started, "cacheStatus": "MISS",
+            "phaseProfile": profiler.report(),
         }
         self.repository.save_qa_audit_run(
             run_id=run_id, project_id=self.project_id, book=self.book,

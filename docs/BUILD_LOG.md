@@ -10,6 +10,156 @@ Updated: 2026-09-02
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
 
+## Stage 9A.0 — Review-queue storage preflight (2026-09-02)
+
+Preflight for Stage 9A (human QA review). No review API and no UI yet; this
+step only makes storage able to answer review-queue questions and measures
+where Stage 8 actually spends its time.
+
+**Regression baseline before any change** — 478 Python tests passed (7m49s),
+`svelte-check` 0/0, `npm run build` OK (801.59 kB bundle, already past Vite's
+500 kB warn threshold), `cargo check` clean.
+
+**Schema v8** (`_MIGRATION_V8`, `passage_semantic_repository.py`). Stage 8
+stored everything about a finding inside `qa_findings.payload_json`; the table
+itself had no `book`, `kind`, `severity` or reference columns. A review queue
+that orders by canonical position or severity and filters by type/state could
+only have been built by scanning and re-parsing every payload. v8 lifts those
+values into real columns (`book`, `kind`, `direction`, `severity`,
+`severity_rank`, `sort_chapter`, `sort_verse`, `displayed_reference`) with
+three supporting indexes, backfilling existing rows from the payload via
+`json_extract`. `severity_rank` exists because `QaFindingSeverity` does not
+sort lexicographically — CRITICAL/HIGH/MEDIUM/LOW/INFO is review priority, not
+alphabetical order. Verified against a real v7 database built from the shipped
+v1-v7 migration scripts: it upgrades, backfills, and leaves the automatic
+`backups/pre-schema-v8-*` snapshot.
+
+`sort_chapter`/`sort_verse`/`displayed_reference` currently backfill empty:
+`QaFinding` carries no reference of its own (`_finding_to_dataclass` sets
+`passage_id` to the *book*). `_queue_sort_key()` already reads an optional
+`displayed_references` attribute, so those columns populate themselves once
+Stage 9A.1 adds that field — no repository change needed then.
+
+**`query_qa_findings()`** — keyset (not OFFSET) pagination, so a human
+decision made mid-review cannot shift rows across a page boundary. Both
+orderings end in the finding id, making order fully deterministic for
+equal-priority findings.
+
+**Reviewer notes.** `_append_review()` hardcoded `note=""`, so no write path
+could record one — only `import_review_record` accepted a note. The parameter
+is now threaded through `update_qa_disposition`. The existing revision-CAS and
+`FoundationConflict` behaviour is unchanged.
+
+**Stage 8 profiling** (the gap the Stage 8 report flagged). `PhaseProfiler`
+does exclusive accounting — time in a nested phase is subtracted from its
+parent, so phases sum to the total instead of double-counting. Persistence is
+attributed through `_ProfiledRepository`, a transparent forwarding proxy that
+times only `save_*`/`update_*`/`create_*`, so no save call site changed. The
+proxy is restored in a `finally`. Results, measured on the PHP Tamil fixture:
+
+| Range | Findings | Elapsed | persistence | sourceCoverageAudit | targetSupportAudit |
+|---|---|---|---|---|---|
+| PHP 1:3 | 6 | 0.41s | 0.376s (92%) | 0.031s | 0.002s |
+| PHP 1:3-1:6 | 29 | 0.96s | 0.782s (81%) | 0.177s | 0.002s |
+
+**Stage 8 is persistence-bound, not analysis-bound** — 81-92% of its runtime
+is SQLite writes, because every `save_qa_finding`/`save_coverage_account` call
+opens its own connection and commits individually. The audit logic itself is
+cheap. Extrapolated to a whole book this is minutes of mostly-commit time.
+Batching a run's writes into one transaction is the obvious fix, but it
+changes Stage 8 persistence semantics and is deliberately **not** done here.
+Not a blocker for review UI work, which reads rather than writes.
+
+Cache hits short-circuit before any audit pass; a cached run reports only
+`cachedRetrieval` (~1.3ms).
+
+**Files:** `engine/tc_ai_bridge/passage_semantic_repository.py`,
+`engine/tc_ai_bridge/qa_audit.py`,
+`engine/tests/test_qa_review_stage9a.py` (new, 17 tests).
+
+### Found while surveying: Stage 8 has no Rust wire and no client methods
+
+Stages 4, 5, 6A, 6B and 7 each shipped their own `src-tauri/src/commands.rs` +
+`passage_semantic_wire.rs` + `bridgeClient.ts` additions. Stage 8 shipped
+none: its commit touched only `src/lib/types/passageSemanticV1.ts` on the
+frontend side. `bridgeClient.ts` has `semanticLocation*` and
+`meaningAnalysis*` but no `qaAudit*`, and `passage_semantic_wire.rs` contains
+no qa_audit entries. Because each protocol method needs a named
+`#[tauri::command]`, Stage 8's methods are currently reachable only over the
+raw sidecar protocol, not from the UI. Stage 9A must add that wiring for the
+existing `qaAudit.*` methods as well as for its own review APIs.
+
+## Retrospective: Stages 4-7 (added 2026-09-02, reconstructed)
+
+> **Marked retrospective.** These stages shipped without BUILD_LOG entries.
+> Reconstructed only from commit contents, the code, and the tests that exist
+> today — deliberately limited to what those verify. The investigation
+> narrative that the other entries in this file carry was not recorded at the
+> time and is not reproduced here rather than guessed at.
+
+Numbering note: these are passage-semantic **Stages**, a different axis from
+the Greek Room **Phases** 4-7 documented further down this file (USFM
+checker, versification, names, alignment statistics). Both numbering schemes
+are in use; they do not correspond.
+
+**Stage 4 — passage runtime and stale invalidation** (`78fdf4b`, 2026-09-01).
+Added `passage_semantic_runtime.py` (1,171 lines) as the composition point for
+the passage-semantic pipeline, plus a large repository expansion (+734) for
+target-revision tracking and dependency-driven staleness — `record_dependencies`
+with `_stale_generic_dependencies` walking the dependency graph, and the
+`prepare_`/`apply_`/`cancel_target_invalidation` intent flow. First stage to
+add Rust wire (`passage_semantic_wire.rs`, +161) and client methods.
+Tests: `test_passage_semantic_runtime.py` (547 lines).
+
+**Stage 5 — source semantic inventory** (`82d6664`, 2026-09-01).
+`source_semantic_inventory.py` (736 lines): the source-side obligation
+inventory, carrying `SemanticObligationStrength`, `CoverageAccountingRole`,
+`CoverageDimension` and `AuditEligibility` — the fields Stage 8's coverage
+audit later gates on. Golden fixture `stage5-source-golden-v1.json` was added
+in the following commit. Tests: `test_source_semantic_inventory_stage5.py`.
+
+**Stage 6A — target semantic inventory** (`de8ce4c`, 2026-09-02).
+`target_semantic_inventory.py` (398 lines), built as language-independent —
+the target side is inventoried without source knowledge, which is what makes
+the later target-support audit a genuinely independent direction rather than a
+re-reading of source coverage. Tests:
+`test_target_semantic_inventory_stage6a.py`.
+
+**Stage 6B — passage-aware semantic location** (`91e5394`, 2026-09-02).
+`semantic_location.py` (809 lines) plus `semantic_location_benchmark.py`.
+Locates where source meaning was realized in the target, across verse
+boundaries, producing `LocationOutcome` + `Realization` + `RelationshipProperty`
+without judging meaning — `test_semantic_location_stage6b.py` asserts
+`all("meaningStatus" not in item for item in result["relationships"])`,
+enforcing the location/meaning separation at the data level. Golden fixture
+`stage6b-location-golden-v1.json` pins the reordered IRV Tamil PHP 1:3-6
+mapping (Greek 1:3→Tamil 1:6, 1:4→1:4, 1:5→1:3, 1:6→1:5) and the test asserts
+it is discovered without book-specific engine rules. This commit also touched
+`versification.py` (+83).
+
+`SemanticEmbeddingProvider` is defined here with `available = False`, and
+`PassageSemanticRuntime` constructs `SemanticLocationEngine(self)` with no
+provider — so **the shipped app runs without embeddings**; the reordering
+fixture passes only because tests inject a `FixtureEmbeddingProvider` with
+hand-built paired vectors. Embeddings are candidate retrieval only
+(`EmbeddingRole.CANDIDATE_RETRIEVAL_ONLY`), never a meaning judge.
+
+**Stage 7 — meaning preservation** (`0289ae5`, 2026-09-02).
+`meaning_analysis.py` (512 lines) plus `meaning_benchmark.py`. Assesses
+whether located realizations preserve meaning, producing `MeaningStatus` and
+per-dimension `MeaningComponentStatus` so that a component judgement
+(e.g. quantity contradicted) stays visible instead of collapsing into one
+score. `MeaningAssessmentReason` records why an assessment was *not* made
+(`NO_LOCATED_REALIZATION`, `AMBIGUOUS_LOCATION`, `SEARCH_INCOMPLETE`), keeping
+"not assessed" distinct from "assessed as fine". Tests:
+`test_meaning_analysis_stage7.py` (365 lines).
+
+Stages 5-8 are all deterministic: none of `source_semantic_inventory.py`,
+`target_semantic_inventory.py`, `semantic_location.py`, `meaning_analysis.py`
+or `qa_audit.py` imports `ai_client` or `model_router`. The `AI_PROPOSED`
+review status Stage 8 stamps on findings marks them as machine-proposed rather
+than human-decided; it does not indicate a language model was involved.
+
 ## Stage 8 — Bidirectional Source Coverage, Target Support, and Translation QA (2026-09-02)
 
 First stage in the passage-semantic pipeline allowed to produce

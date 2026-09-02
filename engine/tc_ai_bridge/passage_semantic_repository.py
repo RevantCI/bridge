@@ -6,12 +6,14 @@ The database never owns or rewrites Scripture or native translationCore data.
 """
 from __future__ import annotations
 
+import base64
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import time
 from typing import Any, Iterator
@@ -43,7 +45,27 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 7
+DATABASE_SCHEMA_VERSION = 8
+
+# Review priority, not alphabetical order — see _MIGRATION_V8.
+_SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
+
+def _queue_sort_key(finding: QaFinding) -> tuple[int, int, str]:
+    """Canonical-order sort key for the Stage 9A review queue.
+
+    Findings that carry no reference sort first under a stable (0, 0, "") key
+    rather than being dropped from the queue.  Verse bridges ("3-4") and
+    lettered segments ("3a") anchor on their first numeric component, matching
+    how finding conversion already treats them elsewhere in the codebase.
+    """
+    for reference in getattr(finding, "displayed_references", ()):
+        _, _, location = str(reference).rpartition(" ")
+        chapter, _, verse = location.partition(":")
+        digits = re.match(r"\d+", verse.strip())
+        if chapter.strip().isdigit() and digits:
+            return int(chapter.strip()), int(digits.group()), str(reference)
+    return 0, 0, ""
 
 
 class FoundationError(RuntimeError):
@@ -616,6 +638,40 @@ ON qa_audit_runs(project_id,book,range_key,lifecycle_status);
 """
 
 
+# Stage 9A: the human review queue orders and filters findings directly.  Every
+# value below already exists inside qa_findings.payload_json; they are lifted
+# into real columns purely so the queue can page deterministically without
+# scanning and re-parsing every payload.  severity_rank exists because
+# QaFindingSeverity does not sort lexicographically (CRITICAL < HIGH < MEDIUM
+# < LOW < INFO is the review priority, not the alphabetical order).
+_MIGRATION_V8 = r"""
+ALTER TABLE qa_findings ADD COLUMN book TEXT NOT NULL DEFAULT '';
+ALTER TABLE qa_findings ADD COLUMN kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE qa_findings ADD COLUMN direction TEXT NOT NULL DEFAULT '';
+ALTER TABLE qa_findings ADD COLUMN severity TEXT NOT NULL DEFAULT '';
+ALTER TABLE qa_findings ADD COLUMN severity_rank INTEGER NOT NULL DEFAULT 99;
+ALTER TABLE qa_findings ADD COLUMN sort_chapter INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE qa_findings ADD COLUMN sort_verse INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE qa_findings ADD COLUMN displayed_reference TEXT NOT NULL DEFAULT '';
+
+UPDATE qa_findings SET
+    book = COALESCE(json_extract(payload_json,'$.book'),''),
+    kind = COALESCE(json_extract(payload_json,'$.kind'),''),
+    direction = COALESCE(json_extract(payload_json,'$.direction'),''),
+    severity = COALESCE(json_extract(payload_json,'$.severity'),''),
+    severity_rank = CASE COALESCE(json_extract(payload_json,'$.severity'),'')
+        WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 WHEN 'MEDIUM' THEN 2
+        WHEN 'LOW' THEN 3 WHEN 'INFO' THEN 4 ELSE 99 END;
+
+CREATE INDEX ix_qa_findings_queue
+ON qa_findings(project_id,book,sort_chapter,sort_verse,id);
+CREATE INDEX ix_qa_findings_severity
+ON qa_findings(project_id,severity_rank,book,sort_chapter,sort_verse,id);
+CREATE INDEX ix_qa_findings_filter
+ON qa_findings(project_id,lifecycle_status,qa_disposition,kind);
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -676,6 +732,10 @@ class FoundationRepository:
             if current < 7:
                 self._backup_before_migration(conn, current, 7)
                 self._apply_migration(conn, 7, _MIGRATION_V7)
+                current = 7
+            if current < 8:
+                self._backup_before_migration(conn, current, 8)
+                self._apply_migration(conn, 8, _MIGRATION_V8)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -2119,7 +2179,14 @@ class FoundationRepository:
             "lifecycleStatus": "ACTIVE", "revision": 1,
         }
         with self._connect() as conn:
-            conn.execute("INSERT INTO qa_findings VALUES(?,?,?,?,?,?,?,?)", (finding_id, project_id, "UNRESOLVED", policy_id, "UNREVIEWED", "ACTIVE", 1, json.dumps(payload)))
+            conn.execute(
+                "INSERT INTO qa_findings"
+                "(id,project_id,qa_disposition,policy_binding_id,review_status,lifecycle_status,"
+                "revision,payload_json,book,kind,direction,severity,severity_rank) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (finding_id, project_id, "UNRESOLVED", policy_id, "UNREVIEWED", "ACTIVE", 1,
+                 json.dumps(payload), "", "NEEDS_PASSAGE_REVIEW", "SOURCE_COVERAGE", "", 99),
+            )
             conn.commit()
 
     def save_qa_finding(self, finding: QaFinding) -> None:
@@ -2135,11 +2202,18 @@ class FoundationRepository:
             for evidence_id in finding.evidence_ids:
                 if conn.execute("SELECT 1 FROM evidence_records WHERE id=?", (evidence_id,)).fetchone() is None:
                     raise FoundationValidationError(f"Unknown QA evidence record: {evidence_id}")
+            chapter, verse, reference = _queue_sort_key(finding)
             conn.execute(
-                "INSERT INTO qa_findings VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO qa_findings"
+                "(id,project_id,qa_disposition,policy_binding_id,review_status,lifecycle_status,"
+                "revision,payload_json,book,kind,direction,severity,severity_rank,"
+                "sort_chapter,sort_verse,displayed_reference) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (finding.id, finding.project_id, finding.qa_disposition.value, policy_id,
                  finding.review_status.value, finding.lifecycle_status.value, finding.revision,
-                 json.dumps(payload, ensure_ascii=False)),
+                 json.dumps(payload, ensure_ascii=False), finding.book, finding.kind.value,
+                 finding.direction.value, finding.severity.value,
+                 _SEVERITY_RANK.get(finding.severity.value, 99), chapter, verse, reference),
             )
             conn.commit()
 
@@ -2150,7 +2224,92 @@ class FoundationRepository:
             raise FoundationValidationError(f"Unknown QA finding: {finding_id}")
         return json.loads(row[0])
 
-    def update_qa_disposition(self, finding_id: str, disposition: QaDisposition, expected_revision: int, reviewer: str) -> None:
+    def query_qa_findings(
+        self, project_id: str, *, book: str = "", chapter: int | None = None,
+        kinds: tuple[str, ...] = (), severities: tuple[str, ...] = (),
+        dispositions: tuple[str, ...] = (), review_statuses: tuple[str, ...] = (),
+        lifecycle_statuses: tuple[str, ...] = (), order: str = "CANONICAL",
+        limit: int = 50, cursor: str = "",
+    ) -> dict[str, Any]:
+        """Page the Stage 9A review queue without parsing every stored payload.
+
+        Ordering is fully deterministic: both orders end in the finding id, so
+        equal-priority findings never swap places between pages.  Paging is
+        keyset-based rather than OFFSET-based so that a human decision made
+        mid-review cannot shift rows across a page boundary.
+        """
+        if order not in ("CANONICAL", "SEVERITY"):
+            raise FoundationValidationError(f"Unknown review queue order: {order}")
+        limit = max(1, min(int(limit), 500))
+        key_columns = (
+            ["book", "sort_chapter", "sort_verse", "id"] if order == "CANONICAL"
+            else ["severity_rank", "book", "sort_chapter", "sort_verse", "id"]
+        )
+
+        where = ["project_id=?"]
+        params: list[Any] = [project_id]
+        for column, values in (
+            ("kind", kinds), ("severity", severities), ("qa_disposition", dispositions),
+            ("review_status", review_statuses), ("lifecycle_status", lifecycle_statuses),
+        ):
+            if values:
+                where.append(f"{column} IN ({','.join('?' * len(values))})")
+                params.extend(values)
+        if book:
+            where.append("book=?")
+            params.append(book)
+        if chapter is not None:
+            where.append("sort_chapter=?")
+            params.append(int(chapter))
+
+        filtered = " AND ".join(where)
+        with self._connect() as conn:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM qa_findings WHERE {filtered}", params,
+            ).fetchone()[0]
+            paged = list(params)
+            keyset = ""
+            if cursor:
+                key = self._decode_queue_cursor(cursor, len(key_columns))
+                keyset = (
+                    f" AND ({','.join(key_columns)}) > "
+                    f"({','.join('?' * len(key_columns))})"
+                )
+                paged.extend(key)
+            rows = conn.execute(
+                f"SELECT {','.join(key_columns)},payload_json FROM qa_findings "
+                f"WHERE {filtered}{keyset} ORDER BY {','.join(key_columns)} LIMIT ?",
+                (*paged, limit + 1),
+            ).fetchall()
+
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = ""
+        if has_more and rows:
+            next_cursor = self._encode_queue_cursor(
+                [rows[-1][column] for column in key_columns]
+            )
+        return {
+            "findings": [json.loads(row["payload_json"]) for row in rows],
+            "nextCursor": next_cursor, "totalCount": total, "order": order,
+        }
+
+    @staticmethod
+    def _encode_queue_cursor(key: list[Any]) -> str:
+        raw = json.dumps(key, ensure_ascii=False).encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("ascii")
+
+    @staticmethod
+    def _decode_queue_cursor(cursor: str, width: int) -> list[Any]:
+        try:
+            key = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")))
+        except Exception as exc:
+            raise FoundationValidationError("Malformed review queue cursor") from exc
+        if not isinstance(key, list) or len(key) != width:
+            raise FoundationValidationError("Review queue cursor does not match this ordering")
+        return key
+
+    def update_qa_disposition(self, finding_id: str, disposition: QaDisposition, expected_revision: int, reviewer: str, note: str = "") -> None:
         disposition = QaDisposition(disposition)
         review = ReviewStatus.NEEDS_DISCUSSION if disposition == QaDisposition.NEEDS_DISCUSSION else (
             ReviewStatus.UNREVIEWED if disposition == QaDisposition.UNRESOLVED else ReviewStatus.HUMAN_APPROVED
@@ -2169,7 +2328,7 @@ class FoundationRepository:
             ).rowcount
             if changed != 1:
                 raise FoundationConflict("QA finding revision conflict")
-            self._append_review(conn, "QA_FINDING", finding_id, row["review_status"], review.value, row["lifecycle_status"], row["lifecycle_status"], row["qa_disposition"], disposition.value, ActorType.HUMAN, reviewer, expected_revision)
+            self._append_review(conn, "QA_FINDING", finding_id, row["review_status"], review.value, row["lifecycle_status"], row["lifecycle_status"], row["qa_disposition"], disposition.value, ActorType.HUMAN, reviewer, expected_revision, note)
             conn.commit()
 
     def save_correction_proposal(self, proposal: CorrectionProposal) -> None:
@@ -2470,11 +2629,12 @@ class FoundationRepository:
     def _append_review(self, conn: sqlite3.Connection, entity_type: str, entity_id: str,
                        previous_review: str | None, new_review: str, previous_lifecycle: str | None,
                        new_lifecycle: str, previous_disposition: str | None, new_disposition: str | None,
-                       actor_type: ActorType, actor_id: str, base_revision: int) -> None:
+                       actor_type: ActorType, actor_id: str, base_revision: int,
+                       note: str = "") -> None:
         conn.execute(
             "INSERT INTO review_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (str(uuid.uuid4()), entity_type, entity_id, previous_review, new_review, previous_lifecycle,
-             new_lifecycle, previous_disposition, new_disposition, actor_type.value, actor_id, "", base_revision, self._now()),
+             new_lifecycle, previous_disposition, new_disposition, actor_type.value, actor_id, note, base_revision, self._now()),
         )
 
     def review_records(self, entity_type: str, entity_id: str) -> list[dict[str, Any]]:
