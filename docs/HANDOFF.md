@@ -1235,15 +1235,128 @@ unchanged (neither stage's own test file was modified; both suites still
 pass as originally written). Existing translationCore behavior unchanged
 (no `tc_project.py`/alignment/import code touched).
 
-**As of this writing the Stage 8 changes are staged but not yet committed
-— check `git status`/`git log` before assuming they've landed, same caution
-the Stage 6B report gave.**
+**Stage 8 has since been committed as `807353d`.** (The original report
+left this staged; recorded here so the caveat is not read as still open.)
+
+---
+
+## Stage 9A — Human QA Review, Evidence Inspection, and Disposition
+Completed 2026-09-02. Full narrative in `docs/BUILD_LOG.md` (entries 9A.0
+through 9A.3, newest first). Committed and pushed: `fbd4174`, `92d6c8a`,
+`989c81b`, `cd973e2`, `f1529a2`.
+
+Stage 9A makes Stage 5–8 output reviewable by a human. It classifies
+findings only — no correction generation, no Scripture edits, no export
+changes.
+
+```text
+Focused Stage 9A (Python):   45 passed  (34 storage/review + 11 PHP walkthrough)
+Frontend (Vitest, new):      97 passed  (9 files)
+Full Python suite:          560 passed  (up from 478 at the end of Stage 8)
+Rust (cargo check):         passed
+Svelte (npm run check):     0 errors / 0 warnings
+Production build:           passed
+git diff --check:           passed
+```
+
+Stage 6B golden locations and Stage 7 golden meaning statuses unchanged
+(neither test file modified). Existing translationCore behavior unchanged.
+`AlignmentModal.svelte` is mounted unmodified as Word mode; nothing converts
+Bridge semantic relationships into native translationCore alignment groups.
+
+### Two defects found by running it, not by reading it
+
+**1. A QA audit made its own project unopenable (Stage 8 defect, fixed).**
+`recovery_check()` runs at `FoundationRepository` construction and sets
+`read_only` on any integrity problem. Its `known_record_tables` map had no
+`QA_RUN` entry, but Stage 8's `save_qa_audit_run` registers `QA_RUN`
+dependency edges — so every edge Stage 8 wrote was reported as an unknown
+dependency type, the database flipped read-only on the next open, and the
+next write failed. Binding project metadata is a write, so **any project
+that had run a QA audit could not be opened from its second open onward.**
+Introduced by `807353d`; invisible to the suite because tests build a fresh
+project per test. Fixed, with regressions covering every dependency type the
+engine writes plus one asserting a genuinely unknown type is still reported.
+
+**2. Stage 8 finding ids were not stable (fixed).** `_build_finding` hashed
+the *run fingerprint* into every id, so any upstream change minted new ids
+and orphaned every human decision recorded against the old ones — which made
+"a stale human-confirmed issue is preserved and re-evaluated" unimplementable.
+Ids are now keyed on kind + direction + coverage dimension + source unit ids
++ target anchors, excluding the run fingerprint and the engine/policy
+versions. What is and is not stable was verified rather than assumed: source
+unit ids hash content from a locked resource; target unit ids embed the
+per-verse `targetRevision`, so target-support findings anchor on
+reference + normalized surface + occurrence instead.
+
+`save_qa_finding` is now an upsert that preserves `qaDisposition`,
+`reviewStatus` and `revision` exactly as the reviewer left them, writes
+nothing when the machine output is unchanged, and appends a SYSTEM
+ReviewRecord when it refreshes an already-decided finding.
+
+### What was added
+
+Schema v8 lifts the queue's ordering/filtering columns out of
+`qa_findings.payload_json`. `query_qa_findings()` pages by keyset, not
+OFFSET. New `engine/tc_ai_bridge/qa_review.py` exposes
+`qaReview.getQueue/getFinding/decideFinding/addNote`,
+`semanticReview.decideLocation/decideMeaning` and
+`reviewHistory.getEntityHistory`, kept separate from the read-only
+`qaAudit.*` analysis methods. `FoundationConflict` surfaces as
+`revision_conflict`. Stage 8 had shipped no Tauri commands at all; its seven
+`qa_audit_*` commands were added alongside the seven review commands.
+
+Frontend: `AlignmentReview.svelte` (Word/Semantic/Passage/QA tabs) as a new
+top-level surface alongside ReviewPanel's per-verse modal, plus
+`AlignmentQaMode`, `QaFindingList`, `QaFindingDetail`, `EvidenceInspector`,
+`SemanticAlignmentMode`, `PassageAlignmentMode`, `VirtualPassageStream`.
+Reviewer-facing wording is centralized in `reviewLabels.ts`: everything
+reads as "Possible omission", never "Error"; severity is labelled review
+priority; `AI_PROPOSED` renders as "Machine-proposed" because Stages 6B–8
+are deterministic.
+
+Stage 8 profiling (the gap the Stage 8 report flagged) is in place:
+**Stage 8 is persistence-bound, not analysis-bound** — 81–92% of its runtime
+is SQLite writes, because each save opens its own connection and commits
+individually. Batching a run's writes would change Stage 8 persistence
+semantics and was deliberately not done.
+
+### Verified, and not verified
+
+Verified against the **rebuilt frozen sidecar**, not just in source: queue,
+layered evidence, decision, `revision_conflict` on a stale write, and
+history all work through `bridge-engine.exe`.
+
+**Not verified: the desktop click-through of the review UI.** The app
+builds, launches and renders, the Alignment Review button is present and
+correctly wired, and the components are confirmed in the shipped bundle —
+but the UI has never been observed rendering a populated queue. jsdom does
+not lay out or paint, so the viewport tests assert structure (the action bar
+is a sibling of the scrolling region, a 400-row queue windows correctly,
+long Tamil is not truncated) rather than measured pixels. **Real 1366×768
+behaviour still needs a human pass.**
+
+### Fixture
+
+`scripts/seed_review_fixture.py` builds a real translationCore-compatible
+IRV Tamil Philippians project and runs Stages 5–8 over it with a fixture
+embedding provider (28 relationships, 12 cross-verse, 12 findings). It mints
+the project identity through `ProjectRegistry` rather than hardcoding one —
+without that, Bridge refuses the companion database as belonging to a
+different project.
+
+`engine/tests/test_php_review_walkthrough_stage9a.py` drives the review APIs
+over the reordered passage (Greek 1:3→Tamil 1:6, 1:4→1:4, 1:5→1:3, 1:6→1:5)
+and imports the seeder, so what a human opens is what the tests assert on.
+The load-bearing assertion is that **no `POSSIBLE_OMISSION` is raised for a
+source unit that was located** — a reordered translation must not read as a
+missing one.
 
 ---
 
 # 36. Current Limitations
 
-At the end of Stage 8:
+At the end of Stage 9A:
 
 - no production multilingual embedding model bundled
 - Stage 6B location benchmark and Stage 7/8 benchmarks are all
@@ -1261,31 +1374,59 @@ At the end of Stage 8:
   lists are small, deliberately controlled fixtures (mirroring Stage 7's
   own comparator lists) — real-world coverage across languages is
   unvalidated beyond the English/Tamil/Hebrew/Aramaic cases actually tested
-- `passage_semantic_models.QaFinding` (Stage 8's output) has no path to the
-  visible ReviewPanel UI — it is a deliberate, separate model from
-  `greek_room_engine.models.finding.QaFinding` (see §34); reconciling or
-  bridging them is unbuilt
+- `passage_semantic_models.QaFinding` (Stage 8's output) reaches the UI via
+  Stage 9A's Alignment Review surface, *not* via ReviewPanel — it remains a
+  deliberately separate model from `greek_room_engine.models.finding.QaFinding`
+  (see §34), and the two are still unreconciled. The two review surfaces sit
+  side by side; whether they should converge is an open product question
 - no correction-generation workflow
-- no final Alignment Review UI
+- **nothing in the app produces Stage 5-8 analysis.** No UI calls
+  `qaAuditRunRange`/`semanticLocationRunRange`/`meaningAnalysisRunRange`, so
+  the review queue is empty on any project that has not been seeded by
+  `scripts/seed_review_fixture.py` or driven over the raw protocol. Not a
+  Stage 9A defect - its stop condition is reviewing *existing* findings - but
+  Stage 9B inherits it. See the *Flag for Benz* entry at the top of
+  `docs/BUILD_LOG.md` for the two decisions this needs
+- the Stage 9A review UI has **never been observed rendering a populated
+  queue in the desktop app**; jsdom cannot lay out or paint, so small-screen
+  behaviour at 1366x768 is asserted structurally only
+- reviewer identity is the single local string `"human"`; `TeamWorkflow` in
+  `team.py` is not wired into semantic review records
+- ~~no final Alignment Review UI~~ — built in Stage 9A (review only; see
+  the unverified-click-through caveat in the Stage 9A record above)
 - no Scripture Burrito export
 - no new native translationCore projection behavior
-- **`docs/BUILD_LOG.md` and `docs/DEVELOPER_GUIDE.md` have no narrative for
-  Stages 4 through 7** (commits `78fdf4b`, `82d6664`, `de8ce4c`, `91e5394`,
-  `0289ae5`) — no reported test counts, no session notes, unlike every
-  other landed feature in this repo. Worth backfilling independent of any
-  future stage's own work.
+- ~~no narrative for Stages 4 through 7~~ — retrospective entries added in
+  Stage 9A.0, explicitly marked as reconstructed from commits, code and
+  tests, and limited to what those verify
 
 ---
 
-# 37. NEXT TASK — Stage 9: Human Review and Correction Workflow
+# 37. NEXT TASK — Stage 9B: Correction Generation and Application
 
-**Stage 9 has not been implemented.** Do not restart Stages 1–8 or
+**Stage 9A is done** (see its record in §35 above): a reviewer can open
+Alignment Review, work the QA queue, inspect a finding's evidence in layers,
+and record one of four dispositions, with no route to changing Scripture.
+**Stage 9B has not been implemented.** Do not restart Stages 1–9A or
 second-guess their outputs without evidence that repository reality
 disagrees with this document (check first, then report the conflict rather
 than silently changing course — see §39).
 
-Stage 9 combines everything Stages 5–8 produced into an actual human
-workflow:
+Two things to settle before 9B starts, both recorded in §36 and in the
+*Flag for Benz* entry at the top of `docs/BUILD_LOG.md`:
+
+1. **Nothing in the app produces Stage 5–8 analysis.** A correction workflow
+   operates on findings, so 9B inherits Stage 9A's emptiest-case problem
+   verbatim. Decide where an analysis run is triggered and over what scope
+   (Stage 8 is persistence-bound, so a whole-book run likely wants the
+   existing background-job treatment), and what the results will look like
+   given the shipped app has no embedding provider.
+2. **The Stage 9A review UI has not had a human click-through** on a
+   populated queue. Worth doing before building on top of it.
+
+Stage 9 as a whole combines everything Stages 5–8 produced into an actual
+human workflow; 9A delivered the review half, and 9B is the correction
+half:
 
 ```text
 confirmed issue
