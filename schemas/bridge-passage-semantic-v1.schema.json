@@ -19,6 +19,8 @@
     { "$ref": "#/$defs/SemanticLocationCandidate" },
     { "$ref": "#/$defs/SemanticLocationRelationship" },
     { "$ref": "#/$defs/SemanticLocationRun" },
+    { "$ref": "#/$defs/MeaningAssessment" },
+    { "$ref": "#/$defs/MeaningAnalysisRun" },
     { "$ref": "#/$defs/ReviewRecord" }
     ,{ "$ref": "#/$defs/Exportability" }
   ],
@@ -69,6 +71,10 @@
     "Realization": { "type": "string", "enum": ["LEXICALLY_REALIZED", "GRAMMATICALLY_REALIZED", "PRONOMINALIZED", "IMPLICIT", "NOT_LOCATED", "UNCERTAIN"] },
     "RelationshipProperty": { "type": "string", "enum": ["SPLIT", "MERGED", "CROSS_VERSE", "REORDERED", "DISCONTIGUOUS", "EXPLICITATED", "CLAUSE_RESTRUCTURED", "IDIOMATIC_REALIZATION", "VERSIFICATION_DIFFERENCE"] },
     "MeaningStatus": { "type": "string", "enum": ["PRESERVED", "PRESERVED_WITH_RESTRUCTURING", "PARTIAL", "OVERTRANSLATED", "UNDERTRANSLATED", "MEANING_SHIFT", "CONTRADICTED", "UNVERIFIABLE"] },
+    "MeaningComponentStatus": { "type": "string", "enum": ["PRESERVED", "PARTIALLY_PRESERVED", "ALTERED", "CONTRADICTED", "TARGET_ADDS_SPECIFICITY", "TARGET_WEAKENS_SPECIFICITY", "NOT_EXPLICIT_BUT_RECOVERABLE", "NOT_DETERMINABLE", "NOT_APPLICABLE"] },
+    "MeaningRunStatus": { "type": "string", "enum": ["RUNNING", "COMPLETE", "FAILED"] },
+    "MeaningAssessmentReason": { "type": "string", "enum": ["ASSESSED", "NO_LOCATED_REALIZATION", "AMBIGUOUS_LOCATION", "SEARCH_INCOMPLETE", "UNSUPPORTED_ANALYSIS", "LOCATION_REVIEW_REQUIRED"] },
+    "MeaningEvidenceKind": { "type": "string", "enum": ["LEXICAL_CONCEPT", "POLARITY", "QUANTITY", "PARTICIPANT", "SEMANTIC_ROLE", "TEMPORAL", "COMPLETION", "MODALITY", "GRAMMATICAL", "CONTEXTUAL", "RESOURCE", "DETERMINISTIC_CONTRADICTION"] },
     "SourceCoverage": { "type": "string", "enum": ["NOT_CHECKED", "COVERED", "COVERED_BY_RESTRUCTURING", "POSSIBLY_MISSING", "MISSING", "UNCERTAIN"] },
     "TargetSupport": { "type": "string", "enum": ["NOT_CHECKED", "SOURCE_SUPPORTED", "CONTEXT_SUPPORTED", "GRAMMATICALLY_REQUIRED", "EXPLICITATION_SUPPORTED", "POSSIBLY_UNSUPPORTED", "UNSUPPORTED", "UNCERTAIN"] },
     "LocationOutcome": { "type": "string", "enum": ["LOCATED", "AMBIGUOUS", "NOT_LOCATED", "SEARCH_INCOMPLETE", "UNSUPPORTED_ANALYSIS"] },
@@ -475,6 +481,66 @@
         "relationships": { "type": "array", "items": { "$ref": "#/$defs/SemanticLocationRelationship" } },
         "candidates": { "type": "array", "items": { "$ref": "#/$defs/SemanticLocationCandidate" } },
         "diagnostics": { "$ref": "#/$defs/SemanticLocationDiagnostics" }, "elapsedSeconds": { "type": "number", "minimum": 0 },
+        "cacheStatus": { "type": "string", "enum": ["MISS", "HIT"] }
+      }
+    },
+    "MeaningComponentAssessment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "coverageDimension", "sourceSemanticUnitIds", "targetSemanticUnitIds", "targetSpanIds", "status", "confidence", "evidence", "explanation"],
+      "properties": {
+        "id": { "type": "string" }, "coverageDimension": { "$ref": "#/$defs/CoverageDimension" },
+        "sourceSemanticUnitIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "targetSemanticUnitIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "targetSpanIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "status": { "$ref": "#/$defs/MeaningComponentStatus" },
+        "confidence": { "$ref": "#/$defs/LocationConfidence" },
+        "evidence": { "type": "object", "additionalProperties": false, "required": ["id", "kind", "resourceStatus", "resourceEvidenceIds"], "properties": { "id": { "type": "string" }, "kind": { "$ref": "#/$defs/MeaningEvidenceKind" }, "resourceStatus": { "$ref": "#/$defs/ResourceValidationStatus" }, "resourceEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true } } },
+        "explanation": { "type": "string" }
+      }
+    },
+    "MeaningAssessment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "semanticLocationRelationshipId", "sourceSemanticUnitIds", "targetSemanticUnitIds", "meaningStatus", "meaningConfidence", "componentAssessments", "supportingEvidenceIds", "conflictingEvidenceIds", "locationOutcomeSnapshot", "locationConfidenceSnapshot", "locationReviewRequired", "reason", "explanation", "sourceInventoryFingerprint", "targetInventoryFingerprint", "targetRevisionHashes", "sourceResourceHashes", "policyBinding", "engineVersion", "modelVersion", "reviewStatus", "lifecycleStatus", "revision"],
+      "properties": {
+        "id": { "type": "string" }, "semanticLocationRelationshipId": { "type": "string" },
+        "sourceSemanticUnitIds": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
+        "targetSemanticUnitIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "meaningStatus": { "$ref": "#/$defs/MeaningStatus" }, "meaningConfidence": { "$ref": "#/$defs/LocationConfidence" },
+        "componentAssessments": { "type": "array", "items": { "$ref": "#/$defs/MeaningComponentAssessment" } },
+        "supportingEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "conflictingEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "locationOutcomeSnapshot": { "$ref": "#/$defs/LocationOutcome" }, "locationConfidenceSnapshot": { "$ref": "#/$defs/LocationConfidence" },
+        "locationReviewRequired": { "type": "boolean" }, "reason": { "$ref": "#/$defs/MeaningAssessmentReason" }, "explanation": { "type": "string" },
+        "sourceInventoryFingerprint": { "type": "string" }, "targetInventoryFingerprint": { "type": "string" },
+        "targetRevisionHashes": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "sourceResourceHashes": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "policyBinding": { "$ref": "#/$defs/PolicyBinding" }, "engineVersion": { "type": "string" }, "modelVersion": { "type": "string" },
+        "reviewStatus": { "$ref": "#/$defs/ReviewStatus" }, "lifecycleStatus": { "$ref": "#/$defs/LifecycleStatus" }, "revision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "MeaningAnalysisDiagnostics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["locatedRelationshipsAssessed", "preserved", "preservedWithRestructuring", "partial", "undertranslated", "overtranslated", "meaningShift", "contradicted", "unverifiable", "locationReviewRequired", "resourceConflict", "averageComponentCount", "deterministicContradictionCount", "analyzerLimitedAssessments"],
+      "properties": {
+        "locatedRelationshipsAssessed": { "type": "integer", "minimum": 0 }, "preserved": { "type": "integer", "minimum": 0 },
+        "preservedWithRestructuring": { "type": "integer", "minimum": 0 }, "partial": { "type": "integer", "minimum": 0 },
+        "undertranslated": { "type": "integer", "minimum": 0 }, "overtranslated": { "type": "integer", "minimum": 0 },
+        "meaningShift": { "type": "integer", "minimum": 0 }, "contradicted": { "type": "integer", "minimum": 0 },
+        "unverifiable": { "type": "integer", "minimum": 0 }, "locationReviewRequired": { "type": "integer", "minimum": 0 },
+        "resourceConflict": { "type": "integer", "minimum": 0 }, "averageComponentCount": { "type": "number", "minimum": 0 },
+        "deterministicContradictionCount": { "type": "integer", "minimum": 0 }, "analyzerLimitedAssessments": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "MeaningAnalysisRun": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "book", "rangeKey", "fingerprint", "locationRunId", "locationRunFingerprint", "sourceInventoryFingerprint", "targetInventoryFingerprint", "meaningEngineVersion", "meaningPolicyVersion", "modelVersion", "calibrationVersion", "runStatus", "assessments", "diagnostics", "elapsedSeconds", "cacheStatus"],
+      "properties": {
+        "id": { "type": "string" }, "book": { "type": "string" }, "rangeKey": { "type": "string" }, "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "locationRunId": { "type": "string" }, "locationRunFingerprint": { "type": "string" },
+        "sourceInventoryFingerprint": { "type": "string" }, "targetInventoryFingerprint": { "type": "string" },
+        "meaningEngineVersion": { "type": "string" }, "meaningPolicyVersion": { "type": "string" }, "modelVersion": { "type": "string" }, "calibrationVersion": { "type": "string" },
+        "runStatus": { "$ref": "#/$defs/MeaningRunStatus" }, "assessments": { "type": "array", "items": { "$ref": "#/$defs/MeaningAssessment" } },
+        "diagnostics": { "$ref": "#/$defs/MeaningAnalysisDiagnostics" }, "elapsedSeconds": { "type": "number", "minimum": 0 },
         "cacheStatus": { "type": "string", "enum": ["MISS", "HIT"] }
       }
     },

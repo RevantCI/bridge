@@ -54,6 +54,7 @@ from . import versification
 from .source_semantic_inventory import SourceSemanticInventory
 from .target_semantic_inventory import TargetSemanticInventory
 from .semantic_location import SemanticLocationEngine
+from .meaning_analysis import MeaningAnalysisEngine
 
 
 RUNTIME_VERSION = "stage4-runtime-v1"
@@ -480,6 +481,7 @@ class PassageSemanticRuntime:
         self.source_semantic = SourceSemanticInventory(self)
         self.target_semantic = TargetSemanticInventory(self)
         self.semantic_location = SemanticLocationEngine(self)
+        self.meaning_analysis = MeaningAnalysisEngine(self)
         self._migrate_legacy_companions()
 
     def _identity_fingerprint(self) -> str:
@@ -1238,3 +1240,26 @@ class PassageSemanticRuntime:
 
     def semantic_location_diagnostics(self, run_id: str) -> dict[str, Any]:
         return self.semantic_location.get_diagnostics(run_id)
+
+    def run_meaning_analysis_range(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+        location_run_id: str = "",
+    ) -> dict[str, Any]:
+        return self.meaning_analysis.run_range(
+            chapter, verse, end_chapter, end_verse, location_run_id=location_run_id,
+        )
+
+    def meaning_analysis_status(self, run_id: str) -> dict[str, Any]:
+        return self.meaning_analysis.status(run_id)
+
+    def meaning_analysis_range(self, run_id: str) -> dict[str, Any]:
+        return self.meaning_analysis.get_range(run_id)
+
+    def meaning_assessment(self, assessment_id: str) -> dict[str, Any]:
+        return self.meaning_analysis.get_assessment(assessment_id)
+
+    def meaning_components(self, assessment_id: str) -> list[dict[str, Any]]:
+        return self.meaning_analysis.get_components(assessment_id)
+
+    def meaning_analysis_diagnostics(self, run_id: str) -> dict[str, Any]:
+        return self.meaning_analysis.get_diagnostics(run_id)

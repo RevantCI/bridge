@@ -120,10 +120,14 @@ def test_irvtam_php_passage_reordering_is_discovered_without_engine_book_rules(t
         for unit_id in relationship["sourceSemanticUnitIds"]:
             source_ref = source_units[unit_id]["canonicalReferences"][0]
             votes.setdefault(source_ref, Counter())[target_ref] += 1
-    assert {reference: counter.most_common(1)[0][0] for reference, counter in votes.items()} == {
-        "PHP 1:3": "PHP 1:6", "PHP 1:4": "PHP 1:4",
-        "PHP 1:5": "PHP 1:3", "PHP 1:6": "PHP 1:5",
+    golden = json.loads((
+        Path(__file__).parent / "fixtures" / "stage6b-location-golden-v1.json"
+    ).read_text(encoding="utf-8"))
+    expected = {
+        item["sourceReference"]: item["targetReference"]
+        for item in golden["relationships"]
     }
+    assert {reference: counter.most_common(1)[0][0] for reference, counter in votes.items()} == expected
     assert result["diagnostics"]["reordered"] is True
     assert result["diagnostics"]["crossVerse"] > 0
     assert result["diagnostics"]["contextualSupportEdges"] > 0

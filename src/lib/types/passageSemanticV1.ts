@@ -721,6 +721,87 @@ export interface SemanticLocationRun {
   cacheStatus: "MISS" | "HIT";
 }
 
+export type MeaningComponentStatus = "PRESERVED" | "PARTIALLY_PRESERVED" | "ALTERED" | "CONTRADICTED" | "TARGET_ADDS_SPECIFICITY" | "TARGET_WEAKENS_SPECIFICITY" | "NOT_EXPLICIT_BUT_RECOVERABLE" | "NOT_DETERMINABLE" | "NOT_APPLICABLE";
+export type MeaningRunStatus = "RUNNING" | "COMPLETE" | "FAILED";
+export type MeaningAssessmentReason = "ASSESSED" | "NO_LOCATED_REALIZATION" | "AMBIGUOUS_LOCATION" | "SEARCH_INCOMPLETE" | "UNSUPPORTED_ANALYSIS" | "LOCATION_REVIEW_REQUIRED";
+export type MeaningEvidenceKind = "LEXICAL_CONCEPT" | "POLARITY" | "QUANTITY" | "PARTICIPANT" | "SEMANTIC_ROLE" | "TEMPORAL" | "COMPLETION" | "MODALITY" | "GRAMMATICAL" | "CONTEXTUAL" | "RESOURCE" | "DETERMINISTIC_CONTRADICTION";
+
+export interface MeaningComponentAssessment {
+  id: string;
+  coverageDimension: CoverageDimension;
+  sourceSemanticUnitIds: string[];
+  targetSemanticUnitIds: string[];
+  targetSpanIds: string[];
+  status: MeaningComponentStatus;
+  confidence: LocationConfidence;
+  evidence: { id: string; kind: MeaningEvidenceKind; resourceStatus: ResourceValidationStatus; resourceEvidenceIds: string[] };
+  explanation: string;
+}
+
+export interface MeaningAssessment {
+  id: string;
+  semanticLocationRelationshipId: string;
+  sourceSemanticUnitIds: string[];
+  targetSemanticUnitIds: string[];
+  meaningStatus: MeaningStatus;
+  meaningConfidence: LocationConfidence;
+  componentAssessments: MeaningComponentAssessment[];
+  supportingEvidenceIds: string[];
+  conflictingEvidenceIds: string[];
+  locationOutcomeSnapshot: LocationOutcome;
+  locationConfidenceSnapshot: LocationConfidence;
+  locationReviewRequired: boolean;
+  reason: MeaningAssessmentReason;
+  explanation: string;
+  sourceInventoryFingerprint: string;
+  targetInventoryFingerprint: string;
+  targetRevisionHashes: string[];
+  sourceResourceHashes: string[];
+  policyBinding: PolicyBinding;
+  engineVersion: string;
+  modelVersion: string;
+  reviewStatus: ReviewStatus;
+  lifecycleStatus: LifecycleStatus;
+  revision: number;
+}
+
+export interface MeaningAnalysisDiagnostics {
+  locatedRelationshipsAssessed: number;
+  preserved: number;
+  preservedWithRestructuring: number;
+  partial: number;
+  undertranslated: number;
+  overtranslated: number;
+  meaningShift: number;
+  contradicted: number;
+  unverifiable: number;
+  locationReviewRequired: number;
+  resourceConflict: number;
+  averageComponentCount: number;
+  deterministicContradictionCount: number;
+  analyzerLimitedAssessments: number;
+}
+
+export interface MeaningAnalysisRun {
+  id: string;
+  book: string;
+  rangeKey: string;
+  fingerprint: string;
+  locationRunId: string;
+  locationRunFingerprint: string;
+  sourceInventoryFingerprint: string;
+  targetInventoryFingerprint: string;
+  meaningEngineVersion: string;
+  meaningPolicyVersion: string;
+  modelVersion: string;
+  calibrationVersion: string;
+  runStatus: MeaningRunStatus;
+  assessments: MeaningAssessment[];
+  diagnostics: MeaningAnalysisDiagnostics;
+  elapsedSeconds: number;
+  cacheStatus: "MISS" | "HIT";
+}
+
 /** Convert canonical code-point offsets to the UTF-16 offsets used by DOM APIs. */
 export function codePointToUtf16Offset(text: string, offset: number): number {
   const codePoints = Array.from(text);

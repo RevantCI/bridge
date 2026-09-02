@@ -1198,6 +1198,138 @@ pub struct SemanticLocationRun {
     pub cache_status: SourceInventoryCacheStatus,
 }
 
+wire_enum!(MeaningComponentStatus {
+    Preserved,
+    PartiallyPreserved,
+    Altered,
+    Contradicted,
+    TargetAddsSpecificity,
+    TargetWeakensSpecificity,
+    NotExplicitButRecoverable,
+    NotDeterminable,
+    NotApplicable
+});
+wire_enum!(MeaningRunStatus {
+    Running,
+    Complete,
+    Failed
+});
+wire_enum!(MeaningAssessmentReason {
+    Assessed,
+    NoLocatedRealization,
+    AmbiguousLocation,
+    SearchIncomplete,
+    UnsupportedAnalysis,
+    LocationReviewRequired
+});
+wire_enum!(MeaningEvidenceKind {
+    LexicalConcept,
+    Polarity,
+    Quantity,
+    Participant,
+    SemanticRole,
+    Temporal,
+    Completion,
+    Modality,
+    Grammatical,
+    Contextual,
+    Resource,
+    DeterministicContradiction
+});
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeaningEvidenceSummary {
+    pub id: String,
+    pub kind: MeaningEvidenceKind,
+    pub resource_status: ResourceValidationStatus,
+    pub resource_evidence_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeaningComponentAssessment {
+    pub id: String,
+    pub coverage_dimension: CoverageDimension,
+    pub source_semantic_unit_ids: Vec<String>,
+    pub target_semantic_unit_ids: Vec<String>,
+    pub target_span_ids: Vec<String>,
+    pub status: MeaningComponentStatus,
+    pub confidence: LocationConfidence,
+    pub evidence: MeaningEvidenceSummary,
+    pub explanation: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeaningAssessment {
+    pub id: String,
+    pub semantic_location_relationship_id: String,
+    pub source_semantic_unit_ids: Vec<String>,
+    pub target_semantic_unit_ids: Vec<String>,
+    pub meaning_status: MeaningStatus,
+    pub meaning_confidence: LocationConfidence,
+    pub component_assessments: Vec<MeaningComponentAssessment>,
+    pub supporting_evidence_ids: Vec<String>,
+    pub conflicting_evidence_ids: Vec<String>,
+    pub location_outcome_snapshot: LocationOutcome,
+    pub location_confidence_snapshot: LocationConfidence,
+    pub location_review_required: bool,
+    pub reason: MeaningAssessmentReason,
+    pub explanation: String,
+    pub source_inventory_fingerprint: String,
+    pub target_inventory_fingerprint: String,
+    pub target_revision_hashes: Vec<String>,
+    pub source_resource_hashes: Vec<String>,
+    pub policy_binding: PolicyBinding,
+    pub engine_version: String,
+    pub model_version: String,
+    pub review_status: ReviewStatus,
+    pub lifecycle_status: LifecycleStatus,
+    pub revision: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeaningAnalysisDiagnostics {
+    pub located_relationships_assessed: u64,
+    pub preserved: u64,
+    pub preserved_with_restructuring: u64,
+    pub partial: u64,
+    pub undertranslated: u64,
+    pub overtranslated: u64,
+    pub meaning_shift: u64,
+    pub contradicted: u64,
+    pub unverifiable: u64,
+    pub location_review_required: u64,
+    pub resource_conflict: u64,
+    pub average_component_count: f64,
+    pub deterministic_contradiction_count: u64,
+    pub analyzer_limited_assessments: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MeaningAnalysisRun {
+    pub id: String,
+    pub book: String,
+    pub range_key: String,
+    pub fingerprint: String,
+    pub location_run_id: String,
+    pub location_run_fingerprint: String,
+    pub source_inventory_fingerprint: String,
+    pub target_inventory_fingerprint: String,
+    pub meaning_engine_version: String,
+    pub meaning_policy_version: String,
+    pub model_version: String,
+    pub calibration_version: String,
+    pub run_status: MeaningRunStatus,
+    pub assessments: Vec<MeaningAssessment>,
+    pub diagnostics: MeaningAnalysisDiagnostics,
+    pub elapsed_seconds: f64,
+    pub cache_status: SourceInventoryCacheStatus,
+}
+
 pub fn codepoint_span(text: &str, start: usize, end: usize) -> Result<String, String> {
     let points: Vec<char> = text.chars().collect();
     if start > end || end > points.len() {

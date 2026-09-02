@@ -303,6 +303,12 @@ class Methods:
     SEMANTIC_LOCATION_GET_RELATIONSHIP = "semanticLocation.getRelationship"
     SEMANTIC_LOCATION_GET_CANDIDATES = "semanticLocation.getCandidates"
     SEMANTIC_LOCATION_GET_DIAGNOSTICS = "semanticLocation.getDiagnostics"
+    MEANING_ANALYSIS_RUN_RANGE = "meaningAnalysis.runRange"
+    MEANING_ANALYSIS_STATUS = "meaningAnalysis.status"
+    MEANING_ANALYSIS_GET_RANGE = "meaningAnalysis.getRange"
+    MEANING_ANALYSIS_GET_ASSESSMENT = "meaningAnalysis.getAssessment"
+    MEANING_ANALYSIS_GET_COMPONENTS = "meaningAnalysis.getComponents"
+    MEANING_ANALYSIS_GET_DIAGNOSTICS = "meaningAnalysis.getDiagnostics"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -1828,6 +1834,29 @@ class BridgeEngine:
     def semantic_location_get_diagnostics(self, run_id: str) -> dict[str, Any]:
         return self._require_passage_semantic_runtime().semantic_location_diagnostics(run_id)
 
+    def meaning_analysis_run_range(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+        location_run_id: str = "",
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().run_meaning_analysis_range(
+            chapter, verse, end_chapter, end_verse, location_run_id,
+        )
+
+    def meaning_analysis_status(self, run_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().meaning_analysis_status(run_id)
+
+    def meaning_analysis_get_range(self, run_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().meaning_analysis_range(run_id)
+
+    def meaning_analysis_get_assessment(self, assessment_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().meaning_assessment(assessment_id)
+
+    def meaning_analysis_get_components(self, assessment_id: str) -> list[dict[str, Any]]:
+        return self._require_passage_semantic_runtime().meaning_components(assessment_id)
+
+    def meaning_analysis_get_diagnostics(self, run_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().meaning_analysis_diagnostics(run_id)
+
     # -- live desktop connectors (Paratext/Logos) --------------------------
     #
     # Direct pass-through calls only in this pass: read the connector's current
@@ -3292,6 +3321,32 @@ class BridgeEngine:
                 ))
             if m == Methods.SEMANTIC_LOCATION_GET_DIAGNOSTICS:
                 return EngineResponse.ok(request.id, result=self.semantic_location_get_diagnostics(
+                    str(p.get("runId") or ""),
+                ))
+            if m == Methods.MEANING_ANALYSIS_RUN_RANGE:
+                return EngineResponse.ok(request.id, result=self.meaning_analysis_run_range(
+                    str(p.get("chapter") or ""), str(p.get("verse") or ""),
+                    str(p.get("endChapter") or ""), str(p.get("endVerse") or ""),
+                    str(p.get("locationRunId") or ""),
+                ))
+            if m == Methods.MEANING_ANALYSIS_STATUS:
+                return EngineResponse.ok(request.id, result=self.meaning_analysis_status(
+                    str(p.get("runId") or ""),
+                ))
+            if m == Methods.MEANING_ANALYSIS_GET_RANGE:
+                return EngineResponse.ok(request.id, result=self.meaning_analysis_get_range(
+                    str(p.get("runId") or ""),
+                ))
+            if m == Methods.MEANING_ANALYSIS_GET_ASSESSMENT:
+                return EngineResponse.ok(request.id, result=self.meaning_analysis_get_assessment(
+                    str(p.get("assessmentId") or ""),
+                ))
+            if m == Methods.MEANING_ANALYSIS_GET_COMPONENTS:
+                return EngineResponse.ok(request.id, result=self.meaning_analysis_get_components(
+                    str(p.get("assessmentId") or ""),
+                ))
+            if m == Methods.MEANING_ANALYSIS_GET_DIAGNOSTICS:
+                return EngineResponse.ok(request.id, result=self.meaning_analysis_get_diagnostics(
                     str(p.get("runId") or ""),
                 ))
             if m == Methods.ISSUE_RESOLUTION_LIST:
