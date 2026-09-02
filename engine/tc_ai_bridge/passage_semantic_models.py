@@ -328,6 +328,7 @@ class EvidenceKind(StrEnum):
     STRUCTURE = "STRUCTURE"
     HUMAN_NOTE = "HUMAN_NOTE"
     AI_RATIONALE = "AI_RATIONALE"
+    SOURCE_VARIANT = "SOURCE_VARIANT"
 
 
 class QaFindingKind(StrEnum):
@@ -338,6 +339,32 @@ class QaFindingKind(StrEnum):
     RESOURCE_CONFLICT = "RESOURCE_CONFLICT"
     NEEDS_PASSAGE_REVIEW = "NEEDS_PASSAGE_REVIEW"
     NEEDS_EXTENDED_PASSAGE_REVIEW = "NEEDS_EXTENDED_PASSAGE_REVIEW"
+    POSSIBLE_OMISSION = "POSSIBLE_OMISSION"
+    POSSIBLE_ADDITION = "POSSIBLE_ADDITION"
+    POSSIBLE_UNDERTRANSLATION = "POSSIBLE_UNDERTRANSLATION"
+    POSSIBLE_OVERTRANSLATION = "POSSIBLE_OVERTRANSLATION"
+    MEANING_SHIFT = "MEANING_SHIFT"
+    CONTRADICTION = "CONTRADICTION"
+    NEGATION_PROBLEM = "NEGATION_PROBLEM"
+    QUANTITY_PROBLEM = "QUANTITY_PROBLEM"
+    TEMPORAL_PROBLEM = "TEMPORAL_PROBLEM"
+    PARTICIPANT_PROBLEM = "PARTICIPANT_PROBLEM"
+    REFERENT_PROBLEM = "REFERENT_PROBLEM"
+    SOURCE_VARIANT_REVIEW = "SOURCE_VARIANT_REVIEW"
+
+
+class QaFindingSeverity(StrEnum):
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+    INFO = "INFO"
+
+
+class QaRunStatus(StrEnum):
+    RUNNING = "RUNNING"
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
 
 
 class PassageStructureKind(StrEnum):
@@ -572,6 +599,23 @@ class SemanticCoverageAccount:
     review_status: ReviewStatus
     lifecycle_status: LifecycleStatus
     revision: int = 1
+    coverage_status: str = "NOT_CHECKED"
+
+    def __post_init__(self) -> None:
+        if self.direction == AuditDirection.SOURCE_COVERAGE:
+            try:
+                SourceCoverage(self.coverage_status)
+            except ValueError as exc:
+                raise ValueError(
+                    "SOURCE_COVERAGE account requires a SourceCoverage coverage_status"
+                ) from exc
+        elif self.direction == AuditDirection.TARGET_SUPPORT:
+            try:
+                TargetSupport(self.coverage_status)
+            except ValueError as exc:
+                raise ValueError(
+                    "TARGET_SUPPORT account requires a TargetSupport coverage_status"
+                ) from exc
 
 
 @dataclass(frozen=True)
@@ -705,6 +749,19 @@ class QaFinding:
     policy_binding: PolicyBinding
     review_status: ReviewStatus
     lifecycle_status: LifecycleStatus
+    severity: QaFindingSeverity
+    meaning_assessment_ids: tuple[str, ...]
+    coverage_account_ids: tuple[str, ...]
+    location_outcome_snapshot: str
+    meaning_status_snapshot: str
+    supporting_evidence_ids: tuple[str, ...]
+    conflicting_evidence_ids: tuple[str, ...]
+    resource_evidence_ids: tuple[str, ...]
+    target_content_hashes: tuple[str, ...]
+    source_resource_hashes: tuple[str, ...]
+    qa_engine_version: str
+    qa_policy_version: str
+    fingerprint: str
     revision: int = 1
 
 

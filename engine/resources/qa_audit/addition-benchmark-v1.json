@@ -1,0 +1,23 @@
+{
+  "schema": "bridge.qa-addition-benchmark/v1",
+  "benchmarkVersion": "qa-addition-benchmark-v1",
+  "reviewStatus": "MACHINE_PROPOSED",
+  "description": "Stage 8 target-support development cases only; human review and production calibration are pending.",
+  "cases": [
+    {"id": "grammatical-article", "split": "TEST", "locationOutcome": "NONE", "isFunctionWord": true, "expected": "GRAMMATICALLY_REQUIRED"},
+    {"id": "grammatical-auxiliary", "split": "TEST", "locationOutcome": "NONE", "isFunctionWord": true, "expected": "GRAMMATICALLY_REQUIRED"},
+    {"id": "grammatical-pronoun", "split": "CALIBRATION", "locationOutcome": "NONE", "isFunctionWord": true, "expected": "GRAMMATICALLY_REQUIRED"},
+    {"id": "discourse-connector", "split": "TEST", "locationOutcome": "NONE", "isFunctionWord": true, "expected": "GRAMMATICALLY_REQUIRED"},
+    {"id": "explicitation-participant", "split": "TEST", "locationOutcome": "NONE", "isExplicitation": true, "expected": "EXPLICITATION_SUPPORTED"},
+    {"id": "classifier-like-material", "split": "CALIBRATION", "locationOutcome": "NONE", "isExplicitation": true, "expected": "EXPLICITATION_SUPPORTED"},
+    {"id": "unsupported-modifier", "split": "TEST", "locationOutcome": "NONE", "hasUnsupportedSpecificity": true, "expected": "POSSIBLY_UNSUPPORTED"},
+    {"id": "unsupported-content-word-conservative", "split": "TEST", "locationOutcome": "NONE", "expected": "UNCERTAIN"},
+    {"id": "source-supported", "split": "TRAIN", "locationOutcome": "LOCATED", "meaningStatus": "PRESERVED", "expected": "SOURCE_SUPPORTED"},
+    {"id": "idiomatic-restructuring-support", "split": "TEST", "locationOutcome": "LOCATED", "meaningStatus": "PRESERVED_WITH_RESTRUCTURING", "expected": "SOURCE_SUPPORTED"},
+    {"id": "context-supported", "split": "TEST", "locationOutcome": "LOCATED", "meaningStatus": "MEANING_SHIFT", "expected": "CONTEXT_SUPPORTED"},
+    {"id": "unsupported-specificity-overtranslated", "split": "TEST", "locationOutcome": "LOCATED", "meaningStatus": "OVERTRANSLATED", "hasUnsupportedSpecificity": true, "expected": "POSSIBLY_UNSUPPORTED"},
+    {"id": "aggregate-only-not-audited", "split": "TRAIN", "locationOutcome": "NONE", "ownerRole": "AGGREGATE", "ownerEligibility": "AGGREGATE_ONLY", "expected": "NOT_CHECKED"},
+    {"id": "ambiguous-blocks-addition", "split": "TEST", "locationOutcome": "AMBIGUOUS", "expected": "UNCERTAIN"},
+    {"id": "search-incomplete-blocks-addition", "split": "CALIBRATION", "locationOutcome": "SEARCH_INCOMPLETE", "expected": "UNCERTAIN"}
+  ]
+}

@@ -55,6 +55,7 @@ from .source_semantic_inventory import SourceSemanticInventory
 from .target_semantic_inventory import TargetSemanticInventory
 from .semantic_location import SemanticLocationEngine
 from .meaning_analysis import MeaningAnalysisEngine
+from .qa_audit import QaAuditEngine
 
 
 RUNTIME_VERSION = "stage4-runtime-v1"
@@ -482,6 +483,7 @@ class PassageSemanticRuntime:
         self.target_semantic = TargetSemanticInventory(self)
         self.semantic_location = SemanticLocationEngine(self)
         self.meaning_analysis = MeaningAnalysisEngine(self)
+        self.qa_audit = QaAuditEngine(self)
         self._migrate_legacy_companions()
 
     def _identity_fingerprint(self) -> str:
@@ -1263,3 +1265,29 @@ class PassageSemanticRuntime:
 
     def meaning_analysis_diagnostics(self, run_id: str) -> dict[str, Any]:
         return self.meaning_analysis.get_diagnostics(run_id)
+
+    def run_qa_audit_range(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+        meaning_run_id: str = "",
+    ) -> dict[str, Any]:
+        return self.qa_audit.run_range(
+            chapter, verse, end_chapter, end_verse, meaning_run_id=meaning_run_id,
+        )
+
+    def qa_audit_status(self, run_id: str) -> dict[str, Any]:
+        return self.qa_audit.status(run_id)
+
+    def qa_audit_range(self, run_id: str) -> dict[str, Any]:
+        return self.qa_audit.get_range(run_id)
+
+    def qa_audit_source_coverage(self, run_id: str) -> list[dict[str, Any]]:
+        return self.qa_audit.get_source_coverage(run_id)
+
+    def qa_audit_target_support(self, run_id: str) -> list[dict[str, Any]]:
+        return self.qa_audit.get_target_support(run_id)
+
+    def qa_audit_finding(self, finding_id: str) -> dict[str, Any]:
+        return self.qa_audit.get_finding(finding_id)
+
+    def qa_audit_diagnostics(self, run_id: str) -> dict[str, Any]:
+        return self.qa_audit.get_diagnostics(run_id)

@@ -43,7 +43,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 6
+DATABASE_SCHEMA_VERSION = 7
 
 
 class FoundationError(RuntimeError):
@@ -596,6 +596,26 @@ ON meaning_component_assessments(assessment_id,coverage_dimension);
 """
 
 
+_MIGRATION_V7 = r"""
+CREATE TABLE qa_audit_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    book TEXT NOT NULL,
+    range_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    meaning_run_id TEXT NOT NULL REFERENCES meaning_analysis_runs(id),
+    run_status TEXT NOT NULL CHECK(run_status IN ('RUNNING','COMPLETE','FAILED')),
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id,book,range_key,fingerprint)
+);
+CREATE INDEX ix_qa_audit_runs_range
+ON qa_audit_runs(project_id,book,range_key,lifecycle_status);
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -652,6 +672,10 @@ class FoundationRepository:
             if current < 6:
                 self._backup_before_migration(conn, current, 6)
                 self._apply_migration(conn, 6, _MIGRATION_V6)
+                current = 6
+            if current < 7:
+                self._backup_before_migration(conn, current, 7)
+                self._apply_migration(conn, 7, _MIGRATION_V7)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -1658,6 +1682,131 @@ class FoundationRepository:
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
+    def coverage_account(self, account_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM coverage_accounts WHERE id=?", (account_id,),
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(f"Unknown coverage account: {account_id}")
+        return json.loads(row[0])
+
+    def coverage_accounts_for_owners(
+        self, project_id: str, direction: str, owner_unit_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        if not owner_unit_ids:
+            return []
+        placeholders = ",".join("?" for _ in owner_unit_ids)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT payload_json FROM coverage_accounts WHERE project_id=? AND direction=? "
+                f"AND audit_owner_unit_id IN ({placeholders}) AND lifecycle_status='ACTIVE'",
+                (project_id, direction, *owner_unit_ids),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def update_coverage_account_status(
+        self, account_id: str, *, coverage_status: str,
+        covered_by_relationship_ids: tuple[str, ...], finding_id: str | None,
+        expected_revision: int,
+    ) -> None:
+        """Finalize a content-addressed coverage account in place (item 3/7/14).
+
+        Stage 5/6A seed SOURCE_COVERAGE/TARGET_SUPPORT accounts with a
+        placeholder status; the QA audit updates the same immutable identity
+        rather than inserting a duplicate row (the account's unique index is
+        keyed by owner/dimension/fingerprint, not by audit run).
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT payload_json FROM coverage_accounts WHERE id=?", (account_id,),
+            ).fetchone()
+            if row is None:
+                raise FoundationValidationError(f"Unknown coverage account: {account_id}")
+            payload = json.loads(row[0])
+            payload.update({
+                "coverageStatus": coverage_status,
+                "coveredByRelationshipIds": list(covered_by_relationship_ids),
+                "findingId": finding_id,
+                "revision": expected_revision + 1,
+            })
+            changed = conn.execute(
+                "UPDATE coverage_accounts SET finding_id=?,revision=revision+1,payload_json=? "
+                "WHERE id=? AND revision=?",
+                (finding_id, json.dumps(payload, ensure_ascii=False), account_id, expected_revision),
+            ).rowcount
+            if changed != 1:
+                raise FoundationConflict("Coverage account revision conflict")
+            conn.commit()
+
+    def save_qa_audit_run(
+        self, *, run_id: str, project_id: str, book: str, range_key: str,
+        fingerprint: str, meaning_run_id: str, run_status: str, payload: dict[str, Any],
+    ) -> None:
+        """Atomically publish an immutable Stage 8 QA-audit run record.
+
+        Coverage accounts and findings are saved individually (via
+        save_coverage_account/save_qa_finding/update_coverage_account_status)
+        before this call, so their ids are already embedded in payload.
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            meaning = conn.execute(
+                "SELECT lifecycle_status FROM meaning_analysis_runs WHERE id=?",
+                (meaning_run_id,),
+            ).fetchone()
+            if meaning is None or meaning[0] != "ACTIVE":
+                raise FoundationValidationError("QA audit requires an active meaning analysis run")
+            conn.execute(
+                "UPDATE qa_audit_runs SET lifecycle_status='SUPERSEDED',revision=revision+1 "
+                "WHERE project_id=? AND book=? AND range_key=? AND lifecycle_status='ACTIVE' "
+                "AND fingerprint<>?", (project_id, book, range_key, fingerprint),
+            )
+            conn.execute(
+                "INSERT INTO qa_audit_runs VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (run_id, project_id, book, range_key, fingerprint, meaning_run_id,
+                 run_status, "ACTIVE", 1, json.dumps(payload, ensure_ascii=False), self._now()),
+            )
+            dependency_edges = [("QA_RUN", run_id, "MEANING_RUN", meaning_run_id)]
+            for account_id in payload.get("sourceCoverageAccountIds", ()):
+                dependency_edges.append(("COVERAGE_ACCOUNT", account_id, "QA_RUN", run_id))
+            for account_id in payload.get("targetSupportAccountIds", ()):
+                dependency_edges.append(("COVERAGE_ACCOUNT", account_id, "QA_RUN", run_id))
+            for finding in payload.get("findings", ()):
+                dependency_edges.append(("QA_FINDING", finding["id"], "QA_RUN", run_id))
+                for account_id in finding.get("coverageAccountIds", ()):
+                    dependency_edges.append(
+                        ("QA_FINDING", finding["id"], "COVERAGE_ACCOUNT", account_id)
+                    )
+            conn.executemany(
+                "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)", dependency_edges,
+            )
+            conn.commit()
+
+    def qa_audit_for_fingerprint(
+        self, project_id: str, book: str, range_key: str, fingerprint: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM qa_audit_runs WHERE project_id=? AND book=? "
+                "AND range_key=? AND fingerprint=? AND lifecycle_status='ACTIVE' "
+                "AND run_status='COMPLETE'", (project_id, book, range_key, fingerprint),
+            ).fetchone()
+        return None if row is None else json.loads(row[0])
+
+    def qa_audit_run(self, run_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json,lifecycle_status FROM qa_audit_runs WHERE id=?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(f"Unknown QA audit run: {run_id}")
+        if row["lifecycle_status"] != "ACTIVE":
+            raise FoundationValidationError("QA audit run is stale or inactive")
+        return json.loads(row["payload_json"])
+
     def human_approved_lexical_precedents(self, project_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -2233,6 +2382,7 @@ class FoundationRepository:
             "evidence": "evidence_records", "exportability": "exportability_records",
             "semanticLocationRuns": "semantic_location_runs",
             "meaningAnalysisRuns": "meaning_analysis_runs",
+            "qaAuditRuns": "qa_audit_runs",
         }
         counts: dict[str, int] = {}
         with self._connect() as conn:
@@ -2278,6 +2428,7 @@ class FoundationRepository:
             "LOCATION_RUN": "semantic_location_runs",
             "MEANING_RUN": "meaning_analysis_runs",
             "MEANING_ASSESSMENT": "meaning_assessments",
+            "QA_RUN": "qa_audit_runs",
         }
         queue: list[tuple[str, str]] = [(dependency_type, dependency_id)]
         visited: set[tuple[str, str]] = set()

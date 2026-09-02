@@ -44,6 +44,8 @@ from tc_ai_bridge.passage_semantic_models import (
     QaDisposition,
     QaFinding,
     QaFindingKind,
+    QaFindingSeverity,
+    QaRunStatus,
     ResourceValidationStatus,
     SCHEMA_ID,
     ReviewStatus,
@@ -359,6 +361,11 @@ def test_passage_evidence_qa_exportability_and_review_round_trip(tmp_path: Path)
         confidence=confidence, current_target_revision=passage.target_revision,
         qa_disposition=QaDisposition.UNRESOLVED, policy_binding=policy,
         review_status=ReviewStatus.UNREVIEWED, lifecycle_status=LifecycleStatus.ACTIVE,
+        severity=QaFindingSeverity.LOW, meaning_assessment_ids=(), coverage_account_ids=(),
+        location_outcome_snapshot="LOCATED", meaning_status_snapshot="PRESERVED",
+        supporting_evidence_ids=(evidence.id,), conflicting_evidence_ids=(), resource_evidence_ids=(evidence.id,),
+        target_content_hashes=(passage.target_content_hash,), source_resource_hashes=(passage.source_resource_hash,),
+        qa_engine_version="bridge-qa-audit-v1", qa_policy_version="qa-policy-v1", fingerprint="test-fingerprint",
     )
     repo.save_qa_finding(finding)
     repo.update_qa_disposition("qa-rich", QaDisposition.NEEDS_DISCUSSION, 1, "Reviewer")
@@ -485,6 +492,8 @@ def test_python_and_typescript_controlled_enums_match_canonical_schema() -> None
         "ResourceValidationStatus": ResourceValidationStatus,
         "EvidenceKind": EvidenceKind,
         "QaFindingKind": QaFindingKind,
+        "QaFindingSeverity": QaFindingSeverity,
+        "QaRunStatus": QaRunStatus,
         "PassageStructureKind": PassageStructureKind,
         "ExportFormat": ExportFormat,
         "ExportabilityLevel": ExportabilityLevel,

@@ -61,8 +61,10 @@
     "AuditDirection": { "type": "string", "enum": ["SOURCE_COVERAGE", "TARGET_SUPPORT"] },
     "ActorType": { "type": "string", "enum": ["HUMAN", "AI", "SYSTEM", "MIGRATION"] },
     "ResourceValidationStatus": { "type": "string", "enum": ["NOT_CHECKED", "CONSISTENT", "SUPPORTING", "CONFLICTING", "NOT_APPLICABLE"] },
-    "EvidenceKind": { "type": "string", "enum": ["SOURCE_TEXT", "TARGET_TEXT", "MORPHOLOGY", "TRANSLATION_NOTE", "TRANSLATION_WORD", "TRANSLATION_WORD_LIST", "VERSIFICATION", "STRUCTURE", "HUMAN_NOTE", "AI_RATIONALE"] },
-    "QaFindingKind": { "type": "string", "enum": ["POSSIBLY_MISSING", "MISSING", "POSSIBLY_UNSUPPORTED", "UNSUPPORTED", "RESOURCE_CONFLICT", "NEEDS_PASSAGE_REVIEW", "NEEDS_EXTENDED_PASSAGE_REVIEW"] },
+    "EvidenceKind": { "type": "string", "enum": ["SOURCE_TEXT", "TARGET_TEXT", "MORPHOLOGY", "TRANSLATION_NOTE", "TRANSLATION_WORD", "TRANSLATION_WORD_LIST", "VERSIFICATION", "STRUCTURE", "HUMAN_NOTE", "AI_RATIONALE", "SOURCE_VARIANT"] },
+    "QaFindingKind": { "type": "string", "enum": ["POSSIBLY_MISSING", "MISSING", "POSSIBLY_UNSUPPORTED", "UNSUPPORTED", "RESOURCE_CONFLICT", "NEEDS_PASSAGE_REVIEW", "NEEDS_EXTENDED_PASSAGE_REVIEW", "POSSIBLE_OMISSION", "POSSIBLE_ADDITION", "POSSIBLE_UNDERTRANSLATION", "POSSIBLE_OVERTRANSLATION", "MEANING_SHIFT", "CONTRADICTION", "NEGATION_PROBLEM", "QUANTITY_PROBLEM", "TEMPORAL_PROBLEM", "PARTICIPANT_PROBLEM", "REFERENT_PROBLEM", "SOURCE_VARIANT_REVIEW"] },
+    "QaFindingSeverity": { "type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"] },
+    "QaRunStatus": { "type": "string", "enum": ["RUNNING", "COMPLETE", "FAILED"] },
     "PassageStructureKind": { "type": "string", "enum": ["CHAPTER", "VERSE", "VERSE_BRIDGE", "PARAGRAPH", "POETRY", "HEADING", "NOTE", "CROSS_REFERENCE", "INLINE_MARKUP"] },
     "ExportFormat": { "type": "string", "enum": ["BRIDGE", "CLEAN_USFM", "TRANSLATIONCORE_ALIGNED_USFM", "SCRIPTURE_BURRITO"] },
     "ExportabilityLevel": { "type": "string", "enum": ["FULL", "PARTIAL", "NOT_REPRESENTABLE", "TEXT_ONLY"] },
@@ -306,7 +308,7 @@
     },
     "SemanticCoverageAccount": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "projectId", "passageId", "direction", "auditOwnerUnitId", "memberUnitIds", "coverageDimension", "semanticFingerprint", "coveredByRelationshipIds", "excludedDuplicateUnitIds", "findingId", "policyBinding", "reviewStatus", "lifecycleStatus", "revision"],
+      "required": ["id", "projectId", "passageId", "direction", "auditOwnerUnitId", "memberUnitIds", "coverageDimension", "semanticFingerprint", "coveredByRelationshipIds", "excludedDuplicateUnitIds", "findingId", "policyBinding", "reviewStatus", "lifecycleStatus", "revision", "coverageStatus"],
       "properties": {
         "id": { "type": "string" }, "projectId": { "type": "string" }, "passageId": { "type": "string" },
         "direction": { "$ref": "#/$defs/AuditDirection" }, "auditOwnerUnitId": { "type": "string" },
@@ -316,7 +318,8 @@
         "excludedDuplicateUnitIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "findingId": { "type": ["string", "null"] }, "policyBinding": { "$ref": "#/$defs/PolicyBinding" },
         "reviewStatus": { "$ref": "#/$defs/ReviewStatus" }, "lifecycleStatus": { "$ref": "#/$defs/LifecycleStatus" },
-        "revision": { "type": "integer", "minimum": 1 }
+        "revision": { "type": "integer", "minimum": 1 },
+        "coverageStatus": { "type": "string", "description": "A SourceCoverage value when direction=SOURCE_COVERAGE, or a TargetSupport value when direction=TARGET_SUPPORT." }
       }
     },
     "LexicalSolution": {
@@ -345,7 +348,7 @@
     },
     "QaFinding": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "projectId", "book", "passageId", "kind", "direction", "sourceSemanticUnitIds", "targetSemanticUnitIds", "semanticRelationshipIds", "evidenceIds", "explanation", "confidence", "currentTargetRevision", "qaDisposition", "policyBinding", "reviewStatus", "lifecycleStatus", "revision"],
+      "required": ["id", "projectId", "book", "passageId", "kind", "direction", "sourceSemanticUnitIds", "targetSemanticUnitIds", "semanticRelationshipIds", "evidenceIds", "explanation", "confidence", "currentTargetRevision", "qaDisposition", "policyBinding", "reviewStatus", "lifecycleStatus", "revision", "severity", "meaningAssessmentIds", "coverageAccountIds", "locationOutcomeSnapshot", "meaningStatusSnapshot", "supportingEvidenceIds", "conflictingEvidenceIds", "resourceEvidenceIds", "targetContentHashes", "sourceResourceHashes", "qaEngineVersion", "qaPolicyVersion", "fingerprint"],
       "properties": {
         "id": { "type": "string" }, "projectId": { "type": "string" }, "book": { "type": "string" }, "passageId": { "type": "string" },
         "kind": { "$ref": "#/$defs/QaFindingKind" }, "direction": { "$ref": "#/$defs/AuditDirection" },
@@ -356,7 +359,17 @@
         "explanation": { "type": "string" }, "confidence": { "$ref": "#/$defs/ConfidenceScore" },
         "currentTargetRevision": { "type": "string" }, "qaDisposition": { "$ref": "#/$defs/QaDisposition" },
         "policyBinding": { "$ref": "#/$defs/PolicyBinding" }, "reviewStatus": { "$ref": "#/$defs/ReviewStatus" },
-        "lifecycleStatus": { "$ref": "#/$defs/LifecycleStatus" }, "revision": { "type": "integer", "minimum": 1 }
+        "lifecycleStatus": { "$ref": "#/$defs/LifecycleStatus" }, "revision": { "type": "integer", "minimum": 1 },
+        "severity": { "$ref": "#/$defs/QaFindingSeverity" },
+        "meaningAssessmentIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "coverageAccountIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "locationOutcomeSnapshot": { "type": "string" }, "meaningStatusSnapshot": { "type": "string" },
+        "supportingEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "conflictingEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "resourceEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "targetContentHashes": { "type": "array", "items": { "type": "string" } },
+        "sourceResourceHashes": { "type": "array", "items": { "type": "string" } },
+        "qaEngineVersion": { "type": "string" }, "qaPolicyVersion": { "type": "string" }, "fingerprint": { "type": "string" }
       }
     },
     "CorrectionProposal": {

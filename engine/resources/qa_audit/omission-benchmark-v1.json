@@ -1,0 +1,23 @@
+{
+  "schema": "bridge.qa-omission-benchmark/v1",
+  "benchmarkVersion": "qa-omission-benchmark-v1",
+  "reviewStatus": "MACHINE_PROPOSED",
+  "description": "Stage 8 source-coverage development cases only; human review and production calibration are pending.",
+  "cases": [
+    {"id": "genuine-omission", "split": "TEST", "locationOutcome": "NOT_LOCATED", "expected": "POSSIBLY_MISSING"},
+    {"id": "lexical-covered", "split": "TRAIN", "locationOutcome": "LOCATED", "meaningStatus": "PRESERVED", "expected": "COVERED"},
+    {"id": "cross-verse-restructuring", "split": "TEST", "locationOutcome": "LOCATED", "meaningStatus": "PRESERVED", "properties": ["CROSS_VERSE"], "legitimateRestructuring": true, "expected": "COVERED_BY_RESTRUCTURING"},
+    {"id": "split-realization", "split": "TEST", "locationOutcome": "LOCATED", "meaningStatus": "PRESERVED_WITH_RESTRUCTURING", "properties": ["SPLIT"], "legitimateRestructuring": true, "expected": "COVERED_BY_RESTRUCTURING"},
+    {"id": "merged-realization", "split": "TEST", "locationOutcome": "LOCATED", "meaningStatus": "PRESERVED", "properties": ["MERGED"], "legitimateRestructuring": true, "expected": "COVERED_BY_RESTRUCTURING"},
+    {"id": "grammatical-realization", "split": "TEST", "locationOutcome": "LOCATED", "meaningStatus": "PRESERVED_WITH_RESTRUCTURING", "realization": "GRAMMATICALLY_REALIZED", "legitimateRestructuring": true, "expected": "COVERED_BY_RESTRUCTURING"},
+    {"id": "pronominalized-realization", "split": "CALIBRATION", "locationOutcome": "LOCATED", "meaningStatus": "PRESERVED_WITH_RESTRUCTURING", "realization": "PRONOMINALIZED", "legitimateRestructuring": true, "expected": "COVERED_BY_RESTRUCTURING"},
+    {"id": "idiom-realization", "split": "TEST", "locationOutcome": "LOCATED", "meaningStatus": "PRESERVED_WITH_RESTRUCTURING", "properties": ["IDIOMATIC_REALIZATION"], "legitimateRestructuring": true, "expected": "COVERED_BY_RESTRUCTURING"},
+    {"id": "implicit-but-supported", "split": "CALIBRATION", "locationOutcome": "LOCATED", "meaningStatus": "PRESERVED_WITH_RESTRUCTURING", "realization": "IMPLICIT", "legitimateRestructuring": true, "expected": "COVERED_BY_RESTRUCTURING"},
+    {"id": "ambiguous-location", "split": "TEST", "locationOutcome": "AMBIGUOUS", "expected": "UNCERTAIN"},
+    {"id": "search-incomplete", "split": "TEST", "locationOutcome": "SEARCH_INCOMPLETE", "expected": "UNCERTAIN"},
+    {"id": "textual-variant", "split": "TEST", "locationOutcome": "NOT_LOCATED", "hasVariantEvidence": true, "expected": "UNCERTAIN"},
+    {"id": "meaning-weakened-but-located", "split": "TEST", "locationOutcome": "LOCATED", "meaningStatus": "UNDERTRANSLATED", "expected": "UNCERTAIN"},
+    {"id": "aggregate-only-not-audited", "split": "TRAIN", "locationOutcome": "NOT_LOCATED", "ownerRole": "AGGREGATE", "ownerEligibility": "AGGREGATE_ONLY", "expected": "NOT_CHECKED"},
+    {"id": "no-relationship-at-all", "split": "CALIBRATION", "locationOutcome": "NONE", "expected": "UNCERTAIN"}
+  ]
+}

@@ -10,6 +10,188 @@ Updated: 2026-09-02
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
 
+## Stage 8 — Bidirectional Source Coverage, Target Support, and Translation QA (2026-09-02)
+
+First stage in the passage-semantic pipeline allowed to produce
+translation-problem findings. Synthesizes evidence already produced by
+Stage 5 (source obligations), Stage 6A (target inventory), Stage 6B
+(location), and Stage 7 (meaning preservation) — it never re-runs location
+search or re-judges meaning, only reads their frozen, already-persisted
+run payloads.
+
+**New module** `engine/tc_ai_bridge/qa_audit.py`: `QaAuditPolicy` (a single
+versioned deterministic gate/precedence/severity policy, `qa-policy-v1`)
+plus `QaAuditEngine`, mirroring `meaning_analysis.py`'s shape exactly
+(fingerprint over upstream fingerprints + engine/policy versions, cache
+check via `qa_audit_for_fingerprint`, `run_range`/`status`/`get_range`/
+`get_source_coverage`/`get_target_support`/`get_finding`/`get_diagnostics`).
+
+**A real discovery that shrank this stage's scope**: the persistence
+foundation for QA was already built in Stage 3 and simply never called —
+`FoundationRepository.save_qa_finding(QaFinding)`,
+`save_coverage_account(SemanticCoverageAccount)`, and
+`update_qa_disposition(...)` (the human-confirmation-boundary transition,
+item 22 of the spec) were all fully functional, unused code. Stage 5
+already seeds one `SemanticCoverageAccount` per `(auditOwnerUnitId,
+coverageDimension)` for every `PRIMARY`-role source unit, with
+`findingId=None` placeholders — Stage 8 finalizes those same rows in place
+(new `update_coverage_account_status`, optimistic-concurrency, same
+pattern as `update_qa_disposition`) rather than inserting duplicates.
+Target-side accounting needed no new Stage 6A structure either —
+`TargetSemanticUnit` already carries `auditEligibility`/`accountingRole`/
+`auditOwnerUnitId`/`coverageDimension` (`target_semantic_inventory.py:183`)
+so `PRIMARY`+`ELIGIBLE` units are exactly the reverse-audit candidates.
+
+**Schema**: migration v6→v7 adds one table, `qa_audit_runs` (mirrors
+`meaning_analysis_runs` — id/fingerprint/`meaning_run_id` FK/payload_json/
+`UNIQUE(project_id,book,range_key,fingerprint)`). `qa_findings` and
+`coverage_accounts` needed no column changes (both existed unused since
+schema v1); run traceability goes through `record_dependencies` the same
+way `MEANING_RUN`/`LOCATION_RUN` already do (`QA_RUN`→`MEANING_RUN`,
+`COVERAGE_ACCOUNT`/`QA_FINDING`→`QA_RUN`), so the existing
+`_stale_generic_dependencies` BFS cascades edits all the way from a
+`SOURCE_RESOURCE`/target-text change down through `QA_FINDING.lifecycleStatus
+= STALE` with one new map entry (`"QA_RUN": "qa_audit_runs"`).
+
+**Model changes** (`passage_semantic_models.py`): `QaFindingKind` gained 12
+new values (`POSSIBLE_OMISSION`, `POSSIBLE_ADDITION`,
+`POSSIBLE_UNDERTRANSLATION`, `POSSIBLE_OVERTRANSLATION`, `MEANING_SHIFT`,
+`CONTRADICTION`, `NEGATION_PROBLEM`, `QUANTITY_PROBLEM`, `TEMPORAL_PROBLEM`,
+`PARTICIPANT_PROBLEM`, `REFERENT_PROBLEM`, `SOURCE_VARIANT_REVIEW`) —
+the original 7 (`POSSIBLY_MISSING`/`MISSING`/etc.) are untouched. New
+`QaFindingSeverity` and `QaRunStatus` enums; `EvidenceKind` gained
+`SOURCE_VARIANT`. `QaFinding` gained 13 fields the Stage-3 foundation
+hadn't anticipated (severity, meaning-assessment/coverage-account id links,
+location/meaning snapshots, supporting/conflicting/resource evidence id
+lists, target/source hashes, engine/policy versions, fingerprint) — all
+required, since every real construction site is new Stage 8 code.
+`SemanticCoverageAccount` gained one field, `coverage_status: str =
+"NOT_CHECKED"` (a `SourceCoverage` value for `SOURCE_COVERAGE`-direction
+accounts, `TargetSupport` for `TARGET_SUPPORT`-direction, validated in
+`__post_init__`); the default keeps Stage 5's existing construction site
+unmodified. This tripped the existing canonical-schema parity tests
+(`test_python_record_fields_match_canonical_schema`,
+`test_python_and_typescript_controlled_enums_match_canonical_schema`,
+which assert every dataclass field and enum value is mirrored 1:1 in
+`schemas/bridge-passage-semantic-v1.schema.json` and
+`src/lib/types/passageSemanticV1.ts`) — both were updated to match, plus
+one pre-existing foundation test
+(`test_passage_evidence_qa_exportability_and_review_round_trip`) that
+constructed a bare `QaFinding` and needed the new fields filled in.
+
+**Source coverage gates** (items 5–9 of the spec): `NOT_LOCATED` only
+becomes `POSSIBLY_MISSING` when every relationship touching that obligation
+resolved to `NOT_LOCATED` (never `AMBIGUOUS`/`SEARCH_INCOMPLETE`/
+`UNSUPPORTED_ANALYSIS`, which gate to `UNCERTAIN` instead) and no
+documented source-variant evidence explains the absence (checked via the
+owner unit's real `evidence_ids` against `EvidenceRecord.kind ==
+SOURCE_VARIANT`, falling back to `SOURCE_VARIANT_REVIEW` instead of
+`POSSIBLE_OMISSION` when one exists). A `LOCATED` relationship whose Stage 7
+assessment is `PRESERVED`/`PRESERVED_WITH_RESTRUCTURING` becomes `COVERED`
+or `COVERED_BY_RESTRUCTURING` depending on whether `RelationshipProperty`
+is non-empty or realization isn't `LEXICALLY_REALIZED`. `POSSIBLY_MISSING`
+is never auto-promoted to `MISSING` — that stays a human-only transition
+via `update_qa_disposition`.
+
+**Target support gates** (items 12–17): a target unit with zero
+referencing relationship becomes `GRAMMATICALLY_REQUIRED` for a small
+controlled function-word list, `EXPLICITATION_SUPPORTED` for licensed
+explicitation targets (reusing `DeterministicMeaningComparator
+.LICENSED_EXPLICITATIONS`'s target side from Stage 7), `POSSIBLY_UNSUPPORTED`
+only for an unmatched specificity marker (reusing `SPECIFICITY_MARKERS`),
+else the conservative default `UNCERTAIN` — deliberately not
+`POSSIBLY_UNSUPPORTED`, since a v1 deterministic policy can't yet
+positively rule out every legitimate grammatical/explicitation reason for
+an unmatched word, and false positives are worse than an `UNCERTAIN`.
+
+**Meaning-failure pass** (items 10–11, 24, 27): for every `LOCATED`
+relationship whose Stage 7 meaning isn't preserved/unverifiable, a single
+component-aware precedence chain picks the finding kind — a `CONTRADICTED`/
+`ALTERED` component on `POLARITY`/`QUANTITY`/`TEMPORAL_ASPECTUAL`/
+`PARTICIPANT`/`REFERENT` wins over the generic `MEANING_SHIFT`/
+`CONTRADICTION`/`POSSIBLE_UNDERTRANSLATION`/`POSSIBLE_OVERTRANSLATION`
+fallback from the aggregate status, and a `CONFLICTING` resource-evidence
+status on any component overrides everything to `RESOURCE_CONFLICT`. One
+finding per relationship, not per component (verified by
+`test_deduplication_one_finding_per_relationship`).
+
+**Benchmarks** (`engine/resources/qa_audit/{omission,addition}-benchmark-v1.json`,
+15 cases each, `reviewStatus: "MACHINE_PROPOSED"` guarded the same way
+`meaning_benchmark.py` guards its own): new `qa_benchmark.py` drives
+`QaAuditPolicy.source_coverage_for`/`target_support_for` directly from
+synthetic gate inputs (mirroring how `meaning_benchmark.py` drives
+`DeterministicMeaningComparator.compare`), plus `false_positive_metrics()`
+reporting possible-omission/addition precision/recall, false-omission/
+addition rate, legitimate-restructuring false-positive count, and
+ambiguity/search-incomplete-to-error leakage separately — not one generic
+accuracy number, per the spec's explicit false-positive emphasis. Current
+deterministic baseline: 100% accuracy, zero leakage on both TEST splits
+(15/15 cases here are the deterministic-policy self-check, not a
+human-reviewed calibration claim).
+
+**Philippians 1:3–6**: ran Stage 8 over the existing `REORDERED` Stage 6B
+relationships (Greek 1:3→Tamil 1:6, 1:4→1:4, 1:5→1:3, 1:6→1:5). Confirmed
+none of the well-covered content lemmas (the 19 `PHP_PAIRS` used since
+Stage 6B/7) are falsely flagged `POSSIBLE_OMISSION` despite the cross-verse
+reordering, and that at least one of them reaches `COVERED`/
+`COVERED_BY_RESTRUCTURING`. Some genuinely-uncovered function
+words/particles in the real UGNT text (not in the 19-pair fixture) do
+legitimately gate to `POSSIBLY_MISSING` — that's correct behavior given
+the fixture's vocabulary coverage, not a false positive, and the test
+(`test_php_reordered_passage_produces_no_false_omissions`) asserts against
+the covered-lemma set specifically rather than a blanket zero-omissions
+claim. Did not implement a QA-specific verdict for the ἐπιτελέσει/நடத்தி
+வருவார் completion-vs-continuation case beyond what Stage 7 already scores
+(`TARGET_WEAKENS_SPECIFICITY` → `POSSIBLE_UNDERTRANSLATION` via the generic
+precedence path) — no dedicated completion/continuation finding kind was
+requested by the spec.
+
+**Tests**: `engine/tests/test_qa_audit_stage8.py`, 27 cases — precedence/
+severity policy (parametrized over all 5 dimension→kind mappings plus
+generic status precedence and resource-conflict override), all→some
+quantity problem, genuine absence, ambiguous/search-incomplete blocking
+omission, the PHP reordered passage, grammatical function words and
+unsupported specificity on the target side, human-confirmation +
+edit-staleness preservation, QA-run cache hit, full `qaAudit.*` protocol
+round-trip via `BridgeEngine`, Hebrew (Gen 2:5) and Aramaic (Dan 2:4)
+reuse, and finding deduplication.
+
+**Not implemented** (explicitly out of scope, per spec): automatic
+Scripture correction, `CorrectionProposal` construction (the dataclass/
+table are untouched — no finding requires one), final QA UI, Scripture
+Burrito export, new translationCore projection behavior. `MISSING`/
+`UNSUPPORTED` and their `OMISSION`/`ADDITION` finding equivalents remain
+human-only transitions.
+
+**Unresolved risks**: the target-support gate's function-word/explicitation/
+specificity-marker lists are small, deliberately controlled fixtures
+(mirroring Stage 7's own comparator lists) — real-world coverage across
+languages is unvalidated beyond the English/Tamil/Hebrew/Aramaic cases
+tested here. `QaFinding.severity` thresholds (0.85/0.9 confidence cutoffs
+for `HIGH`→`CRITICAL`) are uncalibrated, same caveat as every confidence
+value elsewhere in this pipeline. No dedicated target-support account for
+`AGGREGATE`/`EVIDENCE_ONLY`-role target units (`NOT_CHECKED`, consistent
+with the source side) — if a future stage needs aggregate-level target QA,
+that's unbuilt.
+
+**Verified**: focused suite 27 passed; full Python suite 478 passed (up
+from 428 at the end of Stage 6B); `cargo check` clean; `npm run check` 0
+errors/0 warnings; `npm run build` succeeds; `git diff --check` clean.
+Stage 6B golden locations and Stage 7 golden meaning statuses unchanged
+(no test in `test_semantic_location_stage6b.py`/`test_meaning_analysis_stage7.py`
+was modified, and both suites still pass unmodified). Existing
+translationCore behavior unchanged (no `tc_project.py`/alignment/import
+code touched).
+
+**Note for Benz**: verifying this repo against the Stage 5–7 handoff doc
+turned up a pre-existing gap this session didn't create or fix — Stages 4
+through 7's commits (`78fdf4b`, `82d6664`, `de8ce4c`, `91e5394`, `0289ae5`)
+have no corresponding `BUILD_LOG.md` narrative (no reported test counts,
+no session notes), unlike every other feature landed in this file.
+`DEVELOPER_GUIDE.md`'s phase-roadmap table also has no row for any of
+these stages. Worth backfilling at some point so the record stays
+continuous, independent of Stage 8's own entry above.
+
 ## Flag for Benz: duplicate-detection fingerprint regression from Stage 4 passage-runtime merge (2026-09-02)
 
 Found while pulling `78fdf4b` (feat(semantic): integrate Stage 4 passage

@@ -23,8 +23,10 @@ export type CoverageDimension = "LEXICAL_CONTENT" | "POLARITY" | "QUANTITY" | "P
 export type AuditDirection = "SOURCE_COVERAGE" | "TARGET_SUPPORT";
 export type ActorType = "HUMAN" | "AI" | "SYSTEM" | "MIGRATION";
 export type ResourceValidationStatus = "NOT_CHECKED" | "CONSISTENT" | "SUPPORTING" | "CONFLICTING" | "NOT_APPLICABLE";
-export type EvidenceKind = "SOURCE_TEXT" | "TARGET_TEXT" | "MORPHOLOGY" | "TRANSLATION_NOTE" | "TRANSLATION_WORD" | "TRANSLATION_WORD_LIST" | "VERSIFICATION" | "STRUCTURE" | "HUMAN_NOTE" | "AI_RATIONALE";
-export type QaFindingKind = "POSSIBLY_MISSING" | "MISSING" | "POSSIBLY_UNSUPPORTED" | "UNSUPPORTED" | "RESOURCE_CONFLICT" | "NEEDS_PASSAGE_REVIEW" | "NEEDS_EXTENDED_PASSAGE_REVIEW";
+export type EvidenceKind = "SOURCE_TEXT" | "TARGET_TEXT" | "MORPHOLOGY" | "TRANSLATION_NOTE" | "TRANSLATION_WORD" | "TRANSLATION_WORD_LIST" | "VERSIFICATION" | "STRUCTURE" | "HUMAN_NOTE" | "AI_RATIONALE" | "SOURCE_VARIANT";
+export type QaFindingKind = "POSSIBLY_MISSING" | "MISSING" | "POSSIBLY_UNSUPPORTED" | "UNSUPPORTED" | "RESOURCE_CONFLICT" | "NEEDS_PASSAGE_REVIEW" | "NEEDS_EXTENDED_PASSAGE_REVIEW" | "POSSIBLE_OMISSION" | "POSSIBLE_ADDITION" | "POSSIBLE_UNDERTRANSLATION" | "POSSIBLE_OVERTRANSLATION" | "MEANING_SHIFT" | "CONTRADICTION" | "NEGATION_PROBLEM" | "QUANTITY_PROBLEM" | "TEMPORAL_PROBLEM" | "PARTICIPANT_PROBLEM" | "REFERENT_PROBLEM" | "SOURCE_VARIANT_REVIEW";
+export type QaFindingSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
+export type QaRunStatus = "RUNNING" | "COMPLETE" | "FAILED";
 export type PassageStructureKind = "CHAPTER" | "VERSE" | "VERSE_BRIDGE" | "PARAGRAPH" | "POETRY" | "HEADING" | "NOTE" | "CROSS_REFERENCE" | "INLINE_MARKUP";
 export type ExportFormat = "BRIDGE" | "CLEAN_USFM" | "TRANSLATIONCORE_ALIGNED_USFM" | "SCRIPTURE_BURRITO";
 export type ExportabilityLevel = "FULL" | "PARTIAL" | "NOT_REPRESENTABLE" | "TEXT_ONLY";
@@ -360,6 +362,8 @@ export interface SemanticCoverageAccount {
   reviewStatus: ReviewStatus;
   lifecycleStatus: LifecycleStatus;
   revision: number;
+  /** A SourceCoverage value when direction=SOURCE_COVERAGE, or a TargetSupport value when direction=TARGET_SUPPORT. */
+  coverageStatus: string;
 }
 
 export interface LexicalSolution {
@@ -411,6 +415,19 @@ export interface QaFinding {
   reviewStatus: ReviewStatus;
   lifecycleStatus: LifecycleStatus;
   revision: number;
+  severity: QaFindingSeverity;
+  meaningAssessmentIds: string[];
+  coverageAccountIds: string[];
+  locationOutcomeSnapshot: string;
+  meaningStatusSnapshot: string;
+  supportingEvidenceIds: string[];
+  conflictingEvidenceIds: string[];
+  resourceEvidenceIds: string[];
+  targetContentHashes: string[];
+  sourceResourceHashes: string[];
+  qaEngineVersion: string;
+  qaPolicyVersion: string;
+  fingerprint: string;
 }
 
 export interface CorrectionProposal {

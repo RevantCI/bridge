@@ -309,6 +309,13 @@ class Methods:
     MEANING_ANALYSIS_GET_ASSESSMENT = "meaningAnalysis.getAssessment"
     MEANING_ANALYSIS_GET_COMPONENTS = "meaningAnalysis.getComponents"
     MEANING_ANALYSIS_GET_DIAGNOSTICS = "meaningAnalysis.getDiagnostics"
+    QA_AUDIT_RUN_RANGE = "qaAudit.runRange"
+    QA_AUDIT_STATUS = "qaAudit.status"
+    QA_AUDIT_GET_RANGE = "qaAudit.getRange"
+    QA_AUDIT_GET_SOURCE_COVERAGE = "qaAudit.getSourceCoverage"
+    QA_AUDIT_GET_TARGET_SUPPORT = "qaAudit.getTargetSupport"
+    QA_AUDIT_GET_FINDING = "qaAudit.getFinding"
+    QA_AUDIT_GET_DIAGNOSTICS = "qaAudit.getDiagnostics"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -1857,6 +1864,32 @@ class BridgeEngine:
     def meaning_analysis_get_diagnostics(self, run_id: str) -> dict[str, Any]:
         return self._require_passage_semantic_runtime().meaning_analysis_diagnostics(run_id)
 
+    def qa_audit_run_range(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+        meaning_run_id: str = "",
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().run_qa_audit_range(
+            chapter, verse, end_chapter, end_verse, meaning_run_id,
+        )
+
+    def qa_audit_status(self, run_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().qa_audit_status(run_id)
+
+    def qa_audit_get_range(self, run_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().qa_audit_range(run_id)
+
+    def qa_audit_get_source_coverage(self, run_id: str) -> list[dict[str, Any]]:
+        return self._require_passage_semantic_runtime().qa_audit_source_coverage(run_id)
+
+    def qa_audit_get_target_support(self, run_id: str) -> list[dict[str, Any]]:
+        return self._require_passage_semantic_runtime().qa_audit_target_support(run_id)
+
+    def qa_audit_get_finding(self, finding_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().qa_audit_finding(finding_id)
+
+    def qa_audit_get_diagnostics(self, run_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().qa_audit_diagnostics(run_id)
+
     # -- live desktop connectors (Paratext/Logos) --------------------------
     #
     # Direct pass-through calls only in this pass: read the connector's current
@@ -3373,6 +3406,36 @@ class BridgeEngine:
                 ))
             if m == Methods.MEANING_ANALYSIS_GET_DIAGNOSTICS:
                 return EngineResponse.ok(request.id, result=self.meaning_analysis_get_diagnostics(
+                    str(p.get("runId") or ""),
+                ))
+            if m == Methods.QA_AUDIT_RUN_RANGE:
+                return EngineResponse.ok(request.id, result=self.qa_audit_run_range(
+                    str(p.get("chapter") or ""), str(p.get("verse") or ""),
+                    str(p.get("endChapter") or ""), str(p.get("endVerse") or ""),
+                    str(p.get("meaningRunId") or ""),
+                ))
+            if m == Methods.QA_AUDIT_STATUS:
+                return EngineResponse.ok(request.id, result=self.qa_audit_status(
+                    str(p.get("runId") or ""),
+                ))
+            if m == Methods.QA_AUDIT_GET_RANGE:
+                return EngineResponse.ok(request.id, result=self.qa_audit_get_range(
+                    str(p.get("runId") or ""),
+                ))
+            if m == Methods.QA_AUDIT_GET_SOURCE_COVERAGE:
+                return EngineResponse.ok(request.id, result=self.qa_audit_get_source_coverage(
+                    str(p.get("runId") or ""),
+                ))
+            if m == Methods.QA_AUDIT_GET_TARGET_SUPPORT:
+                return EngineResponse.ok(request.id, result=self.qa_audit_get_target_support(
+                    str(p.get("runId") or ""),
+                ))
+            if m == Methods.QA_AUDIT_GET_FINDING:
+                return EngineResponse.ok(request.id, result=self.qa_audit_get_finding(
+                    str(p.get("findingId") or ""),
+                ))
+            if m == Methods.QA_AUDIT_GET_DIAGNOSTICS:
+                return EngineResponse.ok(request.id, result=self.qa_audit_get_diagnostics(
                     str(p.get("runId") or ""),
                 ))
             if m == Methods.ISSUE_RESOLUTION_LIST:
