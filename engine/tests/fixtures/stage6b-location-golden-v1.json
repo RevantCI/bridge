@@ -1,0 +1,14 @@
+{
+  "schema": "bridge.stage6b-location-golden/v1",
+  "provenance": "MACHINE_PROPOSED_TEST_FIXTURE",
+  "relationships": [
+    {"sourceReference":"PHP 1:3","targetReference":"PHP 1:6","properties":["CROSS_VERSE","REORDERED"]},
+    {"sourceReference":"PHP 1:4","targetReference":"PHP 1:4","properties":["REORDERED"]},
+    {"sourceReference":"PHP 1:5","targetReference":"PHP 1:3","properties":["CROSS_VERSE","REORDERED"]},
+    {"sourceReference":"PHP 1:6","targetReference":"PHP 1:5","properties":["CROSS_VERSE","REORDERED"]}
+  ],
+  "controlledCases": [
+    "all-to-some", "before-to-after", "genuine-not-located", "split", "merged",
+    "repeated-word-ambiguity", "hebrew-preserved", "aramaic-preserved"
+  ]
+}

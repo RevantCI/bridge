@@ -1111,6 +1111,93 @@ pub async fn semantic_location_get_diagnostics(
 }
 
 #[tauri::command]
+pub async fn meaning_analysis_run_range(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    end_chapter: Option<String>,
+    end_verse: Option<String>,
+    location_run_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "meaningAnalysis.runRange",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse,
+                "endChapter": end_chapter.unwrap_or_default(),
+                "endVerse": end_verse.unwrap_or_default(),
+                "locationRunId": location_run_id.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn meaning_analysis_status(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "meaningAnalysis.status",
+            serde_json::json!({"runId": run_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn meaning_analysis_get_range(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "meaningAnalysis.getRange",
+            serde_json::json!({"runId": run_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn meaning_analysis_get_assessment(
+    sidecar: State<'_, EngineSidecar>,
+    assessment_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "meaningAnalysis.getAssessment",
+            serde_json::json!({"assessmentId": assessment_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn meaning_analysis_get_components(
+    sidecar: State<'_, EngineSidecar>,
+    assessment_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "meaningAnalysis.getComponents",
+            serde_json::json!({"assessmentId": assessment_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn meaning_analysis_get_diagnostics(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "meaningAnalysis.getDiagnostics",
+            serde_json::json!({"runId": run_id}),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn paratext_get_state(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar
         .send_request("paratext.getState", serde_json::json!({}))

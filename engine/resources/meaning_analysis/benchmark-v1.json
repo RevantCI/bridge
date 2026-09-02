@@ -1,0 +1,28 @@
+{
+  "schema": "bridge.meaning-benchmark/v1",
+  "benchmarkVersion": "meaning-benchmark-v1",
+  "reviewStatus": "MACHINE_PROPOSED",
+  "description": "Stage 7 development cases only; human review and production calibration are pending.",
+  "cases": [
+    {"id":"preserved","split":"TRAIN","source":"all","target":"all","dimension":"QUANTITY","expected":"PRESERVED"},
+    {"id":"restructuring","split":"TEST","source":"the man","target":"he","dimension":"PARTICIPANT","realization":"PRONOMINALIZED","expected":"PRESERVED_WITH_RESTRUCTURING"},
+    {"id":"implicit-recoverable","split":"CALIBRATION","source":"possession","target":"his","dimension":"REFERENT","realization":"GRAMMATICALLY_REALIZED","expected":"PRESERVED_WITH_RESTRUCTURING"},
+    {"id":"grammatical","split":"TEST","source":"plural","target":"they","dimension":"QUANTITY","realization":"GRAMMATICALLY_REALIZED","expected":"UNVERIFIABLE"},
+    {"id":"pronoun","split":"CALIBRATION","source":"person","target":"he","dimension":"PARTICIPANT","realization":"PRONOMINALIZED","expected":"PRESERVED_WITH_RESTRUCTURING"},
+    {"id":"idiom","split":"TEST","source":"heart was lifted","target":"became proud","dimension":"LEXICAL_CONTENT","expected":"PRESERVED_WITH_RESTRUCTURING"},
+    {"id":"all-some","split":"TEST","source":"all","target":"some","dimension":"QUANTITY","expected":"CONTRADICTED"},
+    {"id":"positive-negative","split":"TEST","source":"yes","target":"not","dimension":"POLARITY","expected":"CONTRADICTED"},
+    {"id":"before-after","split":"TEST","source":"before","target":"after","dimension":"TEMPORAL_ASPECTUAL","expected":"CONTRADICTED"},
+    {"id":"giver-receiver","split":"CALIBRATION","source":"give to him","target":"he gives","dimension":"CLAUSE_RELATION","expected":"CONTRADICTED"},
+    {"id":"participant-swap","split":"TEST","source":"God","target":"man","dimension":"PARTICIPANT","expected":"CONTRADICTED"},
+    {"id":"completion-continuation","split":"TEST","source":"complete","target":"continue","dimension":"TEMPORAL_ASPECTUAL","expected":"UNDERTRANSLATED"},
+    {"id":"certainty-possibility","split":"TEST","source":"certain","target":"may","dimension":"OTHER","expected":"UNDERTRANSLATED"},
+    {"id":"unsupported-specificity","split":"CALIBRATION","source":"city","target":"holy city","dimension":"LEXICAL_CONTENT","expected":"OVERTRANSLATED"},
+    {"id":"partial","split":"CALIBRATION","source":"complete","target":"begin","dimension":"TEMPORAL_ASPECTUAL","expected":"PARTIAL"},
+    {"id":"unverifiable","split":"TEST","source":"λόγος","target":"மொழி","dimension":"LEXICAL_CONTENT","expected":"UNVERIFIABLE"},
+    {"id":"split","split":"TRAIN","source":"one concept","target":"alpha … omega","dimension":"LEXICAL_CONTENT","properties":["SPLIT"],"expected":"UNVERIFIABLE"},
+    {"id":"merged","split":"TRAIN","source":"two concepts","target":"combined","dimension":"LEXICAL_CONTENT","properties":["MERGED"],"expected":"UNVERIFIABLE"},
+    {"id":"cross-reordered","split":"TRAIN","source":"all","target":"all","dimension":"QUANTITY","properties":["CROSS_VERSE","REORDERED"],"expected":"PRESERVED_WITH_RESTRUCTURING"}
+    ,{"id":"valid-explicitation","split":"TEST","source":"he","target":"the man","dimension":"PARTICIPANT","expected":"PRESERVED_WITH_RESTRUCTURING"}
+  ]
+}

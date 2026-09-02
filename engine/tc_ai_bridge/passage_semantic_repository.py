@@ -43,7 +43,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 5
+DATABASE_SCHEMA_VERSION = 6
 
 
 class FoundationError(RuntimeError):
@@ -554,6 +554,47 @@ CREATE TABLE semantic_embedding_cache (
 );
 """
 
+_MIGRATION_V6 = r"""
+CREATE TABLE meaning_analysis_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    book TEXT NOT NULL,
+    range_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    location_run_id TEXT NOT NULL REFERENCES semantic_location_runs(id),
+    run_status TEXT NOT NULL CHECK(run_status IN ('RUNNING','COMPLETE','FAILED')),
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id,book,range_key,fingerprint)
+);
+CREATE INDEX ix_meaning_analysis_runs_range
+ON meaning_analysis_runs(project_id,book,range_key,lifecycle_status);
+
+CREATE TABLE meaning_assessments (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES meaning_analysis_runs(id) ON DELETE CASCADE,
+    semantic_location_relationship_id TEXT NOT NULL REFERENCES semantic_location_relationships(id),
+    meaning_status TEXT NOT NULL CHECK(meaning_status IN ('PRESERVED','PRESERVED_WITH_RESTRUCTURING','PARTIAL','OVERTRANSLATED','UNDERTRANSLATED','MEANING_SHIFT','CONTRADICTED','UNVERIFIABLE')),
+    review_status TEXT NOT NULL CHECK(review_status IN ('UNREVIEWED','AI_PROPOSED','HUMAN_APPROVED','HUMAN_REJECTED','HUMAN_MODIFIED','NEEDS_DISCUSSION')),
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX ix_meaning_assessments_run ON meaning_assessments(run_id,meaning_status);
+
+CREATE TABLE meaning_component_assessments (
+    id TEXT PRIMARY KEY,
+    assessment_id TEXT NOT NULL REFERENCES meaning_assessments(id) ON DELETE CASCADE,
+    coverage_dimension TEXT NOT NULL,
+    component_status TEXT NOT NULL CHECK(component_status IN ('PRESERVED','PARTIALLY_PRESERVED','ALTERED','CONTRADICTED','TARGET_ADDS_SPECIFICITY','TARGET_WEAKENS_SPECIFICITY','NOT_EXPLICIT_BUT_RECOVERABLE','NOT_DETERMINABLE','NOT_APPLICABLE')),
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX ix_meaning_components_assessment
+ON meaning_component_assessments(assessment_id,coverage_dimension);
+"""
+
 
 class FoundationRepository:
     def __init__(self, path: str | Path):
@@ -607,6 +648,10 @@ class FoundationRepository:
             if current < 5:
                 self._backup_before_migration(conn, current, 5)
                 self._apply_migration(conn, 5, _MIGRATION_V5)
+                current = 5
+            if current < 6:
+                self._backup_before_migration(conn, current, 6)
+                self._apply_migration(conn, 6, _MIGRATION_V6)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -1523,6 +1568,96 @@ class FoundationRepository:
         self.semantic_location_run(row["run_id"])
         return json.loads(row["payload_json"])
 
+    def save_meaning_analysis_run(
+        self, *, run_id: str, project_id: str, book: str, range_key: str,
+        fingerprint: str, location_run_id: str, run_status: str,
+        payload: dict[str, Any], assessments: list[dict[str, Any]],
+    ) -> None:
+        """Atomically publish immutable Stage 7 assessments and dependencies."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            location = conn.execute(
+                "SELECT lifecycle_status FROM semantic_location_runs WHERE id=?",
+                (location_run_id,),
+            ).fetchone()
+            if location is None or location[0] != "ACTIVE":
+                raise FoundationValidationError("Meaning analysis requires an active location run")
+            conn.execute(
+                "UPDATE meaning_analysis_runs SET lifecycle_status='SUPERSEDED',revision=revision+1 "
+                "WHERE project_id=? AND book=? AND range_key=? AND lifecycle_status='ACTIVE' "
+                "AND fingerprint<>?", (project_id, book, range_key, fingerprint),
+            )
+            conn.execute(
+                "INSERT INTO meaning_analysis_runs VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (run_id, project_id, book, range_key, fingerprint, location_run_id,
+                 run_status, "ACTIVE", 1, json.dumps(payload, ensure_ascii=False), self._now()),
+            )
+            conn.executemany(
+                "INSERT INTO meaning_assessments VALUES(?,?,?,?,?,?,?,?)",
+                [(item["id"], run_id, item["semanticLocationRelationshipId"],
+                  item["meaningStatus"], item["reviewStatus"], item["lifecycleStatus"],
+                  item["revision"], json.dumps(item, ensure_ascii=False),)
+                 for item in assessments],
+            )
+            conn.executemany(
+                "INSERT INTO meaning_component_assessments VALUES(?,?,?,?,?)",
+                [(component["id"], item["id"], component["coverageDimension"],
+                  component["status"], json.dumps(component, ensure_ascii=False))
+                 for item in assessments for component in item["componentAssessments"]],
+            )
+            conn.executemany(
+                "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)",
+                [
+                    ("MEANING_RUN", run_id, "LOCATION_RUN", location_run_id),
+                    *[("MEANING_ASSESSMENT", item["id"], "MEANING_RUN", run_id)
+                      for item in assessments],
+                ],
+            )
+            conn.commit()
+
+    def meaning_analysis_for_fingerprint(
+        self, project_id: str, book: str, range_key: str, fingerprint: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM meaning_analysis_runs WHERE project_id=? AND book=? "
+                "AND range_key=? AND fingerprint=? AND lifecycle_status='ACTIVE' "
+                "AND run_status='COMPLETE'", (project_id, book, range_key, fingerprint),
+            ).fetchone()
+        return None if row is None else json.loads(row[0])
+
+    def meaning_analysis_run(self, run_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json,lifecycle_status FROM meaning_analysis_runs WHERE id=?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(f"Unknown meaning analysis run: {run_id}")
+        if row["lifecycle_status"] != "ACTIVE":
+            raise FoundationValidationError("Meaning analysis run is stale or inactive")
+        return json.loads(row["payload_json"])
+
+    def meaning_assessment(self, assessment_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json,run_id FROM meaning_assessments WHERE id=?",
+                (assessment_id,),
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(f"Unknown meaning assessment: {assessment_id}")
+        self.meaning_analysis_run(row["run_id"])
+        return json.loads(row["payload_json"])
+
+    def meaning_components(self, assessment_id: str) -> list[dict[str, Any]]:
+        self.meaning_assessment(assessment_id)
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM meaning_component_assessments "
+                "WHERE assessment_id=? ORDER BY coverage_dimension,id", (assessment_id,),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
     def human_approved_lexical_precedents(self, project_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -2097,6 +2232,7 @@ class FoundationRepository:
             "lexicalSolutions": "lexical_solutions", "correctionProposals": "correction_proposals",
             "evidence": "evidence_records", "exportability": "exportability_records",
             "semanticLocationRuns": "semantic_location_runs",
+            "meaningAnalysisRuns": "meaning_analysis_runs",
         }
         counts: dict[str, int] = {}
         with self._connect() as conn:
@@ -2140,6 +2276,8 @@ class FoundationRepository:
             "TARGET_INVENTORY": "target_inventory_runs",
             "SOURCE_INVENTORY": "source_inventory_runs",
             "LOCATION_RUN": "semantic_location_runs",
+            "MEANING_RUN": "meaning_analysis_runs",
+            "MEANING_ASSESSMENT": "meaning_assessments",
         }
         queue: list[tuple[str, str]] = [(dependency_type, dependency_id)]
         visited: set[tuple[str, str]] = set()
@@ -2260,6 +2398,8 @@ class FoundationRepository:
                 "SOURCE_INVENTORY": "source_inventory_runs",
                 "TARGET_INVENTORY": "target_inventory_runs",
                 "LOCATION_RUN": "semantic_location_runs",
+                "MEANING_RUN": "meaning_analysis_runs",
+                "MEANING_ASSESSMENT": "meaning_assessments",
             }
             dependencies = conn.execute(
                 "SELECT record_type,record_id,depends_on_type,depends_on_id FROM record_dependencies"

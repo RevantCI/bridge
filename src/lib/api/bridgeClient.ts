@@ -24,6 +24,10 @@ import type {
   SemanticLocationDiagnostics,
   SemanticLocationRelationship,
   SemanticLocationRun,
+  MeaningAnalysisRun,
+  MeaningAssessment,
+  MeaningComponentAssessment,
+  MeaningAnalysisDiagnostics,
 } from "../types/passageSemanticV1";
 
 /**
@@ -506,6 +510,35 @@ export const bridge = {
 
   semanticLocationGetDiagnostics(runId: string): Promise<SemanticLocationDiagnostics> {
     return call("semantic_location_get_diagnostics", { runId });
+  },
+
+  meaningAnalysisRunRange(
+    chapter: string, verse: string, endChapter?: string, endVerse?: string,
+    locationRunId?: string,
+  ): Promise<MeaningAnalysisRun> {
+    return call("meaning_analysis_run_range", {
+      chapter, verse, endChapter, endVerse, locationRunId,
+    });
+  },
+
+  meaningAnalysisStatus(runId: string): Promise<Pick<MeaningAnalysisRun, "id" | "runStatus" | "diagnostics" | "cacheStatus">> {
+    return call("meaning_analysis_status", { runId });
+  },
+
+  meaningAnalysisGetRange(runId: string): Promise<MeaningAnalysisRun> {
+    return call("meaning_analysis_get_range", { runId });
+  },
+
+  meaningAnalysisGetAssessment(assessmentId: string): Promise<MeaningAssessment> {
+    return call("meaning_analysis_get_assessment", { assessmentId });
+  },
+
+  meaningAnalysisGetComponents(assessmentId: string): Promise<MeaningComponentAssessment[]> {
+    return call("meaning_analysis_get_components", { assessmentId });
+  },
+
+  meaningAnalysisGetDiagnostics(runId: string): Promise<MeaningAnalysisDiagnostics> {
+    return call("meaning_analysis_get_diagnostics", { runId });
   },
 
   paratextGetState(): Promise<DesktopConnectorState> {
