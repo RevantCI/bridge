@@ -1,0 +1,298 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+
+  import QaFindingDetail from "./QaFindingDetail.svelte";
+  import QaFindingList from "./QaFindingList.svelte";
+  import type { QaDisposition, ReviewQueueOrder, ReviewerDecision } from "../types/qaReview";
+  import {
+    addReviewerNote,
+    decideFinding,
+    detailError,
+    detailLoading,
+    goToNextUnresolved,
+    hasMoreFindings,
+    loadMoreFindings,
+    loadQueue,
+    reviewError,
+    reviewFilters,
+    reviewLoading,
+    reviewQueue,
+    reviewTotal,
+    selectFinding,
+    selectedDetail,
+    selectedFindingId,
+    stepSelection,
+  } from "../reviewStores";
+
+  /**
+   * QA mode: the primary Stage 9A work surface.
+   *
+   * Queue on the left, evidence and decision on the right. Filters restart
+   * the queue rather than filtering the loaded page, so what the reviewer
+   * sees always matches what the engine ordered.
+   */
+
+  const KIND_FILTERS: Array<{ value: string; label: string }> = [
+    { value: "POSSIBLE_OMISSION", label: "Possible omissions" },
+    { value: "POSSIBLE_ADDITION", label: "Possible additions" },
+    { value: "POSSIBLE_UNDERTRANSLATION", label: "Undertranslation" },
+    { value: "POSSIBLE_OVERTRANSLATION", label: "Overtranslation" },
+    { value: "MEANING_SHIFT", label: "Meaning shifts" },
+    { value: "CONTRADICTION", label: "Contradictions" },
+    { value: "NEGATION_PROBLEM", label: "Negation" },
+    { value: "QUANTITY_PROBLEM", label: "Quantity" },
+    { value: "TEMPORAL_PROBLEM", label: "Temporal" },
+    { value: "PARTICIPANT_PROBLEM", label: "Participant" },
+    { value: "REFERENT_PROBLEM", label: "Referent" },
+    { value: "RESOURCE_CONFLICT", label: "Resource conflict" },
+    { value: "SOURCE_VARIANT_REVIEW", label: "Source variant" },
+  ];
+
+  const STATE_FILTERS: Array<{ value: QaDisposition; label: string }> = [
+    { value: "UNRESOLVED", label: "Unreviewed" },
+    { value: "CONFIRMED_TRANSLATION_ERROR", label: "Confirmed" },
+    { value: "ACCEPTABLE_TRANSLATION", label: "Accepted" },
+    { value: "FALSE_POSITIVE", label: "False positives" },
+    { value: "NEEDS_DISCUSSION", label: "Needs discussion" },
+  ];
+
+  let busy = false;
+  let flash = "";
+  let flashTone: "ok" | "warn" = "ok";
+
+  onMount(() => {
+    void loadQueue();
+  });
+
+  async function applyFilters(): Promise<void> {
+    await loadQueue();
+    await selectFinding(null);
+  }
+
+  function toggle<T>(list: T[], value: T): T[] {
+    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
+  }
+
+  async function toggleKind(value: string): Promise<void> {
+    reviewFilters.update((f) => ({ ...f, kinds: toggle(f.kinds, value) }));
+    await applyFilters();
+  }
+
+  async function toggleDisposition(value: QaDisposition): Promise<void> {
+    reviewFilters.update((f) => ({ ...f, dispositions: toggle(f.dispositions, value) }));
+    await applyFilters();
+  }
+
+  async function toggleStale(): Promise<void> {
+    reviewFilters.update((f) => ({
+      ...f,
+      lifecycleStatuses: f.lifecycleStatuses.includes("STALE") ? [] : ["STALE"],
+    }));
+    await applyFilters();
+  }
+
+  async function setOrder(order: ReviewQueueOrder): Promise<void> {
+    reviewFilters.update((f) => ({ ...f, order }));
+    await applyFilters();
+  }
+
+  function announce(message: string, tone: "ok" | "warn" = "ok"): void {
+    flash = message;
+    flashTone = tone;
+  }
+
+  async function onDecide(
+    event: CustomEvent<{ disposition: ReviewerDecision; note: string; promote: boolean }>,
+  ): Promise<void> {
+    const id = $selectedFindingId;
+    if (!id) return;
+    busy = true;
+    const result = await decideFinding(id, event.detail.disposition, {
+      note: event.detail.note,
+      promote: event.detail.promote,
+    });
+    busy = false;
+    if (result.ok) {
+      const promoted = result.promoted.length
+        ? ` Promoted ${result.promoted.length} coverage account${result.promoted.length === 1 ? "" : "s"}.`
+        : "";
+      announce(`Decision recorded.${promoted}`);
+      await goToNextUnresolved();
+    } else {
+      announce(result.message, "warn");
+    }
+  }
+
+  async function onNote(event: CustomEvent<{ note: string }>): Promise<void> {
+    const id = $selectedFindingId;
+    if (!id) return;
+    busy = true;
+    const result = await addReviewerNote(id, event.detail.note);
+    busy = false;
+    announce(result.ok ? "Note saved." : result.message, result.ok ? "ok" : "warn");
+  }
+</script>
+
+<div class="qa-mode">
+  <div class="filters" role="group" aria-label="Filter the review queue">
+    <div class="filter-row">
+      <span class="filter-label" id="filter-order">Order</span>
+      <div class="chips" role="group" aria-labelledby="filter-order">
+        <button
+          type="button"
+          class="chip"
+          aria-pressed={$reviewFilters.order === "CANONICAL"}
+          on:click={() => setOrder("CANONICAL")}
+        >Book order</button>
+        <button
+          type="button"
+          class="chip"
+          aria-pressed={$reviewFilters.order === "SEVERITY"}
+          on:click={() => setOrder("SEVERITY")}
+        >Highest priority first</button>
+      </div>
+    </div>
+
+    <div class="filter-row">
+      <span class="filter-label" id="filter-state">Review state</span>
+      <div class="chips" role="group" aria-labelledby="filter-state">
+        {#each STATE_FILTERS as option}
+          <button
+            type="button"
+            class="chip"
+            aria-pressed={$reviewFilters.dispositions.includes(option.value)}
+            on:click={() => toggleDisposition(option.value)}
+          >{option.label}</button>
+        {/each}
+        <button
+          type="button"
+          class="chip"
+          aria-pressed={$reviewFilters.lifecycleStatuses.includes("STALE")}
+          on:click={toggleStale}
+        >Stale only</button>
+      </div>
+    </div>
+
+    <div class="filter-row">
+      <span class="filter-label" id="filter-kind">Issue type</span>
+      <div class="chips" role="group" aria-labelledby="filter-kind">
+        {#each KIND_FILTERS as option}
+          <button
+            type="button"
+            class="chip"
+            aria-pressed={$reviewFilters.kinds.includes(option.value)}
+            on:click={() => toggleKind(option.value)}
+          >{option.label}</button>
+        {/each}
+      </div>
+    </div>
+  </div>
+
+  {#if flash}
+    <p class="flash" class:warn={flashTone === "warn"} role="status">{flash}</p>
+  {/if}
+  {#if $reviewError}
+    <p class="flash warn" role="alert">{$reviewError}</p>
+  {/if}
+
+  <div class="panes">
+    <div class="pane list-pane">
+      <QaFindingList
+        findings={$reviewQueue}
+        selectedId={$selectedFindingId}
+        loading={$reviewLoading}
+        hasMore={$hasMoreFindings}
+        total={$reviewTotal}
+        on:select={(event) => selectFinding(event.detail.id)}
+        on:loadMore={() => loadMoreFindings()}
+      />
+    </div>
+
+    <div class="pane detail-pane">
+      <QaFindingDetail
+        detail={$selectedDetail}
+        loading={$detailLoading}
+        error={$detailError}
+        {busy}
+        on:decide={onDecide}
+        on:note={onNote}
+        on:next={() => stepSelection(1)}
+        on:previous={() => stepSelection(-1)}
+      />
+    </div>
+  </div>
+</div>
+
+<style>
+  .qa-mode { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+
+  .filters {
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    flex: none;
+    /* Many filters on a 1366x768 screen: cap the block and let it scroll
+       rather than pushing the queue itself off the viewport. */
+    max-height: 8.5rem;
+    overflow-y: auto;
+  }
+
+  .filter-row { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+  .filter-label { font-size: 0.7rem; color: #6b7280; min-width: 5.5rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+
+  .chip {
+    font: inherit;
+    font-size: 0.72rem;
+    padding: 0.15rem 0.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 999px;
+    background: #fff;
+    color: #374151;
+    cursor: pointer;
+  }
+
+  /* Pressed state carries a border weight and a check glyph position, not
+     colour alone. */
+  .chip[aria-pressed="true"] {
+    border-color: #1d4ed8;
+    border-width: 2px;
+    padding: 0.1rem 0.45rem;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 600;
+  }
+
+  .chip:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+
+  .flash {
+    margin: 0;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.78rem;
+    background: #ecfdf5;
+    color: #065f46;
+    border-bottom: 1px solid #d1fae5;
+    flex: none;
+  }
+
+  .flash.warn { background: #fef2f2; color: #991b1b; border-bottom-color: #fecaca; }
+
+  .panes {
+    display: grid;
+    grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  .pane { min-height: 0; min-width: 0; }
+  .list-pane { border-right: 1px solid #e5e7eb; }
+
+  /* Below roughly a narrow laptop the two panes stack instead of shrinking
+     the evidence column into unreadability. */
+  @media (max-width: 900px) {
+    .panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: 14rem minmax(0, 1fr); }
+    .list-pane { border-right: none; border-bottom: 1px solid #e5e7eb; }
+  }
+</style>

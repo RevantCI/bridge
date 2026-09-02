@@ -212,3 +212,34 @@ export interface EntityHistory {
   entityId: string;
   records: ReviewRecord[];
 }
+
+/**
+ * Visual tone for a review status pill. Each tone pairs with a glyph and its
+ * own text in ReviewStatusBadge, so status never depends on colour alone.
+ */
+export type BadgeTone =
+  | "possible"
+  | "confirmed"
+  | "acceptable"
+  | "rejected"
+  | "discussion"
+  | "stale"
+  | "neutral";
+
+/**
+ * One verse row in the target passage stream, with the flags Passage mode
+ * filters on. Built from the target inventory's tokens and the location run's
+ * relationships rather than fetched as its own record.
+ */
+export interface PassageVerse {
+  reference: string;
+  text: string;
+  /** Relationship ids whose target realization lands in this verse. */
+  relationshipIds: string[];
+  linked: boolean;
+  crossVerse: boolean;
+  splitOrMerged: boolean;
+  hasFinding: boolean;
+  reviewed: boolean;
+  stale: boolean;
+}

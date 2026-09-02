@@ -5,6 +5,8 @@
   import TopBar from "./lib/components/TopBar.svelte";
   import VerseList from "./lib/components/VerseList.svelte";
   import ReviewPanel from "./lib/components/ReviewPanel.svelte";
+  import AlignmentReview from "./lib/components/AlignmentReview.svelte";
+  import { resetReviewState } from "./lib/reviewStores";
   import SettingsModal from "./lib/components/SettingsModal.svelte";
   import ExportModal from "./lib/components/ExportModal.svelte";
   import ProjectDashboard from "./lib/components/ProjectDashboard.svelte";
@@ -31,6 +33,9 @@
   let chapterLoadSequence = 0;
   let showingDashboard = false;
   let showingSemanticValidation = false;
+  // Alignment Review is a top-level surface alongside the editor, not a
+  // replacement for ReviewPanel's per-verse alignment modal.
+  let showingAlignmentReview = false;
   let bookProgress: BookProgressEntry[] = [];
   let dashboardLoading = false;
   let dashboardError = "";
@@ -148,9 +153,11 @@
   async function showProjectHome() {
     await stopActiveJob();
     resetBookState();
+    resetReviewState();
     project.set(null);
     opened = false;
     showingSemanticValidation = false;
+    showingAlignmentReview = false;
     openingBook = "";
     bookOpenError = "";
   }
@@ -188,6 +195,7 @@
 
   function openDashboard(): void {
     showingSemanticValidation = false;
+    showingAlignmentReview = false;
     showingDashboard = true;
     void loadDashboard();
     void loadReport();
@@ -260,6 +268,7 @@
       const info = await bridge.openProject(path);
       if (!info.importedProjects && siblings) info.importedProjects = siblings;
       resetBookState();
+    resetReviewState();
       project.set(info);
       if (enterEditor) await enterCurrentProject();
       return true;
@@ -429,6 +438,7 @@
   async function navigateToFinding(chapter: string, verse: string): Promise<void> {
     showingDashboard = false;
     showingSemanticValidation = false;
+    showingAlignmentReview = false;
     await activateChapter(chapter, verse);
   }
 
@@ -501,8 +511,12 @@
     showingDashboard = true;
   }
   $: screen = (
-    !opened ? "home" : showingSemanticValidation ? "validation" : showingDashboard ? "dashboard" : "editor"
-  ) as "home" | "dashboard" | "validation" | "editor";
+    !opened ? "home"
+      : showingAlignmentReview ? "review"
+      : showingSemanticValidation ? "validation"
+      : showingDashboard ? "dashboard"
+      : "editor"
+  ) as "home" | "dashboard" | "validation" | "review" | "editor";
   $: projectName = $project?.projectName || $project?.bibleName || $project?.bookName || "";
   $: dashboardSubtitle = [
     $project?.targetLanguage,
@@ -587,6 +601,14 @@
       onOpenSemanticValidation={openSemanticValidation}
       onRequestAdvancedMode={() => openSettings("quality")}
     />
+  {:else if screen === "review"}
+    {#key $project?.path}
+      <AlignmentReview
+        chapter={$currentChapter}
+        verse={$selectedVerse}
+        onClose={() => (showingAlignmentReview = false)}
+      />
+    {/key}
   {:else if screen === "validation"}
     {#key $project?.path}
       <SemanticMappingValidation
@@ -604,6 +626,9 @@
           <span>Chapter {$currentChapter} of {$project?.chapters.length ?? "?"}</span>
           <button class="whole-book-btn" on:click={runWholeBook} disabled={Boolean(activeJobId)}>
             {$checkingProgress.scope === "book" && $checkingProgress.running ? "Running…" : "Run whole book"}
+          </button>
+          <button class="whole-book-btn" on:click={() => (showingAlignmentReview = true)}>
+            Alignment Review
           </button>
           <span class="grow" />
           <span title="Word-alignment status for this chapter">

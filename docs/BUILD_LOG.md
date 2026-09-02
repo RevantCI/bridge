@@ -10,6 +10,162 @@ Updated: 2026-09-02
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
 
+## Stage 9A.2 — Alignment Review UI: shell, QA mode, evidence inspector (2026-09-02)
+
+The first UI for the Stage 4-8 semantic pipeline. A reviewer can now open
+Alignment Review, work the QA queue, inspect a finding's evidence in layers,
+and record one of four decisions - without any route to changing Scripture.
+Frontend only: no Python or Rust changed in this step, and the backend tree
+is byte-identical to the one that passed 532 tests at Stage 9A.1.
+
+Semantic and Passage modes landed in the same pass rather than as
+placeholders, since both turned out to need no new backend: the read chain
+already existed (a finding's location `runId` to `semanticLocation.getRange`
+to `targetSemantic.getRange`). The remaining Stage 9A.3 work is the seeded
+fixture project, the PHP 1:3-6 walkthrough, and final verification.
+
+### Vitest
+
+Bridge had no frontend test framework; `svelte-check` plus `npm run build`
+were the whole gate. Added Vitest + @testing-library/svelte + jsdom
+(`vitest.config.ts`, `npm test`). Playwright was deliberately **not** added:
+it roughly doubles the test-infra surface, and Bridge ships offline into a
+Tauri shell where a headless-browser harness buys little over asserting on
+the DOM these components actually produce. The cost of that choice is
+recorded under "what these tests cannot check" below.
+
+### Components
+
+- `AlignmentReview.svelte` - the shell, with Word / Semantic / Passage / QA
+  tabs following the WAI-ARIA tabs pattern (one tab stop, arrow keys move,
+  each panel labelled by its tab). Opens in QA mode.
+- `SemanticAlignmentMode.svelte` - the same focused record presented
+  relationship-first: source meaning, target realization, and an assessment
+  strip keeping location, meaning and coverage in separate cells. Each
+  realization kind (lexical, grammatical, pronominalized, implicit) and each
+  property (split, merged, cross-verse) carries a sentence saying what it
+  means, described neutrally rather than as a defect.
+- `PassageAlignmentMode.svelte` + `VirtualPassageStream.svelte` - the target
+  passage as a windowed stream of collapsible verse rows, never one column
+  per verse. Connector detail is drawn only for the focused relationship; an
+  unfocused linked verse gets a count instead, which is what keeps the view
+  from becoming a full-passage spaghetti graph. Relationships are matched to
+  verses through their target token ids, since a relationship carries tokens
+  rather than references - which is also what makes cross-verse realization
+  visible, one relationship's tokens falling in more than one verse.
+
+  When a run had no embedding provider, the mode says so and reports how many
+  relationships were found, so sparse linking reads as the capability limit
+  it is rather than as an indictment of the translation.
+- `AlignmentQaMode.svelte` - queue on the left, evidence and decision on the
+  right; filter chips for order, review state and issue type.
+- `QaFindingList.svelte` - the queue, windowed above 60 rows so a
+  thousand-finding queue puts a few dozen rows in the DOM rather than a
+  thousand. Fixed row height so the window is computed from `scrollTop`
+  without measuring.
+- `QaFindingDetail.svelte` - the four reviewer actions, the note field, and
+  the opt-in promotion checkbox.
+- `EvidenceInspector.svelte` - FINDING / SOURCE / LOCATION / MEANING /
+  COVERAGE / RESOURCES / HISTORY as separate sections.
+- `ReviewStatusBadge.svelte` - status pills.
+- `reviewStores.ts`, `reviewLabels.ts`, `__tests__/fixtures.ts`.
+
+`AlignmentModal.svelte` is mounted unchanged as Word mode. Nothing converts
+Bridge semantic relationships into translationCore alignment groups.
+
+### Where the design decisions actually live
+
+**Wording is centralized in `reviewLabels.ts`** so no component can invent
+its own. Everything Stage 8 produces reads as "Possible omission", never
+"Error"; the confirmed forms exist only because a reviewer can promote a
+finding explicitly. `AI_PROPOSED` renders as **"Machine-proposed"**, not "AI
+proposed" - Stages 6B-8 are deterministic and no language model is involved,
+so calling it AI would be simply untrue.
+
+**Severity is labelled "… priority"** with a tooltip saying it sets review
+order and does not mean the issue is confirmed. Nothing about severity is
+styled to look like a verdict.
+
+**Location and meaning are separate sections by construction**, and the
+inspector ends with a plain-language "What this means" that names which of
+the two the reviewer is looking at: mapping uncertain, mapping probably
+right so this is about the translation, or nothing located at all. That is
+the mapping-error / translation-error distinction made explicit rather than
+left for the reviewer to infer.
+
+**Coverage statuses carry their own justification.** GRAMMATICALLY_REQUIRED
+and EXPLICITATION_SUPPORTED render with a sentence explaining why an
+apparent extra word may be perfectly correct, so the UI does not nudge
+toward treating every addition as a fault. Cross-verse, split and reordered
+realizations get the same treatment.
+
+**Alternatives are always shown when the engine retained them**, and say so
+explicitly when it retained none, so the UI never implies a single candidate
+where several competed.
+
+**STALE is never hidden.** A stale finding carries a badge in the list, a
+badge in the header, and a notice at the top of the inspector saying it was
+produced against an earlier revision and must be re-evaluated - while its
+human decision stays visible in history.
+
+**There is no "Apply correction" anywhere**, and a test asserts its absence
+rather than trusting that nobody adds one.
+
+### Concurrency in the UI
+
+`decideFinding` sends the `revision` and `targetContentHashes` the reviewer
+actually saw. A `revision_conflict` is never retried: the finding is
+reloaded and the reviewer is told it changed since they opened it, so the
+decision is made against what it says now.
+
+### Accessibility
+
+Status never depends on colour alone - every badge pairs a Unicode glyph
+with its own text, selection is marked by a left rule as well as a fill, and
+filter chips use border weight plus `aria-pressed`. Unicode glyphs rather
+than an icon font, per the existing gotcha about offline builds not reaching
+a CDN. The queue is one tab stop with arrow/Home/End navigation and
+`aria-activedescendant`, so reaching row 900 does not mean 900 tab presses.
+Meaning components are a real table with row and column headers.
+
+### Small-screen behaviour
+
+The decision controls live in a sticky footer that is a *sibling* of the
+scrolling evidence area, not inside it, so long evidence cannot push them
+below the fold - the specific failure Bridge's alignment UI had before. The
+filter block is capped and scrolls rather than pushing the queue off-screen;
+the panes stack below ~900px; Scripture wraps with `overflow-wrap: anywhere`
+and a line height that suits Tamil and Hebrew.
+
+### What these tests cannot check
+
+jsdom does not lay out or paint. The viewport tests assert *structure* -
+scroll containers exist, the action bar is outside the scrolling region,
+long text is not truncated, a 400-row queue windows correctly - not measured
+pixels. **Real 1366x768 behaviour still needs a pass in the running desktop
+app**, which needs the Tauri build and both sidecars. The tests keep the
+structure from regressing between those passes; they do not replace one.
+
+### Entry point
+
+Alignment Review is a new top-level surface (`screen === "review"`) reached
+from the editor toolbar, alongside ReviewPanel's existing per-verse alignment
+modal rather than replacing it. `resetReviewState()` is called wherever
+`resetBookState()` is, so a finding id from one book can never appear under
+another - the same class of bug as gotcha 7.
+
+**Tests:** 97 frontend tests across 9 files - evidence layering, possible-vs-
+confirmed wording, the four dispositions, promotion gating, note-without-
+deciding, revision conflict, queue paging and dedup, virtualization,
+keyboard navigation, accessibility, small-viewport structure, realization and
+property wording, passage windowing, focused-relationship marking, and
+passage search.
+
+**Files:** `vitest.config.ts`, `package.json`, `src/App.svelte`,
+`src/lib/components/TopBar.svelte`, `src/lib/reviewStores.ts`,
+`src/lib/utils/reviewLabels.ts`, `src/lib/types/qaReview.ts`, and the six new
+components plus `src/lib/components/__tests__/`.
+
 ## Stage 9A.1 — Stable finding identity and the human review APIs (2026-09-02)
 
 Backend half of Stage 9A. A reviewer can now be given a deterministic queue,
