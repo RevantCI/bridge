@@ -264,3 +264,67 @@ def test_stale_revision_is_rejected_rather_than_overwriting(repo: FoundationRepo
             reviewer="human", note="stale write")
     assert repo.qa_finding("finding-3")["qaDisposition"] == "CONFIRMED_TRANSLATION_ERROR"
     assert len(repo.review_records("QA_FINDING", "finding-3")) == 1
+
+
+# --- Recovery check must know every dependency type the engine writes -------
+
+def test_recovery_check_knows_every_dependency_type_the_engine_registers(
+    repo: FoundationRepository,
+) -> None:
+    """A dependency type this check does not recognise makes the DB read-only.
+
+    Stage 8 registered QA_RUN edges without teaching recovery_check about
+    them, so any project that had run a QA audit failed recovery on its next
+    open, set read_only, and then threw "attempt to write a readonly
+    database" on the next write -- which is every project open, since binding
+    project metadata is a write. Asserting the two maps agree stops the next
+    dependency type from doing the same.
+    """
+    with repo._connect() as conn:
+        conn.execute(
+            "INSERT INTO record_dependencies VALUES(?,?,?,?)",
+            ("QA_RUN", "qa-run-1", "MEANING_RUN", "meaning-run-1"),
+        )
+        conn.commit()
+    problems = repo.recovery_check()["problems"]
+    assert not any("unknown-record-dependency-type" in problem for problem in problems), problems
+
+
+@pytest.mark.parametrize("record_type", [
+    "PASSAGE_RECORD", "EVIDENCE_RECORD", "SEMANTIC_RELATIONSHIP", "COVERAGE_ACCOUNT",
+    "QA_FINDING", "LEXICAL_SOLUTION", "CORRECTION_PROPOSAL", "EXPORTABILITY",
+    "SOURCE_INVENTORY", "TARGET_INVENTORY", "LOCATION_RUN", "LOCATION_RELATIONSHIP",
+    "MEANING_RUN", "MEANING_ASSESSMENT", "QA_RUN",
+])
+def test_every_dependency_type_the_engine_writes_is_recognised(
+    repo: FoundationRepository, record_type: str,
+) -> None:
+    """Only the *type* is under test here.
+
+    A fabricated record id legitimately trips the dangling-reference check,
+    so this asserts the narrower thing that actually matters: no type the
+    engine writes is reported as unknown.
+    """
+    with repo._connect() as conn:
+        conn.execute(
+            "INSERT INTO record_dependencies VALUES(?,?,?,?)",
+            (record_type, f"{record_type.lower()}-1", "TARGET_REFERENCE", "ref-1"),
+        )
+        conn.commit()
+    problems = repo.recovery_check()["problems"]
+    assert not any(problem.startswith("unknown-record-dependency-type") for problem in problems), (
+        f"{record_type} is written by the engine but not recognised by recovery_check"
+    )
+
+
+def test_an_unknown_dependency_type_is_still_reported(repo: FoundationRepository) -> None:
+    """The check must keep catching genuinely unknown types."""
+    with repo._connect() as conn:
+        conn.execute(
+            "INSERT INTO record_dependencies VALUES(?,?,?,?)",
+            ("NOT_A_REAL_TYPE", "x-1", "TARGET_REFERENCE", "ref-1"),
+        )
+        conn.commit()
+    check = repo.recovery_check()
+    assert check["ok"] is False
+    assert any("NOT_A_REAL_TYPE" in problem for problem in check["problems"])

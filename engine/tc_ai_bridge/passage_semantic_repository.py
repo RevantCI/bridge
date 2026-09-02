@@ -2854,8 +2854,15 @@ class FoundationRepository:
                 "SOURCE_INVENTORY": "source_inventory_runs",
                 "TARGET_INVENTORY": "target_inventory_runs",
                 "LOCATION_RUN": "semantic_location_runs",
+                "LOCATION_RELATIONSHIP": "semantic_location_relationships",
                 "MEANING_RUN": "meaning_analysis_runs",
                 "MEANING_ASSESSMENT": "meaning_assessments",
+                # Stage 8 registers QA_RUN dependency edges (save_qa_audit_run)
+                # but never taught this check about them, so every project that
+                # had run a QA audit failed recovery on its next open and put
+                # itself in read-only mode.  Keep this map in step with the one
+                # in _stale_generic_dependencies.
+                "QA_RUN": "qa_audit_runs",
             }
             dependencies = conn.execute(
                 "SELECT record_type,record_id,depends_on_type,depends_on_id FROM record_dependencies"

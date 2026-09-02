@@ -10,6 +10,92 @@ Updated: 2026-09-02
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
 
+## Stage 9A.3 — PHP 1:3-6 review fixture, and a Stage 8 read-only bug (2026-09-02)
+
+Closes Stage 9A: a seeded fixture project a human can actually open, the
+Philippians walkthrough asserted end to end, and one real defect found by
+running it.
+
+### The bug: a QA audit made its own project read-only
+
+`scripts/seed_review_fixture.py` seeded a project fine, but *reopening* it
+threw `attempt to write a readonly database` from
+`bind_project_metadata` — during `PassageSemanticRuntime.__init__`, so the
+project could not be opened at all.
+
+Cause: `FoundationRepository.__init__` runs `recovery_check()`, which sets
+`self.read_only = True` if it finds any integrity problem. Its
+`known_record_tables` map did not contain `QA_RUN`, but Stage 8's
+`save_qa_audit_run` registers `QA_RUN` dependency edges. So every dependency
+edge Stage 8 wrote was reported as `unknown-record-dependency-type`, the
+database flipped to read-only on the next open, and the next write failed.
+
+**Any project that had run a QA audit was unusable from its second open
+onward.** Introduced by Stage 8 (`807353d`) and invisible until something
+opened a companion database twice — which nothing in the test suite did,
+because tests build a fresh project per test. This is exactly the
+second-call class of bug the vendored-tool notes warn about, in Bridge's own
+code this time.
+
+Fix: `QA_RUN` (and `LOCATION_RELATIONSHIP`, for symmetry with the stale-
+propagation map) added to `known_record_tables`, with a comment tying the
+two maps together. Regressions added: one asserting a QA_RUN edge is
+recognised, one parametrized over every dependency type the engine writes,
+and one confirming a genuinely unknown type is *still* reported — the check
+had to keep working, not just stop complaining.
+
+### The fixture project
+
+`scripts/seed_review_fixture.py` builds a real translationCore-compatible
+IRV Tamil Philippians project and runs Stages 5-8 over it with a fixture
+embedding provider, leaving the results in the project's own companion
+database.
+
+This is what makes the review UI exercisable in the desktop app at all. The
+shipped app has no embedding provider (`available = False`), so it cannot
+produce the reordered-passage analysis itself — but the review surface only
+ever *reads* persisted findings, so a pre-seeded project works. The location
+run fingerprint includes the embedding descriptor, so the app will not
+mistake a seeded run for one of its own.
+
+Generated rather than committed, matching the repository's practice of not
+committing companion databases. Seeded output: 28 relationships, 12
+cross-verse, `reordered: True`, 12 findings in the review queue.
+
+### The walkthrough
+
+`engine/tests/test_php_review_walkthrough_stage9a.py` drives the review APIs
+over the reordered passage — Greek 1:3 to Tamil 1:6, 1:4 to 1:4, 1:5 to 1:3,
+1:6 to 1:5 — and imports the seeder, so what a human opens is what the tests
+assert on.
+
+The load-bearing assertion is
+`test_no_omission_is_raised_merely_because_a_verse_moved`: every
+POSSIBLE_OMISSION must correspond to a source unit with no located
+realization anywhere, never to one simply found in a different verse. A
+reordered translation must not read as a missing one. The rest cover
+cross-verse relationships being visible and marked LOCATED rather than as a
+failure to locate, location and meaning being reported from separate records
+with neither field leaking into the other, every finding exposing its
+evidence layers, a reviewer accepting, rejecting and deferring with the
+reason landing in structured history, a stale revision being refused, and —
+directly — that reviewing the passage leaves both `php/1.json` and
+`php.usfm` byte-identical.
+
+### Stop condition
+
+A human can open Alignment Review, choose QA mode, select a possible issue,
+see the source evidence, the Stage 6B location, the Stage 7 meaning
+assessment, the Stage 8 coverage/support reasoning, the applicable resource
+evidence, the alternatives and the history, decide, and move to the next
+issue — without modifying Scripture. No correction generation exists, and no
+export path changed.
+
+**Not verified here:** the final click-through in the running desktop app.
+That needs the Tauri build plus both sidecars, and jsdom cannot check real
+1366x768 layout. The structure is asserted and the engine paths are covered;
+the pixels are not.
+
 ## Stage 9A.2 — Alignment Review UI: shell, QA mode, evidence inspector (2026-09-02)
 
 The first UI for the Stage 4-8 semantic pipeline. A reviewer can now open
