@@ -53,6 +53,7 @@ from .usfm_passages import PassageWindow, TargetSegment, UsfmPassageIndex
 from . import versification
 from .source_semantic_inventory import SourceSemanticInventory
 from .target_semantic_inventory import TargetSemanticInventory
+from .semantic_location import SemanticLocationEngine
 
 
 RUNTIME_VERSION = "stage4-runtime-v1"
@@ -478,6 +479,7 @@ class PassageSemanticRuntime:
         self._synchronize_source_lock()
         self.source_semantic = SourceSemanticInventory(self)
         self.target_semantic = TargetSemanticInventory(self)
+        self.semantic_location = SemanticLocationEngine(self)
         self._migrate_legacy_companions()
 
     def _identity_fingerprint(self) -> str:
@@ -789,7 +791,8 @@ class PassageSemanticRuntime:
                 displayed_reference=displayed_reference,
             )
             previous = [item for item in previous if item.get("textRevision") != text_revision]
-            created: list[dict[str, Any]] = []
+            lineages: list[TokenLineage] = []
+            instances: list[TokenInstance] = []
             for token in tokenize_target_text(text, profile):
                 identity = "\u241f".join((
                     self.project_id, self.book, displayed_reference, text_revision,
@@ -802,14 +805,14 @@ class PassageSemanticRuntime:
                     start_grapheme=token["startGrapheme"], end_grapheme=token["endGrapheme"],
                     quote=token["raw"], quote_sha256=_sha256_text(token["raw"]),
                 )
-                self.repository.save_token_lineage(TokenLineage(
+                lineages.append(TokenLineage(
                     id=lineage_id, side=TokenSide.TARGET, project_id=self.project_id,
                     logical_resource_id=self.project_id, book=self.book,
                     canonical_reference_scope=tuple(reference_map[displayed_reference]["canonicalReferences"]),
                     token_layer=TokenLayer.ORTHOGRAPHIC, upstream_identity=None,
                     created_at=_now(), provenance=SemanticUnitProvenance.DETERMINISTIC_RULE,
                 ))
-                instance = TokenInstance(
+                instances.append(TokenInstance(
                     id=instance_id, lineage_id=lineage_id, side=TokenSide.TARGET,
                     project_id=self.project_id, resource_id=self.project_id,
                     resource_version=None, resource_hash=current["textHash"],
@@ -822,10 +825,9 @@ class PassageSemanticRuntime:
                     tokenization_version=profile, token_layer=TokenLayer.ORTHOGRAPHIC,
                     token_kind=token["kind"], parent_instance_id=None,
                     instance_fingerprint=_sha256_text(identity),
-                )
-                self.repository.save_token_instance(instance)
-                wire = self.repository.token_instance(instance_id)
-                created.append(wire); result.append(instance_id)
+                ))
+                result.append(instance_id)
+            created = self.repository.save_target_token_batch(lineages, instances)
             self._suggest_lineage_candidates(previous, created)
         return result
 
@@ -1210,3 +1212,29 @@ class PassageSemanticRuntime:
 
     def target_semantic_capabilities(self, inventory_id: str = "") -> dict[str, Any]:
         return self.target_semantic.get_capabilities(inventory_id)
+
+    def run_semantic_location_range(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+        max_candidate_evaluations: int | None = None,
+    ) -> dict[str, Any]:
+        return self.semantic_location.run_range(
+            chapter, verse, end_chapter, end_verse,
+            max_candidate_evaluations=max_candidate_evaluations,
+        )
+
+    def semantic_location_status(self, run_id: str) -> dict[str, Any]:
+        return self.semantic_location.status(run_id)
+
+    def semantic_location_range(self, run_id: str) -> dict[str, Any]:
+        return self.semantic_location.get_range(run_id)
+
+    def semantic_location_relationship(self, relationship_id: str) -> dict[str, Any]:
+        return self.semantic_location.get_relationship(relationship_id)
+
+    def semantic_location_candidates(
+        self, run_id: str, source_owner_unit_id: str = "",
+    ) -> list[dict[str, Any]]:
+        return self.semantic_location.get_candidates(run_id, source_owner_unit_id)
+
+    def semantic_location_diagnostics(self, run_id: str) -> dict[str, Any]:
+        return self.semantic_location.get_diagnostics(run_id)

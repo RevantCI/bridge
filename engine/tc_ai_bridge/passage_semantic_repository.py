@@ -43,7 +43,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 4
+DATABASE_SCHEMA_VERSION = 5
 
 
 class FoundationError(RuntimeError):
@@ -499,6 +499,62 @@ CREATE TABLE target_search_neighborhoods (
 """
 
 
+_MIGRATION_V5 = r"""
+CREATE TABLE semantic_location_runs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    book TEXT NOT NULL,
+    range_key TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    source_inventory_id TEXT NOT NULL REFERENCES source_inventory_runs(id),
+    target_inventory_id TEXT NOT NULL REFERENCES target_inventory_runs(id),
+    run_status TEXT NOT NULL CHECK(run_status IN ('RUNNING','COMPLETE','FAILED')),
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, book, range_key, fingerprint)
+);
+CREATE INDEX ix_semantic_location_runs_range
+ON semantic_location_runs(project_id, book, range_key, lifecycle_status);
+
+CREATE TABLE semantic_location_candidates (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES semantic_location_runs(id) ON DELETE CASCADE,
+    source_owner_unit_id TEXT NOT NULL REFERENCES semantic_units(id),
+    candidate_rank INTEGER NOT NULL CHECK(candidate_rank >= 1),
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX ix_semantic_location_candidates_owner
+ON semantic_location_candidates(run_id, source_owner_unit_id, candidate_rank);
+
+CREATE TABLE semantic_location_relationships (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES semantic_location_runs(id) ON DELETE CASCADE,
+    source_owner_unit_id TEXT NOT NULL REFERENCES semantic_units(id),
+    location_outcome TEXT NOT NULL CHECK(location_outcome IN ('LOCATED','AMBIGUOUS','NOT_LOCATED','SEARCH_INCOMPLETE','UNSUPPORTED_ANALYSIS')),
+    selected_candidate_id TEXT REFERENCES semantic_location_candidates(id),
+    review_status TEXT NOT NULL CHECK(review_status IN ('UNREVIEWED','AI_PROPOSED','HUMAN_APPROVED','HUMAN_REJECTED','HUMAN_MODIFIED','NEEDS_DISCUSSION')),
+    lifecycle_status TEXT NOT NULL CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX ix_semantic_location_relationships_run
+ON semantic_location_relationships(run_id, source_owner_unit_id);
+
+CREATE TABLE semantic_embedding_cache (
+    id TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL,
+    model_hash TEXT NOT NULL,
+    dimensions INTEGER NOT NULL CHECK(dimensions > 0),
+    normalization TEXT NOT NULL,
+    vector_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(content_hash, model_hash)
+);
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -547,6 +603,10 @@ class FoundationRepository:
             if current < 4:
                 self._backup_before_migration(conn, current, 4)
                 self._apply_migration(conn, 4, _MIGRATION_V4)
+                current = 4
+            if current < 5:
+                self._backup_before_migration(conn, current, 5)
+                self._apply_migration(conn, 5, _MIGRATION_V5)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -880,6 +940,60 @@ class FoundationRepository:
             except sqlite3.IntegrityError as exc:
                 raise FoundationValidationError(f"Invalid token instance: {exc}") from exc
 
+    def save_target_token_batch(
+        self, lineages: list[TokenLineage], instances: list[TokenInstance],
+    ) -> list[dict[str, Any]]:
+        """Persist one target tokenization result in a single transaction."""
+        if len(lineages) != len(instances):
+            raise FoundationValidationError("Target token batch lineage/instance counts differ")
+        lineage_ids = {lineage.id for lineage in lineages}
+        instance_ids = {instance.id for instance in instances}
+        payloads = [to_wire(instance) for instance in instances]
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                for lineage in lineages:
+                    conn.execute(
+                        "INSERT INTO token_lineages VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (lineage.id, lineage.side.value, lineage.project_id,
+                         lineage.logical_resource_id, lineage.book,
+                         json.dumps(list(lineage.canonical_reference_scope)),
+                         lineage.token_layer.value, lineage.upstream_identity,
+                         lineage.provenance.value, lineage.review_status.value,
+                         lineage.lifecycle_status.value, lineage.revision,
+                         json.dumps(to_wire(lineage), ensure_ascii=False)),
+                    )
+                for instance, payload in zip(instances, payloads):
+                    if instance.lineage_id not in lineage_ids:
+                        lineage = conn.execute(
+                            "SELECT side,token_layer FROM token_lineages WHERE id=?",
+                            (instance.lineage_id,),
+                        ).fetchone()
+                        if lineage is None:
+                            raise FoundationValidationError(
+                                f"Unknown token lineage: {instance.lineage_id}"
+                            )
+                    if instance.parent_instance_id is not None and (
+                        instance.parent_instance_id not in instance_ids
+                        and conn.execute(
+                            "SELECT 1 FROM token_instances WHERE id=?",
+                            (instance.parent_instance_id,),
+                        ).fetchone() is None
+                    ):
+                        raise FoundationValidationError("Unknown target token parent")
+                    conn.execute(
+                        "INSERT INTO token_instances VALUES(?,?,?,?,?,?,?,?)",
+                        (instance.id, instance.lineage_id, instance.side.value,
+                         instance.token_layer.value, instance.parent_instance_id,
+                         instance.text_revision, instance.instance_fingerprint,
+                         json.dumps(payload, ensure_ascii=False)),
+                    )
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                raise FoundationValidationError(f"Invalid target token batch: {exc}") from exc
+        return payloads
+
     def token_instance(self, instance_id: str) -> dict[str, Any]:
         with self._connect() as conn:
             row = conn.execute("SELECT payload_json FROM token_instances WHERE id=?", (instance_id,)).fetchone()
@@ -1028,6 +1142,54 @@ class FoundationRepository:
                  unit.lifecycle_status.value, unit.revision, json.dumps(payload, ensure_ascii=False)),
             )
             conn.commit()
+
+    def ensure_semantic_units(self, units: list[SemanticUnit]) -> list[dict[str, Any]]:
+        """Load or insert deterministic semantic units with one commit."""
+        unit_ids = {unit.id for unit in units}
+        result: list[dict[str, Any]] = []
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for unit in units:
+                existing = conn.execute(
+                    "SELECT payload_json FROM semantic_units WHERE id=?", (unit.id,),
+                ).fetchone()
+                if existing is not None:
+                    result.append(json.loads(existing[0]))
+                    continue
+                for token_id in unit.token_instance_ids:
+                    token = conn.execute(
+                        "SELECT side FROM token_instances WHERE id=?", (token_id,),
+                    ).fetchone()
+                    if token is None or token["side"] != unit.side.value:
+                        raise FoundationValidationError(
+                            f"Invalid semantic-unit token instance: {token_id}"
+                        )
+                if unit.audit_owner_unit_id not in unit_ids and conn.execute(
+                    "SELECT 1 FROM semantic_units WHERE id=?", (unit.audit_owner_unit_id,),
+                ).fetchone() is None:
+                    raise FoundationValidationError(
+                        f"Unknown semantic-unit audit owner: {unit.audit_owner_unit_id}"
+                    )
+                for evidence_id in unit.evidence_ids:
+                    if conn.execute(
+                        "SELECT 1 FROM evidence_records WHERE id=?", (evidence_id,),
+                    ).fetchone() is None:
+                        raise FoundationValidationError(
+                            f"Unknown semantic-unit evidence record: {evidence_id}"
+                        )
+                payload = to_wire(unit)
+                conn.execute(
+                    "INSERT INTO semantic_units VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (unit.id, unit.project_id, unit.side.value, unit.kind.value,
+                     unit.audit_owner_unit_id, unit.audit_eligibility.value,
+                     unit.semantic_obligation.value, unit.accounting_role.value,
+                     unit.coverage_dimension.value, unit.semantic_fingerprint,
+                     unit.review_status.value, unit.lifecycle_status.value,
+                     unit.revision, json.dumps(payload, ensure_ascii=False)),
+                )
+                result.append(payload)
+            conn.commit()
+        return result
 
     def semantic_unit(self, unit_id: str) -> dict[str, Any]:
         with self._connect() as conn:
@@ -1257,6 +1419,149 @@ class FoundationRepository:
         if row["lifecycle_status"] != "ACTIVE":
             raise FoundationValidationError("Target inventory is stale or inactive")
         return json.loads(row["payload_json"])
+
+    def save_semantic_location_run(
+        self, *, run_id: str, project_id: str, book: str, range_key: str,
+        fingerprint: str, source_inventory_id: str, target_inventory_id: str,
+        run_status: str, payload: dict[str, Any], candidates: list[dict[str, Any]],
+        relationships: list[dict[str, Any]],
+    ) -> None:
+        """Atomically publish an immutable source-to-target location run."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            source = conn.execute(
+                "SELECT lifecycle_status FROM source_inventory_runs WHERE id=?",
+                (source_inventory_id,),
+            ).fetchone()
+            target = conn.execute(
+                "SELECT lifecycle_status FROM target_inventory_runs WHERE id=?",
+                (target_inventory_id,),
+            ).fetchone()
+            if source is None or source[0] != "ACTIVE" or target is None or target[0] != "ACTIVE":
+                raise FoundationValidationError(
+                    "Semantic location requires active independent source and target inventories"
+                )
+            conn.execute(
+                "UPDATE semantic_location_runs SET lifecycle_status='SUPERSEDED',revision=revision+1 "
+                "WHERE project_id=? AND book=? AND range_key=? AND lifecycle_status='ACTIVE' "
+                "AND fingerprint<>?",
+                (project_id, book, range_key, fingerprint),
+            )
+            conn.execute(
+                "INSERT INTO semantic_location_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (run_id, project_id, book, range_key, fingerprint, source_inventory_id,
+                 target_inventory_id, run_status, "ACTIVE", 1,
+                 json.dumps(payload, ensure_ascii=False), self._now()),
+            )
+            conn.executemany(
+                "INSERT INTO semantic_location_candidates VALUES(?,?,?,?,?)",
+                [(item["id"], run_id, item["sourceOwnerUnitId"], item["rank"],
+                  json.dumps(item, ensure_ascii=False)) for item in candidates],
+            )
+            conn.executemany(
+                "INSERT INTO semantic_location_relationships VALUES(?,?,?,?,?,?,?,?,?)",
+                [(item["id"], run_id, item["sourceOwnerUnitId"], item["locationOutcome"],
+                  item.get("selectedCandidateId"), item["reviewStatus"],
+                  item["lifecycleStatus"], item["revision"],
+                  json.dumps(item, ensure_ascii=False)) for item in relationships],
+            )
+            conn.executemany(
+                "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)",
+                [
+                    ("LOCATION_RUN", run_id, "SOURCE_INVENTORY", source_inventory_id),
+                    ("LOCATION_RUN", run_id, "TARGET_INVENTORY", target_inventory_id),
+                ],
+            )
+            conn.commit()
+
+    def semantic_location_for_fingerprint(
+        self, project_id: str, book: str, range_key: str, fingerprint: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM semantic_location_runs WHERE project_id=? AND book=? "
+                "AND range_key=? AND fingerprint=? AND lifecycle_status='ACTIVE' "
+                "AND run_status='COMPLETE'",
+                (project_id, book, range_key, fingerprint),
+            ).fetchone()
+        return None if row is None else json.loads(row[0])
+
+    def semantic_location_run(self, run_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json,lifecycle_status FROM semantic_location_runs WHERE id=?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(f"Unknown semantic location run: {run_id}")
+        if row["lifecycle_status"] != "ACTIVE":
+            raise FoundationValidationError("Semantic location run is stale or inactive")
+        return json.loads(row["payload_json"])
+
+    def semantic_location_candidates(
+        self, run_id: str, source_owner_unit_id: str = "",
+    ) -> list[dict[str, Any]]:
+        self.semantic_location_run(run_id)
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM semantic_location_candidates WHERE run_id=? "
+                "AND (?='' OR source_owner_unit_id=?) ORDER BY source_owner_unit_id,candidate_rank,id",
+                (run_id, source_owner_unit_id, source_owner_unit_id),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def semantic_location_relationship(self, relationship_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT r.payload_json,r.run_id FROM semantic_location_relationships r WHERE r.id=?",
+                (relationship_id,),
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(
+                f"Unknown semantic location relationship: {relationship_id}"
+            )
+        self.semantic_location_run(row["run_id"])
+        return json.loads(row["payload_json"])
+
+    def human_approved_lexical_precedents(self, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT g.payload_json FROM lexical_groups g "
+                "JOIN lexical_solutions s ON s.id=g.solution_id "
+                "WHERE s.project_id=? AND s.lifecycle_status='ACTIVE' "
+                "AND g.lifecycle_status='ACTIVE' AND g.review_status='HUMAN_APPROVED'",
+                (project_id,),
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def embedding_vectors(
+        self, content_hashes: list[str], model_hash: str,
+    ) -> dict[str, list[float]]:
+        if not content_hashes:
+            return {}
+        placeholders = ",".join("?" for _ in content_hashes)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT content_hash,vector_json FROM semantic_embedding_cache "
+                f"WHERE model_hash=? AND content_hash IN ({placeholders})",
+                (model_hash, *content_hashes),
+            ).fetchall()
+        return {row["content_hash"]: json.loads(row["vector_json"]) for row in rows}
+
+    def save_embedding_vectors(
+        self, *, model_hash: str, dimensions: int, normalization: str,
+        vectors: dict[str, list[float]],
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany(
+                "INSERT OR IGNORE INTO semantic_embedding_cache VALUES(?,?,?,?,?,?,?)",
+                [("embedding-" + hashlib.sha256(
+                    f"{model_hash}\u241f{content_hash}".encode("utf-8")
+                ).hexdigest()[:32], content_hash, model_hash, dimensions, normalization,
+                  json.dumps(vector), self._now()) for content_hash, vector in vectors.items()],
+            )
+            conn.commit()
 
     def save_semantic_relationship(self, relationship: SemanticRelationship) -> None:
         payload = to_wire(relationship)
@@ -1690,6 +1995,15 @@ class FoundationRepository:
                 changed = True
                 dependency_id = self.source_dependency_id(project_id, book, row["resource_hash"])
                 staled = self._stale_generic_dependencies(conn, "SOURCE_RESOURCE", dependency_id)
+                active_inventories = conn.execute(
+                    "SELECT id FROM source_inventory_runs WHERE project_id=? AND book=? "
+                    "AND lifecycle_status='ACTIVE'",
+                    (project_id, book),
+                ).fetchall()
+                for inventory in active_inventories:
+                    staled += self._stale_generic_dependencies(
+                        conn, "SOURCE_INVENTORY", inventory["id"],
+                    )
                 inventory_staled = conn.execute(
                     "UPDATE source_inventory_runs SET lifecycle_status='STALE' "
                     "WHERE project_id=? AND book=? AND lifecycle_status='ACTIVE'",
@@ -1782,6 +2096,7 @@ class FoundationRepository:
             "coverageAccounts": "coverage_accounts", "qaFindings": "qa_findings",
             "lexicalSolutions": "lexical_solutions", "correctionProposals": "correction_proposals",
             "evidence": "evidence_records", "exportability": "exportability_records",
+            "semanticLocationRuns": "semantic_location_runs",
         }
         counts: dict[str, int] = {}
         with self._connect() as conn:
@@ -1823,6 +2138,8 @@ class FoundationRepository:
             "CORRECTION_PROPOSAL": "correction_proposals",
             "EXPORTABILITY": "exportability_records",
             "TARGET_INVENTORY": "target_inventory_runs",
+            "SOURCE_INVENTORY": "source_inventory_runs",
+            "LOCATION_RUN": "semantic_location_runs",
         }
         queue: list[tuple[str, str]] = [(dependency_type, dependency_id)]
         visited: set[tuple[str, str]] = set()
@@ -1940,6 +2257,9 @@ class FoundationRepository:
                 "LEXICAL_SOLUTION": "lexical_solutions",
                 "CORRECTION_PROPOSAL": "correction_proposals",
                 "EXPORTABILITY": "exportability_records",
+                "SOURCE_INVENTORY": "source_inventory_runs",
+                "TARGET_INVENTORY": "target_inventory_runs",
+                "LOCATION_RUN": "semantic_location_runs",
             }
             dependencies = conn.execute(
                 "SELECT record_type,record_id,depends_on_type,depends_on_id FROM record_dependencies"

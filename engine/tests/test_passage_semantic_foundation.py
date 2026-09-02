@@ -20,6 +20,7 @@ from tc_ai_bridge.passage_semantic_models import (
     DependencyRelation,
     EvidenceKind,
     EvidenceRecord,
+    EmbeddingRole,
     ExportFormat,
     ExportReason,
     Exportability,
@@ -27,6 +28,10 @@ from tc_ai_bridge.passage_semantic_models import (
     LifecycleStatus,
     LexicalAlignmentGroup,
     LexicalSolution,
+    LocationCalibrationStatus,
+    LocationEvidenceKind,
+    LocationOutcome,
+    LocationRunStatus,
     MeaningStatus,
     PassageRecord,
     PassageStructureKind,
@@ -485,6 +490,11 @@ def test_python_and_typescript_controlled_enums_match_canonical_schema() -> None
         "MeaningStatus": MeaningStatus,
         "SourceCoverage": SourceCoverage,
         "TargetSupport": TargetSupport,
+        "LocationOutcome": LocationOutcome,
+        "LocationRunStatus": LocationRunStatus,
+        "LocationEvidenceKind": LocationEvidenceKind,
+        "LocationCalibrationStatus": LocationCalibrationStatus,
+        "EmbeddingRole": EmbeddingRole,
     }
     ts = (ROOT / "src" / "lib" / "types" / "passageSemanticV1.ts").read_text(encoding="utf-8")
     for schema_name, enum_type in enum_types.items():

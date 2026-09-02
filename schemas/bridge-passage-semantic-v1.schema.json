@@ -16,6 +16,9 @@
     { "$ref": "#/$defs/LexicalAlignmentGroup" },
     { "$ref": "#/$defs/QaFinding" },
     { "$ref": "#/$defs/CorrectionProposal" },
+    { "$ref": "#/$defs/SemanticLocationCandidate" },
+    { "$ref": "#/$defs/SemanticLocationRelationship" },
+    { "$ref": "#/$defs/SemanticLocationRun" },
     { "$ref": "#/$defs/ReviewRecord" }
     ,{ "$ref": "#/$defs/Exportability" }
   ],
@@ -68,6 +71,11 @@
     "MeaningStatus": { "type": "string", "enum": ["PRESERVED", "PRESERVED_WITH_RESTRUCTURING", "PARTIAL", "OVERTRANSLATED", "UNDERTRANSLATED", "MEANING_SHIFT", "CONTRADICTED", "UNVERIFIABLE"] },
     "SourceCoverage": { "type": "string", "enum": ["NOT_CHECKED", "COVERED", "COVERED_BY_RESTRUCTURING", "POSSIBLY_MISSING", "MISSING", "UNCERTAIN"] },
     "TargetSupport": { "type": "string", "enum": ["NOT_CHECKED", "SOURCE_SUPPORTED", "CONTEXT_SUPPORTED", "GRAMMATICALLY_REQUIRED", "EXPLICITATION_SUPPORTED", "POSSIBLY_UNSUPPORTED", "UNSUPPORTED", "UNCERTAIN"] },
+    "LocationOutcome": { "type": "string", "enum": ["LOCATED", "AMBIGUOUS", "NOT_LOCATED", "SEARCH_INCOMPLETE", "UNSUPPORTED_ANALYSIS"] },
+    "LocationRunStatus": { "type": "string", "enum": ["RUNNING", "COMPLETE", "FAILED"] },
+    "LocationCalibrationStatus": { "type": "string", "enum": ["CALIBRATED", "UNCALIBRATED_INTERNAL"] },
+    "EmbeddingRole": { "type": "string", "enum": ["CANDIDATE_RETRIEVAL_ONLY"] },
+    "LocationEvidenceKind": { "type": "string", "enum": ["SEMANTIC_SIMILARITY", "LEXICAL", "CONCEPT", "MORPHOLOGY", "STRUCTURAL_PROXIMITY", "PASSAGE_COHERENCE", "PARTICIPANT", "HUMAN_PRECEDENT", "RESOURCE", "EXACT_SPAN", "CANDIDATE_COMPETITION"] },
     "PolicyBinding": {
       "type": "object",
       "additionalProperties": false,
@@ -358,6 +366,116 @@
         "lifecycleStatus": { "$ref": "#/$defs/LifecycleStatus" }, "appliedTargetRevision": { "type": ["string", "null"] },
         "appliedBy": { "type": ["string", "null"] }, "appliedAt": { "type": ["string", "null"], "format": "date-time" },
         "revision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "LocationEvidenceComponent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "rawScore", "weight", "weightedScore", "provenance"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/LocationEvidenceKind" },
+        "rawScore": { "type": "number", "minimum": 0, "maximum": 1 },
+        "weight": { "type": "number", "minimum": 0 },
+        "weightedScore": { "type": "number", "minimum": 0 },
+        "provenance": { "type": "string" }
+      }
+    },
+    "SemanticEmbeddingDescriptor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["providerId", "providerVersion", "modelId", "modelHash", "dimensions", "normalization", "languageCapabilities", "offline", "available", "role"],
+      "properties": {
+        "providerId": { "type": "string" }, "providerVersion": { "type": "string" },
+        "modelId": { "type": "string" }, "modelHash": { "type": "string" },
+        "dimensions": { "type": "integer", "minimum": 0 }, "normalization": { "type": "string" },
+        "languageCapabilities": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "offline": { "type": "boolean" }, "available": { "type": "boolean" },
+        "role": { "$ref": "#/$defs/EmbeddingRole" }
+      }
+    },
+    "SemanticLocationCandidate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "sourceOwnerUnitId", "sourceSemanticUnitIds", "targetSemanticUnitIds", "targetSpanIds", "targetTokenInstanceIds", "targetDisplayedReferences", "targetCanonicalReferences", "quotes", "realization", "properties", "rawScore", "evidenceComponents", "rank"],
+      "properties": {
+        "id": { "type": "string" }, "sourceOwnerUnitId": { "type": "string" },
+        "sourceSemanticUnitIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "targetSemanticUnitIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "targetSpanIds": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
+        "targetTokenInstanceIds": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
+        "targetDisplayedReferences": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
+        "targetCanonicalReferences": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "quotes": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false, "required": ["spanId", "quote", "quoteSha256"], "properties": { "spanId": { "type": "string" }, "quote": { "type": "string" }, "quoteSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } } },
+        "realization": { "$ref": "#/$defs/Realization" },
+        "properties": { "type": "array", "items": { "$ref": "#/$defs/RelationshipProperty" }, "uniqueItems": true },
+        "rawScore": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidenceComponents": { "type": "array", "items": { "$ref": "#/$defs/LocationEvidenceComponent" } },
+        "rank": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "SemanticLocationRelationship": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "sourceOwnerUnitId", "sourceSemanticUnitIds", "targetSemanticUnitIds", "targetSpanIds", "targetTokenInstanceIds", "locationOutcome", "realization", "properties", "locationConfidence", "selectedCandidateId", "alternativeCandidateIds", "reviewStatus", "lifecycleStatus", "revision"],
+      "properties": {
+        "id": { "type": "string" }, "sourceOwnerUnitId": { "type": "string" },
+        "sourceSemanticUnitIds": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
+        "targetSemanticUnitIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "targetSpanIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "targetTokenInstanceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "locationOutcome": { "$ref": "#/$defs/LocationOutcome" }, "realization": { "$ref": "#/$defs/Realization" },
+        "properties": { "type": "array", "items": { "$ref": "#/$defs/RelationshipProperty" }, "uniqueItems": true },
+        "locationConfidence": { "$ref": "#/$defs/LocationConfidence" },
+        "selectedCandidateId": { "type": ["string", "null"] },
+        "alternativeCandidateIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "reviewStatus": { "$ref": "#/$defs/ReviewStatus" }, "lifecycleStatus": { "$ref": "#/$defs/LifecycleStatus" },
+        "revision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "LocationConfidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rawScore", "calibratedValue", "confidencePolicyVersion", "calibrationVersion", "calibrationStatus"],
+      "properties": {
+        "rawScore": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "calibratedValue": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidencePolicyVersion": { "type": "string", "minLength": 1 },
+        "calibrationVersion": { "type": "string", "minLength": 1 },
+        "calibrationStatus": { "$ref": "#/$defs/LocationCalibrationStatus" }
+      }
+    },
+    "SemanticLocationDiagnostics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sourcePrimaryObligations", "locationsFound", "ambiguous", "notLocated", "searchIncomplete", "unsupportedAnalysis", "sameVerse", "crossVerse", "split", "merged", "reordered", "grammatical", "pronominalized", "implicit", "averageCandidateCount", "candidateEvaluations", "candidateBudget", "progressiveSearchScopeEvaluations", "contextualSupportEdges", "retrievalSeconds", "rankingSeconds", "embeddingSeconds", "embeddingCacheHits", "embeddingCacheMisses", "embeddingFailure", "embeddingCacheHitRate"],
+      "properties": {
+        "sourcePrimaryObligations": { "type": "integer", "minimum": 0 }, "locationsFound": { "type": "integer", "minimum": 0 },
+        "ambiguous": { "type": "integer", "minimum": 0 }, "notLocated": { "type": "integer", "minimum": 0 },
+        "searchIncomplete": { "type": "integer", "minimum": 0 }, "unsupportedAnalysis": { "type": "integer", "minimum": 0 },
+        "sameVerse": { "type": "integer", "minimum": 0 }, "crossVerse": { "type": "integer", "minimum": 0 },
+        "split": { "type": "integer", "minimum": 0 }, "merged": { "type": "integer", "minimum": 0 },
+        "reordered": { "type": "boolean" }, "grammatical": { "type": "integer", "minimum": 0 },
+        "pronominalized": { "type": "integer", "minimum": 0 }, "implicit": { "type": "integer", "minimum": 0 },
+        "averageCandidateCount": { "type": "number", "minimum": 0 }, "candidateEvaluations": { "type": "integer", "minimum": 0 },
+        "candidateBudget": { "type": "integer", "minimum": 0 },
+        "progressiveSearchScopeEvaluations": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "contextualSupportEdges": { "type": "integer", "minimum": 0 },
+        "retrievalSeconds": { "type": "number", "minimum": 0 }, "rankingSeconds": { "type": "number", "minimum": 0 },
+        "embeddingSeconds": { "type": "number", "minimum": 0 }, "embeddingCacheHits": { "type": "integer", "minimum": 0 },
+        "embeddingCacheMisses": { "type": "integer", "minimum": 0 }, "embeddingFailure": { "type": ["string", "null"] },
+        "embeddingCacheHitRate": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "SemanticLocationRun": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "book", "rangeKey", "fingerprint", "sourceInventoryId", "sourceInventoryFingerprint", "targetInventoryId", "targetInventoryFingerprint", "passageFingerprint", "locationEngineVersion", "embeddingProvider", "confidencePolicyVersion", "calibrationVersion", "searchPolicyVersion", "runStatus", "relationships", "candidates", "diagnostics", "elapsedSeconds", "cacheStatus"],
+      "properties": {
+        "id": { "type": "string" }, "book": { "type": "string" }, "rangeKey": { "type": "string" },
+        "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "sourceInventoryId": { "type": "string" }, "sourceInventoryFingerprint": { "type": "string" },
+        "targetInventoryId": { "type": "string" }, "targetInventoryFingerprint": { "type": "string" },
+        "passageFingerprint": { "type": "string" }, "locationEngineVersion": { "type": "string" },
+        "embeddingProvider": { "$ref": "#/$defs/SemanticEmbeddingDescriptor" }, "confidencePolicyVersion": { "type": "string" },
+        "calibrationVersion": { "type": "string" }, "searchPolicyVersion": { "type": "string" },
+        "runStatus": { "$ref": "#/$defs/LocationRunStatus" },
+        "relationships": { "type": "array", "items": { "$ref": "#/$defs/SemanticLocationRelationship" } },
+        "candidates": { "type": "array", "items": { "$ref": "#/$defs/SemanticLocationCandidate" } },
+        "diagnostics": { "$ref": "#/$defs/SemanticLocationDiagnostics" }, "elapsedSeconds": { "type": "number", "minimum": 0 },
+        "cacheStatus": { "type": "string", "enum": ["MISS", "HIT"] }
       }
     },
     "ReviewRecord": {

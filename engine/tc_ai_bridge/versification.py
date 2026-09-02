@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import sys
 import threading
 from pathlib import Path
@@ -75,6 +76,66 @@ _lock = threading.Lock()
 _loaded = False
 _module = None
 _bible = None
+
+_SIMPLE_VERSE_ID = re.compile(r"(\S+)\s+(\d+):(\d+)([a-z]?)$")
+
+
+def _split_simple_verse_id(verse_id: str) -> tuple[str | None, int | None, int | str | None]:
+    """Parse the non-range verse IDs used by VersificationMatch.
+
+    The upstream matcher calls its general regex parser for every verse in
+    every Bible schema. Bridge only needs book/chapter membership and retains
+    the upstream parser as the fallback for unusual IDs.
+    """
+    match = _SIMPLE_VERSE_ID.fullmatch(verse_id)
+    if match is None:
+        return None, None, None
+    book, chapter, verse, segment = match.groups()
+    return book, int(chapter), f"{verse}{segment}" if segment else int(verse)
+
+
+def _match_schema_cost(vc: Any, v: Any, bible: Any) -> int:
+    """Equivalent VersificationMatch cost without full-Bible regex scans."""
+    chapter_overages: set[tuple[str, int]] = set()
+    verse_overages = 0
+    for verse_id in vc.vref2verse:
+        if verse_id in v.verse_ids:
+            continue
+        book, chapter, verse = _split_simple_verse_id(verse_id)
+        if book is None:
+            book, chapter, verse, _ = v.split_verse_id(verse_id)
+        if book is None or book not in bible.books:
+            continue
+        if ((book == "PSA") and (verse == 0)
+                and ((v.schema in ("rsc", "rso")) or (chapter in bible.psalms_with_descriptive_titles))):
+            continue
+        if verse_id in bible.post_verse_descriptive_titles_pseudo_verse_ids:
+            continue
+        verse_overages += 1
+        chapter_overages.add((book, int(chapter)))
+
+    covered_chapters = set(vc.chapters)
+    chapter_shortages: set[tuple[str, int]] = set()
+    verse_shortages = 0
+    for verse_id in v.verse_id_list:
+        if verse_id in vc.vref2verse:
+            continue
+        if verse_id in bible.often_omitted_verses:
+            continue
+        if verse_id in bible.verses_sometimes_merged_into_neighboring_verses:
+            continue
+        book, chapter, _verse = _split_simple_verse_id(verse_id)
+        if book is None:
+            book, chapter, _verse, _ = v.split_verse_id(verse_id)
+        key = (book, int(chapter)) if book is not None and chapter is not None else None
+        if key not in covered_chapters:
+            continue
+        verse_shortages += 1
+        chapter_shortages.add(key)
+    return (
+        len(chapter_overages) + len(chapter_shortages)
+        + 10 * (verse_overages + verse_shortages)
+    )
 
 
 class VersificationUnavailable(RuntimeError):
@@ -171,26 +232,18 @@ def detect_schema(book_id: str, verses: dict[str, str]) -> dict[str, Any]:
     costs: dict[str, int] = {}
     best_schema: str | None = None
     best_cost: int | None = None
-    # Real, measured bug: VersificationMatch.__init__ does a pure-Python scan
-    # over each schema's full verse_id_list (tens of thousands of entries for
-    # 'eng'/'org'). Under CPython's GIL, running several of these scans on
-    # different threads AT ONCE doesn't just add up — it degrades
-    # catastrophically (measured: a single-threaded scan for one schema takes
-    # ~0.5s; the same scan run on 16 threads concurrently took ~47s PER
-    # THREAD, not ~8s as naive linear scaling would suggest). Serializing
-    # with the same lock _ensure_loaded() uses turns that into ~8s total for
-    # all 16 threads combined, each waiting its turn instead of all thrashing
-    # the GIL together. Confirmed by direct measurement, not assumed from
-    # general GIL folklore — see test_versification_concurrency.py.
+    # Keep the scan serialized because the vendored schema objects are shared.
+    # _match_schema_cost preserves the upstream cost formula while avoiding a
+    # general regex parse for every verse in unrelated books.
     with _lock, contextlib.redirect_stderr(io.StringIO()):
         for schema in SCHEMAS:
             v = _module.Versification.versification_d.get(schema)
             if v is None:
                 continue
-            match = _module.VersificationMatch(vc, v, _bible)
-            costs[schema] = match.cost
-            if best_cost is None or match.cost < best_cost:
-                best_cost, best_schema = match.cost, schema
+            cost = _match_schema_cost(vc, v, _bible)
+            costs[schema] = cost
+            if best_cost is None or cost < best_cost:
+                best_cost, best_schema = cost, schema
 
     return {
         "bestSchema": best_schema,

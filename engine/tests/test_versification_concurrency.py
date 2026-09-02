@@ -135,7 +135,22 @@ _DETECT_SCHEMA_SERIALIZATION_SCRIPT = textwrap.dedent("""
                 with state_lock:
                     active -= 1
 
-    vt._module.VersificationMatch = InstrumentedMatch
+    original_match = vt._match_schema_cost
+
+    def instrumented_match(vc, v, bible):
+        global active, max_active, match_calls
+        with state_lock:
+            active += 1
+            max_active = max(max_active, active)
+            match_calls += 1
+        try:
+            time.sleep(0.02)
+            return original_match(vc, v, bible)
+        finally:
+            with state_lock:
+                active -= 1
+
+    vt._match_schema_cost = instrumented_match
 
     N_THREADS = 8
     errors = [None] * N_THREADS

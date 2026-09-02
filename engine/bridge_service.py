@@ -297,6 +297,12 @@ class Methods:
     TARGET_SEMANTIC_GET_DIAGNOSTICS = "targetSemantic.getDiagnostics"
     TARGET_SEMANTIC_GET_SEARCH_SPANS = "targetSemantic.getSearchSpans"
     TARGET_SEMANTIC_GET_CAPABILITIES = "targetSemantic.getCapabilities"
+    SEMANTIC_LOCATION_RUN_RANGE = "semanticLocation.runRange"
+    SEMANTIC_LOCATION_STATUS = "semanticLocation.status"
+    SEMANTIC_LOCATION_GET_RANGE = "semanticLocation.getRange"
+    SEMANTIC_LOCATION_GET_RELATIONSHIP = "semanticLocation.getRelationship"
+    SEMANTIC_LOCATION_GET_CANDIDATES = "semanticLocation.getCandidates"
+    SEMANTIC_LOCATION_GET_DIAGNOSTICS = "semanticLocation.getDiagnostics"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -1795,6 +1801,33 @@ class BridgeEngine:
     def target_semantic_get_capabilities(self, inventory_id: str = "") -> dict[str, Any]:
         return self._require_passage_semantic_runtime().target_semantic_capabilities(inventory_id)
 
+    def semantic_location_run_range(
+        self, chapter: str, verse: str, end_chapter: str = "", end_verse: str = "",
+        max_candidate_evaluations: int | None = None,
+    ) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().run_semantic_location_range(
+            chapter, verse, end_chapter, end_verse, max_candidate_evaluations,
+        )
+
+    def semantic_location_status(self, run_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().semantic_location_status(run_id)
+
+    def semantic_location_get_range(self, run_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().semantic_location_range(run_id)
+
+    def semantic_location_get_relationship(self, relationship_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().semantic_location_relationship(relationship_id)
+
+    def semantic_location_get_candidates(
+        self, run_id: str, source_owner_unit_id: str = "",
+    ) -> list[dict[str, Any]]:
+        return self._require_passage_semantic_runtime().semantic_location_candidates(
+            run_id, source_owner_unit_id,
+        )
+
+    def semantic_location_get_diagnostics(self, run_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().semantic_location_diagnostics(run_id)
+
     # -- live desktop connectors (Paratext/Logos) --------------------------
     #
     # Direct pass-through calls only in this pass: read the connector's current
@@ -3233,6 +3266,33 @@ class BridgeEngine:
             if m == Methods.TARGET_SEMANTIC_GET_CAPABILITIES:
                 return EngineResponse.ok(request.id, result=self.target_semantic_get_capabilities(
                     str(p.get("inventoryId") or ""),
+                ))
+            if m == Methods.SEMANTIC_LOCATION_RUN_RANGE:
+                budget = p.get("maxCandidateEvaluations")
+                return EngineResponse.ok(request.id, result=self.semantic_location_run_range(
+                    str(p.get("chapter") or ""), str(p.get("verse") or ""),
+                    str(p.get("endChapter") or ""), str(p.get("endVerse") or ""),
+                    int(budget) if budget is not None else None,
+                ))
+            if m == Methods.SEMANTIC_LOCATION_STATUS:
+                return EngineResponse.ok(request.id, result=self.semantic_location_status(
+                    str(p.get("runId") or ""),
+                ))
+            if m == Methods.SEMANTIC_LOCATION_GET_RANGE:
+                return EngineResponse.ok(request.id, result=self.semantic_location_get_range(
+                    str(p.get("runId") or ""),
+                ))
+            if m == Methods.SEMANTIC_LOCATION_GET_RELATIONSHIP:
+                return EngineResponse.ok(request.id, result=self.semantic_location_get_relationship(
+                    str(p.get("relationshipId") or ""),
+                ))
+            if m == Methods.SEMANTIC_LOCATION_GET_CANDIDATES:
+                return EngineResponse.ok(request.id, result=self.semantic_location_get_candidates(
+                    str(p.get("runId") or ""), str(p.get("sourceOwnerUnitId") or ""),
+                ))
+            if m == Methods.SEMANTIC_LOCATION_GET_DIAGNOSTICS:
+                return EngineResponse.ok(request.id, result=self.semantic_location_get_diagnostics(
+                    str(p.get("runId") or ""),
                 ))
             if m == Methods.ISSUE_RESOLUTION_LIST:
                 return EngineResponse.ok(

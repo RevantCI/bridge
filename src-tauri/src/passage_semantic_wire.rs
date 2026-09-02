@@ -1027,6 +1027,177 @@ pub struct TargetSemanticInventory {
     pub cache_status: SourceInventoryCacheStatus,
 }
 
+wire_enum!(LocationOutcome {
+    Located,
+    Ambiguous,
+    NotLocated,
+    SearchIncomplete,
+    UnsupportedAnalysis
+});
+wire_enum!(LocationRunStatus {
+    Running,
+    Complete,
+    Failed
+});
+wire_enum!(LocationCalibrationStatus {
+    Calibrated,
+    UncalibratedInternal
+});
+wire_enum!(LocationEvidenceKind {
+    SemanticSimilarity,
+    Lexical,
+    Concept,
+    Morphology,
+    StructuralProximity,
+    PassageCoherence,
+    Participant,
+    HumanPrecedent,
+    Resource,
+    ExactSpan,
+    CandidateCompetition
+});
+wire_enum!(EmbeddingRole {
+    CandidateRetrievalOnly
+});
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticEmbeddingDescriptor {
+    pub provider_id: String,
+    pub provider_version: String,
+    pub model_id: String,
+    pub model_hash: String,
+    pub dimensions: u64,
+    pub normalization: String,
+    pub language_capabilities: Vec<String>,
+    pub offline: bool,
+    pub available: bool,
+    pub role: EmbeddingRole,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocationEvidenceComponent {
+    pub kind: LocationEvidenceKind,
+    pub raw_score: f64,
+    pub weight: f64,
+    pub weighted_score: f64,
+    pub provenance: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocationQuoteAnchor {
+    pub span_id: String,
+    pub quote: String,
+    pub quote_sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticLocationCandidate {
+    pub id: String,
+    pub source_owner_unit_id: String,
+    pub source_semantic_unit_ids: Vec<String>,
+    pub target_semantic_unit_ids: Vec<String>,
+    pub target_span_ids: Vec<String>,
+    pub target_token_instance_ids: Vec<String>,
+    pub target_displayed_references: Vec<String>,
+    pub target_canonical_references: Vec<String>,
+    pub quotes: Vec<LocationQuoteAnchor>,
+    pub realization: Realization,
+    pub properties: Vec<RelationshipProperty>,
+    pub raw_score: f64,
+    pub evidence_components: Vec<LocationEvidenceComponent>,
+    pub rank: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocationConfidence {
+    pub raw_score: Option<f64>,
+    pub calibrated_value: f64,
+    pub confidence_policy_version: String,
+    pub calibration_version: String,
+    pub calibration_status: LocationCalibrationStatus,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticLocationRelationship {
+    pub id: String,
+    pub source_owner_unit_id: String,
+    pub source_semantic_unit_ids: Vec<String>,
+    pub target_semantic_unit_ids: Vec<String>,
+    pub target_span_ids: Vec<String>,
+    pub target_token_instance_ids: Vec<String>,
+    pub location_outcome: LocationOutcome,
+    pub realization: Realization,
+    pub properties: Vec<RelationshipProperty>,
+    pub location_confidence: LocationConfidence,
+    pub selected_candidate_id: Option<String>,
+    pub alternative_candidate_ids: Vec<String>,
+    pub review_status: ReviewStatus,
+    pub lifecycle_status: LifecycleStatus,
+    pub revision: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticLocationDiagnostics {
+    pub source_primary_obligations: u64,
+    pub locations_found: u64,
+    pub ambiguous: u64,
+    pub not_located: u64,
+    pub search_incomplete: u64,
+    pub unsupported_analysis: u64,
+    pub same_verse: u64,
+    pub cross_verse: u64,
+    pub split: u64,
+    pub merged: u64,
+    pub reordered: bool,
+    pub grammatical: u64,
+    pub pronominalized: u64,
+    pub implicit: u64,
+    pub average_candidate_count: f64,
+    pub candidate_evaluations: u64,
+    pub candidate_budget: u64,
+    pub progressive_search_scope_evaluations: HashMap<String, u64>,
+    pub contextual_support_edges: u64,
+    pub retrieval_seconds: f64,
+    pub ranking_seconds: f64,
+    pub embedding_seconds: f64,
+    pub embedding_cache_hits: u64,
+    pub embedding_cache_misses: u64,
+    pub embedding_failure: Option<String>,
+    pub embedding_cache_hit_rate: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SemanticLocationRun {
+    pub id: String,
+    pub book: String,
+    pub range_key: String,
+    pub fingerprint: String,
+    pub source_inventory_id: String,
+    pub source_inventory_fingerprint: String,
+    pub target_inventory_id: String,
+    pub target_inventory_fingerprint: String,
+    pub passage_fingerprint: String,
+    pub location_engine_version: String,
+    pub embedding_provider: SemanticEmbeddingDescriptor,
+    pub confidence_policy_version: String,
+    pub calibration_version: String,
+    pub search_policy_version: String,
+    pub run_status: LocationRunStatus,
+    pub relationships: Vec<SemanticLocationRelationship>,
+    pub candidates: Vec<SemanticLocationCandidate>,
+    pub diagnostics: SemanticLocationDiagnostics,
+    pub elapsed_seconds: f64,
+    pub cache_status: SourceInventoryCacheStatus,
+}
+
 pub fn codepoint_span(text: &str, start: usize, end: usize) -> Result<String, String> {
     let points: Vec<char> = text.chars().collect();
     if start > end || end > points.len() {

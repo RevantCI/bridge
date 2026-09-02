@@ -1020,6 +1020,97 @@ pub async fn target_semantic_get_capabilities(
 }
 
 #[tauri::command]
+pub async fn semantic_location_run_range(
+    sidecar: State<'_, EngineSidecar>,
+    chapter: String,
+    verse: String,
+    end_chapter: Option<String>,
+    end_verse: Option<String>,
+    max_candidate_evaluations: Option<u64>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "semanticLocation.runRange",
+            serde_json::json!({
+                "chapter": chapter, "verse": verse,
+                "endChapter": end_chapter.unwrap_or_default(),
+                "endVerse": end_verse.unwrap_or_default(),
+                "maxCandidateEvaluations": max_candidate_evaluations,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn semantic_location_status(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "semanticLocation.status",
+            serde_json::json!({"runId": run_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn semantic_location_get_range(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "semanticLocation.getRange",
+            serde_json::json!({"runId": run_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn semantic_location_get_relationship(
+    sidecar: State<'_, EngineSidecar>,
+    relationship_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "semanticLocation.getRelationship",
+            serde_json::json!({"relationshipId": relationship_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn semantic_location_get_candidates(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+    source_owner_unit_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "semanticLocation.getCandidates",
+            serde_json::json!({
+                "runId": run_id,
+                "sourceOwnerUnitId": source_owner_unit_id.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn semantic_location_get_diagnostics(
+    sidecar: State<'_, EngineSidecar>,
+    run_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "semanticLocation.getDiagnostics",
+            serde_json::json!({"runId": run_id}),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn paratext_get_state(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar
         .send_request("paratext.getState", serde_json::json!({}))

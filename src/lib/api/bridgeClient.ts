@@ -20,6 +20,10 @@ import type {
   TargetLanguageCapabilities,
   TargetSearchSpan,
   TargetSemanticInventory,
+  SemanticLocationCandidate,
+  SemanticLocationDiagnostics,
+  SemanticLocationRelationship,
+  SemanticLocationRun,
 } from "../types/passageSemanticV1";
 
 /**
@@ -473,6 +477,35 @@ export const bridge = {
 
   targetSemanticGetCapabilities(inventoryId?: string): Promise<TargetLanguageCapabilities> {
     return call("target_semantic_get_capabilities", { inventoryId });
+  },
+
+  semanticLocationRunRange(
+    chapter: string, verse: string, endChapter?: string, endVerse?: string,
+    maxCandidateEvaluations?: number,
+  ): Promise<SemanticLocationRun> {
+    return call("semantic_location_run_range", {
+      chapter, verse, endChapter, endVerse, maxCandidateEvaluations,
+    });
+  },
+
+  semanticLocationStatus(runId: string): Promise<Pick<SemanticLocationRun, "id" | "runStatus" | "diagnostics" | "cacheStatus">> {
+    return call("semantic_location_status", { runId });
+  },
+
+  semanticLocationGetRange(runId: string): Promise<SemanticLocationRun> {
+    return call("semantic_location_get_range", { runId });
+  },
+
+  semanticLocationGetRelationship(relationshipId: string): Promise<SemanticLocationRelationship> {
+    return call("semantic_location_get_relationship", { relationshipId });
+  },
+
+  semanticLocationGetCandidates(runId: string, sourceOwnerUnitId?: string): Promise<SemanticLocationCandidate[]> {
+    return call("semantic_location_get_candidates", { runId, sourceOwnerUnitId });
+  },
+
+  semanticLocationGetDiagnostics(runId: string): Promise<SemanticLocationDiagnostics> {
+    return call("semantic_location_get_diagnostics", { runId });
   },
 
   paratextGetState(): Promise<DesktopConnectorState> {

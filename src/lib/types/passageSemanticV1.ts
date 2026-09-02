@@ -600,6 +600,127 @@ export interface TargetSemanticInventory {
   cacheStatus: "MISS" | "HIT";
 }
 
+export type LocationOutcome = "LOCATED" | "AMBIGUOUS" | "NOT_LOCATED" | "SEARCH_INCOMPLETE" | "UNSUPPORTED_ANALYSIS";
+export type LocationRunStatus = "RUNNING" | "COMPLETE" | "FAILED";
+export type LocationCalibrationStatus = "CALIBRATED" | "UNCALIBRATED_INTERNAL";
+export type LocationEvidenceKind = "SEMANTIC_SIMILARITY" | "LEXICAL" | "CONCEPT" | "MORPHOLOGY" | "STRUCTURAL_PROXIMITY" | "PASSAGE_COHERENCE" | "PARTICIPANT" | "HUMAN_PRECEDENT" | "RESOURCE" | "EXACT_SPAN" | "CANDIDATE_COMPETITION";
+
+export interface SemanticEmbeddingDescriptor {
+  providerId: string;
+  providerVersion: string;
+  modelId: string;
+  modelHash: string;
+  dimensions: number;
+  normalization: string;
+  languageCapabilities: string[];
+  offline: boolean;
+  available: boolean;
+  role: "CANDIDATE_RETRIEVAL_ONLY";
+}
+
+export interface LocationEvidenceComponent {
+  kind: LocationEvidenceKind;
+  rawScore: number;
+  weight: number;
+  weightedScore: number;
+  provenance: string;
+}
+
+export interface SemanticLocationCandidate {
+  id: string;
+  sourceOwnerUnitId: string;
+  sourceSemanticUnitIds: string[];
+  targetSemanticUnitIds: string[];
+  targetSpanIds: string[];
+  targetTokenInstanceIds: string[];
+  targetDisplayedReferences: string[];
+  targetCanonicalReferences: string[];
+  quotes: Array<{ spanId: string; quote: string; quoteSha256: string }>;
+  realization: Realization;
+  properties: RelationshipProperty[];
+  rawScore: number;
+  evidenceComponents: LocationEvidenceComponent[];
+  rank: number;
+}
+
+export interface SemanticLocationRelationship {
+  id: string;
+  sourceOwnerUnitId: string;
+  sourceSemanticUnitIds: string[];
+  targetSemanticUnitIds: string[];
+  targetSpanIds: string[];
+  targetTokenInstanceIds: string[];
+  locationOutcome: LocationOutcome;
+  realization: Realization;
+  properties: RelationshipProperty[];
+  locationConfidence: LocationConfidence;
+  selectedCandidateId: string | null;
+  alternativeCandidateIds: string[];
+  reviewStatus: ReviewStatus;
+  lifecycleStatus: LifecycleStatus;
+  revision: number;
+}
+
+export interface LocationConfidence {
+  rawScore: number | null;
+  calibratedValue: number;
+  confidencePolicyVersion: string;
+  calibrationVersion: string;
+  calibrationStatus: LocationCalibrationStatus;
+}
+
+export interface SemanticLocationDiagnostics {
+  sourcePrimaryObligations: number;
+  locationsFound: number;
+  ambiguous: number;
+  notLocated: number;
+  searchIncomplete: number;
+  unsupportedAnalysis: number;
+  sameVerse: number;
+  crossVerse: number;
+  split: number;
+  merged: number;
+  reordered: boolean;
+  grammatical: number;
+  pronominalized: number;
+  implicit: number;
+  averageCandidateCount: number;
+  candidateEvaluations: number;
+  candidateBudget: number;
+  progressiveSearchScopeEvaluations: Record<string, number>;
+  contextualSupportEdges: number;
+  retrievalSeconds: number;
+  rankingSeconds: number;
+  embeddingSeconds: number;
+  embeddingCacheHits: number;
+  embeddingCacheMisses: number;
+  embeddingFailure: string | null;
+  embeddingCacheHitRate: number;
+}
+
+export interface SemanticLocationRun {
+  id: string;
+  book: string;
+  rangeKey: string;
+  fingerprint: string;
+  sourceInventoryId: string;
+  sourceInventoryFingerprint: string;
+  targetInventoryId: string;
+  targetInventoryFingerprint: string;
+  passageFingerprint: string;
+  locationEngineVersion: string;
+  embeddingProvider: SemanticEmbeddingDescriptor;
+  confidencePolicyVersion: string;
+  calibrationVersion: string;
+  searchPolicyVersion: string;
+  runStatus: LocationRunStatus;
+  relationships: SemanticLocationRelationship[];
+  candidates: SemanticLocationCandidate[];
+  diagnostics: SemanticLocationDiagnostics;
+  elapsedSeconds: number;
+  cacheStatus: "MISS" | "HIT";
+}
+
 /** Convert canonical code-point offsets to the UTF-16 offsets used by DOM APIs. */
 export function codePointToUtf16Offset(text: string, offset: number): number {
   const codePoints = Array.from(text);

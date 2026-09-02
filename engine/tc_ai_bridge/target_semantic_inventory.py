@@ -213,13 +213,6 @@ class TargetSemanticInventory:
             review_status=ReviewStatus.UNREVIEWED, lifecycle_status=LifecycleStatus.ACTIVE,
         )
 
-    def _save_unit(self, unit: TargetSemanticUnit) -> dict[str, Any]:
-        try:
-            return self.repository.semantic_unit(unit.id)
-        except FoundationValidationError:
-            self.repository.save_semantic_unit(unit)
-            return self.repository.semantic_unit(unit.id)
-
     @staticmethod
     def _span(token_group: list[dict[str, Any]], text: str, kind: str, revision: str) -> dict[str, Any]:
         first, last = token_group[0], token_group[-1]
@@ -257,22 +250,23 @@ class TargetSemanticInventory:
             return cached
 
         tokens = [self.repository.token_instance(item) for item in passage["targetTokenInstanceIds"]]
-        units: list[dict[str, Any]] = []
+        unit_models: list[TargetSemanticUnit] = []
         by_ref: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for token in tokens:
             by_ref[token["displayedReference"]].append(token)
             if token["tokenKind"] == TokenKind.PUNCTUATION.value:
                 continue
-            units.append(self._save_unit(self._unit(
+            unit_models.append(self._unit(
                 token, SemanticUnitKind.LEXICAL, CoverageDimension.LEXICAL_CONTENT,
                 "ORTHOGRAPHIC_TARGET_MATERIAL", 1.0, None,
-            )))
+            ))
             for provider in self.registry.providers:
                 for finding in provider.analyze_token(token):
-                    units.append(self._save_unit(self._unit(
+                    unit_models.append(self._unit(
                         token, SemanticUnitKind(finding["kind"]), CoverageDimension(finding["dimension"]),
                         finding["interpretation"], float(finding["confidence"]), provider,
-                    )))
+                    ))
+        units = self.repository.ensure_semantic_units(unit_models)
 
         spans: list[dict[str, Any]] = []
         subtoken_count = 0
