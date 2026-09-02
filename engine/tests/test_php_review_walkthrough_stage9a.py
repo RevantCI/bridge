@@ -47,8 +47,11 @@ def seeded(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, dict]:
 
 @pytest.fixture()
 def runtime(seeded: tuple[Path, dict]) -> PassageSemanticRuntime:
-    root, _ = seeded
-    return PassageSemanticRuntime(TranslationCoreProject(root), "stage9a-review-fixture")
+    root, summary = seeded
+    # The seeder registers the fixture exactly as the desktop app does. Reopen
+    # it with that persisted identity; a hardcoded id correctly trips the
+    # companion database's cross-project merge protection.
+    return PassageSemanticRuntime(TranslationCoreProject(root), summary["projectId"])
 
 
 # --- The fixture itself -----------------------------------------------------
