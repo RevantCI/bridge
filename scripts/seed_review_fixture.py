@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -158,7 +159,12 @@ def seed(root: Path) -> dict[str, object]:
         "kind": "SELECTED_RANGE", "startChapter": "1", "startVerse": "3",
         "endChapter": "1", "endVerse": "6",
     })
-    deadline = time.monotonic() + 30
+    # Stage 5 alone runs ~20s on an ordinary dev machine and the whole job
+    # ~40s, so the original 30s budget expired even with nothing else running
+    # -- it just failed more often under load. Generous by default, and
+    # overridable for slower or busier CI hardware.
+    budget = float(os.environ.get("BRIDGE_FIXTURE_ANALYSIS_TIMEOUT", "300"))
+    deadline = time.monotonic() + budget
     while time.monotonic() < deadline:
         job = manager.status(started["jobId"])
         if job["overallStatus"] in {
@@ -167,7 +173,11 @@ def seed(root: Path) -> dict[str, object]:
             break
         time.sleep(0.01)
     else:
-        raise RuntimeError("Fixture analysis job did not finish")
+        raise RuntimeError(
+            f"Fixture analysis job did not finish within {budget:.0f}s "
+            f"(last status {job['overallStatus']}, stage {job['currentStage'] or 'n/a'}). "
+            "Raise BRIDGE_FIXTURE_ANALYSIS_TIMEOUT if this machine is slower."
+        )
     if job["overallStatus"] not in {"COMPLETED", "COMPLETED_WITH_WARNINGS"}:
         raise RuntimeError(f"Fixture analysis failed: {job['failures']}")
     location = runtime.semantic_location.get_range(
