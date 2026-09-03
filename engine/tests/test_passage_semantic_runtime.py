@@ -14,7 +14,12 @@ from tc_ai_bridge.passage_semantic_models import (
     QaDisposition,
     ReviewStatus,
 )
-from tc_ai_bridge.passage_semantic_repository import FoundationConflict, FoundationRepository
+from tc_ai_bridge import passage_semantic_runtime as psr
+from tc_ai_bridge.passage_semantic_repository import (
+    FoundationConflict,
+    FoundationRepository,
+    FoundationValidationError,
+)
 from tc_ai_bridge.passage_semantic_runtime import (
     PassageSemanticRuntime,
     _canonical_reference,
@@ -545,3 +550,83 @@ def test_verse_bridge_and_lettered_segment_are_deterministic(
     )
     assert _canonical_reference("RUT", "1", "2-3", "test")["mappingKind"] == "VERSE_BRIDGE"
     assert _canonical_reference("RUT", "1", "4a", "test")["mappingKind"] == "AMBIGUOUS_SEGMENT"
+
+
+# --- Verse text carrying its own structural markers -------------------------
+
+def _write_marker_bearing_project(root: Path) -> Path:
+    r"""A project shaped like real imported Scripture.
+
+    translationCore chapter JSON stores trailing paragraph/section markers
+    inside the verse string, e.g. ``...text\n\p`` or
+    ``...text\n\s heading\n\p``. Every real imported Hindi/English project in
+    this workspace looks like this; only synthetic fixtures have clean verse
+    text, which is why this went unnoticed until Stage 9A.4 made scope
+    resolution run automatically when Alignment Review opens.
+    """
+    align_dir = root / ".apps" / "translationCore" / "alignmentData" / "php"
+    align_dir.mkdir(parents=True)
+    (root / "php").mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps({
+        "project": {"id": "php", "name": "Philippians"},
+        "target_language": {"id": "hin", "name": "Hindi"},
+        "resource": {"id": "irv", "name": "IRV"},
+        "tc_version": "8",
+    }), encoding="utf-8")
+    (root / "php" / "1.json").write_text(json.dumps({
+        "1": "पहला वचन,\n\\p",
+        "2": "दूसरा वचन।\n\\s अनुभाग शीर्षक\n\\p",
+        "3": "तीसरा वचन।",
+    }, ensure_ascii=False), encoding="utf-8")
+    (align_dir / "1.json").write_text(json.dumps({
+        "1": {"alignments": [], "wordBank": []},
+        "2": {"alignments": [], "wordBank": []},
+        "3": {"alignments": [], "wordBank": []},
+    }, ensure_ascii=False), encoding="utf-8")
+    (root / "php.usfm").write_text(
+        "\\id PHP\n\\c 1\n\\p\n\\v 1 पुराना आयातित पाठ।\n"
+        "\\v 2 पुराना आयातित पाठ।\n\\v 3 पुराना आयातित पाठ।\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_verse_text_carrying_structural_markers_is_authoritative(tmp_path: Path) -> None:
+    """Trailing \\p and \\s markers in verse JSON must not read as corruption.
+
+    The parser correctly hoists them out of verse text. Comparing a parsed
+    segment against the raw stored string therefore fails on good data - it
+    blocked 16 of 26 real projects, and with them Stage 9A.4 analysis.
+    """
+    root = _write_marker_bearing_project(tmp_path / "marker-bearing")
+    overlay = build_current_text_overlay(TranslationCoreProject(root))
+
+    by_reference = {seg.reference: seg.text for seg in overlay.index.segments}
+    assert by_reference["PHP 1:1"] == "पहला वचन,"
+    assert by_reference["PHP 1:2"] == "दूसरा वचन।"
+    assert by_reference["PHP 1:3"] == "तीसरा वचन।"
+    # The markers become structure, and the old imported Scripture never returns.
+    assert "पुराना आयातित पाठ" not in " ".join(by_reference.values())
+    assert "अनुभाग शीर्षक" not in " ".join(by_reference.values())
+
+
+def test_overlay_still_rejects_text_that_is_not_the_current_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guard must keep its teeth after being taught about markers.
+
+    Simulates the regression it exists for - the assembled overlay parsing to
+    something other than the current authoritative text - and asserts it still
+    refuses rather than silently publishing non-authoritative Scripture.
+    """
+    root = _write_marker_bearing_project(tmp_path / "guard-still-bites")
+    real = psr._authoritative_current_segments
+
+    def diverged(book: str, by_chapter: dict) -> dict:
+        segments = dict(real(book, by_chapter))
+        segments["PHP 1:2"] = "कुछ और ही पाठ"   # not what the overlay will produce
+        return segments
+
+    monkeypatch.setattr(psr, "_authoritative_current_segments", diverged)
+    with pytest.raises(FoundationValidationError, match="non-authoritative"):
+        build_current_text_overlay(TranslationCoreProject(root))

@@ -188,6 +188,33 @@ class CurrentTextOverlay:
     structure_resource_id: str
 
 
+def _authoritative_current_segments(
+    book: str, by_chapter: dict[str, dict[str, str]],
+) -> dict[str, str]:
+    r"""Parsed form of the current chapter JSON, via the same USFM parser.
+
+    Chapter JSON legitimately stores trailing paragraph/section markers inside
+    the verse string (``...text\n\p``, ``...text\n\s heading\n\p``) -- real
+    imported projects are full of them. The parser correctly hoists those out
+    of verse text, so comparing a parsed segment against the raw stored string
+    reports perfectly good data as non-authoritative: 39 of 104 segments in a
+    real Hindi Philippians failed that way, which blocked scope resolution and
+    therefore Stage 9A.4 analysis for the whole book.
+
+    Both sides are parsed identically instead. This is the same construction
+    the no-preserved-USFM fallback above already treats as authoritative, so
+    the guard still catches what it exists for: any source-USFM Scripture body
+    leaking into a verse still parses differently from the current text.
+    """
+    lines = [f"\\id {book}"]
+    for chapter in sorted(by_chapter, key=lambda item: _verse_key(item)[0]):
+        lines.append(f"\\c {chapter}")
+        for verse in sorted(by_chapter[chapter], key=_verse_key):
+            lines.append(f"\\v {verse} {by_chapter[chapter][verse]}")
+    index = UsfmPassageIndex.from_text("\n".join(lines) + "\n", book_hint=book)
+    return {segment.reference: segment.text for segment in index.segments}
+
+
 def build_current_text_overlay(project: Any) -> CurrentTextOverlay:
     """Overlay current chapter JSON onto a marker-only imported-USFM skeleton.
 
@@ -373,9 +400,9 @@ def build_current_text_overlay(project: Any) -> CurrentTextOverlay:
 
     text = "\n".join(synthetic) + "\n"
     index = UsfmPassageIndex.from_text(text, book_hint=book)
-    current = current_target_text(project)
+    authoritative = _authoritative_current_segments(book, by_chapter)
     for segment in index.segments:
-        if current.get(segment.reference) != segment.text:
+        if authoritative.get(segment.reference) != segment.text:
             raise FoundationValidationError(
                 f"Current-text overlay produced non-authoritative text at {segment.reference}"
             )
