@@ -311,11 +311,15 @@ def test_exact_current_span_validation_and_optional_embedding_fallback(tmp_path:
     runtime = _runtime(tmp_path, language="el", chapters={"1": {"3": "θεός"}})
     inventory = runtime.target_semantic.build_range("1", "3")
     engine = SemanticLocationEngine(runtime)
+    # Spans anchor against parsed, marker-stripped verse text - the same
+    # source they were built from - not the raw stored verse string.
+    current_text = runtime.rebuild_current_passage(
+        "1", "3")["targetTextByDisplayedReference"]
     exact = next(span for span in inventory["searchSpans"] if span["quote"] == "θεός")
-    engine._validate_span(exact, inventory)
+    engine._validate_span(exact, inventory, current_text)
     damaged = {**exact, "quote": "other"}
     with pytest.raises(Exception, match="quote hash"):
-        engine._validate_span(damaged, inventory)
+        engine._validate_span(damaged, inventory, current_text)
     result = engine.run_range("1", "3")
     assert result["embeddingProvider"]["available"] is False
     assert any(item["locationOutcome"] == "LOCATED" for item in result["relationships"])
