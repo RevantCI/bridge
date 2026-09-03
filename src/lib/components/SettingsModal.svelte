@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
-  import { project, reviewerMode } from "../stores";
+  import { navigationStatus, project, reviewerMode } from "../stores";
   import type { SettingsData } from "../types/finding";
 
   export let onClose: () => void;
-  export let initialPane: "ai" | "quality" | "resources" | "security" = "ai";
+  export let initialPane: "ai" | "quality" | "connections" | "resources" | "security" = "ai";
 
-  let activePane: "ai" | "quality" | "resources" | "security" = initialPane;
+  let activePane: "ai" | "quality" | "connections" | "resources" | "security" = initialPane;
   let loading = true;
   let saving = false;
   let saveMessage = "";
@@ -18,6 +18,8 @@
   let apiKey = "";
   let hasApiKey = false;
   let mode: "basic" | "advanced" = "basic";
+  let paratextNavigation = false;
+  let logosNavigation = false;
 
   const providerPresets: Record<string, string> = {
     openai: "",
@@ -37,7 +39,10 @@
       model = s.model || "gpt-5.6";
       hasApiKey = s.hasApiKey;
       mode = s.reviewerMode;
+      paratextNavigation = s.paratextNavigation;
+      logosNavigation = s.logosNavigation;
       reviewerMode.set(s.reviewerMode);
+      navigationStatus.set(await bridge.navigationStatus());
     } catch (e) {
       console.error("failed to load settings", e);
     } finally {
@@ -55,17 +60,29 @@
     saving = true;
     saveMessage = "";
     try {
-      const params: Record<string, unknown> = { provider, apiBaseUrl, model, reviewerMode: mode };
+      const params: Record<string, unknown> = {
+        provider, apiBaseUrl, model, reviewerMode: mode, paratextNavigation, logosNavigation,
+      };
       if (apiKey.trim()) params.apiKey = apiKey.trim();
       const result = await bridge.setSettings(params);
       hasApiKey = result.hasApiKey;
       reviewerMode.set(result.reviewerMode);
       apiKey = "";
+      navigationStatus.set(await bridge.navigationStatus());
       saveMessage = "Saved.";
     } catch (e) {
       saveMessage = e instanceof Error ? e.message : String(e);
     } finally {
       saving = false;
+    }
+  }
+
+  async function refreshConnections(): Promise<void> {
+    saveMessage = "";
+    try {
+      navigationStatus.set(await bridge.navigationStatus());
+    } catch (e) {
+      saveMessage = e instanceof Error ? e.message : String(e);
     }
   }
 </script>
@@ -77,6 +94,7 @@
       <div class="nav-title">Settings</div>
       <button class="nav-item" class:active={activePane === "ai"} on:click={() => (activePane = "ai")}>AI provider</button>
       <button class="nav-item" class:active={activePane === "quality"} on:click={() => (activePane = "quality")}>Quality engine</button>
+      <button class="nav-item" class:active={activePane === "connections"} on:click={() => (activePane = "connections")}>Connections</button>
       <button class="nav-item" class:active={activePane === "resources"} on:click={() => (activePane = "resources")}>Resources & licenses</button>
       <button class="nav-item" class:active={activePane === "security"} on:click={() => (activePane = "security")}>Security</button>
     </div>
@@ -140,6 +158,45 @@
           <button class="btn primary" on:click={save} disabled={saving}>{saving ? "Saving…" : "Save"}</button>
           {#if saveMessage}<span class="save-msg">{saveMessage}</span>{/if}
         </div>
+      {:else if activePane === "connections"}
+        <h3>Verse navigation</h3>
+        <p class="desc">Keep Bridge, Paratext, and Logos on the same verse. Navigation stays on this computer and never changes Scripture text.</p>
+        {#if $navigationStatus.ownerConflict}
+          <div class="connection-warning">Another Bridge window currently owns desktop navigation. Close it or turn sync off there before enabling this window.</div>
+        {/if}
+        <label class="connection-option" class:selected={paratextNavigation}>
+          <input type="checkbox" bind:checked={paratextNavigation} />
+          <span>
+            <b>Paratext navigation</b>
+            <small>Requires the AI Bridge Connector plugin and an active Scripture window in sync group A–E.</small>
+          </span>
+          <i class:connected={$navigationStatus.paratext.connected} class:error={Boolean($navigationStatus.paratext.error)} />
+        </label>
+        <div class="connection-detail">
+          {#if !paratextNavigation}Off
+          {:else if $navigationStatus.paratext.checking}Checking…
+          {:else if $navigationStatus.paratext.connected}Connected{#if $navigationStatus.paratext.project_name} · {$navigationStatus.paratext.project_name}{/if}{#if $navigationStatus.paratext.reference} · {$navigationStatus.paratext.reference}{/if}
+          {:else}{$navigationStatus.paratext.error || "Waiting for Paratext"}{/if}
+        </div>
+        <label class="connection-option" class:selected={logosNavigation}>
+          <input type="checkbox" bind:checked={logosNavigation} />
+          <span>
+            <b>Logos navigation</b>
+            <small>Requires Logos Desktop for Windows and a navigable Bible panel.</small>
+          </span>
+          <i class:connected={$navigationStatus.logos.connected} class:error={Boolean($navigationStatus.logos.error)} />
+        </label>
+        <div class="connection-detail">
+          {#if !logosNavigation}Off
+          {:else if $navigationStatus.logos.checking}Checking…
+          {:else if $navigationStatus.logos.connected}Connected{#if $navigationStatus.logos.reference} · {$navigationStatus.logos.reference}{/if}
+          {:else}{$navigationStatus.logos.error || "Waiting for Logos"}{/if}
+        </div>
+        <div class="save-row">
+          <button class="btn primary" on:click={save} disabled={saving}>{saving ? "Saving…" : "Save & connect"}</button>
+          <button class="btn" on:click={refreshConnections} disabled={saving}>Refresh</button>
+          {#if saveMessage}<span class="save-msg">{saveMessage}</span>{/if}
+        </div>
       {:else if activePane === "resources"}
         <h3>Original-language resources</h3>
         <p class="desc">Bridge bundles versioned Hebrew and Greek source-token indexes for offline word alignment.</p>
@@ -200,4 +257,14 @@
   .kv .on { color: var(--success); font-weight: 700; }
   .resource-note { font-size: 10px; line-height: 1.45; color: var(--text-3); margin-top: 10px; overflow-wrap: anywhere; }
   .resource-warning { font-size: 11px; line-height: 1.4; color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger); border-radius: 6px; padding: 8px; margin-bottom: 10px; }
+  .connection-warning { font-size: 11px; line-height: 1.4; color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger); border-radius: 6px; padding: 8px; margin-bottom: 10px; }
+  .connection-option { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 9px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; cursor: pointer; background: var(--surface-2); }
+  .connection-option.selected { border-color: var(--accent); background: var(--accent-bg); }
+  .connection-option input { width: auto; height: auto; margin: 2px 0 0; }
+  .connection-option span { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+  .connection-option small { color: var(--text-2); line-height: 1.35; }
+  .connection-option i { width: 9px; height: 9px; border-radius: 50%; margin-top: 3px; background: var(--border-strong); }
+  .connection-option i.connected { background: var(--success); }
+  .connection-option i.error { background: var(--danger); }
+  .connection-detail { min-height: 26px; padding: 5px 8px 8px 31px; color: var(--text-3); font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
 </style>

@@ -17,8 +17,9 @@
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
     verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState, reviewerMode,
-    aiCheckReviewsByVerse, diagnosticsOpen, engineLog, appendEngineLog,
+    aiCheckReviewsByVerse, diagnosticsOpen, engineLog, appendEngineLog, navigationStatus,
   } from "./lib/stores";
+  import { editingChapter, editingVerse, editSaving } from "./lib/verseEditor";
 
   let opened = false;
   let engineStatus: "checking" | "ready" | "error" = "checking";
@@ -44,11 +45,132 @@
   let reportError = "";
   let engineNotice = "";
   let engineNoticeTimer: ReturnType<typeof setTimeout> | undefined;
-  let settingsInitialPane: "ai" | "quality" | "resources" | "security" = "ai";
+  let settingsInitialPane: "ai" | "quality" | "connections" | "resources" | "security" = "ai";
+  let navigationPollInFlight = false;
+  let handlingNavigationRequest = "";
+  let lastNavigationReference = "";
+  let navigationReference = "";
 
-  function openSettings(pane: "ai" | "quality" | "resources" | "security" = "ai"): void {
+  function openSettings(pane: "ai" | "quality" | "connections" | "resources" | "security" = "ai"): void {
     settingsInitialPane = pane;
     settingsOpen.set(true);
+  }
+
+  function currentBridgeReference(): string {
+    if (!$project || !$selectedVerse) return "";
+    return `${$project.bookId.toUpperCase()} ${$currentChapter}:${$selectedVerse}`;
+  }
+
+  function navigationContext(): string {
+    return [
+      $project?.path ?? "no-project",
+      currentBridgeReference(),
+      $editingChapter ? `editing:${$editingChapter}:${$editingVerse}` : "not-editing",
+      $editSaving ? "saving" : "idle",
+      screen,
+    ].join("|");
+  }
+
+  function showNavigationNotice(message: string): void {
+    if (engineNoticeTimer) clearTimeout(engineNoticeTimer);
+    engineNotice = message;
+    engineNoticeTimer = setTimeout(() => { engineNotice = ""; }, 10000);
+  }
+
+  async function rejectNavigation(requestId: string, message: string): Promise<void> {
+    navigationStatus.set(await bridge.navigationResolve(
+      requestId, false, currentBridgeReference(), navigationContext(),
+    ));
+    showNavigationNotice(message);
+  }
+
+  async function handleNavigationCandidate(
+    candidate: { reference: string; origin: "paratext" | "logos"; requestId: string },
+  ): Promise<void> {
+    if (handlingNavigationRequest === candidate.requestId) return;
+    handlingNavigationRequest = candidate.requestId;
+    const source = candidate.origin === "paratext" ? "Paratext" : "Logos";
+    try {
+      if (!opened || !$project) {
+        await rejectNavigation(candidate.requestId, `${source} moved to ${candidate.reference}; open a Bridge project to follow it.`);
+        return;
+      }
+      if ($editingChapter || $editSaving) {
+        await rejectNavigation(candidate.requestId, `${source} moved to ${candidate.reference}. Save or cancel the verse edit before following external navigation.`);
+        return;
+      }
+      const match = /^([1-4]?[A-Z]{2,4})\s+(\d+):(\d+[a-z]?)$/i.exec(candidate.reference);
+      if (!match) {
+        await rejectNavigation(candidate.requestId, `${source} reported an unsupported Scripture reference.`);
+        return;
+      }
+      const [, bookId, chapter, verse] = match;
+      const original = {
+        path: $project.path, chapter: $currentChapter, verse: $selectedVerse,
+        dashboard: showingDashboard, validation: showingSemanticValidation, review: showingAlignmentReview,
+      };
+      const destination = $project.bookId.toUpperCase() === bookId.toUpperCase()
+        ? { path: $project.path }
+        : $project.importedProjects?.find((book) => book.bookId.toUpperCase() === bookId.toUpperCase());
+      if (!destination) {
+        await rejectNavigation(candidate.requestId, `${source} moved to ${candidate.reference}, but that book is not in the open Bridge collection.`);
+        return;
+      }
+      if (destination.path !== $project.path && !(await switchBook(destination.path, false))) {
+        await rejectNavigation(candidate.requestId, `Bridge could not open the book requested by ${source}: ${bookOpenError || candidate.reference}.`);
+        return;
+      }
+      let valid = $project?.chapters.includes(chapter) ?? false;
+      if (valid) {
+        await ensureChapterData(chapter);
+        valid = ($chapterVerseNums[chapter] ?? []).includes(verse);
+      }
+      if (!valid) {
+        if ($project?.path !== original.path) {
+          await switchBook(original.path, false);
+          if ($project?.chapters.includes(original.chapter) && original.verse) {
+            await activateChapter(original.chapter, original.verse);
+          }
+          showingDashboard = original.dashboard;
+          showingSemanticValidation = original.validation;
+          showingAlignmentReview = original.review;
+        }
+        await rejectNavigation(candidate.requestId, `${source} moved to ${candidate.reference}, which is not present in this Bridge project.`);
+        return;
+      }
+      showingDashboard = false;
+      showingSemanticValidation = false;
+      showingAlignmentReview = false;
+      await activateChapter(chapter, verse);
+      navigationStatus.set(await bridge.navigationResolve(
+        candidate.requestId, true, currentBridgeReference(), navigationContext(),
+      ));
+    } catch (error) {
+      try {
+        await rejectNavigation(
+          candidate.requestId,
+          `Could not follow ${source} navigation: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      } catch (resolveError) {
+        console.error("Could not reject external navigation", resolveError);
+      }
+    } finally {
+      handlingNavigationRequest = "";
+    }
+  }
+
+  async function pollNavigation(): Promise<void> {
+    if (navigationPollInFlight || engineStatus !== "ready") return;
+    navigationPollInFlight = true;
+    try {
+      const state = await bridge.navigationPoll(navigationContext());
+      navigationStatus.set(state);
+      if (state.candidate) await handleNavigationCandidate(state.candidate);
+    } catch (error) {
+      console.error("Could not poll desktop navigation", error);
+    } finally {
+      navigationPollInFlight = false;
+    }
   }
 
   // Sidecar respawns are silent by design (see sidecar.rs) — the new
@@ -71,6 +193,7 @@
         const siblings = $project?.importedProjects;
         if (!info.importedProjects && siblings) info.importedProjects = siblings;
         project.set(info);
+        lastNavigationReference = "";
         engineNotice = "Engine restarted — project reconnected automatically.";
       } catch (error) {
         engineNotice = `Engine restarted, but the project could not be reopened automatically (${error instanceof Error ? error.message : String(error)}). Reopen it from Projects if things look stale.`;
@@ -86,6 +209,7 @@
     let unlistenLog: (() => void) | null = null;
     let unlistenRespawn: (() => void) | null = null;
     let disposed = false;
+    const navigationTimer = window.setInterval(() => void pollNavigation(), 800);
     void (async () => {
       try {
         const initialLog = await bridge.engineLogRecent(200);
@@ -135,6 +259,7 @@
       unlistenLog?.();
       unlistenRespawn?.();
       if (engineNoticeTimer) clearTimeout(engineNoticeTimer);
+      window.clearInterval(navigationTimer);
     };
   });
 
@@ -495,6 +620,16 @@
     if (($chapterVerseNums[$currentChapter] ?? []).includes(v)) selectedVerse.set(v);
   }
 
+  $: navigationReference = currentBridgeReference();
+  $: if (!navigationReference) {
+    lastNavigationReference = "";
+  } else if (engineStatus === "ready" && navigationReference !== lastNavigationReference) {
+    lastNavigationReference = navigationReference;
+    void bridge.navigationBridgeChanged(navigationReference)
+      .then((state) => navigationStatus.set(state))
+      .catch((error) => console.error("Could not publish Bridge navigation", error));
+  }
+
   // Export is enabled only once every chapter in the whole book has been
   // loaded AND fully approved — not just the currently visible one.
   $: bookSummary = bookApprovedSummary();
@@ -540,6 +675,7 @@
     onGoHome={showProjectHome}
     onGoToDashboard={openDashboard}
     onOpenSettings={() => openSettings("ai")}
+    onOpenConnections={() => openSettings("connections")}
     onOpenExport={() => exportOpen.set(true)}
     onGotoVerse={gotoVerse}
     onChapterChange={switchChapter}

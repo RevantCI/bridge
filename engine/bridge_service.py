@@ -69,6 +69,7 @@ from tc_ai_bridge.ai_client import AIError, OpenAIResponsesClient, Transport
 from tc_ai_bridge.knowledge_base import KnowledgeBaseError
 from tc_ai_bridge.paratext_connector import ParatextConnectorClient, ParatextConnectorError
 from tc_ai_bridge.logos_connector import LogosConnectorClient, LogosConnectorError
+from tc_ai_bridge.navigation import NavigationSyncCoordinator
 from tc_ai_bridge.models import QAIssue, TokenRef, VerseAlignment
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.resource_materializer import materialize_book_checks
@@ -350,6 +351,11 @@ class Methods:
     LOGOS_GET_STATE = "logos.getState"
     LOGOS_SET_REFERENCE = "logos.setReference"
 
+    NAVIGATION_STATUS = "navigation.status"
+    NAVIGATION_POLL = "navigation.poll"
+    NAVIGATION_BRIDGE_CHANGED = "navigation.bridgeChanged"
+    NAVIGATION_RESOLVE = "navigation.resolve"
+
 
 class BridgeEngine:
     def __init__(self, settings: Optional[AppSettings] = None, ai_transport: Optional[Transport] = None) -> None:
@@ -431,6 +437,17 @@ class BridgeEngine:
         # inject an isolated instance rather than touch the real machine's
         # settings. See tests/test_bridge_service.py.
         self.settings = settings if settings is not None else AppSettings()
+
+        # Connector I/O is deliberately performed by NavigationSyncCoordinator's
+        # daemon probe rather than this service's single-threaded stdio request loop.
+        self._navigation = NavigationSyncCoordinator(
+            paratext_client=lambda: ParatextConnectorClient(),
+            logos_client=self._logos_client_instance,
+        )
+        self._navigation.configure(
+            paratext=self.settings.paratext_navigation,
+            logos=self.settings.logos_navigation,
+        )
 
         # Keep imported projects in the same application-owned folder as settings.
         settings_root = self.settings.path.parent
@@ -1980,15 +1997,9 @@ class BridgeEngine:
 
     # -- live desktop connectors (Paratext/Logos) --------------------------
     #
-    # Direct pass-through calls only in this pass: read the connector's current
-    # state, or push one explicit reference into it. This deliberately does NOT
-    # wire tc_ai_bridge/navigation.py's NavigationBroker/NavigationOwnership into
-    # an automatic background polling loop yet — that's a real, separate UX design
-    # (conflict handling, a background job, a live-sync toggle) worth its own pass
-    # once these two connectors have been proven against real running
-    # Paratext/Logos instances. What's here is already useful on its own: a
-    # "Connections" panel can show live state and let a reviewer manually push
-    # Bridge's current verse into either application.
+    # Explicit connector calls remain available for diagnostics and Paratext note
+    # handoff. Continuous navigation uses the coordinator below so slow/unavailable
+    # desktop applications never block ordinary Bridge requests.
 
     def paratext_get_state(self) -> dict[str, Any]:
         state = ParatextConnectorClient().get_state()
@@ -2173,6 +2184,22 @@ class BridgeEngine:
     def logos_set_reference(self, reference: str, origin_id: str = "") -> dict[str, Any]:
         state = self._logos_client_instance().set_reference(reference, origin_id=origin_id)
         return asdict(state)
+
+    def navigation_status(self, context: str = "") -> dict[str, Any]:
+        return self._navigation.snapshot(context=context)
+
+    def navigation_bridge_changed(self, reference: str) -> dict[str, Any]:
+        return self._navigation.bridge_changed(reference)
+
+    def navigation_resolve(
+        self, request_id: str, accepted: bool, bridge_reference: str = "", context: str = "",
+    ) -> dict[str, Any]:
+        return self._navigation.resolve(
+            request_id,
+            accepted=accepted,
+            bridge_reference=bridge_reference,
+            context=context,
+        )
 
     def _usfm_findings_for_book(
         self, project: Optional[TranslationCoreProject] = None,
@@ -3132,6 +3159,8 @@ class BridgeEngine:
             "reviewerName": self.settings.reviewer_name,
             "reviewerMode": self.settings.reviewer_mode,
             "paratextUsername": self.settings.paratext_username,
+            "paratextNavigation": self.settings.paratext_navigation,
+            "logosNavigation": self.settings.logos_navigation,
             "hasApiKey": bool(self.settings.get_api_key()),
             "aiUsage": self.settings.get_ai_usage_totals(),
         }
@@ -3149,6 +3178,14 @@ class BridgeEngine:
             self.settings.reviewer_name = kwargs["reviewerName"]
         if "reviewerMode" in kwargs:
             self.settings.reviewer_mode = kwargs["reviewerMode"]
+        if "paratextNavigation" in kwargs:
+            self.settings.paratext_navigation = bool(kwargs["paratextNavigation"])
+        if "logosNavigation" in kwargs:
+            self.settings.logos_navigation = bool(kwargs["logosNavigation"])
+        self._navigation.configure(
+            paratext=self.settings.paratext_navigation,
+            logos=self.settings.logos_navigation,
+        )
         return self.get_settings()
 
     def _require_project(self) -> None:
@@ -3621,6 +3658,19 @@ class BridgeEngine:
             if m == Methods.LOGOS_SET_REFERENCE:
                 return EngineResponse.ok(request.id, result=self.logos_set_reference(
                     p["reference"], p.get("originId", ""),
+                ))
+            if m in (Methods.NAVIGATION_STATUS, Methods.NAVIGATION_POLL):
+                return EngineResponse.ok(request.id, result=self.navigation_status(
+                    str(p.get("context") or ""),
+                ))
+            if m == Methods.NAVIGATION_BRIDGE_CHANGED:
+                return EngineResponse.ok(request.id, result=self.navigation_bridge_changed(
+                    p.get("reference", ""),
+                ))
+            if m == Methods.NAVIGATION_RESOLVE:
+                return EngineResponse.ok(request.id, result=self.navigation_resolve(
+                    str(p.get("requestId") or ""), bool(p.get("accepted", False)),
+                    str(p.get("bridgeReference") or ""), str(p.get("context") or ""),
                 ))
 
             return EngineResponse.fail(request.id, "unknown_method", f"No handler for '{m}'")

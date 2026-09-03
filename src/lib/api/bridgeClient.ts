@@ -2,7 +2,7 @@ import type {
   AiExplainResult, AIReviewChapterResponse, AIReviewJobSnapshot, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
   AlignmentStatusResponse, BookProgressEntry, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
   CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, LexiconEntryResponse, NativeCheckListResponse,
-  NativeCheckTool, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
+  NativeCheckTool, NavigationSyncState, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
   IssueResolutionHandoffResult, IssueResolutionListResponse, IssueResolutionRecord,
   ProjectReport, CollectionReport, SemanticValidationCorrection, SemanticValidationQueue,
 } from "../types/finding";
@@ -573,6 +573,24 @@ export const bridge = {
 
   logosSetReference(reference: string, originId?: string): Promise<DesktopConnectorState> {
     return call("logos_set_reference", { reference, originId });
+  },
+
+  navigationStatus(context?: string): Promise<NavigationSyncState> {
+    return call("navigation_status", { context });
+  },
+
+  navigationPoll(context?: string): Promise<NavigationSyncState> {
+    return call("navigation_poll", { context });
+  },
+
+  navigationBridgeChanged(reference: string): Promise<NavigationSyncState> {
+    return call("navigation_bridge_changed", { reference });
+  },
+
+  navigationResolve(
+    requestId: string, accepted: boolean, bridgeReference?: string, context?: string,
+  ): Promise<NavigationSyncState> {
+    return call("navigation_resolve", { requestId, accepted, bridgeReference, context });
   },
 
   getSettings(): Promise<SettingsData> {

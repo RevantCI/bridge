@@ -1,5 +1,5 @@
 import { writable, derived, get } from "svelte/store";
-import type { AiCheckReview, AlignmentWorkStatus, NativeCheckReview, ProjectInfo, QaFinding } from "./types/finding";
+import type { AiCheckReview, AlignmentWorkStatus, NativeCheckReview, NavigationSyncState, ProjectInfo, QaFinding } from "./types/finding";
 import type { EngineLogEntry } from "./api/bridgeClient";
 
 export function verseKey(chapter: string, verse: string): string {
@@ -65,6 +65,20 @@ export const settingsOpen = writable(false);
 export const exportOpen = writable(false);
 export const showSource = writable(false);
 export const diagnosticsOpen = writable(false);
+
+const disconnectedNavigationTarget = {
+  enabled: false, checking: false, connected: false, reference: "", error: "", checkedAt: 0,
+};
+export const navigationStatus = writable<NavigationSyncState>({
+  enabled: false,
+  ownsNavigation: false,
+  ownerConflict: false,
+  currentReference: "",
+  currentOrigin: "bridge",
+  candidate: null,
+  paratext: { ...disconnectedNavigationTarget },
+  logos: { ...disconnectedNavigationTarget },
+});
 
 const ENGINE_LOG_CAPACITY = 400;
 export const engineLog = writable<EngineLogEntry[]>([]);

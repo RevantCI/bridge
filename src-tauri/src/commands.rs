@@ -1552,6 +1552,66 @@ pub async fn logos_set_reference(
 }
 
 #[tauri::command]
+pub async fn navigation_status(
+    sidecar: State<'_, EngineSidecar>,
+    context: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "navigation.status",
+            serde_json::json!({ "context": context.unwrap_or_default() }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn navigation_poll(
+    sidecar: State<'_, EngineSidecar>,
+    context: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "navigation.poll",
+            serde_json::json!({ "context": context.unwrap_or_default() }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn navigation_bridge_changed(
+    sidecar: State<'_, EngineSidecar>,
+    reference: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "navigation.bridgeChanged",
+            serde_json::json!({ "reference": reference }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn navigation_resolve(
+    sidecar: State<'_, EngineSidecar>,
+    request_id: String,
+    accepted: bool,
+    bridge_reference: Option<String>,
+    context: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "navigation.resolve",
+            serde_json::json!({
+                "requestId": request_id,
+                "accepted": accepted,
+                "bridgeReference": bridge_reference.unwrap_or_default(),
+                "context": context.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn settings_get(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
     sidecar
         .send_request("settings.get", serde_json::json!({}))

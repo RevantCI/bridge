@@ -9,48 +9,28 @@ did not exist anywhere in this repo before Phase 7 (see
 
 ## What's verified and what isn't
 
-Logos was not installed on the machine this was written on, so the actual
-COM automation calls inside `Handle-State`/`Handle-Navigate` have never been
-run against a real Logos instance. What **is** verified:
+The first draft was written without Logos installed. On 2026-09-03, a local
+Logos installation exposed the registered `LogosBibleSoftware.Launcher` and
+`.Launcher.1` COM classes, and the real helper returned a clean disconnected
+state while Logos was closed. What **is** verified:
 
-- The script's own file header cites the real, sourced API surface (COM
-  ProgID/type-library GUID, method/property names) pulled directly from
-  `LogosBible/Logos4ComApiDemo`'s actual `.cs`/`.csproj` source on GitHub,
-  not from memory or docs alone.
+- The documented PowerShell ProgID is `LogosBibleSoftware.Launcher` (with
+  versioned fallback `.Launcher.1`), not the generated interop namespace
+  `Logos4Lib.LogosLauncher` guessed by the first draft.
+- Current state uses the documented `GetActivePanel()` and
+  `GetCurrentReferencesAndHeadwords()` calls, then reads the returned Bible
+  reference's `Details.Book/Chapter/Verse`.
 - `engine/tests/test_logos_connector.py` proves the real subprocess wiring:
   `LogosConnectorClient` genuinely spawns this script in `-STA` mode,
-  exchanges newline-delimited JSON over stdin/stdout, and a real "Logos
-  isn't installed" failure round-trips as a clean `LogosConnectorError`
-  rather than a hang or a malformed-response error. The script's own parser
-  syntax was checked with
+  exchanges newline-delimited JSON over stdin/stdout, and returns either a
+  valid state or a clean `LogosConnectorError` rather than hanging or emitting
+  malformed output. The script's own parser syntax was checked with
   `[System.Management.Automation.Language.Parser]::ParseFile()`.
 
-Two things flagged inline in the script's own header as the most likely to
-need a real fix once tested against a live Logos install:
-
-1. The COM ProgID `"Logos4Lib.LogosLauncher"` follows the standard `tlbimp`
-   naming convention but was never confirmed against a real registered
-   class. `Get-LogosLauncher` searches the registry for a plausible
-   alternative and reports it in its error message if the literal string
-   fails.
-2. Reading the *currently active panel's* Bible reference
-   (`Get-CurrentReferenceInfo`) is a best-effort guess (`$app.ActivePanel`,
-   then `.DataType.Details.Book/Chapter/Verse`) - the official demo project
-   only shows *pushing* a reference via `Navigate()`, never reading one back,
-   so this path has no real source to verify against. It's wrapped in
-   defensive `try`/`catch` throughout so a wrong guess degrades to an empty
-   reference (still a valid, non-crashing response) rather than breaking the
-   helper.
-
-Whoever tests this next against a real Logos install (per this session's
-plan: installed by the user, verified by a colleague who already has it)
-should run an interactive `-STA` PowerShell session, get a live `$app`
-object the same way this script does, and run `$app | Get-Member` /
-`$app.ActivePanel | Get-Member` to confirm or correct those two points -
-then this note (and the corresponding one in the script header) should be
-updated to say what was actually confirmed, per this project's own standing
-practice of never leaving a doc's claim unverified once real testing is
-possible.
+Still pending: start Logos with a Bible panel open and verify both the returned
+active Bible reference and `Navigate()` against the installed release. Bridge
+does not launch Logos automatically; a closed application remains a normal,
+non-error disconnected state.
 
 ## No live event push - deliberate, not a shortfall
 

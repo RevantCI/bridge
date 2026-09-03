@@ -401,6 +401,24 @@ export interface DesktopConnectorState {
   [key: string]: unknown;
 }
 
+export interface NavigationTargetState extends DesktopConnectorState {
+  enabled: boolean;
+  checking: boolean;
+  error: string;
+  checkedAt: number;
+}
+
+export interface NavigationSyncState {
+  enabled: boolean;
+  ownsNavigation: boolean;
+  ownerConflict: boolean;
+  currentReference: string;
+  currentOrigin: string;
+  candidate: { reference: string; origin: "paratext" | "logos"; requestId: string } | null;
+  paratext: NavigationTargetState;
+  logos: NavigationTargetState;
+}
+
 export interface ProjectInfo {
   projectId?: string;
   collectionId?: string;
@@ -792,6 +810,8 @@ export interface SettingsData {
   reviewerName: string;
   reviewerMode: "basic" | "advanced";
   paratextUsername: string;
+  paratextNavigation: boolean;
+  logosNavigation: boolean;
   hasApiKey: boolean;
   aiUsage: { tokens: number; estimatedCostUSD: number };
 }

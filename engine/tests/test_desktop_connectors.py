@@ -52,12 +52,14 @@ def test_paratext_set_reference_fails_cleanly_with_no_companion_plugin_running(m
     not shutil.which("powershell.exe") and not shutil.which("powershell"),
     reason="Windows PowerShell is required to run the real logos_bridge.ps1 helper.",
 )
-def test_logos_get_state_spawns_the_real_helper_and_fails_cleanly_without_logos_installed():
+def test_logos_get_state_spawns_the_real_helper_and_returns_environment_safe_result():
     engine = BridgeEngine()
     try:
         result = call(engine, "logos.getState")
-        assert result["success"] is False
-        assert result["error"]["code"] == "logos_connector_error"
+        if result["success"]:
+            assert isinstance(result["result"]["connected"], bool)
+        else:
+            assert result["error"]["code"] == "logos_connector_error"
         # The same BridgeEngine reuses one persistent helper process rather than
         # spawning a fresh one for every call — the real point of caching it.
         assert engine._logos_client is not None
@@ -71,10 +73,12 @@ def test_logos_get_state_spawns_the_real_helper_and_fails_cleanly_without_logos_
     not shutil.which("powershell.exe") and not shutil.which("powershell"),
     reason="Windows PowerShell is required to run the real logos_bridge.ps1 helper.",
 )
-def test_logos_set_reference_fails_cleanly_without_logos_installed():
+def test_logos_set_reference_rejects_an_unmapped_book_without_touching_logos():
     engine = BridgeEngine()
     try:
-        result = call(engine, "logos.setReference", {"reference": "TIT 1:1"})
+        # Invalid book mapping fails before connector I/O, so this protocol test can
+        # never move a developer's live Logos session.
+        result = call(engine, "logos.setReference", {"reference": "ZZZ 1:1"})
         assert result["success"] is False
         assert result["error"]["code"] == "logos_connector_error"
     finally:

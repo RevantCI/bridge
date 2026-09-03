@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { project, currentChapter } from "../stores";
+  import { project, currentChapter, navigationStatus } from "../stores";
 
   export let screen: "home" | "dashboard" | "validation" | "review" | "editor";
   export let projectName = "";
   export let onGoHome: () => void;
   export let onGoToDashboard: () => void;
   export let onOpenSettings: () => void;
+  export let onOpenConnections: () => void;
   export let onOpenExport: () => void;
   export let onGotoVerse: (verse: string) => void;
   export let onChapterChange: (chapter: string) => void;
@@ -87,6 +88,20 @@
   {/if}
 
   <div class="grow" />
+  <button
+    class="sync-status"
+    class:enabled={$navigationStatus.enabled}
+    on:click={onOpenConnections}
+    title={$navigationStatus.ownerConflict ? "Another Bridge window owns desktop navigation" : "Paratext and Logos navigation"}
+  >
+    {#if $navigationStatus.enabled}
+      <span class:connected={$navigationStatus.paratext.connected} class:error={Boolean($navigationStatus.paratext.error)}>P</span>
+      <span class:connected={$navigationStatus.logos.connected} class:error={Boolean($navigationStatus.logos.error)}>L</span>
+      Sync
+    {:else}
+      Sync off
+    {/if}
+  </button>
   {#if screen === "editor"}
     <button class="btn primary" disabled={!exportEnabled} on:click={onOpenExport}>Export</button>
   {/if}
@@ -111,6 +126,11 @@
   .goto { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; height: 28px; width: 150px; flex-shrink: 0; }
   .goto input { border: none; background: transparent; font-size: 12px; color: var(--text); outline: none; width: 100%; }
   .grow { flex: 1; }
+  .sync-status { display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-2); font-size: 11px; font-weight: 600; cursor: pointer; flex-shrink: 0; }
+  .sync-status:hover { background: var(--surface-2); }
+  .sync-status span { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--border-strong); color: var(--surface); font-size: 9px; }
+  .sync-status span.connected { background: var(--success); }
+  .sync-status span.error { background: var(--danger); }
   .btn { font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; flex-shrink: 0; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.primary:disabled { background: #B9C6E0; border-color: #B9C6E0; color: #fff; cursor: not-allowed; }

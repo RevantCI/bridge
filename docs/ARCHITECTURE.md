@@ -126,7 +126,7 @@ which mode is actually active.
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
 | v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
 | v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/BUILD_LOG.md's Phase 7 section) |
-| v1.0.x | Paratext/Logos live navigation, AI explain, and optional AI + Greek Room synthesis. | Drag-and-drop import and ai.explain ✅ Built (2026-08-24, tested against a fake transport — no real API key available). Paratext/Logos connector plugins now exist and are wired (2026-08-24) but are unverified against a live Paratext/Logos instance — see docs/BUILD_LOG.md's Phase 7 sections for exactly what's confirmed vs. not, and paratext_plugin/README.md + engine/logos_connector/README.md for the remaining steps |
+| v1.0.x | Paratext/Logos live navigation, AI explain, and optional AI + Greek Room synthesis. | Drag-and-drop import and ai.explain ✅ Built. Opt-in, brokered Bridge/Paratext/Logos navigation is wired (2026-09-03) with non-blocking polling, loop suppression, edit guards, cross-book routing, reconnect catch-up, and single-window ownership. Installed Paratext state/outbound navigation and installed-but-closed Logos COM discovery passed; active Logos panel/navigation acceptance remains pending. See docs/BUILD_LOG.md and the connector READMEs. |
 
 ### Stage 3 adaptive passage search
 
@@ -169,16 +169,16 @@ Protocol methods implemented so far: `ping`, `engine.info`, `project.open`,
 `semanticMapping.getForVerse/confirm/rerunForVerse`,
 `semanticValidation.list/decide`,
 `paratext.getState/setReference`, `logos.getState/setReference`,
+`navigation.status/poll/bridgeChanged/resolve`,
 `versification.detect/orgRef/backVersificationMap`,
 `settings.get/set`, `export.aligned`, and `export.nonAligned`.
 
-Not yet wired (real logic exists in `tc_ai_bridge` but no protocol method calls it yet):
-Git service, reporting, terminology/Psalms QA, and `navigation.py`'s
-`NavigationBroker`/`NavigationOwnership` (the Paratext/Logos connector protocol methods above
-are direct pass-through calls — read state, push one reference — not yet wired into an
-automatic background live-sync polling loop; see docs/BUILD_LOG.md's Phase 7
-sections for why that's a deliberate scope boundary, not an oversight). These are
-Phase-appropriate follow-ups per the table above, not gaps in the design.
+The navigation coordinator now uses `navigation.py`'s `NavigationBroker` and
+`NavigationOwnership`. Connector operations run on a bounded background probe, while the
+protocol returns cached status/candidates immediately; this preserves responsiveness of the
+single-threaded stdio dispatcher when Paratext or Logos is unavailable. Still not wired (real
+logic exists in `tc_ai_bridge` but no protocol method calls it yet): Git service, reporting, and
+terminology/Psalms QA. These are phase-appropriate follow-ups per the table above.
 
 ## Explicit non-goals (for now)
 

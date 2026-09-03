@@ -215,6 +215,24 @@ class AppSettings:
         self.save_sanitized()
 
     @property
+    def paratext_navigation(self) -> bool:
+        return bool(self.data.get('paratext_navigation', False))
+
+    @paratext_navigation.setter
+    def paratext_navigation(self, value: bool) -> None:
+        self.data['paratext_navigation'] = bool(value)
+        self.save_sanitized()
+
+    @property
+    def logos_navigation(self) -> bool:
+        return bool(self.data.get('logos_navigation', False))
+
+    @logos_navigation.setter
+    def logos_navigation(self, value: bool) -> None:
+        self.data['logos_navigation'] = bool(value)
+        self.save_sanitized()
+
+    @property
     def paratext_username(self) -> str:
         return str(self.data.get('paratext_username') or '')
 

@@ -3,9 +3,11 @@ from __future__ import annotations
 import ctypes
 import os
 import re
+import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
+from typing import Any, Callable
 
 _REF_RE = re.compile(r'^([1-4]?[A-Z]{2,4})\s+(\d+):([0-9]+[A-Za-z]?)$', re.I)
 
@@ -213,3 +215,232 @@ class NavigationOwnership:
 
     def close(self) -> None:
         self.release()
+
+
+class NavigationSyncCoordinator:
+    """Coordinate opt-in Bridge/Paratext/Logos navigation without blocking RPC.
+
+    Connector calls can take seconds when an application is starting or unavailable. ``snapshot``
+    therefore starts at most one daemon probe and immediately returns cached state. The Bridge UI
+    can poll this object freely without putting its single-threaded stdio dispatcher behind a
+    desktop-application timeout.
+    """
+
+    TARGETS = ('paratext', 'logos')
+
+    def __init__(
+        self,
+        *,
+        paratext_client: Callable[[], Any],
+        logos_client: Callable[[], Any],
+        ownership: NavigationOwnership | None = None,
+        poll_interval_seconds: float = 0.8,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._clients = {'paratext': paratext_client, 'logos': logos_client}
+        self._ownership = ownership or NavigationOwnership()
+        self._poll_interval = max(0.1, float(poll_interval_seconds))
+        self._clock = clock
+        self._lock = threading.RLock()
+        self._broker = NavigationBroker(clock=clock)
+        self._enabled = {target: False for target in self.TARGETS}
+        self._target_state: dict[str, dict[str, Any]] = {
+            target: self._empty_target_state(False) for target in self.TARGETS
+        }
+        self._outbound: dict[str, tuple[str, str]] = {}
+        self._pending: NavigationEvent | None = None
+        self._polling = False
+        self._next_poll_at = 0.0
+        self._closed = False
+
+    @staticmethod
+    def _empty_target_state(enabled: bool) -> dict[str, Any]:
+        return {
+            'enabled': bool(enabled), 'checking': False, 'connected': False,
+            'reference': '', 'error': '', 'checkedAt': 0.0,
+        }
+
+    @staticmethod
+    def _state_dict(value: Any) -> dict[str, Any]:
+        if is_dataclass(value):
+            return asdict(value)
+        return dict(value) if isinstance(value, dict) else {}
+
+    def configure(self, *, paratext: bool, logos: bool) -> dict[str, Any]:
+        requested = {'paratext': bool(paratext), 'logos': bool(logos)}
+        with self._lock:
+            if self._closed:
+                return self._snapshot_locked()
+            was_enabled = any(self._enabled.values())
+            for target, enabled in requested.items():
+                newly_enabled = enabled and not self._enabled[target]
+                self._enabled[target] = enabled
+                self._target_state[target]['enabled'] = enabled
+                if not enabled:
+                    self._outbound.pop(target, None)
+                    self._target_state[target] = self._empty_target_state(False)
+                elif newly_enabled and self._broker.current_reference:
+                    request_id = uuid.uuid4().hex
+                    self._outbound[target] = (self._broker.current_reference, request_id)
+            is_enabled = any(self._enabled.values())
+            if is_enabled and not self._ownership.owned:
+                self._ownership.acquire()
+            if was_enabled and not is_enabled:
+                self._pending = None
+                self._outbound.clear()
+                self._ownership.release()
+            if is_enabled and self._ownership.owned:
+                self._schedule_probe_locked(force=True)
+            return self._snapshot_locked()
+
+    def bridge_changed(self, reference: str) -> dict[str, Any]:
+        ref = normalize_reference(reference)
+        with self._lock:
+            if not ref or self._closed:
+                return self._snapshot_locked()
+            if self._pending and self._pending.reference == ref:
+                return self._snapshot_locked()
+            superseded_pending = self._pending is not None
+            if self._pending:
+                self._broker.reject_event(
+                    self._pending, ref, context='bridge-reference-changed',
+                )
+                self._pending = None
+            if self._broker.current_reference == ref and not superseded_pending:
+                return self._snapshot_locked()
+            event = self._broker.set_bridge_reference(ref)
+            if event:
+                for target, enabled in self._enabled.items():
+                    if enabled:
+                        self._outbound[target] = (ref, event.request_id)
+                self._schedule_probe_locked(force=True)
+            return self._snapshot_locked()
+
+    def resolve(
+        self,
+        request_id: str,
+        *,
+        accepted: bool,
+        bridge_reference: str = '',
+        context: str = '',
+    ) -> dict[str, Any]:
+        with self._lock:
+            event = self._pending
+            if event is None or event.request_id != str(request_id or ''):
+                return self._snapshot_locked()
+            self._pending = None
+            if accepted:
+                self._broker.commit_event(event)
+                for target, enabled in self._enabled.items():
+                    if enabled and target != event.origin:
+                        self._outbound[target] = (event.reference, event.request_id)
+            else:
+                self._broker.reject_event(event, bridge_reference, context=context)
+            self._schedule_probe_locked(context=context, force=True)
+            return self._snapshot_locked()
+
+    def snapshot(self, *, context: str = '', schedule_probe: bool = True) -> dict[str, Any]:
+        with self._lock:
+            if any(self._enabled.values()) and not self._ownership.owned:
+                self._ownership.acquire()
+            if schedule_probe and self._ownership.owned:
+                self._schedule_probe_locked(context=context)
+            return self._snapshot_locked()
+
+    def _snapshot_locked(self) -> dict[str, Any]:
+        pending = self._pending
+        return {
+            'enabled': any(self._enabled.values()),
+            'ownsNavigation': self._ownership.owned,
+            'ownerConflict': any(self._enabled.values()) and not self._ownership.owned,
+            'currentReference': self._broker.current_reference,
+            'currentOrigin': self._broker.current_origin,
+            'candidate': None if pending is None else {
+                'reference': pending.reference,
+                'origin': pending.origin,
+                'requestId': pending.request_id,
+            },
+            'paratext': dict(self._target_state['paratext']),
+            'logos': dict(self._target_state['logos']),
+        }
+
+    def _schedule_probe_locked(self, *, context: str = '', force: bool = False) -> None:
+        if self._closed or self._polling or not any(self._enabled.values()) or not self._ownership.owned:
+            return
+        now = self._clock()
+        if not force and now < self._next_poll_at:
+            return
+        self._polling = True
+        for target, enabled in self._enabled.items():
+            if enabled:
+                self._target_state[target]['checking'] = True
+        thread = threading.Thread(
+            target=self._probe,
+            args=(str(context or ''),),
+            name='BridgeNavigationProbe',
+            daemon=True,
+        )
+        thread.start()
+
+    def _probe(self, context: str) -> None:
+        try:
+            for target in self.TARGETS:
+                with self._lock:
+                    if self._closed or not self._enabled[target] or not self._ownership.owned:
+                        continue
+                    outbound = self._outbound.pop(target, None)
+                try:
+                    client = self._clients[target]()
+                    if outbound:
+                        reference, request_id = outbound
+                        with self._lock:
+                            self._broker.record_outbound(target, reference, request_id)
+                        if target == 'paratext':
+                            client.set_reference(reference, request_id)
+                        else:
+                            client.set_reference(reference, origin_id=request_id)
+                    raw_state = self._state_dict(client.get_state())
+                    raw_state.update({
+                        'enabled': True,
+                        'checking': False,
+                        'error': '',
+                        'checkedAt': time.time(),
+                    })
+                    with self._lock:
+                        if self._closed or not self._enabled[target] or not self._ownership.owned:
+                            continue
+                        self._target_state[target] = raw_state
+                        if self._pending is None:
+                            event = self._broker.new_event(
+                                str(raw_state.get('reference') or ''), target, context=context,
+                            )
+                            if event:
+                                self._pending = event
+                except Exception as exc:
+                    with self._lock:
+                        if outbound and self._enabled[target] and not self._closed:
+                            # Keep the latest Bridge destination pending so a connector that
+                            # starts later catches up before its old verse can drive Bridge.
+                            self._outbound.setdefault(target, outbound)
+                        if self._closed or not self._enabled[target]:
+                            continue
+                        prior = self._target_state[target]
+                        self._target_state[target] = {
+                            **self._empty_target_state(True),
+                            'reference': str(prior.get('reference') or ''),
+                            'error': str(exc),
+                            'checkedAt': time.time(),
+                        }
+        finally:
+            with self._lock:
+                self._polling = False
+                self._next_poll_at = self._clock() + self._poll_interval
+                for target in self.TARGETS:
+                    self._target_state[target]['checking'] = False
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            self._pending = None
+            self._outbound.clear()
+            self._ownership.release()

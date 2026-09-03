@@ -4,20 +4,20 @@ LogosConnectorClient and the actual logos_connector/logos_bridge.ps1 helper
 script added in Phase 7 (see docs/BUILD_LOG.md) - the companion that
 did not exist anywhere in this repo before this pass.
 
-Logos itself is not installed on this machine (confirmed at the start of this
-work), so this cannot verify the real COM automation path - only that
-LogosConnectorClient can actually spawn the real script, that it starts in
--STA mode without crashing, and that the two sides speak the same
-newline-delimited JSON protocol for real, including a real "Logos isn't
-installed" error round-tripping cleanly rather than hanging or crashing the
-helper. This is a floor, not a ceiling: it proves the wiring, not the COM
-calls inside Handle-State/Handle-Navigate.
+The test is read-only and environment-independent: an installed Logos COM API
+may return connected or disconnected state, while a machine without the API may
+return a clean connector error. Tests never navigate a developer's live Logos
+session.
 """
 import shutil
 
 import pytest
 
-from tc_ai_bridge.logos_connector import LogosConnectorClient, LogosConnectorError
+from tc_ai_bridge.logos_connector import (
+    LogosConnectorClient,
+    LogosConnectorError,
+    bridge_to_logos_reference,
+)
 
 
 pytestmark = pytest.mark.skipif(
@@ -33,32 +33,30 @@ def test_default_script_path_resolves_to_the_real_bundled_helper():
 
 
 def test_get_state_round_trips_through_the_real_helper_process():
-    """Logos isn't installed here, so this must surface a clean
-    LogosConnectorError (the helper's own real COM-object-creation failure),
-    not a hang, a crash, or a malformed-response error - proving the actual
-    subprocess/STA/stdin-stdout JSON protocol genuinely works end to end."""
-    client = LogosConnectorClient(startup_timeout=15.0)
-    with pytest.raises(LogosConnectorError) as excinfo:
-        client.get_state()
-    message = str(excinfo.value)
-    assert "invalid connector response" not in message.lower()
-    assert "did not respond within" not in message.lower()
-    client.close()
-
-
-def test_set_reference_also_round_trips_cleanly(tmp_path):
+    """The real helper returns state when registered and a clean error otherwise."""
     client = LogosConnectorClient(startup_timeout=15.0)
     try:
-        with pytest.raises(LogosConnectorError):
-            client.set_reference("TIT 1:1")
+        try:
+            state = client.get_state()
+            assert isinstance(state.connected, bool)
+        except LogosConnectorError as exc:
+            message = str(exc)
+            assert "invalid connector response" not in message.lower()
+            assert "did not respond within" not in message.lower()
     finally:
         client.close()
 
 
+def test_bridge_reference_uses_the_logos_bible_parser_name():
+    assert bridge_to_logos_reference("TIT 1:1") == "Titus 1:1"
+
+
 def test_close_stops_the_helper_process():
     client = LogosConnectorClient(startup_timeout=15.0)
-    with pytest.raises(LogosConnectorError):
+    try:
         client.get_state()
+    except LogosConnectorError:
+        pass
     assert client.running is True
     client.close()
     assert client.running is False

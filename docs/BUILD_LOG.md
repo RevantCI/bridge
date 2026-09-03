@@ -3076,3 +3076,33 @@ for how a teammate installs it locally via
   passage-fingerprint so re-opening an unchanged passage is a cache hit.
   Worth watching real-world cost/latency impact.
 
+## Brokered Paratext/Logos verse navigation (2026-09-03)
+
+Bridge now has opt-in two-way verse navigation for Paratext and Logos. The existing connector
+clients and `NavigationBroker`/`NavigationOwnership` are wired through
+`navigation.status/poll/bridgeChanged/resolve`; Svelte polls cached state and explicitly accepts
+or rejects each external candidate after verifying the destination exists in the open collection.
+Bridge-originated changes go to every enabled connector, while a Paratext- or Logos-originated
+change is forwarded only to the other connector after Bridge loads it.
+
+Connector calls run in one bounded daemon probe rather than the synchronous stdio dispatcher.
+Unavailable applications therefore cannot freeze verse review, and the latest outbound Bridge
+reference remains queued for reconnect. Echoes, stale settling observations, duplicate polls, and
+same-context rejected jumps are suppressed. A per-Windows-user mutex prevents two Bridge windows
+from driving the desktop applications simultaneously. Incoming navigation is rejected while a
+verse edit is active, and invalid cross-book destinations restore the prior Bridge location.
+
+The new Settings → Connections pane controls Paratext and Logos independently and reports live
+connection/reference/error state; the top bar exposes the same state compactly. Automated gates
+cover non-blocking behavior, both navigation directions, rejection retry semantics, ownership,
+and reconnect catch-up.
+
+Live Paratext acceptance read IRVTam at PHP 1:3 in sync group B and a same-reference outbound
+request returned `reference_set_by_bridge` with the expected origin ID. Logos was installed but
+closed. That check found and fixed two defects in the older unverified helper: its ProgID is the
+documented and locally registered `LogosBibleSoftware.Launcher` (not
+`Logos4Lib.LogosLauncher`), and active state uses the documented `GetActivePanel()` plus
+`GetCurrentReferencesAndHeadwords()` calls. The real helper now returns clean disconnected state
+while Logos is closed. Active-panel reading and outbound navigation still need acceptance with
+Logos running and a Bible panel open.
+

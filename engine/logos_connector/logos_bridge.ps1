@@ -35,23 +35,12 @@
 #     on LogosApplication; a panel object has at least a .Title property via the
 #     ILogosPanel interface (from MainForm.cs's RecordPanelEvent).
 #
-# STILL GENUINELY UNVERIFIED - the two things most likely to need a real fix
-# once Logos is actually installed and this is tested for the first time:
-#   1. The ProgID string below ("Logos4Lib.LogosLauncher") is the standard
-#      tlbimp <TypeLibraryName>.<CoClassName> convention, not something this
-#      session ever saw registered in a real HKEY_CLASSES_ROOT. If New-Object
-#      -ComObject fails, search the registry for the real ProgID (see the
-#      Get-LogosLauncher function below for exactly how) and fix the constant.
-#   2. The demo project never shows reading the CURRENTLY ACTIVE panel's Bible
-#      reference (only pushing a new reference via Navigate() - a one-way
-#      capability). Get-CurrentReference below is a best-effort guess
-#      (tries $app.ActivePanel, then a couple of plausible property paths on
-#      whatever panel object it finds) wrapped in try/catch so a wrong guess
-#      degrades to an empty reference rather than crashing the helper. This is
-#      the single most likely thing to need real correction once someone with
-#      Logos installed can inspect the live COM object's actual members (e.g.
-#      `$app | Get-Member` / `$app.ActivePanel | Get-Member` in an interactive
-#      -STA PowerShell session).
+# The original unverified draft used the generated .NET interop namespace as a
+# guessed ProgID and guessed at an ActivePanel property. Logos's documented
+# PowerShell ProgID is LogosBibleSoftware.Launcher; its API exposes
+# GetActivePanel() and LogosPanel.GetCurrentReferencesAndHeadwords(). Those
+# documented late-bound COM calls are used below, so no generated interop
+# assembly is required.
 #
 # No event-driven push updates are attempted: a plain script host without a
 # WinForms/WPF message loop cannot reliably pump COM event callbacks, and
@@ -68,19 +57,16 @@ $script:launcher = $null
 
 function Get-LogosLauncher {
     if ($null -eq $script:launcher) {
-        try {
-            $script:launcher = New-Object -ComObject "Logos4Lib.LogosLauncher"
-        }
-        catch {
-            $hits = @()
+        $errors = @()
+        foreach ($progId in @('LogosBibleSoftware.Launcher', 'LogosBibleSoftware.Launcher.1')) {
             try {
-                $hits = Get-ChildItem 'HKCU:\Software\Classes' -ErrorAction SilentlyContinue |
-                    Where-Object { $_.PSChildName -match 'Logos' } |
-                    Select-Object -ExpandProperty PSChildName
+                $script:launcher = New-Object -ComObject $progId
+                break
             }
-            catch { }
-            $hint = if ($hits.Count -gt 0) { "Possible real ProgIDs found in the registry: $($hits -join ', ')" } else { 'No Logos-related ProgID found under HKCU:\Software\Classes - is Logos actually installed?' }
-            throw "Could not create COM object 'Logos4Lib.LogosLauncher': $($_.Exception.Message). $hint"
+            catch { $errors += "${progId}: $($_.Exception.Message)" }
+        }
+        if ($null -eq $script:launcher) {
+            throw "Could not create the Logos COM launcher. $($errors -join ' | ') Logos may need to be repaired or registered."
         }
     }
     return $script:launcher
@@ -92,29 +78,37 @@ function Get-LogosApp {
 }
 
 function Get-CurrentReferenceInfo($app) {
-    # Best effort, deliberately defensive - see the file header's "STILL GENUINELY
-    # UNVERIFIED" section. Every property access is individually guarded so a wrong
-    # guess about one property name doesn't prevent the others from being tried.
+    # The API can return multiple references/headwords. Use the first Bible reference
+    # exposed by the active panel and ignore headword-only entries.
     $result = @{ book_abbrev = ''; chapter = ''; verse = ''; reference_rendered = ''; panel_title = ''; panel_kind = '' }
     $panel = $null
-    try { $panel = $app.ActivePanel } catch { }
+    try { $panel = $app.GetActivePanel() } catch { }
     if ($null -eq $panel) {
         return $result
     }
     try { $result.panel_title = [string]$panel.Title } catch { }
-    try { $result.panel_kind = $panel.GetType().Name } catch { }
-    $dataType = $null
-    try { $dataType = $panel.DataType } catch { }
-    if ($null -eq $dataType) {
-        return $result
-    }
-    try { $result.reference_rendered = [string]$dataType.ToString() } catch { }
-    $details = $null
-    try { $details = $dataType.Details } catch { }
-    if ($null -ne $details) {
-        try { $result.book_abbrev = [string]$details.Book } catch { }
-        try { $result.chapter = [string]$details.Chapter } catch { }
-        try { $result.verse = [string]$details.Verse } catch { }
+    try { $result.panel_kind = [string]$panel.Kind } catch { }
+    $references = $null
+    try { $references = $panel.GetCurrentReferencesAndHeadwords() } catch { }
+    if ($null -eq $references) { return $result }
+    $count = 0
+    try { $count = [int]$references.Count } catch { return $result }
+    for ($index = 0; $index -lt $count; $index++) {
+        $entry = $null
+        $reference = $null
+        $details = $null
+        try { $entry = $references.Item($index) } catch { continue }
+        try { $reference = $entry.Reference } catch { continue }
+        if ($null -eq $reference) { continue }
+        try { $details = $reference.Details } catch { continue }
+        if ($null -eq $details) { continue }
+        try { $result.book_abbrev = [string]$details.Book } catch { continue }
+        try { $result.chapter = [string]$details.Chapter } catch { continue }
+        try { $result.verse = [string]$details.Verse } catch { continue }
+        try { $result.reference_rendered = [string]$reference.Render('display') } catch {
+            try { $result.reference_rendered = [string]$reference.Render() } catch { }
+        }
+        if ($result.book_abbrev -and $result.chapter -and $result.verse) { break }
     }
     return $result
 }
