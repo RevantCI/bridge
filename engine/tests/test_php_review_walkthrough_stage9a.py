@@ -64,6 +64,7 @@ def test_the_seeder_produces_a_reordered_passage_with_findings(
     assert summary["crossVerse"] > 0
     assert summary["relationships"] > 0
     assert summary["queueTotal"] > 0, "a reviewer needs something to review"
+    assert summary["analysisJob"], "the fixture must populate through Stage 9A.4 orchestration"
 
 
 def test_the_seeded_project_is_openable_as_a_real_project(
