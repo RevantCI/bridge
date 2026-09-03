@@ -46,12 +46,15 @@ automatically — `pip install -e ".[dev]"` alone always works; add the
 ```bash
 npm install
 npm run check    # svelte-check, should be 0 errors/warnings
+npm run test     # Vitest component/store tests (jsdom) — added Stage 9A.2
 npm run build    # production Vite build
 npm run dev      # browser-only dev server at localhost:1420 — no sidecar, bridge.ping() etc. will fail
 ```
 
-No frontend test framework is configured; `npm run check` + `npm run build`
-are the whole frontend verification gate.
+`npm run check` + `npm run test` + `npm run build` are the frontend
+verification gate. Vitest uses jsdom, which does not lay out or paint — it
+catches logic/structure regressions, not real 1366x768 rendering; a visual
+check still needs the actual desktop app.
 
 ### Full desktop app (Windows, MSVC toolchain + Rust required)
 
@@ -68,8 +71,10 @@ required; `bridge-engine.exe` deliberately never re-invokes itself to run
 the USFM checker script. Verify the frozen pair directly (not just source)
 with `python scripts/smoke_sidecars.py engine/dist/bridge-engine.exe`.
 
-Rust has no `#[test]` unit tests; `cargo check`/`cargo build` (compile
-success) is the verification bar for `src-tauri/`.
+`src-tauri/` has both: `cargo check`/`cargo build` for compile success, and a
+handful of real `#[test]` unit tests (`passage_semantic_wire::tests`,
+`sidecar::tests` — 5 as of Stage 9A.4) run with `cargo test`. Run both, not
+just the compile check.
 
 ## Architecture
 
