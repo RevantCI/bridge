@@ -155,15 +155,16 @@ class SemanticLocationEngine:
                 result[unit["id"]] = unit
         return list(result.values())
 
-    def _validate_span(self, span: dict[str, Any], target_inventory: dict[str, Any]) -> None:
+    def _validate_span(
+        self, span: dict[str, Any], target_inventory: dict[str, Any],
+        current_text_by_reference: dict[str, str],
+    ) -> None:
         if span["targetRevision"] != target_inventory["targetRevision"]:
             raise FoundationValidationError("Target span revision does not match target inventory")
         if _sha(span["quote"]) != span["quoteSha256"]:
             raise FoundationValidationError("Target span quote hash is invalid")
         reference = span["displayedReference"]
-        _book, cv = reference.split(" ", 1)
-        chapter, verse = cv.split(":", 1)
-        current = str(self.runtime.project.target_verse_text(chapter, verse))
+        current = current_text_by_reference.get(reference, "")
         start, end = int(span["startCodePoint"]), int(span["endCodePoint"])
         if current[start:end] != span["quote"]:
             raise FoundationValidationError("Target span does not anchor exact current Scripture text")
@@ -572,9 +573,20 @@ class SemanticLocationEngine:
         for unit in target_inventory["units"]:
             for token_id in unit["tokenInstanceIds"]:
                 target_units_by_token[token_id].append(unit)
+        # Spans are content-addressed against parsed, marker-stripped verse
+        # text (build_current_text_overlay via rebuild_current_passage) --
+        # the same source target_semantic.build_range used to build them.
+        # Slicing the raw stored verse string here instead breaks on any
+        # embedded markup (a leading italics marker, an inline footnote
+        # quoting the verse text, a cross reference): the raw string is
+        # longer than the clean text the span's code points were measured
+        # against, so every offset from that point on drifts.
+        current_text_by_reference = self.runtime.rebuild_current_passage(
+            chapter, verse, end_chapter, end_verse,
+        )["targetTextByDisplayedReference"]
         spans = target_inventory["searchSpans"]
         for span in spans:
-            self._validate_span(span, target_inventory)
+            self._validate_span(span, target_inventory, current_text_by_reference)
 
         embedding_started = time.perf_counter()
         source_texts = [self._source_text(unit) for unit in primary]
