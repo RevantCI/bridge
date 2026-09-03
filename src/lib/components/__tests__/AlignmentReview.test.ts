@@ -11,6 +11,18 @@ vi.mock("../../api/bridgeClient", () => ({
     qaReviewGetFinding: vi.fn(),
     qaReviewDecideFinding: vi.fn(),
     qaReviewAddNote: vi.fn(),
+    analysisJobGetScopeStatus: vi.fn().mockResolvedValue({
+      state: "NOT_ANALYZED", rangeKey: "PHP 1:3..PHP 1:3",
+      displayedReferences: ["PHP 1:3"], canonicalReferences: ["PHP 1:3"],
+      affectedReferences: [], latestJob: null,
+      providerCapability: {
+        semanticRetrieval: "LIMITED", multilingualEmbeddingProvider: "NOT_CONFIGURED",
+        providerId: "unavailable", providerVersion: "", modelHash: "none", fixtureProvider: false,
+      },
+    }),
+    analysisJobStart: vi.fn(),
+    analysisJobStatus: vi.fn(),
+    analysisJobCancel: vi.fn(),
   },
 }));
 

@@ -3,6 +3,8 @@
 
   import QaFindingDetail from "./QaFindingDetail.svelte";
   import QaFindingList from "./QaFindingList.svelte";
+  import AnalysisControls from "./AnalysisControls.svelte";
+  import type { AnalysisScopeState } from "../types/analysisJob";
   import type { QaDisposition, ReviewQueueOrder, ReviewerDecision } from "../types/qaReview";
   import {
     addReviewerNote,
@@ -32,6 +34,9 @@
    * sees always matches what the engine ordered.
    */
 
+  export let chapter: string;
+  export let verse: string | null = null;
+
   const KIND_FILTERS: Array<{ value: string; label: string }> = [
     { value: "POSSIBLE_OMISSION", label: "Possible omissions" },
     { value: "POSSIBLE_ADDITION", label: "Possible additions" },
@@ -59,6 +64,7 @@
   let busy = false;
   let flash = "";
   let flashTone: "ok" | "warn" = "ok";
+  let analysisState: AnalysisScopeState = "NOT_ANALYZED";
 
   onMount(() => {
     void loadQueue();
@@ -131,9 +137,21 @@
     busy = false;
     announce(result.ok ? "Note saved." : result.message, result.ok ? "ok" : "warn");
   }
+
+  async function analysisCompleted(): Promise<void> {
+    await loadQueue();
+    await selectFinding(null);
+    announce("Analysis complete. The QA review queue has been refreshed.");
+  }
 </script>
 
 <div class="qa-mode">
+  <AnalysisControls
+    {chapter}
+    {verse}
+    on:scopeStatus={(event) => { analysisState = event.detail.state; }}
+    on:completed={analysisCompleted}
+  />
   <div class="filters" role="group" aria-label="Filter the review queue">
     <div class="filter-row">
       <span class="filter-label" id="filter-order">Order</span>
@@ -193,6 +211,25 @@
   {/if}
   {#if $reviewError}
     <p class="flash warn" role="alert">{$reviewError}</p>
+  {/if}
+  {#if !$reviewLoading && $reviewTotal === 0}
+    <p class="empty-state" role="status">
+      {#if analysisState === "NOT_ANALYZED"}
+        This range has not been analyzed yet. Choose a scope and run analysis.
+      {:else if analysisState === "PARTIALLY_ANALYZED"}
+        Part of this range has analysis results. Run analysis for complete coverage.
+      {:else if analysisState === "STALE"}
+        Previous results are out of date because the target text or source resources changed.
+      {:else if analysisState === "SEARCH_INCOMPLETE"}
+        Analysis completed with incomplete semantic search. No omission was inferred from unresolved searches.
+      {:else if analysisState === "FAILED"}
+        The latest analysis failed. Retry it from the analysis controls above.
+      {:else if analysisState === "CURRENT"}
+        Analysis complete. No possible QA issues were found in this range.
+      {:else if analysisState === "RUNNING"}
+        Analysis is running. Findings will appear here when the QA stage completes.
+      {/if}
+    </p>
   {/if}
 
   <div class="panes">
@@ -278,6 +315,7 @@
   }
 
   .flash.warn { background: #fef2f2; color: #991b1b; border-bottom-color: #fecaca; }
+  .empty-state { margin: 0; padding: 0.4rem 0.6rem; font-size: 0.76rem; background: #f9fafb; color: #4b5563; border-bottom: 1px solid #e5e7eb; }
 
   .panes {
     display: grid;

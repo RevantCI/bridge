@@ -4,12 +4,13 @@ Bridge ships with no embedding provider (``SemanticEmbeddingProvider`` has
 ``available = False``), so the Stage 6B passage-reordering behaviour that the
 review UI is most interesting against cannot be produced by the running app
 on its own. This script builds a real translationCore-compatible project,
-runs the Stage 5-8 pipeline against it with a fixture embedding provider, and
+runs the Stage 5-8 pipeline through the analysis orchestrator with an
+explicitly fixture-only embedding provider, and
 leaves the results persisted in the project's own companion database.
 
-That is enough for the review UI, because the review surface only ever reads
-persisted findings - it never re-runs analysis. Open the printed path in
-Bridge and Alignment Review's QA mode will show the seeded queue.
+Open the printed path in Bridge and Alignment Review's QA mode will show the
+seeded queue. Normal Bridge orchestration rejects this fixture provider; only
+this explicit fixture setup opts in to it.
 
     python scripts/seed_review_fixture.py [destination]
 
@@ -23,15 +24,15 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import time
 import unicodedata
 
 ENGINE = Path(__file__).resolve().parent.parent / "engine"
 sys.path.insert(0, str(ENGINE))
 
-from tc_ai_bridge.meaning_analysis import MeaningAnalysisEngine  # noqa: E402
+from tc_ai_bridge.analysis_jobs import AnalysisJobManager  # noqa: E402
 from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime  # noqa: E402
 from tc_ai_bridge.project_registry import ProjectRegistry  # noqa: E402
-from tc_ai_bridge.qa_audit import QaAuditEngine  # noqa: E402
 from tc_ai_bridge.semantic_location import (  # noqa: E402
     SemanticEmbeddingProvider,
     SemanticLocationEngine,
@@ -78,6 +79,7 @@ class FixtureEmbeddingProvider(SemanticEmbeddingProvider):
     languages = ("el", "hbo", "arc", "ta", "en")
     offline = True
     available = True
+    fixture_only = True
 
     def __init__(self, vectors: dict[str, list[float]]):
         self.vectors = {_norm(key): value for key, value in vectors.items()}
@@ -147,15 +149,30 @@ def project_identity(root: Path) -> str:
 
 
 def seed(root: Path) -> dict[str, object]:
-    """Run Stages 5-8 over the fixture and persist the results."""
+    """Run Stages 5-8 through Stage 9A.4 orchestration and persist results."""
     runtime = PassageSemanticRuntime(TranslationCoreProject(root), project_identity(root))
     provider = FixtureEmbeddingProvider(paired_vectors(PHP_PAIRS))
-
-    location = SemanticLocationEngine(runtime, provider).run_range("1", "3", "1", "6")
-    meaning = MeaningAnalysisEngine(runtime).run_range(
-        "1", "3", "1", "6", location_run_id=location["id"])
-    audit = QaAuditEngine(runtime).run_range(
-        "1", "3", "1", "6", meaning_run_id=meaning["id"])
+    runtime.semantic_location = SemanticLocationEngine(runtime, provider)
+    manager = AnalysisJobManager(allow_fixture_provider=True)
+    started = manager.start(runtime, requested_scope={
+        "kind": "SELECTED_RANGE", "startChapter": "1", "startVerse": "3",
+        "endChapter": "1", "endVerse": "6",
+    })
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        job = manager.status(started["jobId"])
+        if job["overallStatus"] in {
+            "COMPLETED", "COMPLETED_WITH_WARNINGS", "FAILED", "CANCELLED",
+        }:
+            break
+        time.sleep(0.01)
+    else:
+        raise RuntimeError("Fixture analysis job did not finish")
+    if job["overallStatus"] not in {"COMPLETED", "COMPLETED_WITH_WARNINGS"}:
+        raise RuntimeError(f"Fixture analysis failed: {job['failures']}")
+    location = runtime.semantic_location.get_range(
+        job["stageStatuses"]["LOCATION"]["runId"])
+    audit = runtime.qa_audit.get_range(job["stageStatuses"]["QA"]["runId"])
 
     queue = runtime.qa_review.get_queue(limit=200)
     return {
@@ -163,8 +180,9 @@ def seed(root: Path) -> dict[str, object]:
         "relationships": len(location["relationships"]),
         "reordered": location["diagnostics"].get("reordered"),
         "crossVerse": location["diagnostics"].get("crossVerse"),
-        "meaningRun": meaning["id"],
+        "meaningRun": job["stageStatuses"]["MEANING"]["runId"],
         "qaRun": audit["id"],
+        "analysisJob": job["jobId"],
         "findings": len(audit["findings"]),
         "queueTotal": queue["totalCount"],
         "companionDatabase": str(runtime.path),

@@ -1287,7 +1287,10 @@ pub async fn qa_audit_get_diagnostics(
     run_id: String,
 ) -> Result<Value, String> {
     sidecar
-        .send_request("qaAudit.getDiagnostics", serde_json::json!({"runId": run_id}))
+        .send_request(
+            "qaAudit.getDiagnostics",
+            serde_json::json!({"runId": run_id}),
+        )
         .await
 }
 
@@ -1441,6 +1444,67 @@ pub async fn review_history_get_entity_history(
                 "entityType": entity_type,
                 "entityId": entity_id,
             }),
+        )
+        .await
+}
+
+// --- Stage 9A.4 persisted analysis orchestration --------------------------
+
+#[tauri::command]
+pub async fn analysis_job_start(
+    sidecar: State<'_, EngineSidecar>,
+    requested_scope: Value,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "analysisJob.start",
+            serde_json::json!({"requestedScope": requested_scope}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn analysis_job_status(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("analysisJob.status", serde_json::json!({"jobId": job_id}))
+        .await
+}
+
+#[tauri::command]
+pub async fn analysis_job_cancel(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request("analysisJob.cancel", serde_json::json!({"jobId": job_id}))
+        .await
+}
+
+#[tauri::command]
+pub async fn analysis_job_get_recent(
+    sidecar: State<'_, EngineSidecar>,
+    limit: Option<u32>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "analysisJob.getRecent",
+            serde_json::json!({"limit": limit.unwrap_or(20)}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn analysis_job_get_scope_status(
+    sidecar: State<'_, EngineSidecar>,
+    requested_scope: Value,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "analysisJob.getScopeStatus",
+            serde_json::json!({"requestedScope": requested_scope}),
         )
         .await
 }

@@ -1241,8 +1241,8 @@ left this staged; recorded here so the caveat is not read as still open.)
 ---
 
 ## Stage 9A — Human QA Review, Evidence Inspection, and Disposition
-Completed 2026-09-02. Full narrative in `docs/BUILD_LOG.md` (entries 9A.0
-through 9A.3, newest first). Committed and pushed: `fbd4174`, `92d6c8a`,
+Completed 2026-09-03. Full narrative in `docs/BUILD_LOG.md` (entries 9A.0
+through 9A.4, newest first). Earlier commits: `fbd4174`, `92d6c8a`,
 `989c81b`, `cd973e2`, `f1529a2`.
 
 Stage 9A makes Stage 5–8 output reviewable by a human. It classifies
@@ -1263,6 +1263,33 @@ Stage 6B golden locations and Stage 7 golden meaning statuses unchanged
 (neither test file modified). Existing translationCore behavior unchanged.
 `AlignmentModal.svelte` is mounted unmodified as Word mode; nothing converts
 Bridge semantic relationships into native translationCore alignment groups.
+
+### Stage 9A.4 analysis orchestration
+
+Alignment Review QA mode now explicitly runs the existing Stage 5–8 engines
+for a current passage, chapter, book, or selected range. Project open only
+recovers/reads persisted state and never starts analysis. The durable schema
+v9 job records real stage progress (not invented percentages), cache reuse,
+run ids, provider capability, warnings/failures, cancellation, and stage/
+Stage-8-phase timings. New protocol methods are `analysisJob.start/status/
+cancel/getRecent/getScopeStatus`, wired through Python, Tauri and TypeScript.
+
+Target edits make matching jobs stale by current-text fingerprint. Affected
+reruns use structural passage boundaries and compose with unchanged cached
+results. Normal runtime rejects fixture-only providers; the PHP fixture has
+an explicit test-only opt-in. A missing production multilingual provider is
+reported as limited capability and does not hide previously persisted
+findings. `SEARCH_INCOMPLETE` remains non-omission evidence.
+
+```text
+Stage 9A.4 focused Python:    17 passed
+PHP 1:3–6 walkthrough:       11 passed
+Frontend (Vitest):          104 passed (11 files)
+Full Python suite:          577 passed
+Rust:                         5 passed; cargo check passed
+Svelte/TypeScript:            0 errors / 0 warnings
+Production frontend build:   passed
+```
 
 ### Two defects found by running it, not by reading it
 
@@ -1380,13 +1407,10 @@ At the end of Stage 9A:
   (see §34), and the two are still unreconciled. The two review surfaces sit
   side by side; whether they should converge is an open product question
 - no correction-generation workflow
-- **nothing in the app produces Stage 5-8 analysis.** No UI calls
-  `qaAuditRunRange`/`semanticLocationRunRange`/`meaningAnalysisRunRange`, so
-  the review queue is empty on any project that has not been seeded by
-  `scripts/seed_review_fixture.py` or driven over the raw protocol. Not a
-  Stage 9A defect - its stop condition is reviewing *existing* findings - but
-  Stage 9B inherits it. See the *Flag for Benz* entry at the top of
-  `docs/BUILD_LOG.md` for the two decisions this needs
+- ~~nothing in the app produces Stage 5-8 analysis~~ — resolved by Stage
+  9A.4's explicit, persisted background orchestration. Whole-Bible scope is
+  still deferred, and normal projects visibly use limited lexical/structural
+  retrieval until a production multilingual embedding provider is configured
 - the Stage 9A review UI has **never been observed rendering a populated
   queue in the desktop app**; jsdom cannot lay out or paint, so small-screen
   behaviour at 1366x768 is asserted structurally only
@@ -1404,7 +1428,7 @@ At the end of Stage 9A:
 
 # 37. NEXT TASK — Stage 9B: Correction Generation and Application
 
-**Stage 9A is done** (see its record in §35 above): a reviewer can open
+**Stage 9A and the Stage 9A.4 orchestration follow-up are done** (see §35): a reviewer can open
 Alignment Review, work the QA queue, inspect a finding's evidence in layers,
 and record one of four dispositions, with no route to changing Scripture.
 **Stage 9B has not been implemented.** Do not restart Stages 1–9A or
@@ -1412,16 +1436,10 @@ second-guess their outputs without evidence that repository reality
 disagrees with this document (check first, then report the conflict rather
 than silently changing course — see §39).
 
-Two things to settle before 9B starts, both recorded in §36 and in the
-*Flag for Benz* entry at the top of `docs/BUILD_LOG.md`:
+The prerequisite analysis-population gap is closed by Stage 9A.4. One manual
+gate remains worth completing before building on this surface:
 
-1. **Nothing in the app produces Stage 5–8 analysis.** A correction workflow
-   operates on findings, so 9B inherits Stage 9A's emptiest-case problem
-   verbatim. Decide where an analysis run is triggered and over what scope
-   (Stage 8 is persistence-bound, so a whole-book run likely wants the
-   existing background-job treatment), and what the results will look like
-   given the shipped app has no embedding provider.
-2. **The Stage 9A review UI has not had a human click-through** on a
+1. **The Stage 9A review UI has not had a human click-through** on a
    populated queue. Worth doing before building on top of it.
 
 Stage 9 as a whole combines everything Stages 5–8 produced into an actual

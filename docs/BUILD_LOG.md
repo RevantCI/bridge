@@ -1,6 +1,6 @@
 # Build log: Bridge v0.8.0-beta.14
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 > **Start with [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) instead** for an
 > oriented, up-to-date summary of the stack decisions, phase roadmap, and
@@ -10,57 +10,51 @@ Updated: 2026-09-02
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
 
-## Flag for Benz: nothing in the app can produce Stage 5-8 analysis (2026-09-02)
+## Stage 9A.4 — Analysis orchestration and queue population (2026-09-03)
 
-Found by opening Alignment Review on a real project (`irv` Hindi, Ruth) after
-Stage 9A landed: the QA queue is empty, and there is no way to populate it
-from inside Bridge.
+The previously recorded empty-queue product gap is resolved. Alignment
+Review QA mode now has an explicit **Run analysis** control for current
+passage, chapter, book, or selected range. It runs the frozen Stage 5, 6A,
+6B, 7 and 8 engines in dependency order on a background worker, polls a
+durable job snapshot, shows stage-based progress, supports cooperative
+cancellation, and refreshes the indexed QA queue when Stage 8 completes.
+Opening a project or the review surface only reads analysis state; it never
+starts analysis automatically.
 
-**This is not a Stage 9A defect.** Stage 9A's stop condition is a reviewer
-being able to inspect and classify *existing* findings, and that works. The
-spec never asked for a control that generates them; it assumed the analysis
-was already there. But nothing in the product puts it there, so on any real
-project the review surface will always look exactly as it did here - a
-correctly-rendered, permanently empty queue.
+Schema v9 adds `analysis_jobs`, CAS revisions, recovery of abandoned workers,
+and a partial unique index enforcing one queued/running job per project even
+across manager instances. Jobs record scope and fingerprints, reused and
+created run ids, provider capability, warnings/failures, per-stage timings,
+and Stage 8's source-coverage/target-support/synthesis/persistence profile.
+Content-addressed Stage 5–8 caches remain authoritative and unchanged.
 
-**Confirmed, not inferred.** `irv`'s companion database
-(`.apps/translationCoreAI/passageSemantic/bridge-semantic.sqlite3`) has zero
-rows in `qa_findings`, `qa_audit_runs`, `meaning_analysis_runs`,
-`semantic_location_runs`, `source_inventory_runs` and
-`target_inventory_runs`. Nothing under `src/` calls `qaAuditRunRange`,
-`semanticLocationRunRange` or `meaningAnalysisRunRange` - the Tauri commands
-and client methods exist (added in Stage 9A.1), but no UI invokes them.
+After a target edit, Bridge compares current per-reference hashes, expands
+changed verses to the smallest available structural passage, and offers
+**Re-run affected analysis**. A smaller refreshed run composes with still-
+current cached results so its parent chapter/book scope does not remain
+incorrectly stale. Interrupted or failed jobs never appear current.
 
-The only ways to populate a project today are
-`scripts/seed_review_fixture.py` or driving `qaAudit.runRange` over the raw
-sidecar protocol. `qaAudit.runRange` cascades the whole chain
-(Stage 5 -> 6A -> 6B -> 7 -> 8), so the backend work is done; what is missing
-is purely the decision about where a reviewer triggers it and over what
-scope.
+The UI distinguishes `NOT_ANALYZED`, `PARTIALLY_ANALYZED`, `STALE`, `RUNNING`,
+`FAILED`, `SEARCH_INCOMPLETE`, and current-with-no-findings. Incomplete Stage
+6B search remains `SEARCH_INCOMPLETE`; Stage 8's existing gate still prevents
+an unresolved search from becoming an omission finding.
 
-**Why it matters beyond 9A:** Stage 9B's correction workflow operates on
-findings, so it inherits the same problem. Whatever answers this for 9A
-answers it for 9B.
+Normal runtime never uses fixture vectors. `SemanticEmbeddingProvider`
+descriptors now say whether a provider is fixture-only, normal orchestration
+rejects such providers, and the PHP seeder opts in explicitly while itself
+running through the same orchestration path. With no production multilingual
+embedding provider, analysis remains available but visibly reports limited
+semantic retrieval; persisted findings remain reviewable.
 
-**Two things worth deciding together:**
+Verification: 17 Stage 9A.4 Python tests, 11 PHP walkthrough tests, 104
+frontend tests, 5 Rust tests, and the complete 577-test Python suite pass.
+Svelte/TypeScript has 0 errors and 0 warnings; the production frontend build
+passes. Analysis leaves editable Scripture JSON, preserved imported USFM, and
+native translationCore alignment data unchanged.
 
-1. *Where does a run get triggered, and over what scope?* Per chapter, per
-   passage range, or per book. Stage 8 is persistence-bound (81-92% of its
-   runtime is SQLite writes - see the Stage 9A.0 entry), so a whole-book run
-   is minutes of mostly-commit time and probably wants the existing
-   background-job treatment rather than a synchronous call.
-
-2. *What will the results actually look like on a real project?*
-   `SemanticEmbeddingProvider.available` is `False` in the shipped app, so
-   Stage 6B location falls back to lexical and structural evidence only. The
-   Philippians fixture's 28 relationships and 12 cross-verse realizations come
-   from a test-injected embedding provider; a real Hindi or Tamil project will
-   be substantially sparser. Adding a run control without addressing this
-   would give reviewers a working button that produces thin results, which is
-   arguably worse than no button.
-
-Deliberately **not** implemented in Stage 9A: adding a run control is new
-scope against a spec that was explicit about its boundaries.
+Still deferred: whole-Bible orchestration, Stage 8 write batching (it remains
+persistence-bound), a production multilingual embedding provider, Stage 9B
+correction generation/application, and installed-app manual acceptance.
 
 ## Stage 9A.3 — PHP 1:3-6 review fixture, and a Stage 8 read-only bug (2026-09-02)
 

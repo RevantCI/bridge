@@ -1,0 +1,241 @@
+<script lang="ts">
+  import { createEventDispatcher, onDestroy, onMount } from "svelte";
+
+  import { bridge } from "../api/bridgeClient";
+  import type {
+    AnalysisJobSnapshot,
+    AnalysisScope,
+    AnalysisScopeKind,
+    AnalysisScopeStatus,
+    AnalysisStage,
+  } from "../types/analysisJob";
+
+  export let chapter: string;
+  export let verse: string | null = null;
+
+  const dispatch = createEventDispatcher<{
+    completed: { job: AnalysisJobSnapshot; scopeStatus: AnalysisScopeStatus };
+    scopeStatus: AnalysisScopeStatus;
+  }>();
+
+  const STAGES: Array<{ id: AnalysisStage; label: string }> = [
+    { id: "SOURCE_INVENTORY", label: "Source inventory" },
+    { id: "TARGET_INVENTORY", label: "Target inventory" },
+    { id: "LOCATION", label: "Passage search" },
+    { id: "MEANING", label: "Meaning analysis" },
+    { id: "QA", label: "QA audit" },
+  ];
+  const TERMINAL = new Set(["COMPLETED", "COMPLETED_WITH_WARNINGS", "FAILED", "CANCELLED"]);
+
+  let kind: Exclude<AnalysisScopeKind, "AFFECTED"> = verse ? "CURRENT_PASSAGE" : "CURRENT_CHAPTER";
+  let startChapter = chapter;
+  let startVerse = verse ?? "1";
+  let endChapter = chapter;
+  let endVerse = verse ?? "1";
+  let scopeStatus: AnalysisScopeStatus | null = null;
+  let job: AnalysisJobSnapshot | null = null;
+  let loadingState = false;
+  let starting = false;
+  let error = "";
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let destroyed = false;
+
+  function requestedScope(selectedKind: Exclude<AnalysisScopeKind, "AFFECTED"> = kind): AnalysisScope {
+    if (selectedKind === "CURRENT_PASSAGE") {
+      return { kind: selectedKind, chapter, verse: verse ?? "" };
+    }
+    if (selectedKind === "CURRENT_CHAPTER") return { kind: selectedKind, chapter };
+    if (selectedKind === "CURRENT_BOOK") return { kind: selectedKind };
+    return { kind: selectedKind, startChapter, startVerse, endChapter, endVerse };
+  }
+
+  async function refreshScopeStatus(): Promise<AnalysisScopeStatus | null> {
+    if (kind === "CURRENT_PASSAGE" && !verse) return null;
+    loadingState = true;
+    error = "";
+    try {
+      scopeStatus = await bridge.analysisJobGetScopeStatus(requestedScope());
+      if (scopeStatus.latestJob) {
+        job = scopeStatus.latestJob;
+      }
+      if (job?.overallStatus === "RUNNING" || job?.overallStatus === "QUEUED") {
+        schedulePoll();
+      }
+      dispatch("scopeStatus", scopeStatus);
+      return scopeStatus;
+    } catch (cause) {
+      error = String(cause);
+      return null;
+    } finally {
+      loadingState = false;
+    }
+  }
+
+  function schedulePoll(): void {
+    if (destroyed || !job || TERMINAL.has(job.overallStatus)) return;
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = setTimeout(() => void poll(), 500);
+  }
+
+  async function poll(): Promise<void> {
+    if (!job) return;
+    try {
+      job = await bridge.analysisJobStatus(job.jobId);
+      if (!TERMINAL.has(job.overallStatus)) {
+        schedulePoll();
+        return;
+      }
+      const updated = await refreshScopeStatus();
+      if (updated && (job.overallStatus === "COMPLETED"
+          || job.overallStatus === "COMPLETED_WITH_WARNINGS")) {
+        dispatch("completed", { job, scopeStatus: updated });
+      }
+    } catch (cause) {
+      error = String(cause);
+    }
+  }
+
+  async function start(): Promise<void> {
+    starting = true;
+    error = "";
+    try {
+      const base = requestedScope();
+      const scope: AnalysisScope = scopeStatus?.state === "STALE"
+        ? { ...base, kind: "AFFECTED", baseKind: kind }
+        : base;
+      job = await bridge.analysisJobStart(scope);
+      schedulePoll();
+    } catch (cause) {
+      error = String(cause);
+    } finally {
+      starting = false;
+    }
+  }
+
+  async function cancel(): Promise<void> {
+    if (!job) return;
+    try {
+      job = await bridge.analysisJobCancel(job.jobId);
+    } catch (cause) {
+      error = String(cause);
+    }
+  }
+
+  async function changeScope(): Promise<void> {
+    job = null;
+    scopeStatus = null;
+    await refreshScopeStatus();
+  }
+
+  const STATE_LABELS: Record<string, string> = {
+    NOT_ANALYZED: "Not analyzed",
+    PARTIALLY_ANALYZED: "Partially analyzed",
+    CURRENT: "Analysis current",
+    STALE: "Analysis stale",
+    RUNNING: "Analysis running",
+    FAILED: "Analysis failed",
+    SEARCH_INCOMPLETE: "Search incomplete",
+  };
+  $: displayedState = scopeStatus ? STATE_LABELS[scopeStatus.state] : "Checking analysis state";
+
+  onMount(() => void refreshScopeStatus());
+  onDestroy(() => {
+    destroyed = true;
+    if (pollTimer) clearTimeout(pollTimer);
+  });
+</script>
+
+<section class="analysis" aria-labelledby="analysis-heading">
+  <div class="controls">
+    <strong id="analysis-heading">Passage analysis</strong>
+    <label>
+      Scope
+      <select bind:value={kind} on:change={changeScope} disabled={job?.overallStatus === "RUNNING"}>
+        {#if verse}<option value="CURRENT_PASSAGE">Current passage</option>{/if}
+        <option value="CURRENT_CHAPTER">Current chapter</option>
+        <option value="CURRENT_BOOK">Current book</option>
+        <option value="SELECTED_RANGE">Selected reference range</option>
+      </select>
+    </label>
+    {#if kind === "SELECTED_RANGE"}
+      <div class="range" aria-label="Selected reference range">
+        <label>From chapter <input aria-label="From chapter" bind:value={startChapter} on:change={changeScope} /></label>
+        <label>verse <input aria-label="From verse" bind:value={startVerse} on:change={changeScope} /></label>
+        <label>to chapter <input aria-label="To chapter" bind:value={endChapter} on:change={changeScope} /></label>
+        <label>verse <input aria-label="To verse" bind:value={endVerse} on:change={changeScope} /></label>
+      </div>
+    {/if}
+    <span class="state" data-state={scopeStatus?.state ?? "LOADING"}>{displayedState}</span>
+    {#if job?.rangeKey || scopeStatus?.rangeKey}
+      <span class="range-label">
+        {job?.overallStatus === "RUNNING" ? "Analyzing" : "Range"} {job?.rangeKey ?? scopeStatus?.rangeKey}
+      </span>
+    {/if}
+    <button type="button" class="run" disabled={starting || loadingState || job?.overallStatus === "RUNNING"} on:click={start}>
+      {scopeStatus?.state === "STALE" ? "Re-run affected analysis" : "Run analysis"}
+    </button>
+    {#if job?.overallStatus === "RUNNING" || job?.overallStatus === "QUEUED"}
+      <button type="button" class="cancel" on:click={cancel} disabled={job.cancellationRequested}>
+        {job.cancellationRequested ? "Cancelling…" : "Cancel"}
+      </button>
+    {/if}
+  </div>
+
+  {#if job}
+    <div class="progress" role="status" aria-live="polite">
+      <span>{job.stageProgress.completedStages} of {job.stageProgress.totalStages} stages complete</span>
+      <ol aria-label="Analysis stages">
+        {#each STAGES as stage}
+          <li data-status={job.stageStatuses[stage.id].status}>
+            <span aria-hidden="true">{job.stageStatuses[stage.id].status === "REUSED" ? "↻" : job.stageStatuses[stage.id].status === "COMPLETED" ? "✓" : job.stageStatuses[stage.id].status === "RUNNING" ? "●" : "○"}</span>
+            {stage.label}: {job.stageStatuses[stage.id].status.toLowerCase().replace("_", " ")}
+          </li>
+        {/each}
+      </ol>
+    </div>
+  {/if}
+
+  {#if scopeStatus?.providerCapability.semanticRetrieval === "LIMITED"}
+    <p class="warning" role="note">
+      Multilingual semantic retrieval is limited: {scopeStatus.providerCapability.multilingualEmbeddingProvider === "FIXTURE_ONLY"
+        ? "a fixture provider is available only for fixture validation."
+        : "no production multilingual embedding provider is configured."}
+    </p>
+  {/if}
+  {#if job?.searchIncomplete}
+    <p class="warning" role="alert">Search was incomplete. Bridge did not infer omissions from unresolved searches.</p>
+  {/if}
+  {#if job?.failures.length}
+    <p class="error" role="alert">{job.failures[0].message}</p>
+  {:else if error}
+    <p class="error" role="alert">{error}</p>
+  {/if}
+</section>
+
+<style>
+  .analysis { flex: none; border-bottom: 1px solid #dbeafe; background: #f8fbff; }
+  .controls { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.45rem 0.6rem; }
+  strong { font-size: 0.78rem; color: #1e3a8a; }
+  label { display: flex; align-items: center; gap: 0.25rem; font-size: 0.7rem; color: #4b5563; }
+  select, input, button { font: inherit; }
+  select, input { border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; padding: 0.22rem 0.35rem; }
+  input { width: 2.4rem; }
+  .range { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+  .state { font-size: 0.7rem; padding: 0.2rem 0.45rem; border-radius: 999px; background: #e5e7eb; color: #374151; }
+  .state[data-state="CURRENT"] { background: #dcfce7; color: #166534; }
+  .state[data-state="STALE"], .state[data-state="SEARCH_INCOMPLETE"] { background: #fef3c7; color: #92400e; }
+  .state[data-state="FAILED"] { background: #fee2e2; color: #991b1b; }
+  .range-label { font-size: 0.7rem; color: #475569; }
+  button { padding: 0.25rem 0.55rem; border-radius: 4px; cursor: pointer; }
+  button:disabled { cursor: default; opacity: 0.55; }
+  .run { border: 1px solid #2563eb; background: #2563eb; color: #fff; }
+  .cancel { border: 1px solid #d1d5db; background: #fff; color: #374151; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+  .progress { padding: 0 0.6rem 0.4rem; font-size: 0.7rem; color: #374151; }
+  ol { display: flex; flex-wrap: wrap; gap: 0.65rem; list-style: none; padding: 0.3rem 0 0; margin: 0; }
+  li[data-status="RUNNING"] { color: #1d4ed8; font-weight: 600; }
+  li[data-status="FAILED"] { color: #b91c1c; }
+  .warning, .error { margin: 0; padding: 0.3rem 0.6rem; font-size: 0.72rem; }
+  .warning { background: #fffbeb; color: #92400e; }
+  .error { background: #fef2f2; color: #991b1b; }
+</style>

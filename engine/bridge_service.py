@@ -52,6 +52,12 @@ from tc_ai_bridge.passage_semantic_repository import (
     FoundationValidationError,
 )
 from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime
+from tc_ai_bridge.analysis_jobs import (
+    AnalysisJobConflict,
+    AnalysisJobError,
+    AnalysisJobManager,
+    AnalysisJobNotFound,
+)
 from tc_ai_bridge.local_checks import run_local_qa
 from tc_ai_bridge.alignment_engine import (
     AlignmentError, apply_proposal, make_inventory, realign, unalign_bottom,
@@ -327,6 +333,11 @@ class Methods:
     SEMANTIC_REVIEW_DECIDE_LOCATION = "semanticReview.decideLocation"
     SEMANTIC_REVIEW_DECIDE_MEANING = "semanticReview.decideMeaning"
     REVIEW_HISTORY_GET_ENTITY_HISTORY = "reviewHistory.getEntityHistory"
+    ANALYSIS_JOB_START = "analysisJob.start"
+    ANALYSIS_JOB_STATUS = "analysisJob.status"
+    ANALYSIS_JOB_CANCEL = "analysisJob.cancel"
+    ANALYSIS_JOB_GET_RECENT = "analysisJob.getRecent"
+    ANALYSIS_JOB_GET_SCOPE_STATUS = "analysisJob.getScopeStatus"
 
     PARATEXT_GET_STATE = "paratext.getState"
     PARATEXT_SET_REFERENCE = "paratext.setReference"
@@ -408,6 +419,7 @@ class BridgeEngine:
         self._import_lock = threading.Lock()
         self._check_jobs = CheckJobManager()
         self._ai_review_jobs = AIReviewJobManager()
+        self._analysis_jobs = AnalysisJobManager()
         self._project_sweep = ProjectSweepManager()
         # AppSettings() with no path defaults to a real, persistent location
         # (%LOCALAPPDATA%/Bridge/data/settings.json on Windows — a subfolder
@@ -478,6 +490,7 @@ class BridgeEngine:
             runtime = PassageSemanticRuntime(candidate, str(registered["projectId"]))
             candidate.attach_passage_semantic_runtime(runtime)
             self.passage_semantic_runtime = runtime
+            self._analysis_jobs.bind_runtime(runtime)
             self._passage_semantic_status = {"state": "READY", **runtime.status()}
         except Exception as exc:
             # Scripture/tC access remains fully usable. Semantic APIs expose the
@@ -1939,6 +1952,31 @@ class BridgeEngine:
         self, entity_type: str, entity_id: str,
     ) -> dict[str, Any]:
         return self._require_passage_semantic_runtime().review_history(entity_type, entity_id)
+
+    # -- Stage 9A.4 analysis orchestration --------------------------------
+
+    def analysis_job_start(self, requested_scope: dict[str, Any]) -> dict[str, Any]:
+        return self._analysis_jobs.start(
+            self._require_passage_semantic_runtime(), requested_scope=requested_scope,
+        )
+
+    def analysis_job_status(self, job_id: str) -> dict[str, Any]:
+        return self._analysis_jobs.status(job_id)
+
+    def analysis_job_cancel(self, job_id: str) -> dict[str, Any]:
+        return self._analysis_jobs.cancel(job_id)
+
+    def analysis_job_get_recent(self, limit: int = 20) -> list[dict[str, Any]]:
+        return self._analysis_jobs.get_recent(
+            self._require_passage_semantic_runtime(), limit=limit,
+        )
+
+    def analysis_job_get_scope_status(
+        self, requested_scope: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._analysis_jobs.get_scope_status(
+            self._require_passage_semantic_runtime(), requested_scope,
+        )
 
     # -- live desktop connectors (Paratext/Logos) --------------------------
     #
@@ -3533,6 +3571,26 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.review_history_get_entity_history(
                     str(p.get("entityType") or ""), str(p.get("entityId") or ""),
                 ))
+            if m == Methods.ANALYSIS_JOB_START:
+                return EngineResponse.ok(request.id, result=self.analysis_job_start(
+                    dict(p.get("requestedScope") or {}),
+                ))
+            if m == Methods.ANALYSIS_JOB_STATUS:
+                return EngineResponse.ok(request.id, result=self.analysis_job_status(
+                    str(p.get("jobId") or ""),
+                ))
+            if m == Methods.ANALYSIS_JOB_CANCEL:
+                return EngineResponse.ok(request.id, result=self.analysis_job_cancel(
+                    str(p.get("jobId") or ""),
+                ))
+            if m == Methods.ANALYSIS_JOB_GET_RECENT:
+                return EngineResponse.ok(request.id, result=self.analysis_job_get_recent(
+                    int(p.get("limit") or 20),
+                ))
+            if m == Methods.ANALYSIS_JOB_GET_SCOPE_STATUS:
+                return EngineResponse.ok(request.id, result=self.analysis_job_get_scope_status(
+                    dict(p.get("requestedScope") or {}),
+                ))
             if m == Methods.ISSUE_RESOLUTION_LIST:
                 return EngineResponse.ok(
                     request.id, result=self.list_issue_resolutions(p["chapter"], p["verse"]),
@@ -3600,6 +3658,12 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "sweep_conflict", str(exc))
         except SweepError as exc:
             return EngineResponse.fail(request.id, "sweep_error", str(exc))
+        except AnalysisJobNotFound as exc:
+            return EngineResponse.fail(request.id, "analysis_job_not_found", str(exc))
+        except AnalysisJobConflict as exc:
+            return EngineResponse.fail(request.id, "analysis_job_conflict", str(exc))
+        except AnalysisJobError as exc:
+            return EngineResponse.fail(request.id, "analysis_job_error", str(exc))
         except FoundationConflict as exc:
             # Optimistic concurrency: a human review decision written against a
             # revision that has since moved is rejected, never merged blindly.

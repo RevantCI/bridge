@@ -72,6 +72,7 @@ class SemanticEmbeddingProvider:
     languages: tuple[str, ...] = ()
     offline = True
     available = False
+    fixture_only = False
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         raise RuntimeError("Semantic embedding provider is unavailable")
@@ -87,6 +88,7 @@ class SemanticEmbeddingProvider:
             "languageCapabilities": list(self.languages),
             "offline": self.offline,
             "available": self.available,
+            "fixtureOnly": self.fixture_only,
             "role": EmbeddingRole.CANDIDATE_RETRIEVAL_ONLY.value,
         }
 

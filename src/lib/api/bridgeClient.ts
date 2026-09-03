@@ -42,6 +42,11 @@ import type {
   MeaningComponentAssessment,
   MeaningAnalysisDiagnostics,
 } from "../types/passageSemanticV1";
+import type {
+  AnalysisJobSnapshot,
+  AnalysisScope,
+  AnalysisScopeStatus,
+} from "../types/analysisJob";
 
 /**
  * Thin wrapper around Tauri's invoke() calling the real commands defined
@@ -712,5 +717,27 @@ export const bridge = {
     entityType: ReviewEntityType, entityId: string,
   ): Promise<EntityHistory> {
     return call("review_history_get_entity_history", { entityType, entityId });
+  },
+
+  // Stage 9A.4 orchestrates the frozen Stage 5--8 engines. Starting a job is
+  // explicit; project open only reports persisted state and never starts one.
+  analysisJobStart(requestedScope: AnalysisScope): Promise<AnalysisJobSnapshot> {
+    return call("analysis_job_start", { requestedScope });
+  },
+
+  analysisJobStatus(jobId: string): Promise<AnalysisJobSnapshot> {
+    return call("analysis_job_status", { jobId });
+  },
+
+  analysisJobCancel(jobId: string): Promise<AnalysisJobSnapshot> {
+    return call("analysis_job_cancel", { jobId });
+  },
+
+  analysisJobGetRecent(limit = 20): Promise<AnalysisJobSnapshot[]> {
+    return call("analysis_job_get_recent", { limit });
+  },
+
+  analysisJobGetScopeStatus(requestedScope: AnalysisScope): Promise<AnalysisScopeStatus> {
+    return call("analysis_job_get_scope_status", { requestedScope });
   },
 };

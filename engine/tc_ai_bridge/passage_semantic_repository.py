@@ -45,7 +45,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 8
+DATABASE_SCHEMA_VERSION = 9
 
 # Review priority, not alphabetical order — see _MIGRATION_V8.
 _SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
@@ -693,6 +693,35 @@ ON qa_findings(project_id,lifecycle_status,qa_disposition,kind);
 """
 
 
+# Stage 9A.4: orchestration jobs are durable independently of the worker
+# thread.  The JSON payload is the wire contract; the lifted columns support
+# recovery, project scoping, and recent-job lookup without parsing every row.
+_MIGRATION_V9 = r"""
+CREATE TABLE analysis_jobs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES project_metadata(project_id),
+    book TEXT NOT NULL,
+    scope_kind TEXT NOT NULL CHECK(scope_kind IN ('CURRENT_PASSAGE','CURRENT_CHAPTER','CURRENT_BOOK','SELECTED_RANGE','AFFECTED')),
+    range_key TEXT NOT NULL,
+    overall_status TEXT NOT NULL CHECK(overall_status IN ('QUEUED','RUNNING','COMPLETED','COMPLETED_WITH_WARNINGS','FAILED','CANCELLED')),
+    target_content_hash TEXT NOT NULL,
+    source_resource_hash TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX ix_analysis_jobs_project_recent
+ON analysis_jobs(project_id,book,created_at DESC,id DESC);
+CREATE INDEX ix_analysis_jobs_scope
+ON analysis_jobs(project_id,book,range_key,overall_status,created_at DESC);
+CREATE UNIQUE INDEX ux_analysis_jobs_one_active
+ON analysis_jobs(project_id)
+WHERE overall_status IN ('QUEUED','RUNNING');
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -757,6 +786,10 @@ class FoundationRepository:
             if current < 8:
                 self._backup_before_migration(conn, current, 8)
                 self._apply_migration(conn, 8, _MIGRATION_V8)
+                current = 8
+            if current < 9:
+                self._backup_before_migration(conn, current, 9)
+                self._apply_migration(conn, 9, _MIGRATION_V9)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -1887,6 +1920,170 @@ class FoundationRepository:
         if row["lifecycle_status"] != "ACTIVE":
             raise FoundationValidationError("QA audit run is stale or inactive")
         return json.loads(row["payload_json"])
+
+    # -- Stage 9A.4 analysis orchestration jobs ---------------------------
+
+    @staticmethod
+    def _validate_analysis_job(payload: dict[str, Any]) -> None:
+        required = {
+            "jobId", "projectId", "book", "requestedScope", "rangeKey",
+            "canonicalReferences", "overallStatus", "stageStatuses",
+            "stageProgress", "reusedRunIds", "createdRunIds", "warnings",
+            "failures", "cancellationRequested", "targetContentHash",
+            "sourceResourceHash", "createdAt",
+        }
+        missing = sorted(required - set(payload))
+        if missing:
+            raise FoundationValidationError(
+                "Analysis job is missing required fields: " + ", ".join(missing)
+            )
+        scope = payload.get("requestedScope")
+        if not isinstance(scope, dict) or scope.get("kind") not in {
+            "CURRENT_PASSAGE", "CURRENT_CHAPTER", "CURRENT_BOOK",
+            "SELECTED_RANGE", "AFFECTED",
+        }:
+            raise FoundationValidationError("Invalid analysis job requestedScope")
+        if payload.get("overallStatus") not in {
+            "QUEUED", "RUNNING", "COMPLETED", "COMPLETED_WITH_WARNINGS",
+            "FAILED", "CANCELLED",
+        }:
+            raise FoundationValidationError("Invalid analysis job overallStatus")
+        stage_names = {"SOURCE_INVENTORY", "TARGET_INVENTORY", "LOCATION", "MEANING", "QA"}
+        stage_statuses = payload.get("stageStatuses")
+        if not isinstance(stage_statuses, dict) or set(stage_statuses) != stage_names:
+            raise FoundationValidationError("Invalid analysis job stageStatuses")
+        allowed_stage_statuses = {
+            "NOT_STARTED", "RUNNING", "COMPLETED", "REUSED", "FAILED", "CANCELLED",
+        }
+        if any(
+            not isinstance(value, dict) or value.get("status") not in allowed_stage_statuses
+            for value in stage_statuses.values()
+        ):
+            raise FoundationValidationError("Invalid analysis job stage status")
+        progress = payload.get("stageProgress")
+        if (
+            not isinstance(progress, dict)
+            or not isinstance(progress.get("completedStages"), int)
+            or progress.get("totalStages") != len(stage_names)
+            or not 0 <= progress["completedStages"] <= progress["totalStages"]
+        ):
+            raise FoundationValidationError("Invalid analysis job stageProgress")
+
+    def create_analysis_job(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._validate_analysis_job(payload)
+        stored = dict(payload)
+        stored["revision"] = 1
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "INSERT INTO analysis_jobs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        stored["jobId"], stored["projectId"], stored["book"],
+                        stored["requestedScope"]["kind"], stored["rangeKey"],
+                        stored["overallStatus"], stored["targetContentHash"],
+                        stored["sourceResourceHash"], 1, stored["createdAt"],
+                        stored.get("startedAt"), stored.get("completedAt"),
+                        json.dumps(stored, ensure_ascii=False),
+                    ),
+                )
+                conn.commit()
+        except sqlite3.IntegrityError as exc:
+            raise FoundationConflict(
+                "Another analysis job is already active for this project"
+            ) from exc
+        return stored
+
+    def update_analysis_job(
+        self, job_id: str, payload: dict[str, Any], expected_revision: int,
+    ) -> dict[str, Any]:
+        self._validate_analysis_job(payload)
+        stored = dict(payload)
+        stored["revision"] = expected_revision + 1
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            changed = conn.execute(
+                "UPDATE analysis_jobs SET overall_status=?,target_content_hash=?,"
+                "source_resource_hash=?,revision=?,started_at=?,completed_at=?,payload_json=? "
+                "WHERE id=? AND revision=?",
+                (
+                    stored["overallStatus"], stored["targetContentHash"],
+                    stored["sourceResourceHash"], stored["revision"],
+                    stored.get("startedAt"), stored.get("completedAt"),
+                    json.dumps(stored, ensure_ascii=False), job_id, expected_revision,
+                ),
+            ).rowcount
+            if changed != 1:
+                conn.rollback()
+                raise FoundationConflict("Analysis job revision conflict")
+            conn.commit()
+        return stored
+
+    def analysis_job(self, job_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM analysis_jobs WHERE id=?", (job_id,),
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(f"Unknown analysis job: {job_id}")
+        return json.loads(row[0])
+
+    def recent_analysis_jobs(
+        self, project_id: str, *, book: str = "", limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(100, int(limit)))
+        sql = "SELECT payload_json FROM analysis_jobs WHERE project_id=?"
+        params: list[Any] = [project_id]
+        if book:
+            sql += " AND book=?"
+            params.append(book)
+        sql += " ORDER BY created_at DESC,id DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def recover_analysis_jobs(
+        self, project_id: str, *, active_job_ids: tuple[str, ...] = (),
+    ) -> int:
+        """Mark workers lost with a previous sidecar process as failed.
+
+        In-memory active ids are excluded so reopening the same project while
+        its worker is alive does not incorrectly terminate that job.
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT id,revision,payload_json FROM analysis_jobs "
+                "WHERE project_id=? AND overall_status IN ('QUEUED','RUNNING')",
+                (project_id,),
+            ).fetchall()
+            recovered = 0
+            for row in rows:
+                if row["id"] in active_job_ids:
+                    continue
+                payload = json.loads(row["payload_json"])
+                abandoned_stage = str(payload.get("currentStage") or "ORCHESTRATION")
+                payload["overallStatus"] = "FAILED"
+                payload["completedAt"] = self._now()
+                payload["currentStage"] = ""
+                payload.setdefault("failures", []).append({
+                    "stage": abandoned_stage,
+                    "code": "INTERRUPTED",
+                    "message": "Analysis was interrupted when Bridge closed.",
+                })
+                payload["revision"] = int(row["revision"]) + 1
+                conn.execute(
+                    "UPDATE analysis_jobs SET overall_status='FAILED',revision=?,"
+                    "completed_at=?,payload_json=? WHERE id=? AND revision=?",
+                    (
+                        payload["revision"], payload["completedAt"],
+                        json.dumps(payload, ensure_ascii=False), row["id"], row["revision"],
+                    ),
+                )
+                recovered += 1
+            conn.commit()
+        return recovered
 
     def human_approved_lexical_precedents(self, project_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:

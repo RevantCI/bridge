@@ -113,7 +113,7 @@
       </div>
     {:else}
       <div id="review-panel-qa" role="tabpanel" aria-labelledby="review-tab-qa" class="panel">
-        <AlignmentQaMode />
+        <AlignmentQaMode {chapter} {verse} />
       </div>
     {/if}
   </div>
