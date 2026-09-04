@@ -10,6 +10,8 @@ from __future__ import annotations
 import copy
 from datetime import datetime, timezone
 import hashlib
+import hmac
+import json
 import threading
 import time
 from typing import Any
@@ -18,6 +20,35 @@ import uuid
 from .passage_semantic_repository import (
     FoundationConflict,
     FoundationValidationError,
+)
+from .meaning_analysis import (
+    MEANING_CALIBRATION_VERSION,
+    MEANING_CONFIDENCE_POLICY_VERSION,
+    MEANING_ENGINE_VERSION,
+    MEANING_MODEL_VERSION,
+    MEANING_POLICY_VERSION,
+)
+from .qa_audit import (
+    QA_CALIBRATION_VERSION,
+    QA_CONFIDENCE_POLICY_VERSION,
+    QA_ENGINE_VERSION,
+    QA_MODEL_VERSION,
+    QA_POLICY_VERSION,
+)
+from .semantic_location import (
+    LOCATION_CALIBRATION_VERSION,
+    LOCATION_CONFIDENCE_POLICY_VERSION,
+    LOCATION_ENGINE_VERSION,
+    LOCATION_SEARCH_POLICY_VERSION,
+)
+from .source_semantic_inventory import (
+    AUDIT_POLICY_VERSION as SOURCE_AUDIT_POLICY_VERSION,
+    INVENTORY_ENGINE_VERSION as SOURCE_INVENTORY_ENGINE_VERSION,
+)
+from .target_semantic_inventory import (
+    POLICY as TARGET_INVENTORY_POLICY,
+    SPAN_POLICY_VERSION,
+    TARGET_INVENTORY_ENGINE_VERSION,
 )
 
 
@@ -45,6 +76,13 @@ def _now() -> str:
 
 def _text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _json_hash(value: Any) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    )
+    return _text_hash(encoded)
 
 
 def _reference_parts(reference: str) -> tuple[str, str]:
@@ -110,6 +148,77 @@ class AnalysisJobManager:
                 "providerVersion", "modelHash", "fixtureProvider",
             )
         )
+
+    @staticmethod
+    def _same_policy(job: dict[str, Any], policy_versions: dict[str, str]) -> bool:
+        return (job.get("policyVersions") or {}) == policy_versions
+
+    @staticmethod
+    def policy_versions(runtime: Any) -> dict[str, str]:
+        """Return every version that can change Stage 5--8 interpretation."""
+        location_policy = getattr(runtime.semantic_location, "policy", None)
+        meaning_policy = getattr(runtime.meaning_analysis, "policy", None)
+        qa_policy = getattr(runtime.qa_audit, "policy", None)
+        return {
+            "sourceInventoryEngineVersion": SOURCE_INVENTORY_ENGINE_VERSION,
+            "sourceAuditPolicyVersion": SOURCE_AUDIT_POLICY_VERSION,
+            "targetInventoryEngineVersion": TARGET_INVENTORY_ENGINE_VERSION,
+            "targetSpanPolicyVersion": SPAN_POLICY_VERSION,
+            "targetAuditPolicyVersion": TARGET_INVENTORY_POLICY.audit_policy_version,
+            "locationEngineVersion": LOCATION_ENGINE_VERSION,
+            "locationSearchPolicyVersion": str(
+                getattr(location_policy, "version", LOCATION_SEARCH_POLICY_VERSION)
+            ),
+            "locationConfidencePolicyVersion": LOCATION_CONFIDENCE_POLICY_VERSION,
+            "locationCalibrationVersion": LOCATION_CALIBRATION_VERSION,
+            "meaningEngineVersion": MEANING_ENGINE_VERSION,
+            "meaningPolicyVersion": str(
+                getattr(meaning_policy, "version", MEANING_POLICY_VERSION)
+            ),
+            "meaningConfidencePolicyVersion": MEANING_CONFIDENCE_POLICY_VERSION,
+            "meaningCalibrationVersion": MEANING_CALIBRATION_VERSION,
+            "meaningModelVersion": str(
+                getattr(runtime.meaning_analysis, "model_version", MEANING_MODEL_VERSION)
+            ),
+            "qaEngineVersion": QA_ENGINE_VERSION,
+            "qaPolicyVersion": str(getattr(qa_policy, "version", QA_POLICY_VERSION)),
+            "qaConfidencePolicyVersion": QA_CONFIDENCE_POLICY_VERSION,
+            "qaCalibrationVersion": QA_CALIBRATION_VERSION,
+            "qaModelVersion": QA_MODEL_VERSION,
+        }
+
+    @classmethod
+    def _analysis_identity(
+        cls, runtime: Any, resolved: dict[str, Any], capability: dict[str, Any],
+        source_lock: dict[str, Any],
+    ) -> tuple[str, dict[str, str]]:
+        policy_versions = cls.policy_versions(runtime)
+        identity = {
+            "projectId": runtime.project_id,
+            "scopeType": resolved["kind"],
+            "canonicalStartReference": (
+                resolved["canonicalReferences"][0]
+                if resolved["canonicalReferences"] else ""
+            ),
+            "canonicalEndReference": (
+                resolved["canonicalReferences"][-1]
+                if resolved["canonicalReferences"] else ""
+            ),
+            "canonicalReferences": resolved["canonicalReferences"],
+            "sourceResourceId": str(source_lock.get("resource_id") or "unavailable"),
+            "sourceResourceVersion": str(source_lock.get("resource_version") or "unavailable"),
+            "sourceResourceHash": str(source_lock.get("resource_hash") or "unavailable"),
+            "targetRevision": resolved["targetRevision"],
+            "targetContentHash": resolved["targetContentHash"],
+            "targetHashes": resolved["targetHashes"],
+            "providerCapability": capability,
+            "policyVersions": policy_versions,
+        }
+        return _json_hash(identity), policy_versions
+
+    @staticmethod
+    def _same_scope_kind(job: dict[str, Any], kind: str) -> bool:
+        return str((job.get("requestedScope") or {}).get("kind") or "") == kind
 
     def bind_runtime(self, runtime: Any) -> int:
         """Bind persisted jobs and recover workers lost on a prior restart."""
@@ -184,6 +293,7 @@ class AnalysisJobManager:
             "displayedReferences": displayed,
             "canonicalReferences": list(passage.get("canonicalReferences") or ()),
             "rangeKey": f"{displayed[0]}..{displayed[-1]}",
+            "targetRevision": str(passage["targetRevision"]),
             "targetContentHash": str(passage["targetContentHash"]),
             "targetHashes": {
                 reference: _text_hash(text)
@@ -202,7 +312,11 @@ class AnalysisJobManager:
         recent = runtime.repository.recent_analysis_jobs(
             runtime.project_id, book=runtime.book, limit=100,
         )
-        prior = next((item for item in recent if item.get("rangeKey") == resolved["rangeKey"]), None)
+        prior = next((
+            item for item in recent
+            if item.get("rangeKey") == resolved["rangeKey"]
+            and cls._same_scope_kind(item, resolved["kind"])
+        ), None)
         if prior is None:
             return (
                 resolved["startChapter"], resolved["startVerse"],
@@ -244,6 +358,9 @@ class AnalysisJobManager:
         resolved = cls._resolve_scope(runtime, requested_scope)
         source_lock = runtime.repository.source_lock(runtime.project_id, runtime.book) or {}
         capability = cls.provider_capability(runtime)
+        analysis_fingerprint, policy_versions = cls._analysis_identity(
+            runtime, resolved, capability, source_lock,
+        )
         warnings: list[dict[str, str]] = []
         if capability["fixtureProvider"]:
             warnings.append({
@@ -273,9 +390,12 @@ class AnalysisJobManager:
             "rangeKey": resolved["rangeKey"],
             "displayedReferences": resolved["displayedReferences"],
             "canonicalReferences": resolved["canonicalReferences"],
+            "targetRevision": resolved["targetRevision"],
             "targetContentHash": resolved["targetContentHash"],
             "targetHashes": resolved["targetHashes"],
             "sourceResourceHash": str(source_lock.get("resource_hash") or "unavailable"),
+            "analysisFingerprint": analysis_fingerprint,
+            "policyVersions": policy_versions,
             "createdAt": now, "startedAt": None, "completedAt": None,
             "currentStage": "", "overallStatus": "QUEUED",
             "stageStatuses": stages,
@@ -286,12 +406,21 @@ class AnalysisJobManager:
             "searchIncomplete": False,
         }
 
-    def start(self, runtime: Any, *, requested_scope: dict[str, Any]) -> dict[str, Any]:
+    def start(
+        self, runtime: Any, *, requested_scope: dict[str, Any],
+        expected_analysis_fingerprint: str = "",
+    ) -> dict[str, Any]:
         if self.provider_capability(runtime)["fixtureProvider"] and not self._allow_fixture_provider:
             raise AnalysisJobError(
                 "Fixture semantic providers cannot run in the normal Bridge analysis workflow"
             )
         payload = self.new_job_payload(runtime, requested_scope)
+        if expected_analysis_fingerprint and not hmac.compare_digest(
+            expected_analysis_fingerprint, payload["analysisFingerprint"],
+        ):
+            raise AnalysisJobConflict(
+                "The analysis scope changed before the job started; refresh the selected scope and retry"
+            )
         project_id = runtime.project_id
         with self._lock:
             active_id = self._active_by_project.get(project_id, "")
@@ -351,12 +480,20 @@ class AnalysisJobManager:
         source_lock = runtime.repository.source_lock(runtime.project_id, runtime.book) or {}
         current_source_hash = str(source_lock.get("resource_hash") or "unavailable")
         current_capability = self.provider_capability(runtime)
-        exact = next((item for item in recent if item.get("rangeKey") == resolved["rangeKey"]), None)
+        analysis_fingerprint, policy_versions = self._analysis_identity(
+            runtime, resolved, current_capability, source_lock,
+        )
+        exact = next((
+            item for item in recent
+            if item.get("rangeKey") == resolved["rangeKey"]
+            and self._same_scope_kind(item, resolved["kind"])
+        ), None)
         if exact is None:
             partial = any(
                 item.get("overallStatus") in {"COMPLETED", "COMPLETED_WITH_WARNINGS"}
                 and str(item.get("sourceResourceHash") or "") == current_source_hash
                 and self._same_provider(item, current_capability)
+                and self._same_policy(item, policy_versions)
                 and any(
                     (item.get("targetHashes") or {}).get(reference) == digest
                     for reference, digest in resolved["targetHashes"].items()
@@ -369,17 +506,20 @@ class AnalysisJobManager:
                 None,
                 [],
                 current_capability,
+                analysis_fingerprint,
+                policy_versions,
             )
         current_hashes = resolved["targetHashes"]
         old_hashes = exact.get("targetHashes") or {}
         affected = [ref for ref, digest in current_hashes.items() if old_hashes.get(ref) != digest]
         source_changed = str(exact.get("sourceResourceHash") or "") != current_source_hash
         provider_changed = not self._same_provider(exact, current_capability)
+        policy_changed = (exact.get("policyVersions") or {}) != policy_versions
         status = exact.get("overallStatus")
         if status in {"QUEUED", "RUNNING"}:
             state = "RUNNING"
-        elif affected or source_changed or provider_changed:
-            if source_changed or provider_changed:
+        elif affected or source_changed or provider_changed or policy_changed:
+            if source_changed or provider_changed or policy_changed:
                 affected = list(resolved["displayedReferences"])
                 state = "STALE"
             else:
@@ -396,6 +536,7 @@ class AnalysisJobManager:
                         and item.get("overallStatus") in {"COMPLETED", "COMPLETED_WITH_WARNINGS"}
                         and str(item.get("sourceResourceHash") or "") == current_source_hash
                         and self._same_provider(item, current_capability)
+                        and self._same_policy(item, policy_versions)
                         and (item.get("targetHashes") or {}).get(reference) == current_hashes[reference]
                     ), None)
                     if replacement is None:
@@ -421,17 +562,21 @@ class AnalysisJobManager:
             state = "NOT_ANALYZED"
         return self._scope_status_payload(
             state, resolved, exact, affected, current_capability,
+            analysis_fingerprint, policy_versions,
         )
 
     def _scope_status_payload(
         self, state: str, resolved: dict[str, Any], job: dict[str, Any] | None,
         affected: list[str], provider_capability: dict[str, Any],
+        analysis_fingerprint: str, policy_versions: dict[str, str],
     ) -> dict[str, Any]:
         return {
             "state": state, "rangeKey": resolved["rangeKey"],
             "displayedReferences": resolved["displayedReferences"],
             "canonicalReferences": resolved["canonicalReferences"],
             "affectedReferences": affected,
+            "analysisFingerprint": analysis_fingerprint,
+            "policyVersions": policy_versions,
             "latestJob": job,
             "providerCapability": provider_capability,
         }

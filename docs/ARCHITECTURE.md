@@ -126,7 +126,7 @@ which mode is actually active.
 | v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
 | v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
 | v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/BUILD_LOG.md's Phase 7 section) |
-| v1.0.x | Paratext/Logos live navigation, AI explain, and optional AI + Greek Room synthesis. | Drag-and-drop import and ai.explain ✅ Built. Opt-in, brokered Bridge/Paratext/Logos navigation is wired (2026-09-03) with non-blocking polling, loop suppression, edit guards, cross-book routing, reconnect catch-up, and single-window ownership. Installed Paratext state/outbound navigation and installed-but-closed Logos COM discovery passed; active Logos panel/navigation acceptance remains pending. See docs/BUILD_LOG.md and the connector READMEs. |
+| v1.0.x | Paratext/Logos live navigation, AI explain, and optional AI + Greek Room synthesis. | Drag-and-drop import and ai.explain ✅ Built. Opt-in, brokered Bridge/Paratext/Logos navigation is wired with non-blocking polling, loop suppression, edit guards, cross-book routing, reconnect catch-up, and single-window ownership. Installed Paratext state/outbound navigation and live Logos 53.1 inbound/outbound navigation are verified. See docs/BUILD_LOG.md and the connector READMEs. |
 
 ### Stage 3 adaptive passage search
 

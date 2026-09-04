@@ -82,9 +82,12 @@ export interface AnalysisJobSnapshot {
   rangeKey: string;
   displayedReferences: string[];
   canonicalReferences: string[];
+  targetRevision: string;
   targetContentHash: string;
   targetHashes: Record<string, string>;
   sourceResourceHash: string;
+  analysisFingerprint: string;
+  policyVersions: Record<string, string>;
   revision: number;
   createdAt: string;
   startedAt: string | null;
@@ -111,6 +114,8 @@ export interface AnalysisScopeStatus {
   displayedReferences: string[];
   canonicalReferences: string[];
   affectedReferences: string[];
+  analysisFingerprint: string;
+  policyVersions: Record<string, string>;
   latestJob: AnalysisJobSnapshot | null;
   providerCapability: AnalysisProviderCapability;
 }

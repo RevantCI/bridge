@@ -406,16 +406,21 @@ def main() -> int:
             elif paratext_state.get("error", {}).get("code") != "paratext_connector_error":
                 raise SystemExit(f"Frozen paratext.getState did not fail cleanly: {paratext_state}")
 
-            # Real, meaningful check: this actually spawns the bundled logos_bridge.ps1
-            # from under sys._MEIPASS (see bridge-engine.spec's logos_connector datas
-            # entry) — a missing/broken bundle would show up as a different failure
-            # shape (a spawn/file-not-found error) than the real "Logos isn't installed"
-            # COM error this asserts on.
-            logos_state = request("logos-not-installed", "logos.getState", {}, timeout=25)
-            if logos_state.get("success") or logos_state.get("error", {}).get("code") != "logos_connector_error":
+            # This actually spawns the bundled logos_bridge.ps1 from under sys._MEIPASS.
+            # A developer machine may have no Logos COM API, an installed-but-closed
+            # app, or a live panel, so validate the environment-safe response shape.
+            logos_state = request("logos-state", "logos.getState", {}, timeout=25)
+            if logos_state.get("success"):
+                if not isinstance(logos_state.get("result", {}).get("connected"), bool):
+                    raise SystemExit(f"Frozen logos.getState returned invalid live state: {logos_state}")
+            elif logos_state.get("error", {}).get("code") != "logos_connector_error":
                 raise SystemExit(f"Frozen logos.getState did not fail cleanly: {logos_state}")
-            if "not registered" not in logos_state["error"]["message"].lower() and "logos" not in logos_state["error"]["message"].lower():
-                raise SystemExit(f"Frozen logos.getState failed for an unexpected reason (bundle may be missing): {logos_state}")
+            else:
+                logos_message = logos_state["error"]["message"].lower()
+                if "helper is missing" in logos_message or "helper did not start" in logos_message:
+                    raise SystemExit(f"Frozen Logos helper was not bundled correctly: {logos_state}")
+                if "logos4lib.logoslauncher" in logos_message:
+                    raise SystemExit(f"Frozen Logos helper still uses the obsolete ProgID: {logos_state}")
 
             aligned_path = Path(temp) / "tit-aligned.usfm"
             exported = request(

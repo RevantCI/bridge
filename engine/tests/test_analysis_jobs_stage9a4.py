@@ -276,6 +276,85 @@ def test_scope_states_distinguish_unanalyzed_current_and_stale(tmp_path) -> None
     assert stale["affectedReferences"] == ["PHP 1:3"]
 
 
+@pytest.mark.parametrize(
+    ("first_scope", "second_scope", "expected_second"),
+    (
+        (
+            {"kind": "SELECTED_RANGE", "startChapter": "1", "startVerse": "3",
+             "endChapter": "1", "endVerse": "6"},
+            {"kind": "SELECTED_RANGE", "startChapter": "1", "startVerse": "1",
+             "endChapter": "1", "endVerse": "1"},
+            ["PHP 1:1"],
+        ),
+        (
+            {"kind": "SELECTED_RANGE", "startChapter": "1", "startVerse": "1",
+             "endChapter": "1", "endVerse": "1"},
+            {"kind": "SELECTED_RANGE", "startChapter": "1", "startVerse": "3",
+             "endChapter": "1", "endVerse": "6"},
+            ["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"],
+        ),
+    ),
+)
+def test_changed_selected_range_gets_distinct_persisted_scope_and_fingerprint(
+    tmp_path, first_scope: dict[str, str], second_scope: dict[str, str],
+    expected_second: list[str],
+) -> None:
+    runtime = _runtime(
+        tmp_path, language="en",
+        chapters={"1": {str(verse): f"verse {verse}" for verse in range(1, 7)}},
+    )
+    manager = AnalysisJobManager()
+
+    _stub_stages(runtime)
+    first_status = manager.get_scope_status(runtime, first_scope)
+    first = _wait(manager, manager.start(
+        runtime, requested_scope=first_scope,
+        expected_analysis_fingerprint=first_status["analysisFingerprint"],
+    )["jobId"])
+
+    _stub_stages(runtime)
+    second_status = manager.get_scope_status(runtime, second_scope)
+    assert second_status["latestJob"] is None
+    second = _wait(manager, manager.start(
+        runtime, requested_scope=second_scope,
+        expected_analysis_fingerprint=second_status["analysisFingerprint"],
+    )["jobId"])
+
+    assert second["requestedScope"] != first["requestedScope"]
+    assert second["canonicalReferences"] == expected_second
+    assert second["analysisFingerprint"] != first["analysisFingerprint"]
+    assert second["reusedRunIds"] == []
+    assert second["rangeKey"] != first["rangeKey"]
+    persisted = runtime.repository.analysis_job(second["jobId"])
+    assert persisted["requestedScope"] == second["requestedScope"]
+    assert persisted["canonicalReferences"] == expected_second
+    assert persisted["policyVersions"]
+    assert persisted["targetRevision"]
+
+
+def test_start_rejects_a_scope_fingerprint_resolved_for_an_old_selection(tmp_path) -> None:
+    runtime = _runtime(
+        tmp_path, language="en",
+        chapters={"1": {str(verse): f"verse {verse}" for verse in range(1, 7)}},
+    )
+    manager = AnalysisJobManager()
+    old_scope = {
+        "kind": "SELECTED_RANGE", "startChapter": "1", "startVerse": "3",
+        "endChapter": "1", "endVerse": "6",
+    }
+    new_scope = {
+        "kind": "SELECTED_RANGE", "startChapter": "1", "startVerse": "1",
+        "endChapter": "1", "endVerse": "1",
+    }
+    old_status = manager.get_scope_status(runtime, old_scope)
+    with pytest.raises(AnalysisJobConflict, match="scope changed"):
+        manager.start(
+            runtime, requested_scope=new_scope,
+            expected_analysis_fingerprint=old_status["analysisFingerprint"],
+        )
+    assert manager.get_recent(runtime) == []
+
+
 def test_affected_rerun_currentizes_a_larger_scope_without_recomputing_it(tmp_path) -> None:
     initial = _runtime(
         tmp_path, language="en", chapters={"1": {"3": "three", "4": "four"}},
@@ -380,8 +459,16 @@ def test_analysis_job_apis_round_trip_over_bridge_protocol(tmp_path) -> None:
     assert before["success"] is True
     assert before["result"]["state"] == "NOT_ANALYZED"
     assert before["result"]["providerCapability"]["semanticRetrieval"] == "LIMITED"
+    assert len(before["result"]["analysisFingerprint"]) == 64
 
-    started = call("analysisJob.start", {"requestedScope": scope})
+    missing_preflight = call("analysisJob.start", {"requestedScope": scope})
+    assert missing_preflight["success"] is False
+    assert "scope status" in missing_preflight["error"]["message"].lower()
+
+    started = call("analysisJob.start", {
+        "requestedScope": scope,
+        "expectedAnalysisFingerprint": before["result"]["analysisFingerprint"],
+    })
     assert started["success"] is True
     job_id = started["result"]["jobId"]
     deadline = time.monotonic() + 5

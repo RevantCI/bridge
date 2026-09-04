@@ -39,6 +39,10 @@
   let error = "";
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let destroyed = false;
+  let mounted = false;
+  let statusGeneration = 0;
+  let statusSelectionSignature = "";
+  let observedNavigation = `${chapter}\u241f${verse ?? ""}`;
 
   function requestedScope(selectedKind: Exclude<AnalysisScopeKind, "AFFECTED"> = kind): AnalysisScope {
     if (selectedKind === "CURRENT_PASSAGE") {
@@ -49,25 +53,55 @@
     return { kind: selectedKind, startChapter, startVerse, endChapter, endVerse };
   }
 
-  async function refreshScopeStatus(): Promise<AnalysisScopeStatus | null> {
-    if (kind === "CURRENT_PASSAGE" && !verse) return null;
+  function scopeSignature(scope: AnalysisScope): string {
+    return JSON.stringify({
+      kind: scope.kind,
+      baseKind: scope.baseKind ?? "",
+      chapter: scope.chapter ?? "",
+      verse: scope.verse ?? "",
+      startChapter: scope.startChapter ?? "",
+      startVerse: scope.startVerse ?? "",
+      endChapter: scope.endChapter ?? "",
+      endVerse: scope.endVerse ?? "",
+    });
+  }
+
+  function displayRange(rangeKey: string): string {
+    const [start, end] = rangeKey.split("..");
+    if (!end || start === end) return start;
+    const first = /^(\S+) (\d+):(\S+)$/.exec(start);
+    const last = /^(\S+) (\d+):(\S+)$/.exec(end);
+    if (first && last && first[1] === last[1] && first[2] === last[2]) {
+      return `${first[1]} ${first[2]}:${first[3]}–${last[2]}:${last[3]}`;
+    }
+    return `${start}–${end}`;
+  }
+
+  async function refreshScopeStatus(
+    scope: AnalysisScope = requestedScope(),
+  ): Promise<AnalysisScopeStatus | null> {
+    if (scope.kind === "CURRENT_PASSAGE" && !scope.verse) return null;
+    const generation = ++statusGeneration;
+    const signature = scopeSignature(scope);
     loadingState = true;
     error = "";
     try {
-      scopeStatus = await bridge.analysisJobGetScopeStatus(requestedScope());
-      if (scopeStatus.latestJob) {
-        job = scopeStatus.latestJob;
-      }
+      const resolved = await bridge.analysisJobGetScopeStatus(scope);
+      if (destroyed || generation !== statusGeneration
+          || signature !== scopeSignature(requestedScope())) return null;
+      scopeStatus = resolved;
+      statusSelectionSignature = signature;
+      job = resolved.latestJob;
       if (job?.overallStatus === "RUNNING" || job?.overallStatus === "QUEUED") {
         schedulePoll();
       }
-      dispatch("scopeStatus", scopeStatus);
-      return scopeStatus;
+      dispatch("scopeStatus", resolved);
+      return resolved;
     } catch (cause) {
-      error = String(cause);
+      if (generation === statusGeneration) error = String(cause);
       return null;
     } finally {
-      loadingState = false;
+      if (generation === statusGeneration) loadingState = false;
     }
   }
 
@@ -97,18 +131,50 @@
 
   async function start(): Promise<void> {
     starting = true;
+    loadingState = true;
     error = "";
     try {
       const base = requestedScope();
-      const scope: AnalysisScope = scopeStatus?.state === "STALE"
+      const selectionSignature = scopeSignature(base);
+      const generation = ++statusGeneration;
+      const current = await bridge.analysisJobGetScopeStatus(base);
+      if (generation !== statusGeneration
+          || selectionSignature !== scopeSignature(requestedScope())) {
+        error = "The selected analysis scope changed. Review the displayed range and run again.";
+        void refreshScopeStatus();
+        return;
+      }
+      scopeStatus = current;
+      statusSelectionSignature = selectionSignature;
+      dispatch("scopeStatus", current);
+      const scope: AnalysisScope = current.state === "STALE"
         ? { ...base, kind: "AFFECTED", baseKind: kind }
         : base;
-      job = await bridge.analysisJobStart(scope);
+      const startStatus = scope.kind === "AFFECTED"
+        ? await bridge.analysisJobGetScopeStatus(scope)
+        : current;
+      if (generation !== statusGeneration
+          || selectionSignature !== scopeSignature(requestedScope())) {
+        error = "The selected analysis scope changed. Review the displayed range and run again.";
+        void refreshScopeStatus();
+        return;
+      }
+      const startedJob = await bridge.analysisJobStart(
+        scope, startStatus.analysisFingerprint,
+      );
+      if (startedJob.analysisFingerprint !== startStatus.analysisFingerprint
+          || startedJob.rangeKey !== startStatus.rangeKey) {
+        error = "Bridge rejected an inconsistent resolved analysis scope. Refresh and retry.";
+        void refreshScopeStatus();
+        return;
+      }
+      job = startedJob;
       schedulePoll();
     } catch (cause) {
       error = String(cause);
     } finally {
       starting = false;
+      loadingState = false;
     }
   }
 
@@ -121,10 +187,26 @@
     }
   }
 
-  async function changeScope(): Promise<void> {
+  function changeScope(): void {
+    statusGeneration += 1;
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
     job = null;
     scopeStatus = null;
-    await refreshScopeStatus();
+    statusSelectionSignature = "";
+    void refreshScopeStatus();
+  }
+
+  function navigationChanged(): void {
+    if (kind !== "SELECTED_RANGE") {
+      startChapter = chapter;
+      startVerse = verse ?? "1";
+      endChapter = chapter;
+      endVerse = verse ?? "1";
+    }
+    changeScope();
   }
 
   const STATE_LABELS: Record<string, string> = {
@@ -137,8 +219,17 @@
     SEARCH_INCOMPLETE: "Search incomplete",
   };
   $: displayedState = scopeStatus ? STATE_LABELS[scopeStatus.state] : "Checking analysis state";
+  $: navigationKey = `${chapter}\u241f${verse ?? ""}`;
+  $: if (mounted && navigationKey !== observedNavigation) {
+    observedNavigation = navigationKey;
+    navigationChanged();
+  }
 
-  onMount(() => void refreshScopeStatus());
+  onMount(() => {
+    mounted = true;
+    observedNavigation = navigationKey;
+    void refreshScopeStatus();
+  });
   onDestroy(() => {
     destroyed = true;
     if (pollTimer) clearTimeout(pollTimer);
@@ -150,7 +241,7 @@
     <strong id="analysis-heading">Passage analysis</strong>
     <label>
       Scope
-      <select bind:value={kind} on:change={changeScope} disabled={job?.overallStatus === "RUNNING"}>
+      <select aria-label="Scope" bind:value={kind} on:change={changeScope} disabled={starting || loadingState || job?.overallStatus === "RUNNING"}>
         {#if verse}<option value="CURRENT_PASSAGE">Current passage</option>{/if}
         <option value="CURRENT_CHAPTER">Current chapter</option>
         <option value="CURRENT_BOOK">Current book</option>
@@ -159,19 +250,21 @@
     </label>
     {#if kind === "SELECTED_RANGE"}
       <div class="range" aria-label="Selected reference range">
-        <label>From chapter <input aria-label="From chapter" bind:value={startChapter} on:change={changeScope} /></label>
-        <label>verse <input aria-label="From verse" bind:value={startVerse} on:change={changeScope} /></label>
-        <label>to chapter <input aria-label="To chapter" bind:value={endChapter} on:change={changeScope} /></label>
-        <label>verse <input aria-label="To verse" bind:value={endVerse} on:change={changeScope} /></label>
+        <label>From chapter <input aria-label="From chapter" bind:value={startChapter} on:input={changeScope} disabled={starting || job?.overallStatus === "RUNNING"} /></label>
+        <label>verse <input aria-label="From verse" bind:value={startVerse} on:input={changeScope} disabled={starting || job?.overallStatus === "RUNNING"} /></label>
+        <label>to chapter <input aria-label="To chapter" bind:value={endChapter} on:input={changeScope} disabled={starting || job?.overallStatus === "RUNNING"} /></label>
+        <label>verse <input aria-label="To verse" bind:value={endVerse} on:input={changeScope} disabled={starting || job?.overallStatus === "RUNNING"} /></label>
       </div>
     {/if}
     <span class="state" data-state={scopeStatus?.state ?? "LOADING"}>{displayedState}</span>
-    {#if job?.rangeKey || scopeStatus?.rangeKey}
+    {#if job?.overallStatus === "RUNNING" || job?.overallStatus === "QUEUED"}
       <span class="range-label">
-        {job?.overallStatus === "RUNNING" ? "Analyzing" : "Range"} {job?.rangeKey ?? scopeStatus?.rangeKey}
+        Running: {displayRange(job.rangeKey)}
       </span>
+    {:else if scopeStatus?.rangeKey && statusSelectionSignature === scopeSignature(requestedScope())}
+      <span class="range-label">Will analyze: {displayRange(scopeStatus.rangeKey)}</span>
     {/if}
-    <button type="button" class="run" disabled={starting || loadingState || job?.overallStatus === "RUNNING"} on:click={start}>
+    <button type="button" class="run" disabled={starting || loadingState || !scopeStatus || statusSelectionSignature !== scopeSignature(requestedScope()) || job?.overallStatus === "RUNNING"} on:click={start}>
       {scopeStatus?.state === "STALE" ? "Re-run affected analysis" : "Run analysis"}
     </button>
     {#if job?.overallStatus === "RUNNING" || job?.overallStatus === "QUEUED"}

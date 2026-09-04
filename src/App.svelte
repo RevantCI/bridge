@@ -50,6 +50,7 @@
   let handlingNavigationRequest = "";
   let lastNavigationReference = "";
   let navigationReference = "";
+  let navigationRetryTimer: ReturnType<typeof setTimeout> | undefined;
 
   function openSettings(pane: "ai" | "quality" | "connections" | "resources" | "security" = "ai"): void {
     settingsInitialPane = pane;
@@ -259,6 +260,7 @@
       unlistenLog?.();
       unlistenRespawn?.();
       if (engineNoticeTimer) clearTimeout(engineNoticeTimer);
+      if (navigationRetryTimer) clearTimeout(navigationRetryTimer);
       window.clearInterval(navigationTimer);
     };
   });
@@ -624,10 +626,19 @@
   $: if (!navigationReference) {
     lastNavigationReference = "";
   } else if (engineStatus === "ready" && navigationReference !== lastNavigationReference) {
-    lastNavigationReference = navigationReference;
-    void bridge.navigationBridgeChanged(navigationReference)
+    const publishedReference = navigationReference;
+    lastNavigationReference = publishedReference;
+    void bridge.navigationBridgeChanged(publishedReference)
       .then((state) => navigationStatus.set(state))
-      .catch((error) => console.error("Could not publish Bridge navigation", error));
+      .catch((error) => {
+        console.error("Could not publish Bridge navigation", error);
+        if (navigationRetryTimer) clearTimeout(navigationRetryTimer);
+        navigationRetryTimer = setTimeout(() => {
+          if (navigationReference === publishedReference && lastNavigationReference === publishedReference) {
+            lastNavigationReference = "";
+          }
+        }, 800);
+      });
   }
 
   // Export is enabled only once every chapter in the whole book has been

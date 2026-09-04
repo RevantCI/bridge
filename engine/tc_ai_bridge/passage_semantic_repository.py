@@ -1968,6 +1968,18 @@ class FoundationRepository:
             or not 0 <= progress["completedStages"] <= progress["totalStages"]
         ):
             raise FoundationValidationError("Invalid analysis job stageProgress")
+        fingerprint = payload.get("analysisFingerprint")
+        if fingerprint is not None and (
+            not isinstance(fingerprint, str) or len(fingerprint) != 64
+        ):
+            raise FoundationValidationError("Invalid analysis job analysisFingerprint")
+        policy_versions = payload.get("policyVersions")
+        if policy_versions is not None and (
+            not isinstance(policy_versions, dict)
+            or any(not isinstance(key, str) or not isinstance(value, str)
+                   for key, value in policy_versions.items())
+        ):
+            raise FoundationValidationError("Invalid analysis job policyVersions")
 
     def create_analysis_job(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._validate_analysis_job(payload)

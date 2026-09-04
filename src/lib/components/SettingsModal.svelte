@@ -174,9 +174,10 @@
         </label>
         <div class="connection-detail">
           {#if !paratextNavigation}Off
-          {:else if $navigationStatus.paratext.checking}Checking…
           {:else if $navigationStatus.paratext.connected}Connected{#if $navigationStatus.paratext.project_name} · {$navigationStatus.paratext.project_name}{/if}{#if $navigationStatus.paratext.reference} · {$navigationStatus.paratext.reference}{/if}
-          {:else}{$navigationStatus.paratext.error || "Waiting for Paratext"}{/if}
+          {:else if $navigationStatus.paratext.error}{$navigationStatus.paratext.error}
+          {:else if $navigationStatus.paratext.checking}Checking…
+          {:else}Waiting for Paratext{/if}
         </div>
         <label class="connection-option" class:selected={logosNavigation}>
           <input type="checkbox" bind:checked={logosNavigation} />
@@ -188,9 +189,10 @@
         </label>
         <div class="connection-detail">
           {#if !logosNavigation}Off
-          {:else if $navigationStatus.logos.checking}Checking…
           {:else if $navigationStatus.logos.connected}Connected{#if $navigationStatus.logos.reference} · {$navigationStatus.logos.reference}{/if}
-          {:else}{$navigationStatus.logos.error || "Waiting for Logos"}{/if}
+          {:else if $navigationStatus.logos.error}{$navigationStatus.logos.error}
+          {:else if $navigationStatus.logos.checking}Checking…
+          {:else}Waiting for Logos{/if}
         </div>
         <div class="save-row">
           <button class="btn primary" on:click={save} disabled={saving}>{saving ? "Saving…" : "Save & connect"}</button>

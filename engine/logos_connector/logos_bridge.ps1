@@ -5,9 +5,9 @@
 # script with `powershell -STA -File logos_bridge.ps1` and talks to it over
 # its own stdin/stdout as one JSON object per line (see that file's
 # _request()/_start() methods) - this script did not exist anywhere in the
-# repo before this pass. -STA is required by the caller because classic COM
-# interop (which this script uses to talk to Logos) needs a single-threaded
-# apartment; do not remove PowerShell's -STA launch flag.
+# repo before this pass. The persistent PowerShell process owns the JSON-lines
+# transport; logos_com.vbs performs the native IDispatch calls in a short-lived
+# Windows Script Host process for each request.
 #
 # Protocol (matches logos_connector.py exactly):
 #   stdin,  one line: {"action": "state"}
@@ -15,14 +15,8 @@
 #           one line: {"action": "close"}
 #   stdout, one line per response: {"ok": true/false, ...fields, "error": "..."}
 #
-# WHAT IS AND ISN'T VERIFIED (read before debugging this against a real Logos install)
-# ---------------------------------------------------------------------------------
-# This session had no Logos installation available to test against (confirmed:
-# not installed on this dev machine). Real, sourced facts below come from
-# fetching LogosBible/Logos4ComApiDemo's actual .cs/.csproj source directly off
-# GitHub (raw.githubusercontent.com), not from memory or the wiki docs alone -
-# same "verify against real code" standard this project applies everywhere else,
-# applied here as far as it could be without the real application:
+# API facts below are sourced from Faithlife's Logos4ComApiDemo and the Logos COM
+# API documentation, then verified against Logos 53.1 on Windows:
 #   - COM type library: Logos4Lib, GUID {81490292-5570-4D02-A2AC-7B828DBD0A8A}
 #     (from Logos4ComApiDemo.csproj's <COMReference>).
 #   - `new LogosLauncher()` -> `.Application` gives the running LogosApplication
@@ -35,12 +29,13 @@
 #     on LogosApplication; a panel object has at least a .Title property via the
 #     ILogosPanel interface (from MainForm.cs's RecordPanelEvent).
 #
-# The original unverified draft used the generated .NET interop namespace as a
-# guessed ProgID and guessed at an ActivePanel property. Logos's documented
-# PowerShell ProgID is LogosBibleSoftware.Launcher; its API exposes
-# GetActivePanel() and LogosPanel.GetCurrentReferencesAndHeadwords(). Those
-# documented late-bound COM calls are used below, so no generated interop
-# assembly is required.
+# The original draft used a guessed ProgID and ActivePanel property. The correct
+# ProgID is LogosBibleSoftware.Launcher, and the API exposes GetActivePanel() plus
+# LogosPanel.GetCurrentReferencesAndHeadwords(). Current Logos returns typed COM
+# objects that PowerShell's .NET wrapper can reject with HRESULT 0x80131165 even
+# while the type library is registered. logos_com.vbs deliberately uses native
+# IDispatch instead; this was verified for state, inbound reference reading, and
+# outbound navigation on Logos 53.1.
 #
 # No event-driven push updates are attempted: a plain script host without a
 # WinForms/WPF message loop cannot reliably pump COM event callbacks, and
@@ -53,64 +48,39 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Web.Extensions
 $script:serializer = New-Object System.Web.Script.Serialization.JavaScriptSerializer
 
-$script:launcher = $null
-
-function Get-LogosLauncher {
-    if ($null -eq $script:launcher) {
-        $errors = @()
-        foreach ($progId in @('LogosBibleSoftware.Launcher', 'LogosBibleSoftware.Launcher.1')) {
-            try {
-                $script:launcher = New-Object -ComObject $progId
-                break
-            }
-            catch { $errors += "${progId}: $($_.Exception.Message)" }
-        }
-        if ($null -eq $script:launcher) {
-            throw "Could not create the Logos COM launcher. $($errors -join ' | ') Logos may need to be repaired or registered."
-        }
+function Invoke-LogosComShim($action, $reference = '', $uri = '') {
+    $shim = Join-Path $PSScriptRoot 'logos_com.vbs'
+    $cscript = Join-Path $env:SystemRoot 'System32\cscript.exe'
+    if (-not (Test-Path -LiteralPath $shim)) {
+        return New-ErrorResponse "Native Logos COM shim is missing: $shim"
     }
-    return $script:launcher
-}
-
-function Get-LogosApp {
-    $launcher = Get-LogosLauncher
-    return $launcher.Application
-}
-
-function Get-CurrentReferenceInfo($app) {
-    # The API can return multiple references/headwords. Use the first Bible reference
-    # exposed by the active panel and ignore headword-only entries.
-    $result = @{ book_abbrev = ''; chapter = ''; verse = ''; reference_rendered = ''; panel_title = ''; panel_kind = '' }
-    $panel = $null
-    try { $panel = $app.GetActivePanel() } catch { }
-    if ($null -eq $panel) {
-        return $result
+    if (-not (Test-Path -LiteralPath $cscript)) {
+        return New-ErrorResponse "Windows Script Host could not be found: $cscript"
     }
-    try { $result.panel_title = [string]$panel.Title } catch { }
-    try { $result.panel_kind = [string]$panel.Kind } catch { }
-    $references = $null
-    try { $references = $panel.GetCurrentReferencesAndHeadwords() } catch { }
-    if ($null -eq $references) { return $result }
-    $count = 0
-    try { $count = [int]$references.Count } catch { return $result }
-    for ($index = 0; $index -lt $count; $index++) {
-        $entry = $null
-        $reference = $null
-        $details = $null
-        try { $entry = $references.Item($index) } catch { continue }
-        try { $reference = $entry.Reference } catch { continue }
-        if ($null -eq $reference) { continue }
-        try { $details = $reference.Details } catch { continue }
-        if ($null -eq $details) { continue }
-        try { $result.book_abbrev = [string]$details.Book } catch { continue }
-        try { $result.chapter = [string]$details.Chapter } catch { continue }
-        try { $result.verse = [string]$details.Verse } catch { continue }
-        try { $result.reference_rendered = [string]$reference.Render('display') } catch {
-            try { $result.reference_rendered = [string]$reference.Render() } catch { }
-        }
-        if ($result.book_abbrev -and $result.chapter -and $result.verse) { break }
+    $arguments = @('//NoLogo', $shim, [string]$action)
+    if ($action -eq 'navigate') {
+        $arguments += @([string]$reference, [string]$uri)
     }
-    return $result
+    $lines = @(& $cscript @arguments)
+    $exitCode = $LASTEXITCODE
+    $response = @{}
+    foreach ($line in $lines) {
+        $separator = ([string]$line).IndexOf('=')
+        if ($separator -lt 1) { continue }
+        $key = ([string]$line).Substring(0, $separator)
+        $value = ([string]$line).Substring($separator + 1)
+        $response[$key] = $value
+    }
+    foreach ($key in @('ok', 'detected', 'connected', 'navigation_ready')) {
+        if ($response.ContainsKey($key)) { $response[$key] = $response[$key] -eq '1' }
+    }
+    if ($response.ContainsKey('api_version')) {
+        try { $response.api_version = [int]$response.api_version } catch { $response.api_version = 0 }
+    }
+    if (-not $response.ContainsKey('ok')) {
+        return New-ErrorResponse "Native Logos COM shim returned no response (exit code $exitCode)."
+    }
+    return $response
 }
 
 function New-OkResponse($extra) {
@@ -124,23 +94,7 @@ function New-ErrorResponse($message) {
 }
 
 function Handle-State {
-    $app = $null
-    try { $app = Get-LogosApp }
-    catch { return (New-ErrorResponse $_.Exception.Message) }
-    if ($null -eq $app) {
-        return New-OkResponse @{ detected = $false; connected = $false; navigation_ready = $false; api_version = 0 }
-    }
-    $apiVersion = 0
-    try { $apiVersion = [int]$app.ApiVersion } catch { }
-    $refInfo = Get-CurrentReferenceInfo $app
-    $fields = @{
-        detected = $true
-        connected = $true
-        navigation_ready = $true
-        api_version = $apiVersion
-    }
-    foreach ($key in $refInfo.Keys) { $fields[$key] = $refInfo[$key] }
-    return New-OkResponse $fields
+    return Invoke-LogosComShim 'state'
 }
 
 function Handle-Navigate($payload) {
@@ -148,25 +102,11 @@ function Handle-Navigate($payload) {
     if ([string]::IsNullOrWhiteSpace($reference)) {
         return New-ErrorResponse "navigate requires a non-empty 'reference'."
     }
-    $app = $null
-    try { $app = Get-LogosApp }
-    catch { return (New-ErrorResponse $_.Exception.Message) }
-    if ($null -eq $app) {
-        return New-ErrorResponse "Logos is not running."
+    $uri = [string]$payload.uri
+    if ($uri -notmatch '^logosref:Bible\.[1-4]?[A-Za-z]+[0-9]+\.[0-9]+[A-Za-z]?$') {
+        return New-ErrorResponse "navigate requires a valid Bridge-generated Logos Bible URI."
     }
-    try {
-        $dataTypeRef = $app.DataTypes.LoadReference($reference)
-        $request = $app.CreateNavigationRequest()
-        $request.Reference = $dataTypeRef
-        $app.Navigate($request)
-    }
-    catch {
-        return New-ErrorResponse "Logos navigation failed for '$reference': $($_.Exception.Message)"
-    }
-    $refInfo = Get-CurrentReferenceInfo $app
-    $fields = @{ detected = $true; connected = $true; navigation_ready = $true }
-    foreach ($key in $refInfo.Keys) { $fields[$key] = $refInfo[$key] }
-    return New-OkResponse $fields
+    return Invoke-LogosComShim 'navigate' $reference $uri
 }
 
 # -- main loop: one JSON request per stdin line, one JSON response per stdout line --

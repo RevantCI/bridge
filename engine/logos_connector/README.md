@@ -7,12 +7,10 @@ did not exist anywhere in this repo before Phase 7 (see
 `docs/BUILD_LOG.md`). It is now real and genuinely exercised by
 `engine/tests/test_logos_connector.py`.
 
-## What's verified and what isn't
+## What's verified
 
-The first draft was written without Logos installed. On 2026-09-03, a local
-Logos installation exposed the registered `LogosBibleSoftware.Launcher` and
-`.Launcher.1` COM classes, and the real helper returned a clean disconnected
-state while Logos was closed. What **is** verified:
+The first draft was written without Logos installed. On 2026-09-04, the full
+connector was verified against Logos 53.1 with an ESV Bible panel open:
 
 - The documented PowerShell ProgID is `LogosBibleSoftware.Launcher` (with
   versioned fallback `.Launcher.1`), not the generated interop namespace
@@ -20,17 +18,16 @@ state while Logos was closed. What **is** verified:
 - Current state uses the documented `GetActivePanel()` and
   `GetCurrentReferencesAndHeadwords()` calls, then reads the returned Bible
   reference's `Details.Book/Chapter/Verse`.
+- PowerShell's .NET COM wrapper failed on Logos's typed return values with
+  HRESULT `0x80131165` even though the type library was registered. The small
+  bundled `logos_com.vbs` shim uses native `IDispatch`, avoiding that wrapper;
+  live state read `PHP 1:5` from the ESV panel and live outbound navigation to
+  the same reference succeeded.
 - `engine/tests/test_logos_connector.py` proves the real subprocess wiring:
-  `LogosConnectorClient` genuinely spawns this script in `-STA` mode,
-  exchanges newline-delimited JSON over stdin/stdout, and returns either a
-  valid state or a clean `LogosConnectorError` rather than hanging or emitting
-  malformed output. The script's own parser syntax was checked with
-  `[System.Management.Automation.Language.Parser]::ParseFile()`.
-
-Still pending: start Logos with a Bible panel open and verify both the returned
-active Bible reference and `Navigate()` against the installed release. Bridge
-does not launch Logos automatically; a closed application remains a normal,
-non-error disconnected state.
+  `LogosConnectorClient` genuinely spawns this script, exchanges
+  newline-delimited JSON over stdin/stdout, and returns either a valid state or
+  a clean `LogosConnectorError` rather than hanging or emitting malformed
+  output. A closed application remains a normal, non-error disconnected state.
 
 ## No live event push - deliberate, not a shortfall
 

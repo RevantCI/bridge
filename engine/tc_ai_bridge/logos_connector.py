@@ -44,6 +44,7 @@ _LOGOS_ABBR_TO_USFM = {
     '1Jn':'1JN','2Jn':'2JN','3Jn':'3JN','Jud':'JUD','Re':'REV',
 }
 _LOGOS_ABBR_TO_USFM_CI = {k.lower(): v for k, v in _LOGOS_ABBR_TO_USFM.items()}
+_USFM_TO_LOGOS_ABBR = {usfm: logos for logos, usfm in _LOGOS_ABBR_TO_USFM.items()}
 _REF_RE = re.compile(r'^([1-4]?[A-Z]{2,4})\s+(\d+):([0-9]+[A-Za-z]?)$', re.I)
 
 
@@ -56,6 +57,17 @@ def bridge_to_logos_reference(reference: str) -> str:
     if not name:
         raise LogosConnectorError(f'Logos navigation does not have a standard mapping for USFM book {book.upper()}.')
     return f'{name} {int(chapter)}:{verse}'
+
+
+def bridge_to_logos_uri(reference: str) -> str:
+    m = _REF_RE.match(' '.join(str(reference or '').strip().upper().split()))
+    if not m:
+        raise LogosConnectorError(f'Unsupported Bridge Scripture reference: {reference!r}')
+    book, chapter, verse = m.groups()
+    abbreviation = _USFM_TO_LOGOS_ABBR.get(book.upper())
+    if not abbreviation:
+        raise LogosConnectorError(f'Logos navigation does not have a standard mapping for USFM book {book.upper()}.')
+    return f'logosref:Bible.{abbreviation}{int(chapter)}.{verse}'
 
 
 def logos_state_to_bridge_reference(book_abbrev: str, chapter: str, verse: str) -> str:
@@ -252,7 +264,10 @@ class LogosConnectorClient:
 
     def set_reference(self, reference: str, *, origin_id: str = '') -> LogosState:
         logos_ref = bridge_to_logos_reference(reference)
-        return self._state(self._request('navigate', reference=logos_ref, origin_id=str(origin_id or '')))
+        logos_uri = bridge_to_logos_uri(reference)
+        return self._state(self._request(
+            'navigate', reference=logos_ref, uri=logos_uri, origin_id=str(origin_id or ''),
+        ))
 
     def close(self) -> None:
         if not self.running:

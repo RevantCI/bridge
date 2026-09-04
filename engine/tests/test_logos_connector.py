@@ -17,6 +17,7 @@ from tc_ai_bridge.logos_connector import (
     LogosConnectorClient,
     LogosConnectorError,
     bridge_to_logos_reference,
+    bridge_to_logos_uri,
 )
 
 
@@ -30,6 +31,12 @@ def test_default_script_path_resolves_to_the_real_bundled_helper():
     client = LogosConnectorClient()
     assert client.script_path.name == "logos_bridge.ps1"
     assert client.script_path.is_file()
+    helper = client.script_path.read_text(encoding="utf-8")
+    shim = client.script_path.with_name("logos_com.vbs")
+    assert shim.is_file()
+    assert "logos_com.vbs" in helper
+    assert 'CreateObject("LogosBibleSoftware.Launcher")' in shim.read_text(encoding="utf-8")
+    assert "New-Object -ComObject 'Logos4Lib.LogosLauncher'" not in helper
 
 
 def test_get_state_round_trips_through_the_real_helper_process():
@@ -49,6 +56,7 @@ def test_get_state_round_trips_through_the_real_helper_process():
 
 def test_bridge_reference_uses_the_logos_bible_parser_name():
     assert bridge_to_logos_reference("TIT 1:1") == "Titus 1:1"
+    assert bridge_to_logos_uri("PHP 1:5") == "logosref:Bible.Php1.5"
 
 
 def test_close_stops_the_helper_process():

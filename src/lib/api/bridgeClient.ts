@@ -739,8 +739,11 @@ export const bridge = {
 
   // Stage 9A.4 orchestrates the frozen Stage 5--8 engines. Starting a job is
   // explicit; project open only reports persisted state and never starts one.
-  analysisJobStart(requestedScope: AnalysisScope): Promise<AnalysisJobSnapshot> {
-    return call("analysis_job_start", { requestedScope });
+  analysisJobStart(
+    requestedScope: AnalysisScope,
+    expectedAnalysisFingerprint: string,
+  ): Promise<AnalysisJobSnapshot> {
+    return call("analysis_job_start", { requestedScope, expectedAnalysisFingerprint });
   },
 
   analysisJobStatus(jobId: string): Promise<AnalysisJobSnapshot> {

@@ -1972,9 +1972,16 @@ class BridgeEngine:
 
     # -- Stage 9A.4 analysis orchestration --------------------------------
 
-    def analysis_job_start(self, requested_scope: dict[str, Any]) -> dict[str, Any]:
+    def analysis_job_start(
+        self, requested_scope: dict[str, Any], expected_analysis_fingerprint: str = "",
+    ) -> dict[str, Any]:
+        if not expected_analysis_fingerprint:
+            raise AnalysisJobConflict(
+                "Resolve the selected scope status before starting analysis"
+            )
         return self._analysis_jobs.start(
             self._require_passage_semantic_runtime(), requested_scope=requested_scope,
+            expected_analysis_fingerprint=expected_analysis_fingerprint,
         )
 
     def analysis_job_status(self, job_id: str) -> dict[str, Any]:
@@ -3611,6 +3618,7 @@ class BridgeEngine:
             if m == Methods.ANALYSIS_JOB_START:
                 return EngineResponse.ok(request.id, result=self.analysis_job_start(
                     dict(p.get("requestedScope") or {}),
+                    str(p.get("expectedAnalysisFingerprint") or ""),
                 ))
             if m == Methods.ANALYSIS_JOB_STATUS:
                 return EngineResponse.ok(request.id, result=self.analysis_job_status(

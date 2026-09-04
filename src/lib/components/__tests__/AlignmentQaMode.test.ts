@@ -32,6 +32,7 @@ function scope(state: AnalysisScopeState, latestJob: AnalysisJobSnapshot | null 
   return {
     state, rangeKey: "PHP 1:3..PHP 1:6", displayedReferences: ["PHP 1:3", "PHP 1:6"],
     canonicalReferences: ["PHP 1:3", "PHP 1:6"], affectedReferences: [],
+    analysisFingerprint: "fingerprint-3-6", policyVersions: {},
     latestJob, providerCapability: capability,
   };
 }
@@ -44,7 +45,8 @@ function job(status: "QUEUED" | "COMPLETED"): AnalysisJobSnapshot {
     jobId: "job-1", projectId: "project-1", book: "PHP",
     requestedScope: { kind: "CURRENT_PASSAGE", chapter: "1", verse: "3" },
     rangeKey: "PHP 1:3..PHP 1:6", displayedReferences: ["PHP 1:3", "PHP 1:6"],
-    canonicalReferences: ["PHP 1:3", "PHP 1:6"], targetContentHash: "target",
+    canonicalReferences: ["PHP 1:3", "PHP 1:6"], targetRevision: "target-revision",
+    targetContentHash: "target", analysisFingerprint: "fingerprint-3-6", policyVersions: {},
     targetHashes: {}, sourceResourceHash: "source", revision: 1,
     createdAt: "2026-01-01T00:00:00Z", startedAt: null, completedAt: done ? "2026-01-01T00:01:00Z" : null,
     currentStage: done ? "" : "SOURCE_INVENTORY", overallStatus: status,

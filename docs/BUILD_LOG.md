@@ -3103,6 +3103,14 @@ closed. That check found and fixed two defects in the older unverified helper: i
 documented and locally registered `LogosBibleSoftware.Launcher` (not
 `Logos4Lib.LogosLauncher`), and active state uses the documented `GetActivePanel()` plus
 `GetCurrentReferencesAndHeadwords()` calls. The real helper now returns clean disconnected state
-while Logos is closed. Active-panel reading and outbound navigation still need acceptance with
-Logos running and a Bible panel open.
+while Logos is closed.
+
+On 2026-09-04, live Logos 53.1 acceptance exposed a second interop layer issue:
+PowerShell's .NET COM wrapper could create the correct launcher but rejected typed return
+objects with HRESULT `0x80131165`, even with the Logos type library registered. A bundled
+native-`IDispatch` VBScript shim now performs panel/reference traversal and `ExecuteUri`
+navigation while the persistent PowerShell helper retains the JSON-lines transport. Live state
+read the ESV panel at PHP 1:5, and Bridge-to-Logos navigation to PHP 1:5 round-tripped with API
+version 3. The Connections-pane flicker was also fixed by retaining the last connected/error
+detail while routine background probes run; failed Bridge-originated publish RPCs now retry.
 

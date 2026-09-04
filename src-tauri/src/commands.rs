@@ -1454,11 +1454,15 @@ pub async fn review_history_get_entity_history(
 pub async fn analysis_job_start(
     sidecar: State<'_, EngineSidecar>,
     requested_scope: Value,
+    expected_analysis_fingerprint: String,
 ) -> Result<Value, String> {
     sidecar
         .send_request(
             "analysisJob.start",
-            serde_json::json!({"requestedScope": requested_scope}),
+            serde_json::json!({
+                "requestedScope": requested_scope,
+                "expectedAnalysisFingerprint": expected_analysis_fingerprint,
+            }),
         )
         .await
 }
