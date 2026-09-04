@@ -29,6 +29,33 @@ connector was verified against Logos 53.1 with an ESV Bible panel open:
   a clean `LogosConnectorError` rather than hanging or emitting malformed
   output. A closed application remains a normal, non-error disconnected state.
 
+## The shim's error handling is per-procedure, on purpose
+
+`logos_com.vbs` sets `On Error Resume Next` **twice**: once at file scope and
+again as the first statement of `Sub EmitState`. That is not redundant.
+VBScript scopes `On Error Resume Next` to the procedure that executes it, so
+the file-scope handler does not cover the Sub. Without its own, the first COM
+error inside `EmitState` (a non-Bible panel is active, Logos will not hand the
+panel over, a build without `LogosPanel.Kind`) aborts the whole Sub, execution
+resumes in the caller at `WScript.Quit 0`, and the helper exits **0 having
+printed nothing** - which `logos_bridge.ps1` reports as `Native Logos COM shim
+returned no response` while Logos is in fact running and connected. The same
+path runs after a *successful* `ExecuteUri`, so a navigation that worked could
+be reported as a failure.
+
+Do not remove either one, and add `On Error Resume Next` to any new procedure
+that touches a COM object. The regression test is
+`test_state_is_still_reported_when_the_active_panel_raises` in
+`engine/tests/test_logos_connector.py`; it lifts the real `Sub EmitState` out of
+this file rather than copying it, so it keeps tracking what ships.
+
+## Still to verify against a live Logos
+
+The panel-failure path above is proven by fault injection, not by a real
+session. Switching Logos to a non-Bible panel (and running the frozen sidecar
+via `scripts/smoke_sidecars.py` after `build-sidecars.ps1`) still needs a pass
+on a machine with Logos installed.
+
 ## No live event push - deliberate, not a shortfall
 
 This helper never tries to register for Logos's `PanelActivated`/

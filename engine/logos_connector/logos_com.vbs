@@ -28,6 +28,15 @@ Sub Fail(message)
 End Sub
 
 Sub EmitState(app)
+    ' VBScript scopes On Error Resume Next per procedure: the caller's handler
+    ' does NOT cover this Sub. Without its own, the first COM error here aborts
+    ' the whole Sub, every Err.Number check below becomes dead code, and the
+    ' helper exits 0 having emitted nothing - which the PowerShell transport
+    ' reports as "shim returned no response" even though Logos is running fine.
+    ' A non-Bible panel, a panel with no references, or a build without
+    ' LogosPanel.Kind is enough to trigger it.
+    On Error Resume Next
+
     Dim panel, references, entry, dataReference, details
     Dim index, count, bookAbbrev, chapter, verse, rendered, panelTitle, panelKind
     bookAbbrev = ""
@@ -74,6 +83,9 @@ Sub EmitState(app)
         End If
     End If
 
+    ' Reaching here with a partial read is normal and reportable: Logos is
+    ' connected even when the active panel exposes no Bible reference.
+    Err.Clear
     Emit "ok", "1"
     Emit "detected", "1"
     Emit "connected", "1"

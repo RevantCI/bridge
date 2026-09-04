@@ -3160,3 +3160,47 @@ debounced 150ms.
 
 Verified: `npm run check` (0 errors/warnings), `npm run test` (110 passed,
 was 109), `npm run build` (succeeds).
+
+## Stage 9A.4 follow-up (2 of 3) — the Logos VBScript shim went silent on any COM hiccup (2026-09-04)
+
+**VBScript scopes `On Error Resume Next` per procedure.** `logos_com.vbs`
+(added in `bcb9a7e` to work around PowerShell's .NET COM wrapper rejecting
+Logos's typed return values with HRESULT `0x80131165`) set it once at file
+scope, so it did *not* cover `Sub EmitState` - every `If Err.Number = 0`
+guard inside that Sub was dead code. The first COM error there (a non-Bible
+panel active, a panel Logos will not hand over, a build without
+`LogosPanel.Kind`) aborted the whole Sub, and execution resumed in the
+caller at `WScript.Quit 0`: **exit code 0, nothing printed at all.**
+`logos_bridge.ps1` then reported `Native Logos COM shim returned no
+response`, so Bridge showed a hard Logos error while Logos was running and
+connected. The same path follows a *successful* `ExecuteUri`, so an outbound
+navigation that actually worked could still be reported as a failure.
+
+The live 53.1 acceptance in `bcb9a7e` did not catch this because it ran with
+an ESV Bible panel active - the one path where nothing throws.
+
+Confirmed by running the real `EmitState` against a `FakeApp` whose
+`GetActivePanel()` raises: before, zero output; after, `ok=1 connected=1
+api_version=3` with empty book/chapter/verse. `EmitState` now opens with its
+own `On Error Resume Next` and clears `Err` before emitting, so a panel with
+no Bible reference reports *connected without a reference* rather than
+failing.
+
+Regression test: `test_logos_connector.py` ›
+`test_state_is_still_reported_when_the_active_panel_raises` (skipped where
+`cscript` is unavailable). It lifts the real `Sub EmitState` out of the
+shipped `.vbs` rather than copying it, so it tracks the file it guards.
+Confirmed to fail against `bcb9a7e` ("EmitState went silent") and pass with
+the fix.
+
+Still open:
+- Not re-verified against a live Logos session or a frozen sidecar build:
+  the shim fix is proven against a fault-injected `EmitState`, but
+  `build-sidecars.ps1` + `scripts/smoke_sidecars.py` and a real Logos 53.1
+  panel-switch acceptance still need a run on a machine with Logos installed.
+- `bridge_to_logos_uri()` upper-cases the whole reference, so a lettered
+  verse segment becomes `logosref:Bible.Php1.3A` rather than the
+  conventional lowercase `...3a`. Whether Logos accepts the upper-case form
+  is unverified - left alone deliberately rather than guessed at.
+
+Verified: `pytest tests/ greek_room_engine/tests/ -q` (589 passed, was 588).
