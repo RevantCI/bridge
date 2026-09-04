@@ -1,7 +1,9 @@
 import type { AiCheckReview, QaFinding, FindingCategory, NativeCheckReview } from "../types/finding";
 
-// Category -> CSS class matching the approved wireframe's four-color legend
-// (tN purple, tW blue, Alignment amber, everything else = Greek Room teal).
+// Category -> CSS class matching the four-colour finding-source legend in
+// index.css (tN red, tW blue, Alignment amber, everything else = Greek Room
+// green). The same classes/tokens colour the review panel, so an underline in
+// the verse and its entry in the panel always agree on what found it.
 export function categoryClass(category: FindingCategory): string {
   switch (category) {
     case "translation_note": return "m-tn";
@@ -108,9 +110,15 @@ export function buildSegments(
     }
   }
 
+  // Only AI reviews that actually flag something get underlined. A tN/tW check
+  // the AI passed is not an issue, and underlining every check it looked at
+  // would light up most of the verse and make the marks meaningless as a
+  // problem signal. "not_applicable" is likewise not a finding.
+  //
   // New AI reviews carry exact translationCore occurrence metadata. Older cached
   // reviews fall back to unique-text matching rather than guessing a repeated span.
   for (const review of aiReviews) {
+    if (review.verdict !== "problem" && review.verdict !== "review") continue;
     const className = review.tool === "translationNotes" ? "m-tn" : "m-tw";
     const evidence = review.evidence_used
       .map((item) => String(item.title ?? item.identifier ?? item.kind ?? ""))

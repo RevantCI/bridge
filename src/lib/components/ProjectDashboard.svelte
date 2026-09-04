@@ -315,13 +315,20 @@
   .pill.discussion { background: var(--accent-bg); color: var(--accent); }
   .pill.invalid { background: var(--surface-2); color: var(--text-2); }
   .pill.engine { background: var(--accent-bg); color: var(--accent); text-transform: capitalize; }
+  /* Same finding-source legend as the verse underlines and the review panel
+     (index.css mark.m-*): tN red, tW blue, Greek Room green. */
+  .pill.tn { background: var(--tn-bg); color: var(--tn); }
+  .pill.tw { background: var(--tw-bg); color: var(--tw); }
   .expand-toggle {
     flex-shrink: 0; font-size: 9px; font-weight: 700; color: var(--accent); align-self: center;
     margin-right: 10px; padding: 2px 7px; border-radius: 999px; background: var(--accent-bg);
     border: 0; cursor: pointer;
   }
   .local-findings { background: var(--surface-2); padding: 6px 12px 10px 32px; display: flex; flex-direction: column; gap: 6px; }
-  .local-finding-row { display: flex; align-items: center; gap: 7px; font-size: 10px; }
+  .local-finding-row { display: flex; align-items: center; gap: 7px; font-size: 10px; border-left: 3px solid transparent; padding-left: 6px; }
+  .local-finding-row.source-gr { border-left-color: var(--gr); }
+  .local-finding-row.source-tn { border-left-color: var(--tn); }
+  .local-finding-row.source-tw { border-left-color: var(--tw); }
   .local-explain { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .more { color: var(--text-2); font-size: 10px; margin: 8px 2px 0; }
   .books { border: 1px solid var(--border); border-radius: 10px; }

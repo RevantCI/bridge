@@ -7,10 +7,14 @@
   --border:#E2E5EA; --border-strong:#CBD1DB;
   --text:#151A21; --text-2:#5B6472; --text-3:#8A93A2;
   --accent:#2F6FED; --accent-bg:#EAF1FE;
-  --tn:#7C3AED; --tn-bg:#F3EBFE;
+  /* Finding-source legend, shared by the verse-text underlines (mark.m-*)
+     and the review panel's per-finding accents so the same colour always
+     means the same source. tN red, tW blue, Greek Room green, alignment
+     amber. Each stays dark enough to double as small text on its own -bg. */
+  --tn:#DC2626; --tn-bg:#FCEBEB;
   --tw:#2563EB; --tw-bg:#E9F0FE;
   --align:#B45309; --align-bg:#FEF3E1;
-  --gr:#0F766E; --gr-bg:#E1F5EE;
+  --gr:#15A34A; --gr-bg:#E6F7EC;
   --success:#16A34A; --success-bg:#EAF7EE;
   --warning:#D97706; --warning-bg:#FEF3E1;
   --danger:#DC2626; --danger-bg:#FCEBEB;

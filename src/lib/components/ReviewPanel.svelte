@@ -4,7 +4,7 @@
   import AlignmentModal from "./AlignmentModal.svelte";
   import TranslationHelpsReview from "./TranslationHelpsReview.svelte";
   import { aiJobAppliesToReference, isAIReviewJobActive } from "../utils/aiJobScope";
-  import { findingNumbers } from "../utils/highlight";
+  import { categoryClass, findingNumbers } from "../utils/highlight";
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
     checkStatusByVerse, checkingProgress, verseKey,
@@ -491,7 +491,7 @@
         <div class="section">
           <div class="section-title">Already computed in background pass</div>
           {#each $selectedFindings.filter((f) => !isGreekRoom(f.engine)) as f}
-            <div class="finding">
+            <div class="finding source-{categoryClass(f.category)}">
               <div class="verdict">
                 {#if findingNumberMap.has(f.id)}<span class="finding-num-badge" title="Marked in the verse text">{findingNumberMap.get(f.id)}</span>{/if}
                 <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
@@ -527,7 +527,7 @@
               {/if}
             </div>
             {#each grOpenFindings as f}
-              <div class="finding">
+              <div class="finding source-{categoryClass(f.category)}">
                 <div class="verdict">
                   {#if findingNumberMap.has(f.id)}<span class="finding-num-badge" title="Marked in the verse text">{findingNumberMap.get(f.id)}</span>{/if}
                   <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
@@ -566,7 +566,7 @@
             <details class="section accepted-section">
               <summary class="section-title ignored-summary">Accepted ({grAcceptedFindings.length})</summary>
               {#each grAcceptedFindings as f}
-                <div class="finding">
+                <div class="finding source-{categoryClass(f.category)}">
                   <div class="verdict">
                     <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
                     <span class="engine-badge">{f.engine}</span>
@@ -593,7 +593,7 @@
             <details class="section ignored-section">
               <summary class="section-title ignored-summary">Ignored ({grIgnoredFindings.length})</summary>
               {#each grIgnoredFindings as f}
-                <div class="finding">
+                <div class="finding source-{categoryClass(f.category)}">
                   <div class="verdict">
                     {#if findingNumberMap.has(f.id)}<span class="finding-num-badge" title="Marked in the verse text">{findingNumberMap.get(f.id)}</span>{/if}
                     <span class="badge {severityBadge[f.severity]}">{f.severity}</span>
@@ -738,6 +738,14 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .finding { border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 10px; }
   .finding:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+  /* Same four-colour source legend as the verse-text underlines (index.css
+     mark.m-*), so a red underline in the verse and its tN entry here read as
+     one thing. Class names come from highlight.ts's categoryClass(). */
+  .finding[class*="source-m-"] { border-left: 3px solid transparent; padding-left: 8px; }
+  .finding.source-m-tn { border-left-color: var(--tn); }
+  .finding.source-m-tw { border-left-color: var(--tw); }
+  .finding.source-m-align { border-left-color: var(--align); }
+  .finding.source-m-gr { border-left-color: var(--gr); }
   .verdict { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 6px; }
   .badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 5px; flex-shrink: 0; }
   .badge-wrong { background: var(--danger-bg); color: var(--danger); }
