@@ -1590,6 +1590,15 @@ class BridgeEngine:
                         self._save_alignment(
                             chapter, verse, review_alignment, alignment.to_dict(), "ai_review_auto_align",
                         )
+                        # The verse alignment is part of review_input_fingerprint,
+                        # and prepare_verse_review already stamped the stored review
+                        # with the fingerprint from BEFORE this write. Without the
+                        # rebase the review invalidates itself: the UI showed
+                        # "Verse changed - the previous AI review is stale" the
+                        # instant the review finished. Only _apply_basic_ai_selections
+                        # rebased, and only when it applied something, so Advanced
+                        # mode (which applies nothing) always went stale.
+                        project.rebase_ai_review_fingerprint(chapter, verse)
                 except Exception:
                     # A concurrent edit or a validation edge case here must not sink the
                     # tN/tW review this verse otherwise completed; the verse simply stays
