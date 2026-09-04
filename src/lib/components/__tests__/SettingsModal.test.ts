@@ -78,3 +78,37 @@ describe("SettingsModal connections", () => {
     expect(screen.getAllByText("Checking…")).toHaveLength(1);
   });
 });
+
+describe("SettingsModal reviewer experience", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getNavigationStatus.mockResolvedValue(navigationState());
+    getSettings.mockResolvedValue({
+      provider: "openai",
+      apiBaseUrl: "",
+      model: "gpt-5.6",
+      hasApiKey: false,
+      reviewerMode: "basic",
+      paratextNavigation: false,
+      logosNavigation: false,
+    });
+  });
+
+  it("offers the two modes as Auto and Manual", async () => {
+    render(SettingsModal, { props: { initialPane: "quality", onClose: vi.fn() } });
+
+    expect(await screen.findByText("Auto")).toBeInTheDocument();
+    expect(screen.getByText("Manual")).toBeInTheDocument();
+    expect(screen.queryByText("Basic")).not.toBeInTheDocument();
+    expect(screen.queryByText("Advanced")).not.toBeInTheDocument();
+  });
+
+  it("keeps the stored basic/advanced values behind the new wording", async () => {
+    const { container } = render(SettingsModal, { props: { initialPane: "quality", onClose: vi.fn() } });
+    await screen.findByText("Auto");
+
+    const values = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
+      .map((input) => input.value);
+    expect(values).toEqual(["basic", "advanced"]);
+  });
+});

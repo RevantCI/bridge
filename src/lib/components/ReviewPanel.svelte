@@ -8,7 +8,7 @@
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
     checkStatusByVerse, checkingProgress, verseKey,
-    aiCheckReviewsByVerse, nativeChecksByVerse, project, reviewerMode,
+    aiCheckReviewsByVerse, nativeChecksByVerse, project, reviewerMode, reviewerModeLabel,
   } from "../stores";
   import {
     editingChapter, editingVerse, editText, editSaving, editError, editErrorKey,
@@ -408,7 +408,7 @@
       <div class="section ai-review-controls">
         <div class="section-title">
           Automatic AI review
-          <span class="mode-pill">{$reviewerMode}</span>
+          <span class="mode-pill">{reviewerModeLabel($reviewerMode)}</span>
         </div>
         <p class="ai-review-help">
           {$reviewerMode === "basic"

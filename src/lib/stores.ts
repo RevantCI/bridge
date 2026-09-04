@@ -22,7 +22,22 @@ export const checkStatusByVerse = writable<Record<string, CheckStatus>>({});
 export const alignmentStatusByVerse = writable<Record<string, AlignmentWorkStatus>>({});
 export const nativeChecksByVerse = writable<Record<string, NativeCheckReview[]>>({});
 export const aiCheckReviewsByVerse = writable<Record<string, AiCheckReview[]>>({});
-export const reviewerMode = writable<"basic" | "advanced">("basic");
+export type ReviewerMode = "basic" | "advanced";
+export const reviewerMode = writable<ReviewerMode>("basic");
+
+// The stored/protocol values stay "basic"/"advanced" (AppSettings, the
+// engine's reviewerMode field and every persisted review provenance record
+// already use them). Only the reviewer-facing wording changed: what the mode
+// actually controls is whether AI selections are applied automatically or the
+// reviewer applies them by hand.
+const REVIEWER_MODE_LABELS: Record<ReviewerMode, string> = {
+  basic: "Auto",
+  advanced: "Manual",
+};
+
+export function reviewerModeLabel(mode: ReviewerMode): string {
+  return REVIEWER_MODE_LABELS[mode] ?? mode;
+}
 
 // Which chapters have had their verse text + checks loaded already, so
 // switching back to a chapter you've already visited doesn't re-fetch.

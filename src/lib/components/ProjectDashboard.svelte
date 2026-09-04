@@ -86,7 +86,7 @@
         >
           {advancedMode ? "Validate semantic mappings" : "Enable semantic validation"}
         </button>
-        {#if !advancedMode}<small>Requires Advanced reviewer mode</small>{/if}
+        {#if !advancedMode}<small>Requires Manual reviewer mode</small>{/if}
       </div>
     </div>
   </div>
@@ -138,7 +138,7 @@
                         <div class="track"><div class="fill" style="width:{percent(book.progress.reviewedVerseCount, book.progress.verseCount)}%" /></div>
                       </div>
                       <div class="bar-row">
-                        <span class="bar-label">AI-checked {book.progress.checkedChapterCount}/{book.progress.chapterCount} chapters</span>
+                        <span class="bar-label">Checked {book.progress.checkedChapterCount}/{book.progress.chapterCount} chapters</span>
                         <div class="track"><div class="fill checked" style="width:{percent(book.progress.checkedChapterCount, book.progress.chapterCount)}%" /></div>
                       </div>
                     </div>
