@@ -27,6 +27,7 @@ import {
   reviewFilters,
   reviewQueue,
   reviewTotal,
+  setReviewCanonicalScope,
   selectFinding,
   selectedDetail,
   selectedFindingId,
@@ -86,6 +87,33 @@ describe("review queue store", () => {
       dispositions: ["UNRESOLVED"],
       order: "SEVERITY",
     }));
+  });
+
+  it("passes the active canonical semantic scope through to the engine", async () => {
+    qaReviewGetQueue.mockResolvedValue(page([]));
+    setReviewCanonicalScope(["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"]);
+    await loadQueue();
+    expect(qaReviewGetQueue).toHaveBeenCalledWith(expect.objectContaining({
+      canonicalReferences: ["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"],
+    }));
+  });
+
+  it("does not let an older scope response overwrite a newer queue", async () => {
+    let resolveOld: ((value: ReturnType<typeof page>) => void) | undefined;
+    qaReviewGetQueue.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveOld = resolve;
+    }));
+    setReviewCanonicalScope(["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"]);
+    const oldLoad = loadQueue();
+
+    setReviewCanonicalScope(["PHP 1:1"]);
+    qaReviewGetQueue.mockResolvedValueOnce(page(["current-1"], "", 1));
+    await loadQueue();
+    resolveOld?.(page(["previous-3"], "", 1));
+    await oldLoad;
+
+    expect(get(reviewQueue).map((finding) => finding.id)).toEqual(["current-1"]);
+    expect(get(reviewTotal)).toBe(1);
   });
 
   it("surfaces a queue failure instead of showing a silently empty list", async () => {

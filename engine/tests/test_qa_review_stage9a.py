@@ -29,7 +29,9 @@ def _insert(repo: FoundationRepository, finding_id: str, *, book: str = "PHP",
             chapter: int = 1, verse: int = 3, kind: str = "POSSIBLE_OMISSION",
             severity: str = "MEDIUM", direction: str = "SOURCE_COVERAGE",
             disposition: str = "UNRESOLVED", review: str = "AI_PROPOSED",
-            lifecycle: str = "ACTIVE", project_id: str = "proj") -> None:
+            lifecycle: str = "ACTIVE", project_id: str = "proj",
+            source_references: tuple[str, ...] = (),
+            target_references: tuple[str, ...] = ()) -> None:
     """Insert a queue row directly.
 
     Stage 8 owns finding construction; these tests only need rows whose queue
@@ -43,10 +45,17 @@ def _insert(repo: FoundationRepository, finding_id: str, *, book: str = "PHP",
             "severity,severity_rank,sort_chapter,sort_verse,displayed_reference) "
             "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (finding_id, project_id, disposition, policy_id, review, lifecycle, 1,
-             json.dumps({"id": finding_id, "book": book, "kind": kind}), book, kind,
+             json.dumps({"id": finding_id, "book": book, "kind": kind,
+                         "direction": direction}), book, kind,
              direction, severity, SEVERITY_RANKS.get(severity, 99), chapter, verse,
              f"{book} {chapter}:{verse}"),
         )
+        for side, references in (("SOURCE", source_references), ("TARGET", target_references)):
+            conn.executemany(
+                "INSERT INTO qa_finding_scope_references"
+                "(finding_id,side,canonical_reference) VALUES(?,?,?)",
+                ((finding_id, side, reference) for reference in references),
+            )
         conn.commit()
 
 
@@ -58,7 +67,7 @@ def repo(tmp_path: Path) -> FoundationRepository:
 # --- Schema v8 queue indexes retained through later migrations -------------
 
 def test_schema_v8_adds_queue_columns_and_indexes(repo: FoundationRepository) -> None:
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 9
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 10
     with repo._connect() as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(qa_findings)")}
         indexes = {row[1] for row in conn.execute("PRAGMA index_list(qa_findings)")}
@@ -94,7 +103,7 @@ def test_v7_database_upgrades_and_backfills_queue_columns(tmp_path: Path) -> Non
     conn.close()
 
     upgraded = FoundationRepository(database)
-    assert upgraded.schema_version() == DATABASE_SCHEMA_VERSION == 9
+    assert upgraded.schema_version() == DATABASE_SCHEMA_VERSION == 10
     with upgraded._connect() as conn:
         row = conn.execute(
             "SELECT book,kind,direction,severity,severity_rank FROM qa_findings WHERE id='legacy-1'"
@@ -104,6 +113,54 @@ def test_v7_database_upgrades_and_backfills_queue_columns(tmp_path: Path) -> Non
     assert [f["id"] for f in upgraded.query_qa_findings("proj")["findings"]] == ["legacy-1"]
     assert list((database.parent / "backups").glob("pre-schema-v8-*")), (
         "migrating an existing database must leave a pre-migration backup")
+
+
+def test_v9_database_upgrades_and_backfills_canonical_finding_scope(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "legacy-v9.sqlite3"
+    conn = sqlite3.connect(str(database))
+    conn.executescript(
+        "CREATE TABLE IF NOT EXISTS schema_migrations"
+        "(version INTEGER PRIMARY KEY, schema_id TEXT NOT NULL, applied_at TEXT NOT NULL);"
+    )
+    for version in range(1, 10):
+        conn.executescript(getattr(repository_module, f"_MIGRATION_V{version}"))
+        conn.execute(
+            "INSERT INTO schema_migrations VALUES(?,?,?)",
+            (version, repository_module.SCHEMA_ID, "2026-09-03T00:00:00Z"),
+        )
+    conn.execute("INSERT INTO policy_bindings VALUES('pb','c-v1','cal-v1','audit-v1')")
+    unit_payload = json.dumps({"id": "source-3", "canonicalReferences": ["PHP 1:3"]})
+    conn.execute(
+        "INSERT INTO semantic_units VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("source-3", "proj", "SOURCE", "LEXICAL", "source-3", "ELIGIBLE",
+         "REQUIRED", "PRIMARY", "LEXICAL_CONTENT", "semantic-source-3",
+         "AI_PROPOSED", "ACTIVE", 1, unit_payload),
+    )
+    finding_payload = json.dumps({
+        "id": "legacy-cross-verse", "book": "PHP", "kind": "POSSIBLE_OMISSION",
+        "direction": "SOURCE_COVERAGE", "severity": "MEDIUM",
+        "sourceSemanticUnitIds": ["source-3"], "targetSemanticUnitIds": [],
+    })
+    conn.execute(
+        "INSERT INTO qa_findings(id,project_id,qa_disposition,policy_binding_id,"
+        "review_status,lifecycle_status,revision,payload_json,book,kind,direction,"
+        "severity,severity_rank,sort_chapter,sort_verse,displayed_reference) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("legacy-cross-verse", "proj", "UNRESOLVED", "pb", "AI_PROPOSED", "ACTIVE",
+         1, finding_payload, "PHP", "POSSIBLE_OMISSION", "SOURCE_COVERAGE", "MEDIUM",
+         2, 1, 6, "PHP 1:6"),
+    )
+    conn.commit()
+    conn.close()
+
+    upgraded = FoundationRepository(database)
+    scoped = upgraded.query_qa_findings(
+        "proj", canonical_references=("PHP 1:3",),
+    )
+    assert [finding["id"] for finding in scoped["findings"]] == ["legacy-cross-verse"]
+    assert list((database.parent / "backups").glob("pre-schema-v10-*"))
 
 
 # --- Queue ordering ---------------------------------------------------------
@@ -175,6 +232,128 @@ def test_queue_is_scoped_to_its_project(repo: FoundationRepository) -> None:
     _insert(repo, "mine", project_id="proj")
     _insert(repo, "theirs", project_id="other")
     assert [f["id"] for f in repo.query_qa_findings("proj")["findings"]] == ["mine"]
+
+
+def test_canonical_scope_keeps_previous_findings_persisted_but_out_of_current_queue(
+    repo: FoundationRepository,
+) -> None:
+    _insert(repo, "previous-3", verse=3, source_references=("PHP 1:3",))
+    _insert(repo, "previous-6", verse=6, source_references=("PHP 1:6",))
+    _insert(repo, "current-1", verse=1, source_references=("PHP 1:1",))
+
+    current = repo.query_qa_findings("proj", canonical_references=("PHP 1:1",))
+    assert [finding["id"] for finding in current["findings"]] == ["current-1"]
+    assert current["totalCount"] == 1
+
+    # Scope filtering is a view, never deletion: switching back restores both rows.
+    previous = repo.query_qa_findings(
+        "proj", canonical_references=("PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"),
+    )
+    assert [finding["id"] for finding in previous["findings"]] == [
+        "previous-3", "previous-6",
+    ]
+    assert repo.query_qa_findings("proj")["totalCount"] == 3
+
+
+def test_canonical_scope_uses_source_units_for_cross_verse_source_coverage(
+    repo: FoundationRepository,
+) -> None:
+    _insert(
+        repo, "greek-1-3-to-tamil-1-6", verse=6, direction="SOURCE_COVERAGE",
+        source_references=("PHP 1:3",), target_references=("PHP 1:6",),
+    )
+    assert [finding["id"] for finding in repo.query_qa_findings(
+        "proj", canonical_references=("PHP 1:3",),
+    )["findings"]] == ["greek-1-3-to-tamil-1-6"]
+    assert repo.query_qa_findings(
+        "proj", canonical_references=("PHP 1:6",),
+    )["findings"] == []
+
+
+def test_canonical_scope_uses_target_units_for_target_support(
+    repo: FoundationRepository,
+) -> None:
+    _insert(
+        repo, "target-addition", verse=6, direction="TARGET_SUPPORT",
+        source_references=("PHP 1:3",), target_references=("PHP 1:6",),
+    )
+    assert repo.query_qa_findings(
+        "proj", canonical_references=("PHP 1:3",),
+    )["findings"] == []
+    assert [finding["id"] for finding in repo.query_qa_findings(
+        "proj", canonical_references=("PHP 1:6",),
+    )["findings"]] == ["target-addition"]
+
+
+def test_scoped_pagination_and_count_use_the_same_result_set(
+    repo: FoundationRepository,
+) -> None:
+    for verse in range(1, 7):
+        _insert(
+            repo, f"in-scope-{verse}", verse=verse,
+            source_references=(f"PHP 1:{verse}",),
+        )
+    for verse in range(7, 10):
+        _insert(
+            repo, f"outside-{verse}", verse=verse,
+            source_references=(f"PHP 1:{verse}",),
+        )
+    selected = tuple(f"PHP 1:{verse}" for verse in range(1, 7))
+    first = repo.query_qa_findings(
+        "proj", canonical_references=selected, limit=2,
+    )
+    second = repo.query_qa_findings(
+        "proj", canonical_references=selected, limit=2, cursor=first["nextCursor"],
+    )
+    assert first["totalCount"] == second["totalCount"] == 6
+    assert all(finding["id"].startswith("in-scope-") for finding in [
+        *first["findings"], *second["findings"],
+    ])
+
+
+def test_book_scope_is_not_limited_by_sqlite_parameter_count(
+    repo: FoundationRepository,
+) -> None:
+    references = tuple(f"PHP 1:{verse}" for verse in range(1, 1201))
+    _insert(repo, "late-book-finding", verse=1200, source_references=(references[-1],))
+    page = repo.query_qa_findings("proj", canonical_references=references)
+    assert [finding["id"] for finding in page["findings"]] == ["late-book-finding"]
+    assert page["totalCount"] == 1
+
+
+def test_cross_chapter_scope_filters_by_canonical_membership(
+    repo: FoundationRepository,
+) -> None:
+    _insert(repo, "chapter-one", chapter=1, verse=6, source_references=("PHP 1:6",))
+    _insert(repo, "chapter-two", chapter=2, verse=1, source_references=("PHP 2:1",))
+    _insert(repo, "outside", chapter=2, verse=2, source_references=("PHP 2:2",))
+    page = repo.query_qa_findings(
+        "proj", canonical_references=("PHP 1:6", "PHP 2:1"),
+    )
+    assert [finding["id"] for finding in page["findings"]] == [
+        "chapter-one", "chapter-two",
+    ]
+
+
+def test_scope_switch_preserves_human_decision_note_and_history(
+    repo: FoundationRepository,
+) -> None:
+    _insert(repo, "reviewed-3", verse=3, source_references=("PHP 1:3",))
+    _insert(repo, "current-1", verse=1, source_references=("PHP 1:1",))
+    repo.update_qa_disposition(
+        "reviewed-3", QaDisposition.ACCEPTABLE_TRANSLATION, expected_revision=1,
+        reviewer="Reviewer", note="Tamil reordered the meaning naturally.",
+    )
+    assert [finding["id"] for finding in repo.query_qa_findings(
+        "proj", canonical_references=("PHP 1:1",),
+    )["findings"]] == ["current-1"]
+    restored = repo.query_qa_findings(
+        "proj", canonical_references=("PHP 1:3",),
+    )["findings"]
+    assert restored[0]["qaDisposition"] == "ACCEPTABLE_TRANSLATION"
+    assert repo.review_records("QA_FINDING", "reviewed-3")[0]["note"] == (
+        "Tamil reordered the meaning naturally."
+    )
 
 
 # --- Keyset pagination ------------------------------------------------------

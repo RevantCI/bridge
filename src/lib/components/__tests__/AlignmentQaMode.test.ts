@@ -28,10 +28,14 @@ const capability = {
   providerId: "unavailable", providerVersion: "v1", modelHash: "unavailable", fixtureProvider: false,
 };
 
-function scope(state: AnalysisScopeState, latestJob: AnalysisJobSnapshot | null = null) {
+function scope(
+  state: AnalysisScopeState,
+  latestJob: AnalysisJobSnapshot | null = null,
+  references = ["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"],
+) {
   return {
-    state, rangeKey: "PHP 1:3..PHP 1:6", displayedReferences: ["PHP 1:3", "PHP 1:6"],
-    canonicalReferences: ["PHP 1:3", "PHP 1:6"], affectedReferences: [],
+    state, rangeKey: `${references[0]}..${references.at(-1)}`,
+    displayedReferences: references, canonicalReferences: references, affectedReferences: [],
     analysisFingerprint: "fingerprint-3-6", policyVersions: {},
     latestJob, providerCapability: capability,
   };
@@ -86,5 +90,69 @@ describe("AlignmentQaMode analysis states", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
     await waitFor(() => expect(queue.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 2000 });
     expect(await screen.findByText(/QA review queue has been refreshed/i)).toBeInTheDocument();
+    expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({
+      canonicalReferences: job("COMPLETED").canonicalReferences,
+    }));
+  });
+
+  it("defaults the queue to the current canonical analysis range", async () => {
+    scopeStatus.mockResolvedValue(scope("CURRENT"));
+    render(AlignmentQaMode, { props: { chapter: "1", verse: "3" } });
+    await waitFor(() => expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+      canonicalReferences: ["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"],
+    })));
+    expect(await screen.findByText(/Review scope: Current analysis range/i)).toBeInTheDocument();
+  });
+
+  it("refreshes the queue to a newly selected range instead of retaining the previous range", async () => {
+    scopeStatus.mockImplementation(async (requested) => {
+      if (requested.kind === "SELECTED_RANGE" && requested.startVerse === "1") {
+        return scope("CURRENT", null, ["PHP 1:1"]);
+      }
+      return scope("CURRENT");
+    });
+    render(AlignmentQaMode, { props: { chapter: "1", verse: "3" } });
+    await waitFor(() => expect(queue).toHaveBeenCalledWith(expect.objectContaining({
+      canonicalReferences: ["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"],
+    })));
+
+    await fireEvent.change(screen.getByLabelText("Scope"), { target: { value: "SELECTED_RANGE" } });
+    await fireEvent.input(screen.getByLabelText("From verse"), { target: { value: "1" } });
+    await fireEvent.input(screen.getByLabelText("To verse"), { target: { value: "1" } });
+
+    await waitFor(() => expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({
+      canonicalReferences: ["PHP 1:1"],
+    })));
+  });
+
+  it("uses the persisted job references for an affected-only rerun", async () => {
+    const affectedQueued = {
+      ...job("QUEUED"),
+      requestedScope: { kind: "AFFECTED" as const, baseKind: "CURRENT_PASSAGE" as const },
+      rangeKey: "PHP 1:5..PHP 1:5",
+      displayedReferences: ["PHP 1:5"],
+      canonicalReferences: ["PHP 1:5"],
+      analysisFingerprint: "fingerprint-affected-5",
+    };
+    const affectedComplete = {
+      ...job("COMPLETED"), ...affectedQueued, overallStatus: "COMPLETED" as const,
+      completedAt: "2026-01-01T00:01:00Z",
+    };
+    scopeStatus.mockImplementation(async (requested) => requested.kind === "AFFECTED"
+      ? {
+          ...scope("STALE", null, ["PHP 1:5"]),
+          rangeKey: "PHP 1:5..PHP 1:5",
+          analysisFingerprint: "fingerprint-affected-5",
+        }
+      : scope("STALE"));
+    startJob.mockResolvedValue(affectedQueued);
+    jobStatus.mockResolvedValue(affectedComplete);
+
+    render(AlignmentQaMode, { props: { chapter: "1", verse: "3" } });
+    await fireEvent.click(await screen.findByRole("button", { name: "Re-run affected analysis" }));
+    await screen.findByText(/QA review queue has been refreshed/i);
+    expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({
+      canonicalReferences: ["PHP 1:5"],
+    }));
   });
 });

@@ -1428,6 +1428,17 @@ At the end of Stage 9A:
 
 # 37. NEXT TASK — Stage 9B: Correction Generation and Application
 
+**2026-09-04 Stage 9A.4 acceptance correction:** the newly selected analysis
+scope was running correctly; the defect was a project-wide QA queue refresh.
+Schema v10 now indexes findings by canonical source/target semantic-unit
+scope, and `qaReview.getQueue` filters that scope in the repository before
+counting, ordering and pagination. PHP 1:1 and PHP 1:3-1:6 remain persisted
+but display separately; switching back restores the earlier human decision,
+note and history. Cross-verse source ownership is preserved. Source, Rust,
+frontend, packaging and installed-sidecar acceptance pass. The unrelated
+frozen smoke duplicate-classification assertion is still open. **Do not start
+Stage 9B without explicit approval.**
+
 **Stage 9A and the Stage 9A.4 orchestration follow-up are done** (see §35): a reviewer can open
 Alignment Review, work the QA queue, inspect a finding's evidence in layers,
 and record one of four dispositions, with no route to changing Scripture.

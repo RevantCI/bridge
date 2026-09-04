@@ -169,6 +169,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | M33 | Correct a multi-span or reordered mapping; verify absent/ambiguous target quotes are rejected and a valid exact correction becomes **Human corrected** | NOT RUN — exact-USFM and cross-verse classification regressions pass; installed acceptance required |
 | M34 | Validate 15–20 representative mappings and review overall/confidence-band/relationship agreement before changing classification or confidence policy | NOT RUN — requires human linguistic review |
 | M35 | Verify confirm/reject/correct actions leave target USFM, verse markers/order, translationCore selections and alignments unchanged | NOT RUN — byte-preservation/backend isolation regressions pass; installed acceptance required |
+| M36 | Analyze PHP 1:3-1:6, then PHP 1:1; verify the default QA queue contains only the active canonical scope, switching back restores prior decisions/history, cross-verse source-owned findings remain included, and counts/pagination stay scoped | PASS — schema-v10 repository/API/UI regressions pass; exact installed Beta 14 sidecar acceptance split 26 persisted findings into 13/13 scoped queues and restored review history |
 
 ## Automated evidence
 
