@@ -139,3 +139,84 @@ def test_accepted_local_finding_drops_out_of_the_row(fixture_project):
     if row is not None:
         assert row["localFindings"] == []
         assert row["high"] == 0
+
+
+def _write_helps_index(root: Path, tool: str, group: str, entry: dict) -> None:
+    path = root / ".apps" / "translationCore" / "index" / tool / "rut" / f"{group}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([entry], ensure_ascii=False), encoding="utf-8")
+
+
+def test_project_report_surfaces_tn_and_tw_problems(fixture_project):
+    """The dashboard shows tN/tW problems next to Greek Room findings, so a
+    reviewer sees every source of trouble for a verse in one place rather
+    than only the Greek Room half."""
+    root, _ = fixture_project
+    reference = {"bookId": "rut", "chapter": "1", "verse": "1"}
+    _write_helps_index(root, "translationNotes", "figs-metaphor", {
+        "contextId": {
+            "reference": reference, "tool": "translationNotes",
+            "groupId": "figs-metaphor", "checkId": "tn-1",
+            "quoteString": "x", "occurrence": 1,
+            "occurrenceNote": "Review the figure of speech.",
+        },
+        "selections": False, "nothingToSelect": False, "invalidated": False,
+    })
+    _write_helps_index(root, "translationWords", "faith", {
+        "contextId": {
+            "reference": reference, "tool": "translationWords",
+            "groupId": "faith", "checkId": "tw-1",
+            "quoteString": "y", "occurrence": 1, "occurrenceNote": "",
+        },
+        "selections": [{"text": "x", "occurrence": 1, "occurrences": 1}],
+        "nothingToSelect": False, "invalidated": True,
+    })
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(root)})
+    result = call(engine, "project.report")
+    assert result["success"] is True
+
+    row = next(r for r in result["result"]["exceptionQueue"] if r["chapter"] == "1" and r["verse"] == "1")
+    helps = {f["checkType"]: f for f in row["helpsFindings"]}
+
+    assert helps["TC_PENDING"]["tool"] == "translationNotes"
+    assert helps["TC_PENDING"]["category"] == "translation_note"
+    assert helps["TC_PENDING"]["severity"] == "medium"
+    assert helps["TC_PENDING"]["explanation"] == "Review the figure of speech."
+
+    assert helps["TC_INVALIDATED"]["tool"] == "translationWords"
+    assert helps["TC_INVALIDATED"]["category"] == "translation_word"
+    assert helps["TC_INVALIDATED"]["severity"] == "high"
+
+    # An invalidated tW check is exactly what invalidChecks already counted;
+    # surfacing it must not change that number.
+    assert row["invalidChecks"] == 1
+    # Greek Room stays its own list -- the dashboard colours them differently.
+    assert row["localFindings"] == []
+
+
+def test_project_report_reports_no_helps_findings_when_everything_is_selected(fixture_project):
+    """A resolved tN/tW check is not a problem and must not appear."""
+    root, _ = fixture_project
+    _write_helps_index(root, "translationWords", "faith", {
+        "contextId": {
+            "reference": {"bookId": "rut", "chapter": "1", "verse": "1"},
+            "tool": "translationWords", "groupId": "faith", "checkId": "tw-ok",
+            "quoteString": "y", "occurrence": 1, "occurrenceNote": "",
+        },
+        "selections": [{"text": "x", "occurrence": 1, "occurrences": 1}],
+        "nothingToSelect": False, "invalidated": False,
+    })
+
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(root)})
+    result = call(engine, "project.report")
+
+    row = next(
+        (r for r in result["result"]["exceptionQueue"] if r["chapter"] == "1" and r["verse"] == "1"),
+        None,
+    )
+    if row is not None:
+        assert row["helpsFindings"] == []
+        assert row["invalidChecks"] == 0

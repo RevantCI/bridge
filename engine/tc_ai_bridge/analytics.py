@@ -67,6 +67,63 @@ def _local_findings_by_verse(project) -> dict[tuple[str, str], list[dict[str, An
     return by_verse
 
 
+def _translation_helps_findings(
+    project, chapter: str, verse: str, checks: list[dict[str, Any]],
+) -> tuple[int, list[dict[str, Any]]]:
+    """tN/tW problems for one verse, plus the invalidated/stale count the
+    exception queue already reported.
+
+    Built from the `checks` list the caller has already loaded, so surfacing
+    these on the project report costs no extra disk I/O per verse — which
+    matters because exception_first_queue walks the whole book and
+    BridgeEngine.build_project_report runs on the single-threaded stdio
+    dispatcher (see its docstring for the ~800-verse incident that made
+    eager whole-book work there unacceptable).
+
+    The codes/severities deliberately mirror
+    local_checks.translationcore_check_issues() so the dashboard and the
+    verse review panel describe the same check the same way. The one
+    difference is staleness: that function asks for every check, this one
+    only where a selection exists, because check_staleness() reads per-check
+    state files and a whole-book pass cannot afford one per unselected check.
+    A check with no selection is reported as pending, which is what it is.
+    """
+    invalid_count = 0
+    findings: list[dict[str, Any]] = []
+    for entry in checks:
+        ctx = entry.get('contextId', {}) if isinstance(entry.get('contextId'), dict) else {}
+        tool = str(ctx.get('tool', ''))
+        if tool not in ('translationNotes', 'translationWords'):
+            continue
+        group = str(ctx.get('groupId', ''))
+        check_id = str(ctx.get('checkId', ''))
+        category = 'translation_note' if tool == 'translationNotes' else 'translation_word'
+        selection = entry.get('selections', False)
+        invalidated = bool(entry.get('invalidated', False))
+        stale = (
+            selection not in (False, None)
+            and project.check_staleness(chapter, verse, check_id, tool, group) == 'stale'
+        )
+        if invalidated or stale:
+            invalid_count += 1
+            findings.append({
+                'tool': tool, 'category': category, 'severity': 'high',
+                'checkType': 'TC_INVALIDATED' if invalidated else 'TC_STALE_AFTER_EDIT',
+                'groupId': group,
+                'explanation': f'{group} / {check_id} is '
+                               f'{"invalidated" if invalidated else "stale after a later Scripture edit"}.',
+            })
+        elif selection is False and not bool(entry.get('nothingToSelect', False)):
+            findings.append({
+                'tool': tool, 'category': category,
+                'severity': 'medium' if tool == 'translationNotes' else 'high',
+                'checkType': 'TC_PENDING', 'groupId': group,
+                'explanation': str(ctx.get('occurrenceNote', '') or '')
+                               or f'{group} / {check_id} has no selection yet.',
+            })
+    return invalid_count, findings
+
+
 def exception_first_queue(project) -> list[dict[str,Any]]:
     rows=[]
     ai={(str(x.get('chapter')),str(x.get('verse'))):x for x in project.list_ai_review_results()}
@@ -95,18 +152,7 @@ def exception_first_queue(project) -> list[dict[str,Any]]:
                 elif sev=='medium':medium+=1
             wa=project.word_alignment_state(ch,vs)
             checks=project.checks_for_verse(ch,vs)
-            invalid=sum(
-                1 for e in checks
-                if bool(e.get('invalidated')) or (
-                    e.get('selections') not in (False, None)
-                    and project.check_staleness(
-                        ch, vs,
-                        str(e.get('contextId', {}).get('checkId', '')),
-                        str(e.get('contextId', {}).get('tool', '')),
-                        str(e.get('contextId', {}).get('groupId', '')),
-                    ) == 'stale'
-                )
-            )
+            invalid,helps_findings=_translation_helps_findings(project,str(ch),str(vs),checks)
             discussion=sum(1 for d in project.decisions_for_verse(ch,vs) if d.get('decision')=='needs_discussion')
             review=project.load_review_state(ch,vs) or {}; final_state=str(review.get('status',''))
             if critical or high or cache in ('stale','missing') or invalid or wa=='invalid' or discussion or final_state.startswith('stale') or local_findings:
@@ -126,6 +172,11 @@ def exception_first_queue(project) -> list[dict[str,Any]]:
                         }
                         for f in local_findings
                     ],
+                    # tN/tW problems, kept in their own list rather than merged
+                    # into localFindings: that one means Greek Room
+                    # (Wildebeest/USFM/Names) and the dashboard colour-codes the
+                    # two differently.
+                    'helpsFindings':helps_findings,
                 })
     rank={'stale':0,'missing':1,'current':2}
     rows.sort(key=lambda r:(-r['critical'],-r['high'],-r['invalidChecks'],-r['discussions'],rank.get(r['cache'],9),int(r['chapter']) if r['chapter'].isdigit() else 999,int(r['verse']) if r['verse'].isdigit() else 999))

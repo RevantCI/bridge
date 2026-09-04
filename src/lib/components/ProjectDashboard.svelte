@@ -199,32 +199,45 @@
             <div class="exceptions" aria-label="Verses needing attention">
               {#each report.exceptionQueue.slice(0, 25) as row (row.chapter + ':' + row.verse)}
                 {@const key = row.chapter + ":" + row.verse}
-                {@const hasLocal = row.localFindings.length > 0}
+                {@const helps = row.helpsFindings ?? []}
+                {@const tnCount = helps.filter((f) => f.tool === "translationNotes").length}
+                {@const twCount = helps.filter((f) => f.tool === "translationWords").length}
+                {@const detailCount = row.localFindings.length + helps.length}
+                {@const hasDetail = detailCount > 0}
                 <div class="exception-item">
                   <div class="exception-row-wrap">
                     <button class="exception-row" on:click={() => onNavigateToFinding(row.chapter, row.verse)}>
                       <span class="ref">{report.bookId?.toUpperCase()} {row.chapter}:{row.verse}</span>
                       {#if row.critical}<span class="pill critical">{row.critical} critical</span>{/if}
                       {#if row.high}<span class="pill high">{row.high} high</span>{/if}
+                      {#if tnCount}<span class="pill tn">{tnCount} tN</span>{/if}
+                      {#if twCount}<span class="pill tw">{twCount} tW</span>{/if}
                       {#if row.discussions}<span class="pill discussion">{row.discussions} discussion</span>{/if}
                       {#if row.wordAlignment === "invalid"}<span class="pill invalid">alignment invalid</span>{/if}
                       {#if row.summary}<span class="summary">{row.summary}</span>{/if}
                     </button>
-                    {#if hasLocal}
+                    {#if hasDetail}
                       <button
                         type="button"
                         class="expand-toggle"
-                        aria-label={expandedRows.has(key) ? "Collapse findings" : `Show ${row.localFindings.length} Greek Room finding(s)`}
+                        aria-label={expandedRows.has(key) ? "Collapse findings" : `Show ${detailCount} finding(s)`}
                         aria-expanded={expandedRows.has(key)}
                         on:click={() => toggleExpanded(key)}
-                      >{row.localFindings.length} Greek Room {expandedRows.has(key) ? "▲" : "▼"}</button>
+                      >{detailCount} finding{detailCount === 1 ? "" : "s"} {expandedRows.has(key) ? "▲" : "▼"}</button>
                     {/if}
                   </div>
-                  {#if hasLocal && expandedRows.has(key)}
+                  {#if hasDetail && expandedRows.has(key)}
                     <div class="local-findings">
                       {#each row.localFindings as finding}
-                        <div class="local-finding-row">
+                        <div class="local-finding-row source-gr">
                           <span class="pill engine">{finding.engine}</span>
+                          <span class="pill {finding.severity}">{finding.severity}</span>
+                          <span class="local-explain">{finding.explanation}</span>
+                        </div>
+                      {/each}
+                      {#each helps as finding}
+                        <div class="local-finding-row source-{finding.tool === 'translationNotes' ? 'tn' : 'tw'}">
+                          <span class="pill engine">{finding.tool === "translationNotes" ? "tN" : "tW"}</span>
                           <span class="pill {finding.severity}">{finding.severity}</span>
                           <span class="local-explain">{finding.explanation}</span>
                         </div>

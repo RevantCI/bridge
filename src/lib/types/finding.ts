@@ -71,6 +71,20 @@ export interface LocalFindingSummary {
   explanation: string;
 }
 
+/**
+ * A tN/tW check that needs attention: invalidated, stale after a Scripture
+ * edit, or never selected. Kept separate from LocalFindingSummary (Greek
+ * Room) because the dashboard colour-codes the two sources differently.
+ */
+export interface HelpsFindingSummary {
+  tool: "translationNotes" | "translationWords";
+  category: "translation_note" | "translation_word";
+  severity: string;
+  checkType: string;
+  groupId: string;
+  explanation: string;
+}
+
 export interface ExceptionQueueRow {
   chapter: string;
   verse: string;
@@ -84,6 +98,7 @@ export interface ExceptionQueueRow {
   finalState: string;
   summary: string;
   localFindings: LocalFindingSummary[];
+  helpsFindings: HelpsFindingSummary[];
 }
 
 export interface ProjectReport {
