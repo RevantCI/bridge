@@ -25,18 +25,22 @@ export const aiCheckReviewsByVerse = writable<Record<string, AiCheckReview[]>>({
 export type ReviewerMode = "basic" | "advanced";
 export const reviewerMode = writable<ReviewerMode>("basic");
 
-// The stored/protocol values stay "basic"/"advanced" (AppSettings, the
-// engine's reviewerMode field and every persisted review provenance record
-// already use them). Only the reviewer-facing wording changed: what the mode
-// actually controls is whether AI selections are applied automatically or the
-// reviewer applies them by hand.
-const REVIEWER_MODE_LABELS: Record<ReviewerMode, string> = {
-  basic: "Auto",
-  advanced: "Manual",
-};
+// One capability, not two experiences: may the reviewer hand-edit a
+// translationCore selection? Safe, evidence-grounded AI selections are applied
+// either way (BridgeEngine._apply_safe_ai_selections runs for every review),
+// so turning this on adds the override editor rather than taking the automatic
+// selection away.
+//
+// The stored/protocol values stay "basic"/"advanced": AppSettings, the engine's
+// reviewerMode field and every persisted review-provenance record already use
+// them, so renaming the wire value would need a settings migration for no
+// user-visible gain. "advanced" == override allowed.
+export const allowManualOverride = derived(
+  reviewerMode, ($mode) => $mode === "advanced",
+);
 
-export function reviewerModeLabel(mode: ReviewerMode): string {
-  return REVIEWER_MODE_LABELS[mode] ?? mode;
+export function manualOverrideMode(allowed: boolean): ReviewerMode {
+  return allowed ? "advanced" : "basic";
 }
 
 // Which chapters have had their verse text + checks loaded already, so

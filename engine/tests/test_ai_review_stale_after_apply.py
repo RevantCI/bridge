@@ -93,3 +93,34 @@ def test_review_is_current_immediately_after_it_writes_its_own_alignment(
     assert listed["aiReviewState"] == "current", (
         f"[{mode}] the review reported itself stale the moment it finished"
     )
+
+
+@pytest.mark.parametrize("mode", ("basic", "advanced"))
+def test_safe_selections_are_applied_whatever_the_override_setting(
+    imported_titus_project, monkeypatch, mode,
+):
+    """Manual override adds an editor; it does not switch the AI off.
+
+    "advanced" used to skip _apply_safe_ai_selections entirely, so turning
+    manual override on silently stopped tN/tW words being selected at all --
+    reported from a real session as "the tN words are not getting selected
+    automatically like earlier".
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    settings, project_path = imported_titus_project
+    settings.set_api_key("sk-test-123")
+    engine = BridgeEngine(settings=settings, ai_transport=_grounded_fake_transport())
+    call(engine, "project.open", {"path": project_path})
+
+    started = call(engine, "ai.review.start", {
+        "scope": "verse", "chapter": "1", "verse": "1", "mode": mode,
+    })
+    snapshot = _wait_for_ai_job(engine, started["result"]["jobId"])
+    assert snapshot["state"] == "succeeded", snapshot
+
+    applied = snapshot["latestResult"]["result"]["appliedSelections"]
+    assert applied, f"[{mode}] no safe selection was applied"
+
+    after = call(engine, "check.listForVerse", {"chapter": "1", "verse": "1"})["result"]
+    selected = [c for c in after["checks"] if c["selectionStatus"] == "selected"]
+    assert selected, f"[{mode}] no check ended up selected"

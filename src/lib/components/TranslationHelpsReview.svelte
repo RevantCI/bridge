@@ -3,7 +3,7 @@
   import { bridge } from "../api/bridgeClient";
   import {
     aiCheckReviewsByVerse, checkStatusByVerse, currentChapter, findingsByVerse, nativeChecksByVerse,
-    reviewerMode, selectedVerse, verseKey, verseTexts,
+    allowManualOverride, selectedVerse, verseKey, verseTexts,
   } from "../stores";
   import type {
     AiCheckReview, CheckTargetSelection, DesktopConnectorState, IssueResolutionRecord,
@@ -489,7 +489,7 @@
 <div class="section translation-helps">
   <div class="section-title">
     Translation helps
-    <span class="mode-badge">{$reviewerMode}</span>
+    {#if $allowManualOverride}<span class="mode-badge">Manual override</span>{/if}
     {#if loading}<span class="loading-label"><span class="spin" /> loading</span>{/if}
   </div>
 
@@ -502,7 +502,7 @@
       <button class="small-btn" on:click={onRerunAIReview} disabled={aiReviewBusy}>Run AI review again</button>
     </div>
   {/if}
-  {#if $reviewerMode === "basic" && checks.some((check) => check.selectionStatus === "pending")}
+  {#if checks.some((check) => check.selectionStatus === "pending")}
     <div class="basic-notice">Run AI review to evaluate these checks. Only high-confidence, evidence-grounded selections are applied automatically; uncertain checks stay pending.</div>
   {/if}
   {#if mutationNotice}<div class="mutation-notice">{mutationNotice}</div>{/if}
@@ -595,7 +595,7 @@
         {/if}
       </details>
 
-      {#if $reviewerMode === "advanced"}
+      {#if $allowManualOverride}
         {#if editingKey === identity(check)}
           <div class="selection-editor">
             <label class="nothing-row"><input type="checkbox" bind:checked={nothingToSelect} /> Nothing to select in the target verse</label>

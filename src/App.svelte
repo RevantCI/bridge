@@ -17,6 +17,7 @@
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
     verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState, reviewerMode,
+    allowManualOverride,
     aiCheckReviewsByVerse, diagnosticsOpen, engineLog, appendEngineLog, navigationStatus,
   } from "./lib/stores";
   import { editingChapter, editingVerse, editSaving } from "./lib/verseEditor";
@@ -333,7 +334,7 @@
   const VALIDATION_BOOK_IDS = new Set(["LUK", "PHP"]);
 
   async function openSemanticValidation(): Promise<void> {
-    if ($reviewerMode !== "advanced") return;
+    if (!$allowManualOverride) return;
     const currentBookId = $project?.bookId?.toUpperCase() ?? "";
     if (!VALIDATION_BOOK_IDS.has(currentBookId)) {
       const validationBook = $project?.importedProjects?.find((book) => (
@@ -666,7 +667,7 @@
   // recompute bookSummary reactively when findings/loadedChapters change
   $: void $findingsByVerse, void $checkStatusByVerse, void $loadedChapters, (bookSummary = bookApprovedSummary());
 
-  $: if ($reviewerMode !== "advanced" && showingSemanticValidation) {
+  $: if (!$allowManualOverride && showingSemanticValidation) {
     showingSemanticValidation = false;
     showingDashboard = true;
   }
@@ -758,7 +759,7 @@
       reportLoading={reportLoading}
       reportError={reportError}
       onNavigateToFinding={navigateToFinding}
-      advancedMode={$reviewerMode === "advanced"}
+      advancedMode={$allowManualOverride}
       onOpenSemanticValidation={openSemanticValidation}
       onRequestAdvancedMode={() => openSettings("quality")}
     />

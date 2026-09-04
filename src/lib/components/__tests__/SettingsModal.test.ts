@@ -1,16 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 
-const { getSettings, getNavigationStatus } = vi.hoisted(() => ({
+const { getSettings, getNavigationStatus, setSettings } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   getNavigationStatus: vi.fn(),
+  setSettings: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
   bridge: {
     getSettings,
     navigationStatus: getNavigationStatus,
-    setSettings: vi.fn(),
+    setSettings,
   },
 }));
 
@@ -79,10 +80,13 @@ describe("SettingsModal connections", () => {
   });
 });
 
-describe("SettingsModal reviewer experience", () => {
+describe("SettingsModal manual override", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getNavigationStatus.mockResolvedValue(navigationState());
+    setSettings.mockImplementation(async (params: Record<string, unknown>) => ({
+      ...params, hasApiKey: false,
+    }));
     getSettings.mockResolvedValue({
       provider: "openai",
       apiBaseUrl: "",
@@ -94,21 +98,35 @@ describe("SettingsModal reviewer experience", () => {
     });
   });
 
-  it("offers the two modes as Auto and Manual", async () => {
-    render(SettingsModal, { props: { initialPane: "quality", onClose: vi.fn() } });
+  it("offers manual override as a single checkbox, not a mode choice", async () => {
+    const { container } = render(SettingsModal, { props: { initialPane: "quality", onClose: vi.fn() } });
 
-    expect(await screen.findByText("Auto")).toBeInTheDocument();
-    expect(screen.getByText("Manual")).toBeInTheDocument();
+    const checkbox = await screen.findByRole("checkbox", { name: /Allow manual override/ });
+    expect(checkbox).not.toBeChecked();
+    expect(container.querySelectorAll('input[type="radio"]')).toHaveLength(0);
     expect(screen.queryByText("Basic")).not.toBeInTheDocument();
     expect(screen.queryByText("Advanced")).not.toBeInTheDocument();
   });
 
-  it("keeps the stored basic/advanced values behind the new wording", async () => {
-    const { container } = render(SettingsModal, { props: { initialPane: "quality", onClose: vi.fn() } });
-    await screen.findByText("Auto");
+  it("reflects a stored advanced setting as override enabled", async () => {
+    getSettings.mockResolvedValue({
+      provider: "openai", apiBaseUrl: "", model: "gpt-5.6", hasApiKey: false,
+      reviewerMode: "advanced", paratextNavigation: false, logosNavigation: false,
+    });
+    render(SettingsModal, { props: { initialPane: "quality", onClose: vi.fn() } });
 
-    const values = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
-      .map((input) => input.value);
-    expect(values).toEqual(["basic", "advanced"]);
+    expect(await screen.findByRole("checkbox", { name: /Allow manual override/ })).toBeChecked();
+  });
+
+  it("saves the checkbox back as the stored basic/advanced value", async () => {
+    render(SettingsModal, { props: { initialPane: "quality", onClose: vi.fn() } });
+    const checkbox = await screen.findByRole("checkbox", { name: /Allow manual override/ });
+
+    await fireEvent.click(checkbox);
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(setSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewerMode: "advanced" }),
+    ));
   });
 });

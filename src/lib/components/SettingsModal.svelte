@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
-  import { navigationStatus, project, reviewerMode } from "../stores";
+  import { manualOverrideMode, navigationStatus, project, reviewerMode } from "../stores";
   import type { SettingsData } from "../types/finding";
 
   export let onClose: () => void;
@@ -17,7 +17,7 @@
   let model = "gpt-5.6";
   let apiKey = "";
   let hasApiKey = false;
-  let mode: "basic" | "advanced" = "basic";
+  let allowOverride = false;
   let paratextNavigation = false;
   let logosNavigation = false;
 
@@ -38,7 +38,7 @@
       apiBaseUrl = s.apiBaseUrl || "";
       model = s.model || "gpt-5.6";
       hasApiKey = s.hasApiKey;
-      mode = s.reviewerMode;
+      allowOverride = s.reviewerMode === "advanced";
       paratextNavigation = s.paratextNavigation;
       logosNavigation = s.logosNavigation;
       reviewerMode.set(s.reviewerMode);
@@ -61,7 +61,8 @@
     saveMessage = "";
     try {
       const params: Record<string, unknown> = {
-        provider, apiBaseUrl, model, reviewerMode: mode, paratextNavigation, logosNavigation,
+        provider, apiBaseUrl, model, reviewerMode: manualOverrideMode(allowOverride),
+        paratextNavigation, logosNavigation,
       };
       if (apiKey.trim()) params.apiKey = apiKey.trim();
       const result = await bridge.setSettings(params);
@@ -142,14 +143,10 @@
         <h3>Quality engine</h3>
         <p class="desc">Greek Room checks run fully offline and never leave this machine.</p>
         <div class="field">
-          <div class="field-label">Reviewer experience</div>
-          <label class="mode-option" class:selected={mode === "basic"}>
-            <input type="radio" bind:group={mode} value="basic" />
-            <span><b>Auto</b><small>Streamlined tN/tW review with conservative automatic AI selections and explicit issue handoff.</small></span>
-          </label>
-          <label class="mode-option" class:selected={mode === "advanced"}>
-            <input type="radio" bind:group={mode} value="advanced" />
-            <span><b>Manual</b><small>Inspect evidence and edit native translationCore target selections yourself.</small></span>
+          <div class="field-label">tN / tW selections</div>
+          <label class="mode-option" class:selected={allowOverride}>
+            <input type="checkbox" bind:checked={allowOverride} />
+            <span><b>Allow manual override</b><small>Adds an editor for correcting the target text a check selected. AI still applies its own high-confidence, evidence-backed selections either way.</small></span>
           </label>
         </div>
         <div class="kv"><span>Offline QA engine (Greek Room)</span><span class="on">On</span></div>

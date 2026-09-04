@@ -8,7 +8,7 @@
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
     checkStatusByVerse, checkingProgress, verseKey,
-    aiCheckReviewsByVerse, nativeChecksByVerse, project, reviewerMode, reviewerModeLabel,
+    aiCheckReviewsByVerse, nativeChecksByVerse, project, reviewerMode, allowManualOverride,
   } from "../stores";
   import {
     editingChapter, editingVerse, editText, editSaving, editError, editErrorKey,
@@ -408,12 +408,12 @@
       <div class="section ai-review-controls">
         <div class="section-title">
           Automatic AI review
-          <span class="mode-pill">{reviewerModeLabel($reviewerMode)}</span>
+          {#if $allowManualOverride}<span class="mode-pill">Manual override</span>{/if}
         </div>
         <p class="ai-review-help">
-          {$reviewerMode === "basic"
-            ? "Safe, evidence-grounded selections are applied automatically; uncertain checks remain for review."
-            : "AI prepares evidence and exact-word proposals; you decide what to apply or edit."}
+          {$allowManualOverride
+            ? "Safe, evidence-grounded selections are applied automatically; uncertain checks remain for review. You can edit any selection."
+            : "Safe, evidence-grounded selections are applied automatically; uncertain checks remain for review."}
         </p>
         <div class="ai-scope-actions">
           <button on:click={() => startAIReview("verse")} disabled={$checkingProgress.running || aiJobBusy}>This verse</button>
@@ -424,7 +424,7 @@
           <div class="ai-job-status" class:failed={visibleAIJob.state === "failed"}>
             <div><b>{visibleAIJob.state === "succeeded" ? "Complete" : visibleAIJob.currentStage}</b><span>{visibleAIJob.percent}%</span></div>
             <progress max="100" value={visibleAIJob.percent} />
-            <small>{visibleAIJob.completedVerses}/{visibleAIJob.totalVerses} verses · {visibleAIJob.mode} mode{visibleAIJob.failedVerses ? ` · ${visibleAIJob.failedVerses} failed` : ""}</small>
+            <small>{visibleAIJob.completedVerses}/{visibleAIJob.totalVerses} verses{visibleAIJob.failedVerses ? ` · ${visibleAIJob.failedVerses} failed` : ""}</small>
             {#if visibleAIJob.skippedCurrentVerses > 0}
               <small>{visibleAIJob.skippedCurrentVerses} already-current verse(s) preserved and skipped.</small>
             {/if}

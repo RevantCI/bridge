@@ -345,7 +345,12 @@ def test_ungrounded_sub_high_confidence_problem_remains_human_review():
     assert "Lexical-absence gate" in gated.rationale
 
 
-def test_advanced_background_review_keeps_proposals_uncommitted(imported_titus_project, monkeypatch):
+def test_manual_override_review_still_applies_safe_selections(imported_titus_project, monkeypatch):
+    """Manual override ("advanced") adds a selection editor; it does not stop
+    the AI selecting. It used to skip _apply_safe_ai_selections entirely,
+    which a real session reported as tN/tW words no longer being selected at
+    all once override was switched on. Everything else this test covers --
+    resume/skip-current, stale-after-edit, rerun -- is unchanged."""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     settings, project_path = imported_titus_project
     settings.set_api_key("sk-test-123")
@@ -362,10 +367,11 @@ def test_advanced_background_review_keeps_proposals_uncommitted(imported_titus_p
     assert snapshot["state"] == "succeeded", snapshot
     result = snapshot["latestResult"]["result"]
     assert result["checkReviews"]
-    assert result["appliedSelections"] == []
+    assert result["appliedSelections"], "safe selections must be applied in either mode"
     assert result["checkReviews"][0]["proposed_selections"][0]["text"] == "Paul"
     after = engine.project.check_reviews_for_verse("1", "1")
-    assert [item["selectionStatus"] for item in after] == [item["selectionStatus"] for item in before]
+    assert [item["selectionStatus"] for item in after] != [item["selectionStatus"] for item in before]
+    assert any(item["selectionStatus"] == "selected" for item in after)
 
     listed = call(engine, "check.listForVerse", {"chapter": "1", "verse": "1"})["result"]
     assert listed["aiReviewState"] == "current"

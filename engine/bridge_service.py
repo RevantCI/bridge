@@ -1458,8 +1458,11 @@ class BridgeEngine:
 
         Structured-output validation proves shape and token identity.  This second,
         deterministic policy gate proves that the conclusion is decisive, grounded,
-        and complete enough for Basic mode.  The native persistence layer remains the
-        final authority and independently blocks overwriting imported/human choices.
+        and complete enough to write without asking.  The native persistence layer
+        remains the final authority and independently blocks overwriting
+        imported/human choices -- which is what makes running this unconditionally
+        safe, including when the reviewer has manual override enabled and may edit
+        the result afterwards.
         """
         if review.verdict not in {"pass", "problem", "not_applicable"}:
             return "AI verdict requires human review"
@@ -1480,7 +1483,7 @@ class BridgeEngine:
             return "No exact target selection was proposed"
         return ""
 
-    def _apply_basic_ai_selections(
+    def _apply_safe_ai_selections(
         self,
         project: TranslationCoreProject,
         chapter: str,
@@ -1533,7 +1536,7 @@ class BridgeEngine:
                         "bridge_ai", str(validation.get("stateFingerprint") or ""),
                         username="Bridge AI",
                         audit_metadata={
-                            "interface": "basic", "model": model,
+                            "interface": "automatic", "model": model,
                             "confidence": review.confidence, "verdict": review.verdict,
                             "evidenceGrounded": True,
                         },
@@ -1595,28 +1598,29 @@ class BridgeEngine:
                         # with the fingerprint from BEFORE this write. Without the
                         # rebase the review invalidates itself: the UI showed
                         # "Verse changed - the previous AI review is stale" the
-                        # instant the review finished. Only _apply_basic_ai_selections
-                        # rebased, and only when it applied something, so Advanced
-                        # mode (which applies nothing) always went stale.
+                        # instant the review finished. Only _apply_safe_ai_selections
+                        # rebased, and only when it applied something, so Manual mode
+                        # (which applies nothing) always went stale.
                         project.rebase_ai_review_fingerprint(chapter, verse)
                 except Exception:
                     # A concurrent edit or a validation edge case here must not sink the
                     # tN/tW review this verse otherwise completed; the verse simply stays
                     # unaligned and is picked up by the alignment-popup/verse-list flag.
                     pass
-            applied: list[dict[str, Any]] = []
-            skipped: list[dict[str, Any]] = []
-            if mode == "basic":
-                progress_callback(94, "Applying safe evidence-grounded selections")
-                applied, skipped = self._apply_basic_ai_selections(
-                    project, chapter, verse, reviews, model=str(meta.get("model") or client.model),
-                    qa_issues=issues,
-                )
+            # Safe, evidence-grounded selections are applied for every review.
+            # `mode` (allow-manual-override) decides whether the reviewer may
+            # then hand-edit the result, not whether the AI is allowed to fill
+            # it in -- gating the write on the mode meant turning override on
+            # silently stopped tN/tW words being selected at all.
+            progress_callback(94, "Applying safe evidence-grounded selections")
+            applied, skipped = self._apply_safe_ai_selections(
+                project, chapter, verse, reviews, model=str(meta.get("model") or client.model),
+                qa_issues=issues,
+            )
             review_dicts = [item.to_dict() for item in reviews]
             lifecycle = project.reconcile_issue_resolutions_after_ai_review(
                 chapter, verse, review_dicts,
                 model=str(meta.get("model") or client.model), summary=summary,
-                allow_automatic_resolution=(mode == "basic"),
             )
             progress_callback(100, "Verse AI review complete")
             return {

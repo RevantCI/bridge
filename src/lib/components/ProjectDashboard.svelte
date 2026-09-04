@@ -86,7 +86,7 @@
         >
           {advancedMode ? "Validate semantic mappings" : "Enable semantic validation"}
         </button>
-        {#if !advancedMode}<small>Requires Manual reviewer mode</small>{/if}
+        {#if !advancedMode}<small>Requires "Allow manual override" in Settings</small>{/if}
       </div>
     </div>
   </div>
