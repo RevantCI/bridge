@@ -437,6 +437,42 @@ def test_basic_background_review_applies_only_grounded_safe_selections(imported_
     assert engine.project.ai_review_cache_status("1", "1") == "current"
 
 
+def test_automatic_selection_outcome_survives_the_job_result(imported_titus_project, monkeypatch):
+    """check.listForVerse must still answer 'why is this pending?' later.
+
+    appliedSelections/skippedSelections only ride along with one verse's job
+    result, so the reason a check was left alone used to vanish the moment the
+    reviewer navigated away -- a declined check then looked exactly like one no
+    AI had ever seen.
+    """
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    settings, project_path = imported_titus_project
+    settings.set_api_key("sk-test-123")
+    engine = BridgeEngine(settings=settings, ai_transport=_grounded_fake_transport())
+    call(engine, "project.open", {"path": project_path})
+
+    started = call(engine, "ai.review.start", {
+        "scope": "verse", "chapter": "1", "verse": "1", "mode": "basic",
+    })
+    snapshot = _wait_for_ai_job(engine, started["result"]["jobId"])
+    assert snapshot["state"] == "succeeded", snapshot
+    result = snapshot["latestResult"]["result"]
+
+    # Read the verse back the way the UI does, with no job snapshot in hand.
+    listed = call(engine, "check.listForVerse", {"chapter": "1", "verse": "1"})["result"]
+    by_id = {item["checkId"]: item for item in listed["checks"]}
+
+    for item in result["appliedSelections"]:
+        outcome = by_id[item["checkId"]]["automaticSelection"]
+        assert outcome == {"outcome": "applied", "reason": ""}
+    for item in result["skippedSelections"]:
+        outcome = by_id[item["checkId"]]["automaticSelection"]
+        assert outcome["outcome"] == "skipped"
+        assert outcome["reason"] == item["reason"]
+        assert outcome["reason"], "a skipped check must carry a human-readable reason"
+    assert result["skippedSelections"], "fixture must exercise at least one skip"
+
+
 def test_basic_ai_never_overwrites_a_human_selection(imported_titus_project, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     settings, project_path = imported_titus_project

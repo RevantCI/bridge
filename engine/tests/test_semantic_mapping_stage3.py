@@ -1,10 +1,9 @@
 from __future__ import annotations
 import json, sqlite3
 from pathlib import Path
-import pytest
 
 from tc_ai_bridge.semantic_mapping import (
-    PassageSearchBudget, SemanticMappingEngine, SemanticMappingValidationError,
+    PassageSearchBudget, SemanticMappingEngine,
     SemanticSourceRepository, SemanticMappingStore, mapping_state_for_review,
 )
 from tc_ai_bridge.usfm_passages import UsfmPassageIndex
@@ -51,9 +50,38 @@ def test_cross_verse_sentence_reordering_is_classified_explicitly(stage3_db, tam
 def test_hallucinated_target_quote_is_rejected(stage3_db, tamil_php_usfm):
     repo=SemanticSourceRepository(stage3_db); unit=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationNotes",check_id="gjyv")
     idx=UsfmPassageIndex.from_path(tamil_php_usfm,book_hint="PHP")
-    fake=FakeClient([fixture_response(unit.id,list(unit.source_token_ids),"PHP 1:3","PHP 1:6","இந்த சொல் இல்லை")])
-    with pytest.raises(SemanticMappingValidationError):
-        SemanticMappingEngine(repo,fake).map_units(target_index=idx,source_units=[unit])
+    hallucinated=fixture_response(unit.id,list(unit.source_token_ids),"PHP 1:3","PHP 1:6","இந்த சொல் இல்லை")
+    fake=FakeClient([hallucinated,hallucinated,hallucinated])
+    run=SemanticMappingEngine(repo,fake,max_neighbor_windows=1).map_units(target_index=idx,source_units=[unit])
+    # A quote that is not literally in the target segment never becomes a mapping;
+    # the unit stays unresolved, which is review work, never an omission verdict.
+    assert run.result["mappings"] == []
+    assert run.result["unresolved_source_units"][0]["source_unit_id"] == unit.id
+    assert run.result["passage_assessment"] == "NEEDS_REVIEW"
+
+
+def test_one_rejected_row_does_not_discard_the_rest_of_the_batch(stage3_db, tamil_php_usfm):
+    """A single bad row used to abort the whole verse's Stage 3 mapping.
+
+    Every other check then reached the review policy as `mapping_error`, which
+    clears its proposal -- so one hallucinated quote left an entire verse's tN/tW
+    selections unapplied and showing "Pending".
+    """
+    repo=SemanticSourceRepository(stage3_db)
+    good=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationNotes",check_id="gjyv")
+    bad=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationWords",check_id="xpgk")
+    assert good.id != bad.id
+    idx=UsfmPassageIndex.from_path(tamil_php_usfm,book_hint="PHP")
+    response={"mappings":[
+        fixture_response(good.id,list(good.source_token_ids),"PHP 1:3","PHP 1:6","என் தேவனை")["mappings"][0],
+        fixture_response(bad.id,list(bad.source_token_ids),"PHP 1:3","PHP 1:6","இந்த சொல் இல்லை")["mappings"][0],
+      ],"unresolved_source_units":[],"passage_assessment":"MAPPED"}
+    fake=FakeClient([response,response,response])
+    run=SemanticMappingEngine(repo,fake,max_neighbor_windows=1).map_units(target_index=idx,source_units=[good,bad])
+    mapped={m["source_unit_id"] for m in run.result["mappings"]}
+    assert mapped == {good.id}
+    unresolved={u["source_unit_id"] for u in run.result["unresolved_source_units"]}
+    assert unresolved == {bad.id}
 
 def test_unresolved_expands_and_never_becomes_omission(stage3_db, tamil_php_usfm):
     repo=SemanticSourceRepository(stage3_db); unit=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationNotes",check_id="gjyv")
@@ -203,6 +231,34 @@ def test_basic_native_apply_requires_exact_high_confidence_grounded_same_verse_m
     assert native_tc_apply_allowed(review) is False
     review["semantic_mapping"]["confidence"] = .95
     review["proposed_selections"][0]["text"] = "வேறொரு சொல்"
+    assert native_tc_apply_allowed(review) is False
+
+
+def test_word_selections_inside_a_clause_span_are_applicable():
+    """tC selects word tokens; Stage 3 verifies the clause they sit in.
+
+    Demanding the two be equal refused every cleanly mapped check, so nothing was
+    ever auto-selected. Containment inside a verified span is the real invariant,
+    and it admits the compounded/suffixed target forms the review prompt asks for.
+    """
+    from tc_ai_bridge.semantic_review_policy import native_tc_apply_allowed
+    review={
+      "selection_state":"found_this_verse", "verdict":"pass", "nothing_to_select":False,
+      "proposed_selections":[
+        {"text":"यीशु","occurrence":1,"occurrences":1},
+        {"text":"मसीह","occurrence":1,"occurrences":1},
+      ],
+      "semantic_mapping":{
+        "meaning_status":"PRESERVED", "confidence":1.0, "relationships":["SAME_VERSE"],
+        "target_spans":[{"reference":"PHP 1:19","quote":"यीशु मसीह की आत्माके दान के द्वारा,","start":48,"end":83}],
+      },
+    }
+    assert native_tc_apply_allowed(review) is True
+    # "आत्मा" is the tW token inside the compounded target form "आत्माके".
+    review["proposed_selections"]=[{"text":"आत्मा","occurrence":1,"occurrences":1}]
+    assert native_tc_apply_allowed(review) is True
+    # A token from outside every verified span is still refused.
+    review["proposed_selections"]=[{"text":"उद्धार","occurrence":1,"occurrences":1}]
     assert native_tc_apply_allowed(review) is False
 
 

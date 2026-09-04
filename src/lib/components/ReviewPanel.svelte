@@ -120,6 +120,16 @@
         .filter((result) => result.status === "failed")
         .map((result) => ({ chapter: result.chapter, verse: result.verse, error: result.error }))
     : [];
+  // Roll-up across every verse in the run. Per-check reasons live on the check
+  // itself in Translation helps; this is the "how much did it actually do"
+  // answer for a chapter or book pass, where no single verse is on screen.
+  $: aiSelectionTally = Object.values(visibleAIJob?.results ?? {}).reduce(
+    (totals, result) => ({
+      applied: totals.applied + (result.appliedCount ?? 0),
+      pending: totals.pending + (result.skippedCount ?? 0),
+    }),
+    { applied: 0, pending: 0 },
+  );
 
   function nativeCheckStateChanged(): void {
     aiExplainResult = null;
@@ -425,6 +435,12 @@
             <div><b>{visibleAIJob.state === "succeeded" ? "Complete" : visibleAIJob.currentStage}</b><span>{visibleAIJob.percent}%</span></div>
             <progress max="100" value={visibleAIJob.percent} />
             <small>{visibleAIJob.completedVerses}/{visibleAIJob.totalVerses} verses{visibleAIJob.failedVerses ? ` · ${visibleAIJob.failedVerses} failed` : ""}</small>
+            {#if aiSelectionTally.applied + aiSelectionTally.pending > 0}
+              <small class="ai-selection-tally">
+                <b>{aiSelectionTally.applied}</b> {aiSelectionTally.applied === 1 ? "check" : "checks"} selected automatically ·
+                <b>{aiSelectionTally.pending}</b> left for review
+              </small>
+            {/if}
             {#if visibleAIJob.skippedCurrentVerses > 0}
               <small>{visibleAIJob.skippedCurrentVerses} already-current verse(s) preserved and skipped.</small>
             {/if}
@@ -794,6 +810,8 @@
   .ai-job-status > div:first-child { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; }
   .ai-job-status progress { width: 100%; height: 6px; margin: 5px 0; accent-color: var(--accent); }
   .ai-job-status small { display: block; font-size: 9px; color: var(--text-3); }
+  .ai-selection-tally { margin-top: 3px; color: inherit; }
+  .ai-selection-tally b { color: inherit; }
   .ai-failure-list { margin-top: 7px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
   .ai-job-actions { margin-top: 6px; }
   .ai-job-background { margin-top: 9px; padding: 8px; border-radius: 7px; font-size: 9px; line-height: 1.4; color: var(--text-2); background: var(--surface-2); }

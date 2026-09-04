@@ -38,6 +38,21 @@ class SemanticMappingValidationError(SemanticMappingError):
     pass
 
 
+class _MappingRowRejected(SemanticMappingValidationError):
+    """One model mapping row Bridge refuses to accept.
+
+    Row-level rejections quarantine that source unit only.  They must never
+    discard the rest of the batch: a single hallucinated target quote used to
+    abort the whole verse's Stage 3 mapping, which pushed every other check --
+    including cleanly mapped ones -- into ``mapping_error`` and left the entire
+    verse's tN/tW selections unapplied.
+    """
+
+    def __init__(self, message: str, *, reason: str = "MODEL_UNCERTAIN") -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class StructuredClient(Protocol):
     model: str
     def _post_structured(self, instructions: str, input_text: str, schema_name: str, schema: dict[str, Any]) -> dict[str, Any]: ...
@@ -611,6 +626,101 @@ class SemanticMappingEngine:
         }
         return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
+    def _validate_mapping_row(
+        self, item: dict[str, Any], uid: str, expected: SourceSemanticUnit,
+        segment_by_ref: dict[str, TargetSegment],
+    ) -> dict[str, Any]:
+        """Validate one model mapping row, or reject that row alone.
+
+        Every failure here is scoped to a single source unit, so it raises
+        _MappingRowRejected and the caller quarantines just that unit.
+        """
+        token_ids = [str(x) for x in item.get("source_token_ids") or []]
+        if token_ids != list(expected.source_token_ids):
+            raise SemanticMappingValidationError(f"Model changed canonical source token IDs for {uid}")
+        if str(item.get("source_reference") or "") != expected.source_reference:
+            raise SemanticMappingValidationError(f"Model changed canonical source reference for {uid}")
+        rel = [str(x) for x in item.get("relationships") or []]
+        if not rel or any(x not in RELATIONSHIPS for x in rel):
+            raise SemanticMappingValidationError(f"Invalid semantic relationship for {uid}")
+        status = str(item.get("meaning_status") or "")
+        if status not in MEANING_STATUSES:
+            raise SemanticMappingValidationError(f"Invalid meaning status for {uid}")
+        try:
+            confidence = float(item.get("confidence"))
+        except Exception as exc:
+            raise SemanticMappingValidationError(f"Invalid confidence for {uid}") from exc
+        if not 0 <= confidence <= 1:
+            raise SemanticMappingValidationError(f"Confidence out of range for {uid}")
+
+        clean_spans: list[dict[str, Any]] = []
+        spans = item.get("target_spans") or []
+        if not isinstance(spans, list):
+            raise SemanticMappingValidationError(f"target_spans must be an array for {uid}")
+        for span in spans:
+            if not isinstance(span, dict):
+                raise SemanticMappingValidationError(f"Invalid target span for {uid}")
+            ref = str(span.get("reference") or "")
+            quote = str(span.get("quote") or "")
+            if ref not in segment_by_ref:
+                raise SemanticMappingValidationError(f"Model referenced target verse outside searched passage: {ref}")
+            if not quote:
+                raise SemanticMappingValidationError(f"Overt target span has empty quote for {uid}")
+            seg_text = segment_by_ref[ref].text
+            start = span.get("start"); end = span.get("end")
+            # The model is never told what indexing convention start/end use, and
+            # LLMs are unreliable at counting exact character offsets in complex/
+            # non-Latin scripts (Devanagari conjuncts/matras and similar). Treat
+            # any offsets it supplies as an unverified hint, not a source of
+            # truth: the real anti-hallucination guard is that the literal quote
+            # text must occur exactly once, unambiguously, in the target segment.
+            # Trust given offsets only when they already agree with that; never
+            # reject solely because the model's own offset arithmetic was wrong.
+            offsets_confirmed = (
+                isinstance(start, int) and isinstance(end, int)
+                and 0 <= start <= end <= len(seg_text) and seg_text[start:end] == quote
+            )
+            if not offsets_confirmed:
+                positions = _literal_positions(seg_text, quote)
+                if len(positions) != 1:
+                    raise _MappingRowRejected(
+                        f"Target quote for {uid} in {ref} was not found as an unambiguous exact match in the target segment; hallucinated or ambiguous text rejected",
+                        reason="AMBIGUOUS",
+                    )
+                start, end = positions[0]
+            clean_spans.append({"reference": ref, "quote": quote, "start": start, "end": end})
+
+        if status == "PRESERVED" and not clean_spans and not ({"IMPLICIT", "GRAMMATICALLY_ENCODED"} & set(rel)):
+            raise SemanticMappingValidationError(f"PRESERVED mapping without overt span must be explicitly implicit/grammatical for {uid}")
+        if clean_spans and status == "NOT_LOCATED":
+            raise SemanticMappingValidationError(f"NOT_LOCATED mapping cannot contain target spans for {uid}")
+
+        target_refs = {s["reference"] for s in clean_spans}
+        if len(target_refs) > 1 and "SPLIT_ACROSS_VERSES" not in rel:
+            rel.append("SPLIT_ACROSS_VERSES")
+        if clean_spans and all(r != expected.source_reference for r in target_refs):
+            if "CROSS_VERSE" not in rel:
+                rel.append("CROSS_VERSE")
+            if (
+                {"SENTENCE_REORDERED", "CLAUSE_REORDERED", "REORDERED_WITHIN_VERSE"} & set(rel)
+                and "CROSS_VERSE_REORDERED" not in rel
+            ):
+                rel.append("CROSS_VERSE_REORDERED")
+            if not any(x in rel for x in ("CROSS_VERSE_MOVED", "CROSS_VERSE_REORDERED", "VERSIFICATION_DIFFERENCE")):
+                rel.append("CROSS_VERSE_MOVED")
+
+        clean = dict(item)
+        clean["source_unit_id"] = uid
+        clean["source_token_ids"] = token_ids
+        clean["source_reference"] = expected.source_reference
+        clean["target_spans"] = clean_spans
+        clean["relationships"] = list(dict.fromkeys(rel))
+        clean["meaning_status"] = status
+        clean["confidence"] = confidence
+        clean["proposal_provenance"] = "MACHINE_PROPOSED"
+        clean["validation_status"] = "UNCONFIRMED"
+        return clean
+
     def _validate_result(
         self, raw: dict[str, Any], units: Sequence[SourceSemanticUnit], segments: Sequence[TargetSegment],
         *, allow_search_exhausted: bool = False,
@@ -627,123 +737,68 @@ class SemanticMappingEngine:
 
         seen: set[str] = set()
         clean_mappings: list[dict[str, Any]] = []
+        # source_unit_id -> quarantine row for a unit whose mapping Bridge rejected.
+        quarantined: dict[str, dict[str, Any]] = {}
         for item in mappings:
             if not isinstance(item, dict):
                 raise SemanticMappingValidationError("Mapping row must be an object")
             uid = str(item.get("source_unit_id") or "")
-            if uid not in unit_by_id:
-                raise SemanticMappingValidationError(f"Model returned unknown source unit: {uid}")
-            if uid in seen:
-                raise SemanticMappingValidationError(f"Model duplicated source unit: {uid}")
-            seen.add(uid)
-            expected = unit_by_id[uid]
-            token_ids = [str(x) for x in item.get("source_token_ids") or []]
-            if token_ids != list(expected.source_token_ids):
-                raise SemanticMappingValidationError(f"Model changed canonical source token IDs for {uid}")
-            if str(item.get("source_reference") or "") != expected.source_reference:
-                raise SemanticMappingValidationError(f"Model changed canonical source reference for {uid}")
-            rel = [str(x) for x in item.get("relationships") or []]
-            if not rel or any(x not in RELATIONSHIPS for x in rel):
-                raise SemanticMappingValidationError(f"Invalid semantic relationship for {uid}")
-            status = str(item.get("meaning_status") or "")
-            if status not in MEANING_STATUSES:
-                raise SemanticMappingValidationError(f"Invalid meaning status for {uid}")
+            # A row naming a unit Bridge never requested, or naming one twice, is
+            # dropped rather than fatal: the units it does not name keep their own
+            # results and the unnamed ones stay pending for the next search layer.
+            if uid not in unit_by_id or uid in seen or uid in quarantined:
+                continue
             try:
-                confidence = float(item.get("confidence"))
-            except Exception as exc:
-                raise SemanticMappingValidationError(f"Invalid confidence for {uid}") from exc
-            if not 0 <= confidence <= 1:
-                raise SemanticMappingValidationError(f"Confidence out of range for {uid}")
-
-            clean_spans: list[dict[str, Any]] = []
-            spans = item.get("target_spans") or []
-            if not isinstance(spans, list):
-                raise SemanticMappingValidationError(f"target_spans must be an array for {uid}")
-            for span in spans:
-                if not isinstance(span, dict):
-                    raise SemanticMappingValidationError(f"Invalid target span for {uid}")
-                ref = str(span.get("reference") or "")
-                quote = str(span.get("quote") or "")
-                if ref not in segment_by_ref:
-                    raise SemanticMappingValidationError(f"Model referenced target verse outside searched passage: {ref}")
-                if not quote:
-                    raise SemanticMappingValidationError(f"Overt target span has empty quote for {uid}")
-                seg_text = segment_by_ref[ref].text
-                start = span.get("start"); end = span.get("end")
-                # The model is never told what indexing convention start/end use, and
-                # LLMs are unreliable at counting exact character offsets in complex/
-                # non-Latin scripts (Devanagari conjuncts/matras and similar). Treat
-                # any offsets it supplies as an unverified hint, not a source of
-                # truth: the real anti-hallucination guard is that the literal quote
-                # text must occur exactly once, unambiguously, in the target segment.
-                # Trust given offsets only when they already agree with that; never
-                # reject solely because the model's own offset arithmetic was wrong.
-                offsets_confirmed = (
-                    isinstance(start, int) and isinstance(end, int)
-                    and 0 <= start <= end <= len(seg_text) and seg_text[start:end] == quote
+                clean_mappings.append(
+                    self._validate_mapping_row(item, uid, unit_by_id[uid], segment_by_ref),
                 )
-                if not offsets_confirmed:
-                    positions = _literal_positions(seg_text, quote)
-                    if len(positions) != 1:
-                        raise SemanticMappingValidationError(f"Target quote for {uid} in {ref} was not found as an unambiguous exact match in the target segment; hallucinated or ambiguous text rejected")
-                    start, end = positions[0]
-                clean_spans.append({"reference": ref, "quote": quote, "start": start, "end": end})
-
-            if status == "PRESERVED" and not clean_spans and not ({"IMPLICIT", "GRAMMATICALLY_ENCODED"} & set(rel)):
-                raise SemanticMappingValidationError(f"PRESERVED mapping without overt span must be explicitly implicit/grammatical for {uid}")
-            if clean_spans and status == "NOT_LOCATED":
-                raise SemanticMappingValidationError(f"NOT_LOCATED mapping cannot contain target spans for {uid}")
-
-            target_refs = {s["reference"] for s in clean_spans}
-            if len(target_refs) > 1 and "SPLIT_ACROSS_VERSES" not in rel:
-                rel.append("SPLIT_ACROSS_VERSES")
-            if clean_spans and all(r != expected.source_reference for r in target_refs):
-                if "CROSS_VERSE" not in rel:
-                    rel.append("CROSS_VERSE")
-                if (
-                    {"SENTENCE_REORDERED", "CLAUSE_REORDERED", "REORDERED_WITHIN_VERSE"} & set(rel)
-                    and "CROSS_VERSE_REORDERED" not in rel
-                ):
-                    rel.append("CROSS_VERSE_REORDERED")
-                if not any(x in rel for x in ("CROSS_VERSE_MOVED", "CROSS_VERSE_REORDERED", "VERSIFICATION_DIFFERENCE")):
-                    rel.append("CROSS_VERSE_MOVED")
-
-            clean = dict(item)
-            clean["source_unit_id"] = uid
-            clean["source_token_ids"] = token_ids
-            clean["source_reference"] = expected.source_reference
-            clean["target_spans"] = clean_spans
-            clean["relationships"] = list(dict.fromkeys(rel))
-            clean["meaning_status"] = status
-            clean["confidence"] = confidence
-            clean["proposal_provenance"] = "MACHINE_PROPOSED"
-            clean["validation_status"] = "UNCONFIRMED"
-            clean_mappings.append(clean)
+            except SemanticMappingValidationError as exc:
+                quarantined[uid] = {
+                    "source_unit_id": uid,
+                    "reason": getattr(exc, "reason", "MODEL_UNCERTAIN"),
+                    "detail": str(exc),
+                }
+                continue
+            seen.add(uid)
 
         clean_unresolved: list[dict[str, Any]] = []
+        unresolved_ids: set[str] = set()
         for item in unresolved:
             if not isinstance(item, dict):
                 raise SemanticMappingValidationError("Unresolved row must be an object")
             uid = str(item.get("source_unit_id") or "")
             reason = str(item.get("reason") or "")
-            if uid not in unit_by_id:
-                raise SemanticMappingValidationError(f"Unknown unresolved source unit: {uid}")
+            # An unattributable or repeated unresolved row is dropped; the unit it
+            # fails to name is still caught by the `missing` backstop below.
+            if uid not in unit_by_id or uid in unresolved_ids:
+                continue
             if uid in seen:
-                raise SemanticMappingValidationError(f"Source unit cannot be both mapped and unresolved: {uid}")
+                # The model both mapped and unresolved the same unit. Fail closed:
+                # withdraw the mapping and keep the unit pending, rather than
+                # letting a self-contradictory row through as a conclusion.
+                clean_mappings = [x for x in clean_mappings if x["source_unit_id"] != uid]
+                seen.discard(uid)
+                reason = "MODEL_UNCERTAIN"
             if reason not in {"NOT_LOCATED", "AMBIGUOUS", "MODEL_UNCERTAIN", "SEARCH_BUDGET_EXHAUSTED"}:
-                raise SemanticMappingValidationError(f"Invalid unresolved reason for {uid}")
+                reason = "MODEL_UNCERTAIN"
             if reason == "SEARCH_BUDGET_EXHAUSTED" and not allow_search_exhausted:
-                raise SemanticMappingValidationError("SEARCH_BUDGET_EXHAUSTED is a Bridge engine state, not a model-returnable conclusion")
-            if any(x["source_unit_id"] == uid for x in clean_unresolved):
-                raise SemanticMappingValidationError(f"Duplicate unresolved source unit: {uid}")
+                # A Bridge engine state, not a model-returnable conclusion.
+                reason = "MODEL_UNCERTAIN"
+            unresolved_ids.add(uid)
             clean_unresolved.append({"source_unit_id": uid, "reason": reason, "detail": str(item.get("detail") or "")})
 
-        returned = seen | {x["source_unit_id"] for x in clean_unresolved}
-        missing = set(unit_by_id) - returned
+        # Rejected rows join the unresolved set so the adaptive search retries just
+        # those units on the next layer and every accepted mapping survives.
+        for uid, row in quarantined.items():
+            if uid not in unresolved_ids:
+                unresolved_ids.add(uid)
+                clean_unresolved.append(row)
+
+        missing = set(unit_by_id) - (seen | unresolved_ids)
         # Model omission is treated as unresolved, never as a semantic omission.
         for uid in sorted(missing):
             clean_unresolved.append({"source_unit_id": uid, "reason": "MODEL_UNCERTAIN", "detail": "Model response omitted this requested source unit."})
-        return {"mappings": clean_mappings, "unresolved_source_units": clean_unresolved, "passage_assessment": assessment if not missing else "NEEDS_REVIEW"}
+        return {"mappings": clean_mappings, "unresolved_source_units": clean_unresolved, "passage_assessment": assessment if not clean_unresolved else "NEEDS_REVIEW"}
 
 
 def _literal_positions(text: str, quote: str) -> list[tuple[int, int]]:

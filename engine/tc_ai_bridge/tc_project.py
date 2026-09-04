@@ -1232,6 +1232,35 @@ class TranslationCoreProject:
         _write_json_atomic(audit, data)
         return p
 
+    def record_ai_selection_outcomes(
+        self, chapter: str | int, verse: str | int,
+        applied: list[dict[str, Any]], skipped: list[dict[str, Any]],
+    ) -> None:
+        """Persist why each check was or was not selected automatically.
+
+        The applied/skipped lists are otherwise only returned in the AI job
+        result, which carries one verse's full payload at a time — so as soon as
+        the reviewer navigated away the reason a check stayed Pending was gone.
+        Storing it beside the review lets nativeChecks.list answer 'why is this
+        still pending?' on any later visit, including after a restart.
+        """
+        p = self.companion_dir() / 'aiReview' / self.book_id / str(chapter) / f'{verse}.json'
+        if not p.exists():
+            return
+        d = _read_json(p)
+        if not isinstance(d, dict):
+            return
+        outcomes: dict[str, Any] = {}
+        for item in list(applied or []):
+            key = f"{str(item.get('tool') or '')}:{str(item.get('checkId') or '')}"
+            outcomes[key] = {'outcome': 'applied', 'reason': ''}
+        for item in list(skipped or []):
+            key = f"{str(item.get('tool') or '')}:{str(item.get('checkId') or '')}"
+            outcomes[key] = {'outcome': 'skipped', 'reason': str(item.get('reason') or '')}
+        d['automaticSelection'] = outcomes
+        d['automaticSelectionTimestamp'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        _write_json_atomic(p, d)
+
     def rebase_ai_review_fingerprint(self, chapter: str | int, verse: str | int) -> None:
         """Keep an already-reviewed verse current after human-only TN/TW state synchronization."""
         p = self.companion_dir() / 'aiReview' / self.book_id / str(chapter) / f'{verse}.json'
@@ -1508,6 +1537,11 @@ class TranslationCoreProject:
             'evaluationStatus': 'needs_review' if invalidated else 'not_run',
             'provenance': self._check_provenance(chapter, verse, check_id, entry),
             'stateFingerprint': self._check_state_fingerprint(chapter, verse, check_id, entry),
+            # Filled in by BridgeEngine.list_checks_for_verse, which is the only
+            # caller that reads the AI review record. Declared here so every
+            # check row has one shape -- a row returned by save_check_selection
+            # would otherwise be missing the field the UI reads.
+            'automaticSelection': None,
         }
 
     def check_review(self, chapter: str | int, verse: str | int, tool: str, group_id: str, check_id: str) -> dict[str, Any]:

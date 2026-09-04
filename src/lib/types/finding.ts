@@ -600,6 +600,16 @@ export interface CheckTargetSelection {
   occurrences: number;
 }
 
+/**
+ * What the last AI review's automatic-selection pass did with this check, and
+ * why. Persisted next to the review, so it is still answerable after the job
+ * result is gone — reopening the verse, or restarting the app.
+ */
+export interface CheckAutomationResult {
+  outcome: "applied" | "skipped" | "";
+  reason: string;
+}
+
 export interface NativeCheckReview {
   chapter: string;
   verse: string;
@@ -617,6 +627,8 @@ export interface NativeCheckReview {
   evaluationStatus: CheckEvaluationStatus;
   provenance: CheckSelectionProvenance;
   stateFingerprint: string;
+  /** null when no AI review has run for this verse since the check appeared. */
+  automaticSelection: CheckAutomationResult | null;
 }
 
 export interface NativeCheckListResponse {

@@ -966,12 +966,22 @@ class BridgeEngine:
                 "pass": "passed", "not_applicable": "passed",
                 "problem": "issue_open", "review": "needs_review",
             }
+            outcomes = dict((cached_ai or {}).get("automaticSelection") or {})
             for check in checks:
-                ai_item = ai_by_identity.get((str(check.get("tool") or ""), str(check.get("checkId") or "")))
+                identity = (str(check.get("tool") or ""), str(check.get("checkId") or ""))
+                ai_item = ai_by_identity.get(identity)
                 if ai_item:
                     check["evaluationStatus"] = evaluation.get(str(ai_item.get("verdict") or ""), "needs_review")
                 elif ai_review_state == "stale":
                     check["evaluationStatus"] = "needs_review"
+                outcome = outcomes.get(f"{identity[0]}:{identity[1]}")
+                check["automaticSelection"] = (
+                    {
+                        "outcome": str(outcome.get("outcome") or ""),
+                        "reason": str(outcome.get("reason") or ""),
+                    }
+                    if isinstance(outcome, dict) else None
+                )
         finally:
             self._checker_lock.release()
         return {
@@ -1549,6 +1559,12 @@ class BridgeEngine:
         if applied:
             with self._checker_lock:
                 project.rebase_ai_review_fingerprint(chapter, verse)
+        # Written last so the reason a check stayed pending outlives this job
+        # result and can be shown whenever the reviewer reopens the verse. Under
+        # the same lock as the rebase above: both rewrite the one review record
+        # that a concurrent list_checks_for_verse reads.
+        with self._checker_lock:
+            project.record_ai_selection_outcomes(chapter, verse, applied, skipped)
         return applied, skipped
 
     def _run_ai_review_for_project(

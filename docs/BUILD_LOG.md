@@ -3215,3 +3215,157 @@ rest of the session. Capped at 3 attempts per reference, reset on success or
 when the reference changes.
 
 Verified: `npm run check`, `npm run test`, `npm run build` all still pass.
+
+## AI review never auto-selected tN/tW words — two Stage 3 defects (2026-09-04)
+
+Reported as "running the AI check still isn't auto-selecting the words, it's
+still showing Pending". Diagnosed against the reporter's own saved reviews
+under `<project>/.apps/translationCoreAI/aiReview/<book>/<ch>/<vs>.json`,
+which persist `selection_state`, `semantic_mapping` and the Stage 3 pack —
+so the failure is reconstructable offline, with no API key and no rerun.
+
+Aggregate over the 53 saved reviews on that machine: 70 checks ended
+`mapping_error` against 9 `found_this_verse`, and 9 of the 12 most recent
+Stage 3 packs had `mappings: []`. **Two independent bugs, either one alone
+enough to leave every check Pending.**
+
+### 1. One bad model row discarded the whole batch
+
+`SemanticMappingEngine._validate_result` raised on the first offending
+mapping row, so a single unusable row threw away every *other* unit's
+perfectly good mapping in the same call.
+`prepare_semantic_mappings_for_review` then caught that and — correctly, for
+the transport/schema failure its comment describes — marked *every* unit
+`mapping_error`, which `apply_semantic_review_policy` treats as `_UNRESOLVED`
+and clears the proposal for. One hallucinated target quote therefore took out
+an entire verse.
+
+PHP 1:6 is the clean example: all 10 checkStates carry the identical detail
+`Target quote for translationNotes:qhmh ... was not found as an unambiguous
+exact match`, i.e. nine checks were failed by a tenth check's row. The
+observed triggers were all single-row: a hallucinated/ambiguous quote (×3),
+`Model changed canonical source token IDs` (×3), `Model returned unknown
+source unit` (×1).
+
+Row validation moved into `_validate_mapping_row`; the caller catches
+`SemanticMappingValidationError` and quarantines that unit as unresolved, so
+the adaptive search retries it on the next layer while every accepted mapping
+survives. `_MappingRowRejected` carries a per-row `reason` (`AMBIGUOUS` for
+the quote case). Unattributable rows — unknown or duplicated `source_unit_id`,
+either list — are dropped rather than fatal; the `missing` backstop still
+catches any unit that goes unmentioned. A unit the model both maps and
+unresolves now fails closed: the mapping is withdrawn and the unit stays
+pending. Only genuine top-level schema breaks still raise.
+
+Quarantined units land as `needs_extended_passage_review`, which is still
+`_UNRESOLVED` — so that one check stays Pending, as it should, and the rest
+of the verse proceeds.
+
+### 2. The auto-apply gate compared clause spans to word tokens
+
+Independent of #1, and the reason even a *clean* Stage 3 run selected
+nothing. `semantic_review_policy.native_tc_apply_allowed` required the
+proposed translationCore selections to equal the verified Stage 3 target
+spans (`selection_text == span_quotes`, or a single span joined from every
+selection). Those are different granularities and essentially never equal: a
+Stage 3 span is the clause the meaning is realized in, a tC selection is the
+word tokens inside it. So `_safe_ai_selection_reason` returned "Stage 3
+mapping is not safe for a verse-local automatic selection" for every mapped
+check.
+
+PHP 1:19 is the proof — Stage 3 `ready`, 8 checks `found_this_verse` /
+`PRESERVED` / confidence 1.0, and zero selections on disk. E.g. proposed
+`["यीशु", "मसीह"]` against span `"यीशु मसीह की आत्माके दान के द्वारा,"`.
+
+Replaced with containment: each proposed token must fall inside a verified
+span for this verse. Substring containment is deliberate — it also admits the
+compounded/suffixed target forms the review prompt explicitly asks the model
+to select (`आत्मा` within `आत्माके`). It does not weaken the anti-hallucination
+guard: the token comes from a supplied bottomWord ID (already checked against
+`known_ids`), `validate_check_selection` re-verifies its occurrence against
+the verse text, and `save_check_selection` still refuses to overwrite
+imported/human choices.
+
+Re-running the real gate over the untouched PHP 1:19 record: 8 of 9 checks
+now APPLY, the 9th correctly skipped as `target_not_located` + verdict
+`review`. Before: 0 of 9.
+
+### Note for anyone reproducing this
+
+`start_ai_review_job` skips verses whose cached review is `current`, so
+chapter/book scope will *not* revisit a verse already reviewed under the
+broken behaviour — it reports them as skipped-because-current. Rerun at
+**verse** scope (which never skips) to see the fix on an
+already-reviewed verse. Verses hit by bug #1 need a fresh model call either
+way; their stored `mapping_error` states are what they are.
+
+`skippedSelections` still carries a per-check `reason` all the way to the
+frontend (`AIReviewResult` in `types/finding.ts`) and nothing renders it —
+which is why this presented as a silent "nothing happened". Surfacing it is
+not done.
+
+Regression tests (`tests/test_semantic_mapping_stage3.py`):
+`test_one_rejected_row_does_not_discard_the_rest_of_the_batch`,
+`test_word_selections_inside_a_clause_span_are_applicable`, and
+`test_hallucinated_target_quote_is_rejected` rewritten — it asserted the
+old whole-batch abort, and now asserts the stronger invariant it was
+protecting: the hallucinated quote never becomes a mapping and the unit ends
+unresolved, never an omission.
+
+Verified: `pytest tests/ greek_room_engine/tests/ -q` (597 passed).
+Not verified in the running desktop app — that needs a real API key and a
+live rerun.
+
+## Surfaced the automatic-selection outcome in the UI (2026-09-04)
+
+Follow-up to the two Stage 3 defects above. The engine had always decided, per
+check, whether it could select the target words automatically and — when it
+could not — why; `_safe_ai_selection_reason` returns real sentences ("AI
+confidence is below the 82% automatic-selection threshold", "Contradictory QA
+evidence requires human review"). Nothing rendered them, so a check the AI
+deliberately declined was visually identical to one no AI had ever seen: the
+same bare "Pending" pill. That is the direct reason the two bugs above read as
+"the AI check does nothing" rather than as a specific, diagnosable refusal.
+
+`appliedSelections` / `skippedSelections` were also the wrong carrier for this:
+they ride along with one verse's job result, and `latestResult` holds only the
+most recent verse — so on a chapter run the reasons for every earlier verse
+were already gone, and navigating away lost them entirely.
+
+**Persisted instead.** `TranslationCoreProject.record_ai_selection_outcomes`
+merges an `automaticSelection` map (`"<tool>:<checkId>" -> {outcome, reason}`)
+into the saved AI review record, written at the end of
+`_apply_safe_ai_selections` — after `rebase_ai_review_fingerprint`, since both
+rewrite that file. `list_checks_for_verse` reads it back onto each check row, so
+the question survives navigation and app restart.
+
+`_check_review_from_entry` declares `automaticSelection: None` as its default.
+Without it a row returned by `save_check_selection` would be missing the field
+the UI reads — and that default is also correct on its own terms: a human who
+has just saved over a selection is no longer described by the AI's outcome.
+
+UI, all in the two places a reviewer is already looking:
+- `TranslationHelpsReview` — per check, "✓ Selected automatically by the AI
+  review" (guarded on `provenance === "bridge_ai"`, so a human takeover drops
+  the claim) or "Left for you — <engine's own reason>" on a still-pending
+  check. Reasons render verbatim; re-mapping them in TypeScript would be a
+  second copy of the policy, free to drift from the engine's.
+- A verse summary bar replacing the old unconditional notice: "N of M checks
+  complete · K selected by AI review" / "J pending". Green once nothing is
+  pending.
+- `ReviewPanel`'s job status gains a run-wide roll-up from the counts already
+  in the snapshot (`appliedCount`/`skippedCount` per verse) — the "how much did
+  it actually do" answer for a chapter or book pass, where no single verse is
+  on screen.
+
+Tests: `test_ai_explain.py` ›
+`test_automatic_selection_outcome_survives_the_job_result` reads the verse back
+through `check.listForVerse` with no job snapshot in hand and asserts every
+applied/skipped row's reason round-trips. New
+`__tests__/TranslationHelpsReview.test.ts` (4 tests) covers the declined-reason
+line, the applied marker plus tally, the human-takeover case, and the unchanged
+"run AI review" prompt when no automatic pass has run.
+
+Verified: `pytest tests/ greek_room_engine/tests/ -q` (598 passed),
+`npm run check` (0/0), `npm run test` (127 passed), `npm run build`.
+Not verified in the running desktop app.

@@ -46,6 +46,19 @@
   $: checks = $nativeChecksByVerse[key] ?? [];
   $: aiReviews = $aiCheckReviewsByVerse[key] ?? [];
   $: verseText = $verseTexts[key] ?? "";
+  $: pendingChecks = checks.filter((check) => check.selectionStatus === "pending");
+  $: doneChecks = checks.filter(
+    (check) => check.selectionStatus === "selected" || check.selectionStatus === "nothing_to_select",
+  );
+  // Only counts a check the last AI pass actually wrote — a selection a human
+  // has since edited or cleared reverts to their provenance, not the AI's.
+  $: aiAppliedChecks = checks.filter(
+    (check) => check.automaticSelection?.outcome === "applied" && check.provenance === "bridge_ai",
+  );
+  $: aiSkippedChecks = checks.filter(
+    (check) => check.automaticSelection?.outcome === "skipped" && check.selectionStatus === "pending",
+  );
+  $: automationRan = checks.some((check) => Boolean(check.automaticSelection?.outcome));
   $: if (key && key !== requestedKey) {
     if (retryTimer) clearTimeout(retryTimer);
     requestedKey = key;
@@ -502,7 +515,20 @@
       <button class="small-btn" on:click={onRerunAIReview} disabled={aiReviewBusy}>Run AI review again</button>
     </div>
   {/if}
-  {#if checks.some((check) => check.selectionStatus === "pending")}
+  {#if automationRan}
+    <div class="automation-summary" class:all-done={pendingChecks.length === 0} role="status">
+      <span class="tally">
+        <b>{doneChecks.length} of {checks.length}</b> {checks.length === 1 ? "check" : "checks"} complete
+        {#if aiAppliedChecks.length > 0}<small>· {aiAppliedChecks.length} selected by AI review</small>{/if}
+      </span>
+      {#if pendingChecks.length > 0}
+        <span class="tally">
+          <b>{pendingChecks.length} pending</b>
+          {#if aiSkippedChecks.length > 0}<small>· reason shown on each check</small>{/if}
+        </span>
+      {/if}
+    </div>
+  {:else if pendingChecks.length > 0}
     <div class="basic-notice">Run AI review to evaluate these checks. Only high-confidence, evidence-grounded selections are applied automatically; uncertain checks stay pending.</div>
   {/if}
   {#if mutationNotice}<div class="mutation-notice">{mutationNotice}</div>{/if}
@@ -539,6 +565,15 @@
         </div>
       {:else if check.nothingToSelect}
         <p class="selection-empty">Reviewer marked that no target selection is required.</p>
+      {/if}
+
+      {#if check.automaticSelection?.outcome === "applied" && check.provenance === "bridge_ai"}
+        <p class="automation applied">✓ Selected automatically by the AI review.</p>
+      {:else if check.automaticSelection?.outcome === "skipped" && check.selectionStatus === "pending"}
+        <p class="automation skipped">
+          <b>Left for you —</b>
+          {check.automaticSelection.reason || "the AI review recorded no reason."}
+        </p>
       {/if}
 
       <details>
@@ -744,6 +779,13 @@
   .selection-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
   .selection-chip { font-size: 10px; padding: 3px 6px; border-radius: 5px; background: var(--accent-bg); color: var(--accent); }
   .selection-empty { font-size: 10px; color: var(--text-2); margin: 7px 0 0; }
+  .automation-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: 10px; line-height: 1.4; border-radius: 6px; padding: 7px 8px; margin-bottom: 8px; color: var(--warning); background: var(--warning-bg); }
+  .automation-summary.all-done { color: var(--success); background: var(--success-bg); }
+  .automation-summary .tally { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; min-width: 0; }
+  .automation-summary small { color: inherit; opacity: .8; }
+  .automation { font-size: 10px; line-height: 1.4; margin: 7px 0 0; border-radius: 5px; padding: 5px 7px; overflow-wrap: anywhere; }
+  .automation.applied { color: var(--success); background: var(--success-bg); }
+  .automation.skipped { color: var(--warning); background: var(--warning-bg); }
   details { margin-top: 7px; font-size: 10px; color: var(--text-2); }
   summary { cursor: pointer; color: var(--accent); font-weight: 650; }
   details p { line-height: 1.45; margin: 6px 0; white-space: pre-wrap; }

@@ -52,11 +52,27 @@ def native_tc_apply_allowed(review: Any) -> bool:
             return False
         span_quotes = [str(span.get("quote") or "") for span in spans]
         selection_text = [str(row.get("text") or "") for row in selections if isinstance(row, dict)]
-        # The native operation must consume the exact, USFM-verified mapping,
-        # not a different model guess from the verse review pass.
-        exact_rows = selection_text == span_quotes
-        one_verified_phrase = len(span_quotes) == 1 and " ".join(selection_text) == span_quotes[0]
-        return bool(selection_text) and (exact_rows or one_verified_phrase) and not nothing
+        # The native operation must consume the USFM-verified mapping, not a
+        # different model guess from the verse review pass -- but the two work at
+        # different granularities: a Stage 3 target span is the clause the meaning
+        # is realized in ("यीशु मसीह की आत्माके दान के द्वारा,"), while a
+        # translationCore selection is the word tokens inside it ("यीशु", "मसीह").
+        # Requiring the two to be equal (or to join into the whole span) was never
+        # satisfiable, so every cleanly mapped check was refused and left pending.
+        # The real invariant is containment: each proposed token must fall inside
+        # a verified span for this verse. Substring containment is deliberate --
+        # it also admits the compounded/suffixed target forms the review prompt
+        # asks for ("आत्मा" within "आत्माके"). The token itself cannot be
+        # invented: it comes from a supplied bottomWord ID, and
+        # validate_check_selection re-verifies its occurrence against the verse.
+        return (
+            bool(selection_text)
+            and not nothing
+            and all(
+                text and any(text in quote for quote in span_quotes)
+                for text in selection_text
+            )
+        )
     # Legacy no-semantic-state path remains available for not-applicable only;
     # this preserves Beta 13 compatibility without misusing NTS for mapped data.
     return verdict == "not_applicable" and nothing or bool(selections)
