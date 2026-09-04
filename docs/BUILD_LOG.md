@@ -1,6 +1,6 @@
 # Build log: Bridge v0.8.0-beta.14
 
-Updated: 2026-09-03
+Updated: 2026-09-04
 
 > **Start with [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) instead** for an
 > oriented, up-to-date summary of the stack decisions, phase roadmap, and
@@ -3114,3 +3114,49 @@ read the ESV panel at PHP 1:5, and Bridge-to-Logos navigation to PHP 1:5 round-t
 version 3. The Connections-pane flicker was also fixed by retaining the last connected/error
 detail while routine background probes run; failed Bridge-originated publish RPCs now retry.
 
+
+## Stage 9A.4 follow-up (1 of 3) — a running analysis job disappeared on navigation (2026-09-04)
+
+Picks up the "Stage 9A.4 bug fixes" pass (commit `bcb9a7e`), which was
+committed unfinished. That pass made a job's identity content-addressed:
+`AnalysisJobManager._analysis_identity()` now hashes project, scope kind,
+canonical start/end, per-reference target hashes, target revision, source
+resource id/version/hash, provider capability, and a `policyVersions` map
+collected from every Stage 5-8 engine/calibration/confidence policy. That
+digest is the `analysisFingerprint`; `analysisJob.start` requires the caller
+to pass back the fingerprint it resolved and refuses to start when it no
+longer matches. The UI (`AnalysisControls.svelte`) was made generation-guarded
+to match: out-of-order scope lookups are discarded, and `Run analysis` stays
+disabled until the displayed status matches the current selection.
+
+That UI change also added a reactive block calling `changeScope()` whenever
+`chapter`/`verse` changes. `changeScope()` unconditionally set `job = null`
+and cleared the poll timer. But navigation is exactly what a reviewer does
+*while* analysis runs - the QA queue is the work surface, and a
+`CURRENT_BOOK` run is long. Clicking any finding therefore killed the poll
+and dropped the job from the UI: no stage progress, no **Cancel**, and **Run
+analysis** re-enabled - where a second click hit the engine's `Analysis job
+<id> is already running` conflict as a raw error string.
+
+Fixed by separating "the job being tracked" from "the latest job for the
+displayed scope": `isActive()` gates the three places that could replace it
+(`changeScope`, `refreshScopeStatus`, `poll`), so only a terminal job is
+replaced by whatever the newly selected scope reports. `poll()` now also
+works from a captured snapshot, because `refreshScopeStatus()` could
+reassign `job` across its `await` and make the `completed` event fire with
+the wrong (or a null) job.
+
+Regression test: `AnalysisControls.test.ts` › "keeps a running book job
+visible when current navigation changes" - confirmed to fail on `bcb9a7e` at
+the post-navigation assertion with the label and Cancel button gone, and to
+pass with the fix.
+
+While there: the range inputs had moved from `on:change` to `on:input`, so
+every keystroke fired a scope-status RPC, and clearing a field to retype it
+sent an incomplete range that the engine rejects - surfacing "Selected range
+requires start and end references" as a red error mid-typing. `isResolvable()`
+now withholds the request until all four fields are present, and lookups are
+debounced 150ms.
+
+Verified: `npm run check` (0 errors/warnings), `npm run test` (110 passed,
+was 109), `npm run build` (succeeds).

@@ -193,6 +193,43 @@ describe("AnalysisControls", () => {
     expect(screen.getByText("Will analyze: PHP 1:1")).toBeInTheDocument();
   });
 
+  it("keeps a running book job visible when current navigation changes", async () => {
+    const bookStatus: AnalysisScopeStatus = {
+      state: "NOT_ANALYZED", rangeKey: "PHP 1:1..PHP 4:23",
+      displayedReferences: ["PHP 1:1", "PHP 4:23"],
+      canonicalReferences: ["PHP 1:1", "PHP 4:23"], affectedReferences: [],
+      analysisFingerprint: "fingerprint-book", policyVersions: {},
+      latestJob: null, providerCapability: capability,
+    };
+    getScopeStatus.mockImplementation(async (requested) => {
+      if (requested.kind === "CURRENT_BOOK") return bookStatus;
+      const selectedVerse = requested.verse ?? "1";
+      return selectedScope(selectedVerse, selectedVerse);
+    });
+    const runningBookJob = {
+      ...job("RUNNING"), jobId: "job-book", rangeKey: "PHP 1:1..PHP 4:23",
+      analysisFingerprint: "fingerprint-book",
+    };
+    startJob.mockResolvedValue(runningBookJob);
+    jobStatus.mockResolvedValue(runningBookJob);
+
+    const { component } = render(AnalysisControls, { props: { chapter: "1", verse: "3" } });
+    await screen.findByText("Will analyze: PHP 1:3");
+    await fireEvent.change(screen.getByLabelText("Scope"), { target: { value: "CURRENT_BOOK" } });
+    await screen.findByText("Will analyze: PHP 1:1–PHP 4:23");
+    await fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
+    await screen.findByText("Running: PHP 1:1–PHP 4:23");
+
+    // The reviewer opens another finding while the book-wide run continues.
+    const lookupsBeforeNavigation = getScopeStatus.mock.calls.length;
+    await component.$set({ chapter: "1", verse: "5" });
+    await waitFor(() =>
+      expect(getScopeStatus.mock.calls.length).toBeGreaterThan(lookupsBeforeNavigation));
+    expect(screen.getByText("Running: PHP 1:1–PHP 4:23")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run analysis" })).toBeDisabled();
+  });
+
   it("invalidates and resolves again when current navigation changes", async () => {
     getScopeStatus.mockImplementation(async (requested) => {
       const selectedVerse = requested.verse ?? "1";

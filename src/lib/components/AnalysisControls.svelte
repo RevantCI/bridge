@@ -38,6 +38,7 @@
   let starting = false;
   let error = "";
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let destroyed = false;
   let mounted = false;
   let statusGeneration = 0;
@@ -66,6 +67,24 @@
     });
   }
 
+  // A queued/running job outlives the selection that started it: the reviewer
+  // navigates the queue (or a book-scoped run keeps going) while it works. Only
+  // a terminal job may be replaced by whatever the newly selected scope reports.
+  function isActive(snapshot: AnalysisJobSnapshot | null): boolean {
+    return !!snapshot && !TERMINAL.has(snapshot.overallStatus);
+  }
+
+  // A half-typed range ("From verse" cleared to retype) is not an error the
+  // reviewer should see - the engine rejects it, so never ask.
+  function isResolvable(scope: AnalysisScope): boolean {
+    if (scope.kind === "CURRENT_PASSAGE") return !!scope.verse;
+    if (scope.kind === "SELECTED_RANGE") {
+      return [scope.startChapter, scope.startVerse, scope.endChapter, scope.endVerse]
+        .every((value) => !!value && value.trim() !== "");
+    }
+    return true;
+  }
+
   function displayRange(rangeKey: string): string {
     const [start, end] = rangeKey.split("..");
     if (!end || start === end) return start;
@@ -80,7 +99,7 @@
   async function refreshScopeStatus(
     scope: AnalysisScope = requestedScope(),
   ): Promise<AnalysisScopeStatus | null> {
-    if (scope.kind === "CURRENT_PASSAGE" && !scope.verse) return null;
+    if (!isResolvable(scope)) return null;
     const generation = ++statusGeneration;
     const signature = scopeSignature(scope);
     loadingState = true;
@@ -91,9 +110,9 @@
           || signature !== scopeSignature(requestedScope())) return null;
       scopeStatus = resolved;
       statusSelectionSignature = signature;
-      job = resolved.latestJob;
-      if (job?.overallStatus === "RUNNING" || job?.overallStatus === "QUEUED") {
-        schedulePoll();
+      if (!isActive(job)) {
+        job = resolved.latestJob;
+        if (isActive(job)) schedulePoll();
       }
       dispatch("scopeStatus", resolved);
       return resolved;
@@ -112,17 +131,20 @@
   }
 
   async function poll(): Promise<void> {
-    if (!job) return;
+    const tracked = job;
+    if (!tracked) return;
     try {
-      job = await bridge.analysisJobStatus(job.jobId);
-      if (!TERMINAL.has(job.overallStatus)) {
+      const polled = await bridge.analysisJobStatus(tracked.jobId);
+      if (destroyed || job?.jobId !== tracked.jobId) return;
+      job = polled;
+      if (!TERMINAL.has(polled.overallStatus)) {
         schedulePoll();
         return;
       }
       const updated = await refreshScopeStatus();
-      if (updated && (job.overallStatus === "COMPLETED"
-          || job.overallStatus === "COMPLETED_WITH_WARNINGS")) {
-        dispatch("completed", { job, scopeStatus: updated });
+      if (updated && (polled.overallStatus === "COMPLETED"
+          || polled.overallStatus === "COMPLETED_WITH_WARNINGS")) {
+        dispatch("completed", { job: polled, scopeStatus: updated });
       }
     } catch (cause) {
       error = String(cause);
@@ -189,14 +211,22 @@
 
   function changeScope(): void {
     statusGeneration += 1;
-    if (pollTimer) {
-      clearTimeout(pollTimer);
-      pollTimer = null;
+    if (!isActive(job)) {
+      if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+      job = null;
     }
-    job = null;
     scopeStatus = null;
     statusSelectionSignature = "";
-    void refreshScopeStatus();
+    error = "";
+    // Typing a range fires per keystroke; resolve the settled value once.
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      if (!destroyed) void refreshScopeStatus();
+    }, 150);
   }
 
   function navigationChanged(): void {
@@ -233,6 +263,7 @@
   onDestroy(() => {
     destroyed = true;
     if (pollTimer) clearTimeout(pollTimer);
+    if (refreshTimer) clearTimeout(refreshTimer);
   });
 </script>
 
