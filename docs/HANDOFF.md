@@ -1507,6 +1507,28 @@ Tests: `engine/tests/test_correction_stage9b0.py`, 55 passing.
 5. **The Stage 9A review UI still has not had a human click-through** on a
    populated queue (carried over from the previous §37).
 
+## Queued change that touches the §39 boundary
+
+Issue **#28** (tN/tW auto-apply above 85% confidence) is filed and approved in
+principle, and carries one decision still open: whether "confidence alone
+decides" also removes the rule that AI never overwrites an imported or
+human-made selection.
+
+That rule is not an implementation detail. §39 lists *silently overwrite
+human-approved work* in the hard do-not list and *protect human decisions* in
+the do list, and it is currently enforced in `save_check_selection()` with
+`test_basic_ai_never_overwrites_a_human_selection` as its regression cover.
+
+Dropping the evidence / Stage 3 mapping / contradictory-QA **policy** gates
+does not conflict with §39. Dropping the **overwrite protection** does. Anyone
+picking up #28 should treat that as a governance decision needing an explicit
+call, not a detail to settle while coding. Recorded on the issue as well.
+
+Note that #28 concerns the `tc_ai_bridge` AI review path (tN/tW selections),
+not the Stage 5-9 passage-semantic pipeline — but it moves the same
+human-versus-AI authority boundary this document governs, which is why it is
+noted here.
+
 ## Scope reminder for 9B.1
 
 9B.1 is **wording generation only**. Do not implement correction UI,
