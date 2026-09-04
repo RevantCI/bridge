@@ -3407,3 +3407,163 @@ line, the applied marker plus tally, the human-takeover case, and the unchanged
 Verified: `pytest tests/ greek_room_engine/tests/ -q` (598 passed),
 `npm run check` (0/0), `npm run test` (127 passed), `npm run build`.
 Not verified in the running desktop app.
+
+## Stage 9B.0 — correction schema/API design and dependency repair (2026-09-04)
+
+Foundation only. No wording generation, no correction UI, no Scripture
+application, no post-correction rerun — those are 9B.1 and later. The goal was
+to make the backend safe enough that 9B.1 can build on it.
+
+### Safety boundary
+
+`test_stage_9b0_never_alters_scripture` hashes every chapter JSON, the
+preserved imported USFM and all translationCore alignment data, runs
+everything this stage can do (eligibility over every finding in the fixture,
+current-text validation, saving a v2 proposal, both read APIs), and asserts
+the digests are byte-identical. `[Create Correction Proposal]` is not exposed
+in the UI; no frontend file was touched.
+
+### CorrectionProposal v2 (`proposalSchemaVersion` 2)
+
+Added alongside v1, which is preserved. New `AffectedTargetSpan` carries the
+exact half-open code-point span plus `targetTextRevision`/`targetContentHash`;
+`CorrectionIntent` carries `failedDimension` (reusing `CoverageDimension` —
+no duplicate polarity/quantity enums), observed vs required meaning, and the
+affected source units. `proposedText` is deliberately allowed to be empty: a
+9B.0 proposal states *what must change*, not *how to say it*.
+
+`is_applicable` is structural only — it says the record carries the
+coordinates an application needs. It is not authorization; eligibility,
+current-text validation and human approval are all separate.
+
+### Migration v11
+
+`ALTER TABLE` adds `proposal_schema_version`, `verification_status`,
+`applicable` (default 0), plus `correction_application_intents` and a
+finding-lookup index. Pre-v11 proposals predate the exact-span contract, so
+they are stamped schema v1 and stay `applicable=0`: **Bridge must not infer a
+span retroactively**, since a guessed span is exactly the silent Scripture
+damage this stage exists to prevent.
+`test_v10_to_v11_migration_preserves_legacy_proposals` builds a real v10
+database with a v1 proposal and asserts the upgrade, the pre-migration backup,
+`recovery_check().ok`, preserved payload history, and `applicable is False`.
+
+Widening the table also broke the positional `INSERT INTO correction_proposals
+VALUES(?…)` — now column-named, so the next migration cannot repeat it.
+
+### Eligibility (`correction_eligibility.py`)
+
+One authority, `CorrectionEligibilityService.evaluate(finding_id)`. Requires
+CONFIRMED_TRANSLATION_ERROR + HUMAN_APPROVED + ACTIVE, a finding that still
+matches current Scripture, usable location evidence, no human-rejected
+mapping, no meaning overridden to PRESERVED, no unresolved resource conflict,
+and no conflicting proposal. Blocks UNRESOLVED / ACCEPTABLE_TRANSLATION /
+FALSE_POSITIVE / NEEDS_DISCUSSION / stale / AMBIGUOUS / SEARCH_INCOMPLETE /
+UNSUPPORTED_ANALYSIS.
+
+`NOT_LOCATED` is deliberately **not** in the unusable set: a confirmed genuine
+omission is a NOT_LOCATED source unit, and inserting text is exactly what
+should be able to fix it.
+
+Returns structured reasons, never a bare boolean, and accumulates every
+blocker rather than short-circuiting — a reviewer clearing one blocker only to
+meet the next is a bad loop.
+
+### Current-text validation
+
+Stage 9A's `_check_target_hashes` compares a submitted hash against the
+finding's own snapshot, which only proves the reviewer saw what the finding
+recorded — it cannot detect a later edit. Eligibility additionally re-reads the
+authoritative chapter JSON via `current_target_text()` and compares revision,
+content hash and exact span text. Exact comparison only; no fuzzy matching
+anywhere on this path.
+
+### Dependency graph repair
+
+The record-type→table map existed as **three** hand-maintained copies. Stage 8
+added QA_RUN edges and taught only one, so every project that had run a QA
+audit failed recovery on its next open and went read-only. Now one
+`RECORD_DEPENDENCY_TABLES` constant, with `RECORD_DEPENDENCY_ANCHOR_TYPES` for
+legitimate upstream-only anchors, and
+`test_every_writable_dependency_type_is_registered` scans the repository
+source for edge literals and asserts every one is known.
+
+Edges added: `LOCATION_RELATIONSHIP → LOCATION_RUN` (missing entirely — a
+re-run staled the run but left every individual relationship looking current);
+`MEANING_ASSESSMENT → LOCATION_RELATIONSHIP`; `QA_FINDING →
+MEANING_ASSESSMENT / SEMANTIC_UNIT / SEMANTIC_RELATIONSHIP`; and the full
+`CORRECTION_PROPOSAL → QA_FINDING / TARGET_REFERENCE / SEMANTIC_UNIT /
+MEANING_ASSESSMENT / SEMANTIC_RELATIONSHIP / EVIDENCE_RECORD` set.
+
+**Latent bug the new invariant test caught:** `_stale_generic_dependencies`
+unconditionally did `revision=revision+1`, but `source_inventory_runs` has no
+`revision` column. It never fired only because nothing currently registers that
+type downstream — the first edge that did would have raised mid-propagation and
+aborted the whole invalidation, leaving downstream records falsely *current*.
+Propagation is now schema-aware and always propagates STALE.
+
+`recovery_check` also now reports an unrecognized *upstream* type instead of
+skipping it silently — the same drift class in the other direction.
+
+### record_correction_applied neutralized
+
+It used to flip the finding straight to CORRECTED, making the strongest claim
+in the system a side effect of writing bytes, with no evidence the edit
+achieved anything. Renamed to `record_correction_application_metadata`, with
+the old name kept as a thin alias (deleting it would lose callers; keeping it
+as-is would preserve the misreading). It now stamps `applied_*`, moves the
+proposal to `verificationStatus = PENDING`, and marks the finding STALE —
+historical, pending re-analysis — while leaving its disposition and review
+status exactly as the human set them.
+
+### Verification model
+
+`VerificationStatus` = NOT_RUN / PENDING / PASSED / FAILED / UNCERTAIN,
+independent of `QaDisposition`. The invariant **applied ≠ corrected** is
+covered three ways: application leaves the disposition alone, the deprecated
+name cannot mint CORRECTED, and PASSED alone still does not produce CORRECTED.
+
+### Application transaction model (design only)
+
+`CorrectionApplicationIntent` + `CorrectionApplicationState` and the
+`correction_application_intents` table. Nothing writes Scripture through it.
+`APPLIED_SCRIPTURE` is kept distinct from `COMPLETED` on purpose: the window
+between "Scripture written" and "bookkeeping finished" is exactly where a crash
+needs recovery, and collapsing them makes that state unrepresentable.
+
+### Canonical edit path
+
+`test_correction_modules_contain_no_scripture_writer` asserts the correction
+module contains no writer at all.
+`test_apply_scripture_edit_still_lacks_the_strict_preconditions` pins the gap:
+`apply_scripture_edit()` takes no `expected_target_revision`,
+`expected_target_content_hash` or `expected_old_text`, so it cannot yet fail
+closed on a concurrent edit. The test fails once those land, which is 9B.3's
+signal to update it.
+
+### Span contract
+
+Half-open Unicode **code-point** offsets `[start, end)`; `[n, n)` is valid and
+is how a genuine omission is repaired. Fixtures cover Tamil combining marks,
+Hebrew points, Greek diacritics and supplementary-plane characters — the last
+being the one that silently breaks a JavaScript caller, where those characters
+are one code point here and two UTF-16 units there.
+
+### Tests and gates
+
+`tests/test_correction_stage9b0.py` — 55 tests, all passing.
+
+Two pre-existing tests updated, both by the spec's own requirements:
+`test_correction_application_requires_human_and_stales_dependencies` asserted
+the old CORRECTED behaviour and now asserts the new invariant; two Stage 9A
+tests pinned `DATABASE_SCHEMA_VERSION == 10`.
+
+`npm run check` (0/0), `npm run test` (132), `npm run build`,
+`git diff --check` — all clean.
+
+**Rust gates not run:** `cargo check` fails in `tauri_build::try_build` with
+`PermissionDenied` because a `cargo run --no-default-features` (a `tauri dev`
+session) is live and holds the sidecar binaries. Stage 9B.0 touched no Rust,
+`.rs`, or `tauri.conf.json` file, so this is contention with a running app, not
+a regression — but `cargo check`/`cargo test` still need a run once that dev
+session is stopped.

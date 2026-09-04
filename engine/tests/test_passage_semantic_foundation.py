@@ -409,13 +409,21 @@ def test_correction_application_requires_human_and_stales_dependencies(tmp_path:
         repo.record_correction_applied(
             "proposal-1", actor_type="SYSTEM", applied_target_revision="rev-2", expected_revision=1
         )
+    before = repo.qa_finding("qa-1")
     repo.record_correction_applied(
         "proposal-1", actor_type="HUMAN", applied_target_revision="rev-2", expected_revision=1
     )
     assert repo.correction_proposal("proposal-1")["appliedTargetRevision"] == "rev-2"
-    assert repo.qa_finding("qa-1")["lifecycleStatus"] == "STALE"
-    assert repo.qa_finding("qa-1")["reviewStatus"] == "HUMAN_APPROVED"
     assert repo.lexical_solution("solution-dependent")["lifecycleStatus"] == "STALE"
+
+    after = repo.qa_finding("qa-1")
+    # Stage 9B.0: applying a correction is bookkeeping, not a verdict. The
+    # finding goes STALE because the text under it changed and must be
+    # re-analysed -- but the human's own disposition and review status are
+    # theirs, and application must not touch either.
+    assert after["lifecycleStatus"] == "STALE"
+    assert after["qaDisposition"] == before["qaDisposition"] != "CORRECTED"
+    assert after["reviewStatus"] == before["reviewStatus"]
 
 
 def test_revision_cas_rejects_stale_write(tmp_path: Path) -> None:

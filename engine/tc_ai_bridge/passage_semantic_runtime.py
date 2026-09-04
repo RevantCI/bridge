@@ -56,6 +56,7 @@ from .target_semantic_inventory import TargetSemanticInventory
 from .semantic_location import SemanticLocationEngine
 from .meaning_analysis import MeaningAnalysisEngine
 from .qa_audit import QaAuditEngine
+from .correction_eligibility import CorrectionEligibilityService
 from .qa_review import QaReviewService
 
 
@@ -513,6 +514,7 @@ class PassageSemanticRuntime:
         self.meaning_analysis = MeaningAnalysisEngine(self)
         self.qa_audit = QaAuditEngine(self)
         self.qa_review = QaReviewService(self)
+        self.correction_eligibility = CorrectionEligibilityService(self)
         self._migrate_legacy_companions()
 
     def _identity_fingerprint(self) -> str:
@@ -1334,6 +1336,18 @@ class PassageSemanticRuntime:
 
     def qa_review_add_note(self, entity_type: str, entity_id: str, note: str) -> dict[str, Any]:
         return self.qa_review.add_note(entity_type, entity_id, note)
+
+    def correction_get_eligibility(self, finding_id: str) -> dict[str, Any]:
+        return self.correction_eligibility.evaluate(finding_id).to_dict()
+
+    def correction_get_proposal(self, proposal_id: str) -> dict[str, Any]:
+        return self.repository.correction_proposal(proposal_id)
+
+    def correction_list_for_finding(self, finding_id: str) -> dict[str, Any]:
+        return {
+            "findingId": finding_id,
+            "proposals": self.repository.correction_proposals_for_finding(finding_id),
+        }
 
     def semantic_review_decide_location(
         self, relationship_id: str, decision: str, **options: Any,

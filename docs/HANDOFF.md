@@ -1426,45 +1426,105 @@ At the end of Stage 9A:
 
 ---
 
-# 37. NEXT TASK — Stage 9B: Correction Generation and Application
+# 37. NEXT TASK — Stage 9B.1: Correction Wording Generation
 
-**2026-09-04 Stage 9A.4 acceptance correction:** the newly selected analysis
-scope was running correctly; the defect was a project-wide QA queue refresh.
-Schema v10 now indexes findings by canonical source/target semantic-unit
-scope, and `qaReview.getQueue` filters that scope in the repository before
-counting, ordering and pagination. PHP 1:1 and PHP 1:3-1:6 remain persisted
-but display separately; switching back restores the earlier human decision,
-note and history. Cross-verse source ownership is preserved. Source, Rust,
-frontend, packaging and installed-sidecar acceptance pass. The unrelated
-frozen smoke duplicate-classification assertion is still open. **Do not start
-Stage 9B without explicit approval.**
+**Stage 9B.0 (schema/API design and dependency repair) is DONE** as of
+2026-09-04. It was explicitly scoped to the backend foundation and stopped
+there. **Stage 9B.1 must not begin until the 9B.0 report is reviewed and
+explicitly approved.**
 
-**Stage 9A and the Stage 9A.4 orchestration follow-up are done** (see §35): a reviewer can open
-Alignment Review, work the QA queue, inspect a finding's evidence in layers,
-and record one of four dispositions, with no route to changing Scripture.
-**Stage 9B has not been implemented.** Do not restart Stages 1–9A or
-second-guess their outputs without evidence that repository reality
-disagrees with this document (check first, then report the conflict rather
-than silently changing course — see §39).
+## What 9B.0 delivered
 
-The prerequisite analysis-population gap is closed by Stage 9A.4. One manual
-gate remains worth completing before building on this surface:
+Full engineering narrative in [`BUILD_LOG.md`](BUILD_LOG.md) under "Stage 9B.0
+— correction schema/API design and dependency repair". Summary:
 
-1. **The Stage 9A review UI has not had a human click-through** on a
-   populated queue. Worth doing before building on top of it.
+- **Nothing in this stage can alter Scripture.**
+  `test_stage_9b0_never_alters_scripture` hashes chapter JSON, preserved
+  imported USFM and alignment data and asserts they are byte-identical after
+  everything 9B.0 can do. No frontend file was touched; `[Create Correction
+  Proposal]` is not exposed.
+- **`CorrectionProposalV2`** (`proposalSchemaVersion` 2) alongside preserved
+  v1, answering §37's old open question 2. Carries `CorrectionIntent`
+  (`failedDimension` reusing `CoverageDimension`, observed vs required
+  meaning, affected source units) and `AffectedTargetSpan` (exact half-open
+  code-point span + `targetTextRevision`/`targetContentHash`). `proposedText`
+  may be empty **by design** — 9B.0 records *what must change*, 9B.1 decides
+  *how to say it*.
+- **Schema v11.** Legacy v1 proposals stay readable with history intact,
+  stamped schema v1 and `applicable=0`. Bridge does **not** infer spans
+  retroactively; a legacy proposal must be explicitly recreated against
+  current text before it can ever be applied.
+- **`correction_eligibility.py`** — one authoritative
+  `evaluate(finding_id)`. The frontend must never re-derive this. Returns
+  structured reasons and accumulates every blocker rather than
+  short-circuiting. `NOT_LOCATED` is deliberately *not* blocked: a confirmed
+  genuine omission is exactly what a correction should be able to fix.
+- **Current-text validation** now re-reads authoritative chapter JSON, not
+  just the finding's snapshot (§37 old open question 4 is closed for the
+  read path). Exact comparison only — no fuzzy matching anywhere.
+- **Dependency graph repaired.** The record-type→table map was three
+  hand-maintained copies; now one `RECORD_DEPENDENCY_TABLES` constant with a
+  source-scanning invariant test. Added the missing `LOCATION_RELATIONSHIP →
+  LOCATION_RUN` edge plus meaning/finding/proposal edges. The invariant test
+  caught a latent crash in `_stale_generic_dependencies` (see BUILD_LOG).
+- **`record_correction_applied` neutralized.** It used to flip a finding
+  straight to `CORRECTED`. Renamed to
+  `record_correction_application_metadata` (old name kept as an alias); it
+  now records metadata, sets verification `PENDING`, marks the finding STALE,
+  and leaves the human's disposition alone.
+- **`VerificationStatus`** (NOT_RUN/PENDING/PASSED/FAILED/UNCERTAIN),
+  independent of `QaDisposition`. Invariant: **applied ≠ corrected**.
+  `CORRECTED` stays unreachable until a later stage supplies
+  `verificationStatus == PASSED` *plus* explicit human acknowledgement.
+- **`CorrectionApplicationIntent`** + `correction_application_intents` table —
+  design/schema groundwork only, nothing writes Scripture through it.
+  `APPLIED_SCRIPTURE` is deliberately distinct from `COMPLETED`.
+- **API:** `correction.getEligibility`, `correction.getProposal`,
+  `correction.listForFinding` — read-only. **`correction.applyProposal` does
+  not exist and must not be added before 9B.3.**
 
-Stage 9 as a whole combines everything Stages 5–8 produced into an actual
-human workflow; 9A delivered the review half, and 9B is the correction
-half:
+Tests: `engine/tests/test_correction_stage9b0.py`, 55 passing.
+
+## Blockers to clear before / during 9B.1
+
+1. **Rust gates unverified for 9B.0.** `cargo check` / `cargo test` could not
+   run: a live `tauri dev` session held the sidecar binaries and
+   `tauri_build::try_build` failed with `PermissionDenied`. Stage 9B.0 touched
+   no `.rs` or `tauri.conf.json` file, so this is contention rather than a
+   regression — but run both once no dev session is active.
+2. **`apply_scripture_edit()` has no strict mode.** It takes no
+   `expected_target_revision`, `expected_target_content_hash` or
+   `expected_old_text`, so it cannot fail closed on a concurrent edit.
+   `test_apply_scripture_edit_still_lacks_the_strict_preconditions` pins this
+   and will fail the moment those parameters land — that is 9B.3's signal to
+   update it. **Required before 9B.3, not before 9B.1.**
+3. **No wording-generation contract yet.** v2 accepts an empty
+   `proposedText`. 9B.1 must define how an intent becomes text, what evidence
+   justifies the wording, and how a human edits it — without weakening the
+   exact-span contract.
+4. **Resource-conflict rule is coarse.** Any entry in
+   `conflictingEvidenceIds` blocks eligibility. If some conflicts are
+   acceptable to correct through, that policy needs deciding.
+5. **The Stage 9A review UI still has not had a human click-through** on a
+   populated queue (carried over from the previous §37).
+
+## Scope reminder for 9B.1
+
+9B.1 is **wording generation only**. Do not implement correction UI,
+Scripture application, or post-correction rerun — those are 9B.2/9B.3/9B.4.
+The exact-span contract (half-open Unicode code-point offsets, `[n, n)` valid
+for insertion) is fixed; do not reinterpret it as UTF-16 or grapheme offsets.
+
+The Stage 9B pipeline as a whole remains:
 
 ```text
 confirmed issue
   ↓
-suggest correction
+suggest correction            ← 9B.1
   ↓
-show current/proposed text + evidence
+show current/proposed text + evidence   ← 9B.2
   ↓
-human apply/edit/reject
+human apply/edit/reject       ← 9B.3
   ↓
 affected records STALE
   ↓
@@ -1472,39 +1532,21 @@ realign
   ↓
 rerun meaning
   ↓
-rerun QA
+rerun QA                      ← 9B.4
 ```
 
-Known open questions to resolve before/while implementing Stage 9 (not
-exhaustive — this is a starting list, not a finalized spec the way §1–28
-are):
+Still-open questions carried forward from before 9B.0:
 
-1. **QaFinding UI path.** Decide whether `passage_semantic_models.QaFinding`
-   gets normalized into `greek_room_engine.models.finding.QaFinding` for
-   ReviewPanel visibility, gets its own dedicated review surface, or both
-   remain separate with Stage 9 building a new panel. This is a real,
-   deliberate fork (§34) — not an oversight to silently paper over.
-2. **CorrectionProposal construction.** The model/table have existed since
-   Stage 3 (§19) and are still untouched. Stage 9 is very likely where they
-   finally get populated — `qaFindingId`, `currentText`/`proposedText`,
-   evidence links, and the human apply/reject transition
-   (`appliedTargetRevision`/`appliedBy`/`appliedAt`).
-3. **Human confirmation transitions.** `POSSIBLY_MISSING → MISSING` and
-   `POSSIBLY_UNSUPPORTED → UNSUPPORTED` (and the corresponding
-   `POSSIBLE_OMISSION → OMISSION`/`POSSIBLE_ADDITION → ADDITION` finding
-   promotions, if the product chooses to persist final labels) are
-   currently only reachable via `update_qa_disposition`'s `qaDisposition`
-   field, not via a dedicated coverage/support-status promotion API. Decide
-   whether Stage 9 needs one.
-4. **Applying a correction must stale dependent analysis** — the
-   `record_dependencies` cascade (used by every stage since Stage 4) is
-   almost certainly the right mechanism; extending it for target-text edits
-   made through a correction (as opposed to an out-of-band manual edit,
-   which already cascades correctly per Stage 7/8's own tests) needs
-   verification.
-5. Preserve existing Scripture and translationCore behavior. Continue
-   test-first and stop at stage boundaries — do not fold Stage 9 into a
-   larger "finish everything" pass.
+1. **QaFinding UI path.** Whether `passage_semantic_models.QaFinding` gets
+   normalized into `greek_room_engine.models.finding.QaFinding` for
+   ReviewPanel visibility, gets its own surface, or both stay separate. A
+   real, deliberate fork (§34) — not an oversight to paper over.
+2. **Human confirmation transitions.** `POSSIBLY_MISSING → MISSING` and
+   `POSSIBLY_UNSUPPORTED → UNSUPPORTED` are reachable only via
+   `update_qa_disposition`'s promotion path, not a dedicated status-promotion
+   API. Decide whether Stage 9B needs one.
+3. Preserve existing Scripture and translationCore behavior. Continue
+   test-first and stop at stage boundaries.
 
 If repository reality conflicts with this document, report the conflict
 instead of silently changing assumptions (§39).

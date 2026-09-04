@@ -23,6 +23,8 @@ from .passage_semantic_models import (
     ActorType,
     Cardinality,
     CorrectionProposal,
+    CorrectionProposalV2,
+    VerificationStatus,
     DependencyRelation,
     EvidenceRecord,
     Exportability,
@@ -45,7 +47,53 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 10
+DATABASE_SCHEMA_VERSION = 11
+
+# The one authoritative record_type -> table map for the dependency graph.
+#
+# This existed as three hand-maintained copies (stale propagation, recovery
+# integrity checking, and the per-call table lookups). Stage 8 added QA_RUN
+# edges and taught only one of them, so every project that had run a QA audit
+# failed recovery on its next open and put itself into read-only mode. A type
+# that is missing here is silently un-propagated rather than loudly broken,
+# which is why RECORD_DEPENDENCY_TABLES is now a single constant and
+# test_dependency_graph_invariants asserts every writable type appears in it.
+RECORD_DEPENDENCY_TABLES: dict[str, str] = {
+    "PASSAGE_RECORD": "passage_records",
+    "EVIDENCE_RECORD": "evidence_records",
+    "SEMANTIC_RELATIONSHIP": "semantic_relationships",
+    "COVERAGE_ACCOUNT": "coverage_accounts",
+    "QA_FINDING": "qa_findings",
+    "LEXICAL_SOLUTION": "lexical_solutions",
+    "CORRECTION_PROPOSAL": "correction_proposals",
+    "EXPORTABILITY": "exportability_records",
+    "SOURCE_INVENTORY": "source_inventory_runs",
+    "TARGET_INVENTORY": "target_inventory_runs",
+    "LOCATION_RUN": "semantic_location_runs",
+    "LOCATION_RELATIONSHIP": "semantic_location_relationships",
+    "MEANING_RUN": "meaning_analysis_runs",
+    "MEANING_ASSESSMENT": "meaning_assessments",
+    "QA_RUN": "qa_audit_runs",
+    "SEMANTIC_UNIT": "semantic_units",
+}
+
+# Upstream-only dependency anchors. They are legitimate `depends_on_type`
+# values with no record table of their own -- a target reference is a
+# coordinate and a source resource is a content hash, not stored records -- so
+# recovery must not report them as unknown, and stale propagation has nothing
+# to walk past them. Their ids come from target_dependency_id() and
+# source_dependency_id(); anything else appearing upstream is real drift.
+RECORD_DEPENDENCY_ANCHOR_TYPES = frozenset({"TARGET_REFERENCE", "SOURCE_RESOURCE"})
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> frozenset[str]:
+    """Column names for one table.
+
+    Deliberately uncached: it is asked only during stale propagation, and a
+    process-wide cache would answer for the wrong schema while a database is
+    part-way through a migration.
+    """
+    return frozenset(row[1] for row in conn.execute(f"PRAGMA table_info({table})"))
 
 # Review priority, not alphabetical order — see _MIGRATION_V8.
 _SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
@@ -755,6 +803,57 @@ WHERE typeof(refs.value)='text' AND length(trim(refs.value)) > 0;
 """
 
 
+_MIGRATION_V11 = r"""
+ALTER TABLE correction_proposals ADD COLUMN proposal_schema_version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE correction_proposals ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'NOT_RUN';
+ALTER TABLE correction_proposals ADD COLUMN applicable INTEGER NOT NULL DEFAULT 0;
+
+-- Every pre-v11 proposal predates the exact-span contract: it has no code-point
+-- offsets, no target content hash, and no recorded original span text. Bridge
+-- must not infer any of those retroactively -- a guessed span is exactly the
+-- kind of silent Scripture damage this stage exists to prevent. So legacy rows
+-- keep their history and stay readable, are stamped as schema v1, and remain
+-- applicable=0 until a human explicitly recreates them against current text.
+UPDATE correction_proposals
+SET payload_json = json_set(
+        json_set(
+            json_set(payload_json, '$.proposalSchemaVersion', 1),
+            '$.verificationStatus', 'NOT_RUN'
+        ),
+        '$.legacyApplicabilityBlocked', json('true')
+    )
+WHERE json_extract(payload_json, '$.proposalSchemaVersion') IS NULL;
+
+CREATE INDEX ix_correction_proposal_finding
+ON correction_proposals(qa_finding_id, lifecycle_status, review_status);
+
+-- Stage 9B.0 defines this table; nothing writes Scripture through it yet.
+-- Each row is one recoverable attempt to apply a proposal, kept separate from
+-- the proposal so a crash between "Scripture written" and "bookkeeping done"
+-- is a representable, resumable state rather than an ambiguous one.
+CREATE TABLE correction_application_intents (
+    application_id TEXT PRIMARY KEY,
+    proposal_id TEXT NOT NULL REFERENCES correction_proposals(id),
+    project_id TEXT NOT NULL,
+    expected_correction_revision INTEGER NOT NULL CHECK(expected_correction_revision >= 1),
+    expected_finding_revision INTEGER NOT NULL CHECK(expected_finding_revision >= 1),
+    expected_target_revision TEXT NOT NULL,
+    expected_original_text TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN (
+        'PREPARED','APPLYING','APPLIED_SCRIPTURE','INVALIDATED','COMPLETED','FAILED','RECOVERY_REQUIRED'
+    )),
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    failure_code TEXT NOT NULL DEFAULT '',
+    failure_detail TEXT NOT NULL DEFAULT '',
+    recovery_required INTEGER NOT NULL DEFAULT 0,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX ix_correction_application_proposal
+ON correction_application_intents(proposal_id, state);
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -827,6 +926,10 @@ class FoundationRepository:
             if current < 10:
                 self._backup_before_migration(conn, current, 10)
                 self._apply_migration(conn, 10, _MIGRATION_V10)
+                current = 10
+            if current < 11:
+                self._backup_before_migration(conn, current, 11)
+                self._apply_migration(conn, 11, _MIGRATION_V11)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -1690,6 +1793,13 @@ class FoundationRepository:
                 [
                     ("LOCATION_RUN", run_id, "SOURCE_INVENTORY", source_inventory_id),
                     ("LOCATION_RUN", run_id, "TARGET_INVENTORY", target_inventory_id),
+                    # Each relationship depends on the run that produced it.
+                    # Without this edge a re-run staled the run but left every
+                    # individual location relationship looking current, so
+                    # downstream meaning assessments and QA findings anchored to
+                    # them never learned their evidence had moved.
+                    *[("LOCATION_RELATIONSHIP", item["id"], "LOCATION_RUN", run_id)
+                      for item in relationships],
                 ],
             )
             conn.commit()
@@ -1786,6 +1896,14 @@ class FoundationRepository:
                     ("MEANING_RUN", run_id, "LOCATION_RUN", location_run_id),
                     *[("MEANING_ASSESSMENT", item["id"], "MEANING_RUN", run_id)
                       for item in assessments],
+                    # A meaning assessment is *about* one located relationship.
+                    # Registering that directly is what makes a human rejecting
+                    # a mapping stale the meaning built on it -- going only via
+                    # the run meant a per-relationship decision propagated nowhere.
+                    *[("MEANING_ASSESSMENT", item["id"], "LOCATION_RELATIONSHIP",
+                       str(item.get("semanticLocationRelationshipId") or ""))
+                      for item in assessments
+                      if str(item.get("semanticLocationRelationshipId") or "")],
                 ],
             )
             conn.commit()
@@ -1929,6 +2047,23 @@ class FoundationRepository:
                 for account_id in finding.get("coverageAccountIds", ()):
                     dependency_edges.append(
                         ("QA_FINDING", finding["id"], "COVERAGE_ACCOUNT", account_id)
+                    )
+                # A finding rests on the specific meaning assessments and
+                # semantic units it cites, not merely on the run as a whole.
+                # Registering only the run meant a human rejecting one mapping,
+                # or overriding one meaning, left every finding built on it
+                # looking current -- and therefore still correction-eligible.
+                for assessment_id in finding.get("meaningAssessmentIds", ()):
+                    dependency_edges.append(
+                        ("QA_FINDING", finding["id"], "MEANING_ASSESSMENT", assessment_id)
+                    )
+                for unit_id in finding.get("sourceSemanticUnitIds", ()):
+                    dependency_edges.append(
+                        ("QA_FINDING", finding["id"], "SEMANTIC_UNIT", unit_id)
+                    )
+                for relationship_id in finding.get("semanticRelationshipIds", ()):
+                    dependency_edges.append(
+                        ("QA_FINDING", finding["id"], "SEMANTIC_RELATIONSHIP", relationship_id)
                     )
             conn.executemany(
                 "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)", dependency_edges,
@@ -2791,16 +2926,86 @@ class FoundationRepository:
             self._append_review(conn, "QA_FINDING", finding_id, row["review_status"], review.value, row["lifecycle_status"], row["lifecycle_status"], row["qa_disposition"], disposition.value, ActorType.HUMAN, reviewer, expected_revision, note)
             conn.commit()
 
+    # Columns are named explicitly: v11 widened this table, and a positional
+    # INSERT would break on every schema addition after it.
+    _CORRECTION_PROPOSAL_COLUMNS = (
+        "id,project_id,qa_finding_id,current_target_revision,applied_target_revision,"
+        "policy_binding_id,review_status,lifecycle_status,revision,payload_json,"
+        "proposal_schema_version,verification_status,applicable"
+    )
+
     def save_correction_proposal(self, proposal: CorrectionProposal) -> None:
+        """Write a legacy v1 proposal. Never applicable -- it carries no exact span."""
         policy_id = self._ensure_policy(proposal.policy_binding); payload = to_wire(proposal)
+        payload.setdefault("proposalSchemaVersion", 1)
+        payload.setdefault("verificationStatus", VerificationStatus.NOT_RUN.value)
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO correction_proposals VALUES(?,?,?,?,?,?,?,?,?,?)",
+                f"INSERT INTO correction_proposals({self._CORRECTION_PROPOSAL_COLUMNS}) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (proposal.id, proposal.project_id, proposal.qa_finding_id, proposal.current_target_revision,
                  proposal.applied_target_revision, policy_id, proposal.review_status.value, proposal.lifecycle_status.value,
-                 proposal.revision, json.dumps(payload, ensure_ascii=False)),
+                 proposal.revision, json.dumps(payload, ensure_ascii=False),
+                 1, VerificationStatus.NOT_RUN.value, 0),
             )
             conn.commit()
+
+    def save_correction_proposal_v2(self, proposal: CorrectionProposalV2) -> None:
+        """Write a canonical v2 proposal and register its dependency edges.
+
+        The edges are the point: a v2 proposal depends on its finding, on the
+        target references it would edit, and on the source semantic units and
+        location/meaning evidence that justify it. Any of those going stale must
+        take the proposal's eligibility with it.
+        """
+        policy_id = self._ensure_policy(proposal.policy_binding)
+        payload = to_wire(proposal)
+        span = proposal.intent.affected_target_span
+        with self._connect() as conn:
+            conn.execute(
+                f"INSERT INTO correction_proposals({self._CORRECTION_PROPOSAL_COLUMNS}) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (proposal.id, proposal.project_id, proposal.qa_finding_id,
+                 span.target_text_revision, proposal.applied_target_revision, policy_id,
+                 proposal.review_status.value, proposal.lifecycle_status.value,
+                 proposal.revision, json.dumps(payload, ensure_ascii=False),
+                 proposal.proposal_schema_version, proposal.verification_status.value,
+                 1 if proposal.is_applicable else 0),
+            )
+            edges: list[tuple[str, str, str, str]] = [
+                ("CORRECTION_PROPOSAL", proposal.id, "QA_FINDING", proposal.qa_finding_id),
+            ]
+            for reference in dict.fromkeys(
+                (*span.canonical_references, *proposal.affected_references)
+            ):
+                edges.append((
+                    "CORRECTION_PROPOSAL", proposal.id, "TARGET_REFERENCE",
+                    self.target_dependency_id(proposal.project_id, self._book_of(reference), reference),
+                ))
+            for unit_id in proposal.intent.affected_source_semantic_unit_ids:
+                edges.append(
+                    ("CORRECTION_PROPOSAL", proposal.id, "SEMANTIC_UNIT", unit_id)
+                )
+            for assessment_id in proposal.meaning_assessment_ids:
+                edges.append(
+                    ("CORRECTION_PROPOSAL", proposal.id, "MEANING_ASSESSMENT", assessment_id)
+                )
+            for relationship_id in proposal.semantic_relationship_ids:
+                edges.append(
+                    ("CORRECTION_PROPOSAL", proposal.id, "SEMANTIC_RELATIONSHIP", relationship_id)
+                )
+            for evidence_id in proposal.evidence_ids:
+                edges.append(
+                    ("CORRECTION_PROPOSAL", proposal.id, "EVIDENCE_RECORD", evidence_id)
+                )
+            conn.executemany(
+                "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)", edges,
+            )
+            conn.commit()
+
+    @staticmethod
+    def _book_of(displayed_reference: str) -> str:
+        return str(displayed_reference).split(" ", 1)[0].upper()
 
     def correction_proposal(self, proposal_id: str) -> dict[str, Any]:
         with self._connect() as conn:
@@ -2809,7 +3014,50 @@ class FoundationRepository:
             raise FoundationValidationError(f"Unknown correction proposal: {proposal_id}")
         return json.loads(row[0])
 
-    def record_correction_applied(self, proposal_id: str, *, actor_type: str | ActorType, applied_target_revision: str, expected_revision: int, actor_id: str = "human") -> None:
+    def correction_proposals_for_finding(self, finding_id: str) -> list[dict[str, Any]]:
+        """Every proposal against one finding, newest revision last.
+
+        Includes legacy v1 rows: they are history a reviewer may need to see,
+        and they still count as a conflicting owner of the finding even though
+        they can never be applied.
+        """
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT payload_json,proposal_schema_version,verification_status,applicable "
+                "FROM correction_proposals WHERE qa_finding_id=? ORDER BY revision,id",
+                (finding_id,),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            payload["proposalSchemaVersion"] = int(row["proposal_schema_version"])
+            payload["verificationStatus"] = row["verification_status"]
+            payload["applicable"] = bool(row["applicable"])
+            out.append(payload)
+        return out
+
+    def record_correction_application_metadata(
+        self, proposal_id: str, *, actor_type: str | ActorType, applied_target_revision: str,
+        expected_revision: int, actor_id: str = "human",
+    ) -> None:
+        """Record that a proposal's text was written. Bookkeeping only.
+
+        This used to be the whole "correction workflow": it flipped the finding
+        straight to CORRECTED. That conflated two different events and made the
+        strongest claim in the system -- "this translation error is fixed" -- a
+        side effect of writing bytes, with no evidence that the edit achieved
+        anything. Stage 9B's invariant is that **applied is not corrected**.
+
+        So application now: stamps applied_* on the proposal, moves it to
+        verification PENDING, and marks the finding STALE -- historical, pending
+        re-analysis -- while deliberately leaving its disposition
+        CONFIRMED_TRANSLATION_ERROR. Reaching CORRECTED additionally requires
+        verificationStatus == PASSED *and* an explicit human acknowledgement,
+        neither of which exists before Stage 9B.4.
+
+        It also does not write Scripture and never did; the caller is
+        responsible for having gone through the canonical edit path first.
+        """
         actor = ActorType(str(actor_type))
         if actor != ActorType.HUMAN:
             raise FoundationValidationError("Correction application requires explicit human action")
@@ -2821,19 +3069,51 @@ class FoundationRepository:
             if int(row["revision"]) != expected_revision:
                 raise FoundationConflict("Correction proposal revision conflict")
             payload = json.loads(row["payload_json"])
-            payload.update({"appliedTargetRevision": applied_target_revision, "appliedBy": actor_id, "appliedAt": self._now(),
-                            "reviewStatus": "HUMAN_APPROVED", "lifecycleStatus": "ACTIVE", "revision": expected_revision + 1})
+            payload.update({
+                "appliedTargetRevision": applied_target_revision, "appliedBy": actor_id,
+                "appliedAt": self._now(), "reviewStatus": "HUMAN_APPROVED",
+                "lifecycleStatus": "ACTIVE", "revision": expected_revision + 1,
+                "verificationStatus": VerificationStatus.PENDING.value,
+            })
             conn.execute(
-                "UPDATE correction_proposals SET applied_target_revision=?,review_status='HUMAN_APPROVED',lifecycle_status='ACTIVE',revision=revision+1,payload_json=? WHERE id=? AND revision=?",
-                (applied_target_revision, json.dumps(payload, ensure_ascii=False), proposal_id, expected_revision),
+                "UPDATE correction_proposals SET applied_target_revision=?,review_status='HUMAN_APPROVED',"
+                "lifecycle_status='ACTIVE',revision=revision+1,verification_status=?,payload_json=? "
+                "WHERE id=? AND revision=?",
+                (applied_target_revision, VerificationStatus.PENDING.value,
+                 json.dumps(payload, ensure_ascii=False), proposal_id, expected_revision),
             )
             finding = conn.execute("SELECT * FROM qa_findings WHERE id=?", (row["qa_finding_id"],)).fetchone()
             if finding is not None:
-                q = json.loads(finding["payload_json"]); q.update({"qaDisposition": "CORRECTED", "reviewStatus": "HUMAN_APPROVED", "lifecycleStatus": "STALE", "revision": int(finding["revision"]) + 1})
-                conn.execute("UPDATE qa_findings SET qa_disposition='CORRECTED',review_status='HUMAN_APPROVED',lifecycle_status='STALE',revision=revision+1,payload_json=? WHERE id=?", (json.dumps(q), finding["id"]))
+                # STALE, not CORRECTED: the text under this finding changed, so
+                # the finding no longer describes current Scripture and must be
+                # re-analysed. Its disposition is left exactly as the human set it.
+                q = json.loads(finding["payload_json"])
+                q.update({"lifecycleStatus": "STALE", "revision": int(finding["revision"]) + 1})
+                conn.execute(
+                    "UPDATE qa_findings SET lifecycle_status='STALE',revision=revision+1,payload_json=? WHERE id=?",
+                    (json.dumps(q, ensure_ascii=False), finding["id"]),
+                )
             self._stale_generic_dependencies(conn, "CORRECTION_PROPOSAL", proposal_id)
-            self._append_review(conn, "CORRECTION_PROPOSAL", proposal_id, row["review_status"], "HUMAN_APPROVED", row["lifecycle_status"], "ACTIVE", None, None, actor, actor_id, expected_revision)
+            self._append_review(
+                conn, "CORRECTION_PROPOSAL", proposal_id, row["review_status"], "HUMAN_APPROVED",
+                row["lifecycle_status"], "ACTIVE", None, None, actor, actor_id, expected_revision,
+                note="Correction text applied; verification pending. Not a CORRECTED disposition.",
+            )
             conn.commit()
+
+    def record_correction_applied(self, proposal_id: str, *, actor_type: str | ActorType, applied_target_revision: str, expected_revision: int, actor_id: str = "human") -> None:
+        """Deprecated Stage 9A name. Retained so existing callers keep working.
+
+        Kept as a thin alias rather than deleted: the old name reads like the
+        complete correction workflow, which is exactly the misreading Stage 9B.0
+        set out to remove, so it forwards to the metadata-only recorder above
+        and can no longer produce a CORRECTED disposition.
+        """
+        self.record_correction_application_metadata(
+            proposal_id, actor_type=actor_type,
+            applied_target_revision=applied_target_revision,
+            expected_revision=expected_revision, actor_id=actor_id,
+        )
 
     def add_record_dependency(self, record_type: str, record_id: str, depends_on_type: str, depends_on_id: str) -> None:
         with self._connect() as conn:
@@ -3033,23 +3313,7 @@ class FoundationRepository:
     def _stale_generic_dependencies(
         conn: sqlite3.Connection, dependency_type: str, dependency_id: str,
     ) -> int:
-        tables = {
-            "PASSAGE_RECORD": "passage_records",
-            "EVIDENCE_RECORD": "evidence_records",
-            "SEMANTIC_RELATIONSHIP": "semantic_relationships",
-            "COVERAGE_ACCOUNT": "coverage_accounts",
-            "QA_FINDING": "qa_findings",
-            "LEXICAL_SOLUTION": "lexical_solutions",
-            "CORRECTION_PROPOSAL": "correction_proposals",
-            "EXPORTABILITY": "exportability_records",
-            "TARGET_INVENTORY": "target_inventory_runs",
-            "SOURCE_INVENTORY": "source_inventory_runs",
-            "LOCATION_RUN": "semantic_location_runs",
-            "MEANING_RUN": "meaning_analysis_runs",
-            "MEANING_ASSESSMENT": "meaning_assessments",
-            "LOCATION_RELATIONSHIP": "semantic_location_relationships",
-            "QA_RUN": "qa_audit_runs",
-        }
+        tables = RECORD_DEPENDENCY_TABLES
         queue: list[tuple[str, str]] = [(dependency_type, dependency_id)]
         visited: set[tuple[str, str]] = set()
         changed = 0
@@ -3075,11 +3339,24 @@ class FoundationRepository:
                     continue
                 payload = json.loads(record[0])
                 payload["lifecycleStatus"] = "STALE"
-                payload["revision"] = int(payload.get("revision", 1)) + 1
+                # Not every record table carries a revision column
+                # (source_inventory_runs does not). Bumping it unconditionally
+                # would raise mid-propagation and abort the whole invalidation,
+                # leaving downstream records falsely current -- strictly worse
+                # than a missing revision bump. Propagate STALE either way.
+                if "revision" in _table_columns(conn, table):
+                    payload["revision"] = int(payload.get("revision", 1)) + 1
+                    statement = (
+                        f"UPDATE {table} SET lifecycle_status='STALE',revision=revision+1,"
+                        "payload_json=? WHERE id=? AND lifecycle_status<>'STALE'"
+                    )
+                else:
+                    statement = (
+                        f"UPDATE {table} SET lifecycle_status='STALE',payload_json=? "
+                        "WHERE id=? AND lifecycle_status<>'STALE'"
+                    )
                 updated = conn.execute(
-                    f"UPDATE {table} SET lifecycle_status='STALE',revision=revision+1,payload_json=? "
-                    "WHERE id=? AND lifecycle_status<>'STALE'",
-                    (json.dumps(payload, ensure_ascii=False), record_id),
+                    statement, (json.dumps(payload, ensure_ascii=False), record_id),
                 ).rowcount
                 changed += updated
                 # Dependency propagation is independent of whether this record
@@ -3158,28 +3435,7 @@ class FoundationRepository:
                 "IFNULL(target_layer,'<NULL>') HAVING COUNT(*)>1"
             ).fetchall()
             problems.extend(f"competing-authoritative-solution:{tuple(row)}" for row in competing)
-            known_record_tables = {
-                "PASSAGE_RECORD": "passage_records",
-                "EVIDENCE_RECORD": "evidence_records",
-                "SEMANTIC_RELATIONSHIP": "semantic_relationships",
-                "COVERAGE_ACCOUNT": "coverage_accounts",
-                "QA_FINDING": "qa_findings",
-                "LEXICAL_SOLUTION": "lexical_solutions",
-                "CORRECTION_PROPOSAL": "correction_proposals",
-                "EXPORTABILITY": "exportability_records",
-                "SOURCE_INVENTORY": "source_inventory_runs",
-                "TARGET_INVENTORY": "target_inventory_runs",
-                "LOCATION_RUN": "semantic_location_runs",
-                "LOCATION_RELATIONSHIP": "semantic_location_relationships",
-                "MEANING_RUN": "meaning_analysis_runs",
-                "MEANING_ASSESSMENT": "meaning_assessments",
-                # Stage 8 registers QA_RUN dependency edges (save_qa_audit_run)
-                # but never taught this check about them, so every project that
-                # had run a QA audit failed recovery on its next open and put
-                # itself in read-only mode.  Keep this map in step with the one
-                # in _stale_generic_dependencies.
-                "QA_RUN": "qa_audit_runs",
-            }
+            known_record_tables = RECORD_DEPENDENCY_TABLES
             dependencies = conn.execute(
                 "SELECT record_type,record_id,depends_on_type,depends_on_id FROM record_dependencies"
             ).fetchall()
@@ -3196,12 +3452,22 @@ class FoundationRepository:
                     problems.append(
                         f"dangling-record-dependency:{dependency['record_type']}:{dependency['record_id']}"
                     )
-                upstream_table = known_record_tables.get(dependency["depends_on_type"])
-                if upstream_table is not None and conn.execute(
+                upstream_type = dependency["depends_on_type"]
+                upstream_table = known_record_tables.get(upstream_type)
+                if upstream_table is None:
+                    # An unrecognized upstream type used to be skipped in
+                    # silence, which is how a whole dependency edge could exist
+                    # and propagate nothing. Anchor types are the one legitimate
+                    # case: they are coordinates, not stored records.
+                    if upstream_type not in RECORD_DEPENDENCY_ANCHOR_TYPES:
+                        problems.append(
+                            f"unknown-upstream-dependency-type:{upstream_type}:{dependency['depends_on_id']}"
+                        )
+                elif conn.execute(
                     f"SELECT 1 FROM {upstream_table} WHERE id=?", (dependency["depends_on_id"],)
                 ).fetchone() is None:
                     problems.append(
-                        f"dangling-upstream-dependency:{dependency['depends_on_type']}:{dependency['depends_on_id']}"
+                        f"dangling-upstream-dependency:{upstream_type}:{dependency['depends_on_id']}"
                     )
             for row in conn.execute(
                 "SELECT id,target_content_hash,payload_json FROM passage_records"

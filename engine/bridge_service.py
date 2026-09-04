@@ -331,6 +331,11 @@ class Methods:
     QA_REVIEW_GET_FINDING = "qaReview.getFinding"
     QA_REVIEW_DECIDE_FINDING = "qaReview.decideFinding"
     QA_REVIEW_ADD_NOTE = "qaReview.addNote"
+    # Stage 9B.0 read-only correction surface. correction.applyProposal is
+    # deliberately absent: no Scripture-changing command exists until 9B.3.
+    CORRECTION_GET_ELIGIBILITY = "correction.getEligibility"
+    CORRECTION_GET_PROPOSAL = "correction.getProposal"
+    CORRECTION_LIST_FOR_FINDING = "correction.listForFinding"
     SEMANTIC_REVIEW_DECIDE_LOCATION = "semanticReview.decideLocation"
     SEMANTIC_REVIEW_DECIDE_MEANING = "semanticReview.decideMeaning"
     REVIEW_HISTORY_GET_ENTITY_HISTORY = "reviewHistory.getEntityHistory"
@@ -1975,6 +1980,17 @@ class BridgeEngine:
     ) -> dict[str, Any]:
         return self._require_passage_semantic_runtime().qa_review_decide(
             finding_id, disposition, **options)
+
+    def correction_get_eligibility(self, finding_id: str) -> dict[str, Any]:
+        """The one authoritative eligibility answer. The UI must call this,
+        never re-derive it from a finding's fields."""
+        return self._require_passage_semantic_runtime().correction_get_eligibility(finding_id)
+
+    def correction_get_proposal(self, proposal_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().correction_get_proposal(proposal_id)
+
+    def correction_list_for_finding(self, finding_id: str) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().correction_list_for_finding(finding_id)
 
     def qa_review_add_note(
         self, entity_type: str, entity_id: str, note: str,
@@ -3627,6 +3643,18 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.qa_review_add_note(
                     str(p.get("entityType") or ""), str(p.get("entityId") or ""),
                     str(p.get("note") or ""),
+                ))
+            if m == Methods.CORRECTION_GET_ELIGIBILITY:
+                return EngineResponse.ok(request.id, result=self.correction_get_eligibility(
+                    str(p.get("findingId") or ""),
+                ))
+            if m == Methods.CORRECTION_GET_PROPOSAL:
+                return EngineResponse.ok(request.id, result=self.correction_get_proposal(
+                    str(p.get("proposalId") or ""),
+                ))
+            if m == Methods.CORRECTION_LIST_FOR_FINDING:
+                return EngineResponse.ok(request.id, result=self.correction_list_for_finding(
+                    str(p.get("findingId") or ""),
                 ))
             if m == Methods.SEMANTIC_REVIEW_DECIDE_LOCATION:
                 return EngineResponse.ok(request.id, result=self.semantic_review_decide_location(

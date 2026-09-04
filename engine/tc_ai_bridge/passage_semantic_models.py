@@ -802,6 +802,190 @@ class CorrectionProposal:
         return replace(self, lifecycle_status=status)
 
 
+CORRECTION_PROPOSAL_SCHEMA_VERSION = 2
+
+
+class VerificationStatus(StrEnum):
+    """Whether a *applied* correction has been re-checked, independent of QaDisposition.
+
+    Stage 9B's central invariant: applying a proposal is not the same event as
+    the finding being corrected. Application changes Scripture; verification is
+    a later, separate re-analysis of the edited text. A finding may therefore be
+    applied and still FAILED, and CORRECTED stays unreachable until a later
+    stage supplies PASSED *plus* explicit human acknowledgement.
+    """
+
+    NOT_RUN = "NOT_RUN"
+    PENDING = "PENDING"
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    UNCERTAIN = "UNCERTAIN"
+
+
+class CorrectionCreationMode(StrEnum):
+    AI_GENERATED = "AI_GENERATED"
+    HUMAN_AUTHORED = "HUMAN_AUTHORED"
+    HUMAN_MODIFIED_AI = "HUMAN_MODIFIED_AI"
+    MIGRATED_LEGACY = "MIGRATED_LEGACY"
+
+
+@dataclass(frozen=True)
+class AffectedTargetSpan:
+    """The exact target region a correction replaces.
+
+    Offsets are half-open Unicode **code-point** offsets into the current
+    authoritative chapter-JSON verse text: ``[start_code_point, end_code_point)``.
+    A zero-length span ``[n, n)`` is valid and is how a genuine omission is
+    expressed -- text is inserted at n without replacing anything.
+
+    Python string indices are already code points, so slicing target text with
+    these offsets is correct as written. They are NOT UTF-16 offsets: a
+    supplementary character (an emoji, some historic scripts) counts as one
+    here and two in UTF-16, so a JavaScript caller must convert rather than
+    pass ``String.prototype.length`` arithmetic through. They are also not
+    grapheme offsets -- Tamil combining marks, Hebrew points and Greek
+    diacritics are separate code points, so a span must be taken from real
+    located evidence and never by visually eyeballing a cluster boundary.
+    """
+
+    displayed_reference: str
+    canonical_references: tuple[str, ...]
+    start_code_point: int
+    end_code_point: int
+    original_text: str
+    target_text_revision: str
+    target_content_hash: str
+
+    def __post_init__(self) -> None:
+        if self.start_code_point < 0:
+            raise ValueError("Span start must not be negative")
+        if self.end_code_point < self.start_code_point:
+            raise ValueError("Span end must not precede its start")
+        if len(self.original_text) != self.end_code_point - self.start_code_point:
+            raise ValueError(
+                "Span original text length must equal end_code_point - start_code_point"
+            )
+
+    @property
+    def is_insertion(self) -> bool:
+        return self.start_code_point == self.end_code_point
+
+
+@dataclass(frozen=True)
+class CorrectionIntent:
+    """What the correction must achieve, separate from any proposed wording.
+
+    9B.0 defines the intent only. Wording generation is 9B.1, so a proposal can
+    carry a fully-specified intent with an empty proposed_text.
+    """
+
+    failed_dimension: CoverageDimension
+    observed_meaning: str
+    required_meaning: str
+    affected_source_semantic_unit_ids: tuple[str, ...]
+    affected_target_span: AffectedTargetSpan
+
+
+@dataclass(frozen=True)
+class CorrectionProposalV2:
+    """Canonical correction proposal.
+
+    v1 (``CorrectionProposal``) is preserved for history and stays readable;
+    it carried no exact span or content hash, so a v1 record can never be
+    applied -- see ``is_applicable``.
+    """
+
+    id: str
+    qa_finding_id: str
+    project_id: str
+    intent: CorrectionIntent
+    affected_references: tuple[str, ...]
+    current_text: str
+    proposed_text: str
+    explanation: str
+    evidence_ids: tuple[str, ...]
+    semantic_relationship_ids: tuple[str, ...]
+    meaning_assessment_ids: tuple[str, ...]
+    created_by: str
+    created_at: str
+    creation_mode: CorrectionCreationMode
+    policy_binding: PolicyBinding
+    review_status: ReviewStatus
+    lifecycle_status: LifecycleStatus
+    verification_status: VerificationStatus = VerificationStatus.NOT_RUN
+    verification_job_ids: tuple[str, ...] = ()
+    applied_target_revision: str | None = None
+    applied_by: str | None = None
+    applied_at: str | None = None
+    revision: int = 1
+    proposal_schema_version: int = CORRECTION_PROPOSAL_SCHEMA_VERSION
+
+    @property
+    def is_applicable(self) -> bool:
+        """Whether this record even *could* be applied to Scripture.
+
+        Structural only -- it says the proposal carries the exact coordinates an
+        application needs. It is not authorization: eligibility, current-text
+        validation and human approval are all evaluated separately.
+        """
+        span = self.intent.affected_target_span
+        return bool(
+            self.proposal_schema_version >= CORRECTION_PROPOSAL_SCHEMA_VERSION
+            and span.target_content_hash
+            and span.target_text_revision
+            and span.canonical_references
+        )
+
+    def with_lifecycle(self, status: LifecycleStatus) -> "CorrectionProposalV2":
+        return replace(self, lifecycle_status=status)
+
+
+class CorrectionApplicationState(StrEnum):
+    """Durable states for one attempt to apply a proposal to Scripture.
+
+    Kept separate from the proposal itself: a proposal is a durable intent that
+    may be attempted more than once, while each attempt is its own recoverable
+    transaction. APPLIED_SCRIPTURE is deliberately distinct from COMPLETED --
+    the window between "Scripture written" and "bookkeeping finished" is exactly
+    where a crash leaves work needing recovery, and collapsing the two would
+    make that state unrepresentable.
+    """
+
+    PREPARED = "PREPARED"
+    APPLYING = "APPLYING"
+    APPLIED_SCRIPTURE = "APPLIED_SCRIPTURE"
+    INVALIDATED = "INVALIDATED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
+
+
+@dataclass(frozen=True)
+class CorrectionApplicationIntent:
+    """Design-only in 9B.0: the durable record 9B.3's application will need.
+
+    Every ``expected_*`` field is an optimistic-concurrency precondition
+    captured at PREPARE time. If any of them no longer matches at APPLY time the
+    attempt must move to INVALIDATED rather than writing Scripture -- the whole
+    point of recording them separately from the proposal.
+    """
+
+    application_id: str
+    proposal_id: str
+    project_id: str
+    expected_correction_revision: int
+    expected_finding_revision: int
+    expected_target_revision: str
+    expected_target_content_hashes: tuple[str, ...]
+    expected_original_text: str
+    state: CorrectionApplicationState
+    created_at: str
+    completed_at: str | None = None
+    failure_code: str = ""
+    failure_detail: str = ""
+    recovery_required: bool = False
+
+
 @dataclass(frozen=True)
 class ReviewRecord:
     id: str
