@@ -15,6 +15,7 @@
   --tw:#2563EB; --tw-bg:#E9F0FE;
   --align:#B45309; --align-bg:#FEF3E1;
   --gr:#15A34A; --gr-bg:#E6F7EC;
+  --ai:#7C3AED; --ai-bg:#F1EAFE;
   --success:#16A34A; --success-bg:#EAF7EE;
   --warning:#D97706; --warning-bg:#FEF3E1;
   --danger:#DC2626; --danger-bg:#FCEBEB;
@@ -28,3 +29,17 @@ mark.m-tw { border-color: var(--tw); }
 mark.m-align { border-color: var(--align); }
 mark.m-gr { border-color: var(--gr); }
 mark.m-tn.m-tw { border-bottom-color: var(--tn); box-shadow: inset 0 -1px 0 var(--tw); }
+
+/* Printing the QA report (ProjectReportScreen → Export → PDF): only the
+   .print-root subtree prints, and every scroll container between it and
+   <body> (.print-expand) is un-clipped so the table runs across pages
+   instead of stopping at the first viewport. */
+@media print {
+  @page { margin: 12mm; }
+  body { background: #fff; }
+  .no-print { display: none !important; }
+  .print-expand { overflow: visible !important; height: auto !important; max-height: none !important; width: auto !important; position: static !important; }
+  body * { visibility: hidden; }
+  .print-root, .print-root * { visibility: visible; }
+  .print-root { position: absolute; left: 0; top: 0; width: 100%; }
+}

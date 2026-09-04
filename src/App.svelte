@@ -12,7 +12,9 @@
   import ProjectDashboard from "./lib/components/ProjectDashboard.svelte";
   import DiagnosticsPanel from "./lib/components/DiagnosticsPanel.svelte";
   import SemanticMappingValidation from "./lib/components/SemanticMappingValidation.svelte";
+  import ProjectReportScreen from "./lib/components/ProjectReportScreen.svelte";
   import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, ProjectReport, QaFinding } from "./lib/types/finding";
+  import type { QaReport, ReportJobSnapshot } from "./lib/types/report";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
@@ -44,6 +46,16 @@
   let report: ProjectReport | null = null;
   let reportLoading = false;
   let reportError = "";
+  // Whole-collection QA report (TopBar "Generate report" on the project
+  // screen). Built by a background sidecar job (report.generate) that is
+  // polled here; the finished payload is fetched once and kept for the
+  // rest of the session so returning to the screen is instant.
+  let showingReport = false;
+  let qaReport: QaReport | null = null;
+  let qaReportJob: ReportJobSnapshot | null = null;
+  let qaReportError = "";
+  let qaReportPollTimer: ReturnType<typeof setTimeout> | undefined;
+  let qaReportPollGeneration = 0;
   let engineNotice = "";
   let engineNoticeTimer: ReturnType<typeof setTimeout> | undefined;
   let settingsInitialPane: "ai" | "quality" | "connections" | "resources" | "security" = "ai";
@@ -288,6 +300,11 @@
     opened = false;
     showingSemanticValidation = false;
     showingAlignmentReview = false;
+    showingReport = false;
+    stopReportPolling();
+    qaReport = null;
+    qaReportJob = null;
+    qaReportError = "";
     openingBook = "";
     bookOpenError = "";
   }
@@ -326,9 +343,100 @@
   function openDashboard(): void {
     showingSemanticValidation = false;
     showingAlignmentReview = false;
+    showingReport = false;
     showingDashboard = true;
     void loadDashboard();
     void loadReport();
+  }
+
+  // -- whole-collection QA report ---------------------------------------
+
+  const REPORT_TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
+
+  function stopReportPolling(): void {
+    qaReportPollGeneration += 1;
+    if (qaReportPollTimer) clearTimeout(qaReportPollTimer);
+    qaReportPollTimer = undefined;
+  }
+
+  function openReportScreen(): void {
+    showingSemanticValidation = false;
+    showingAlignmentReview = false;
+    showingReport = true;
+    if (!qaReport && !qaReportJob) void generateReport();
+  }
+
+  async function generateReport(): Promise<void> {
+    qaReportError = "";
+    stopReportPolling();
+    const generation = qaReportPollGeneration;
+    try {
+      let snapshot: ReportJobSnapshot;
+      try {
+        snapshot = await bridge.reportGenerate();
+      } catch (error) {
+        // A build is already running (a double click, or a second window
+        // on the same sidecar): follow it rather than fail.
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/already/i.test(message)) throw error;
+        snapshot = await bridge.reportStatus("");
+      }
+      if (generation !== qaReportPollGeneration) return;
+      qaReportJob = snapshot;
+      await pollReport(snapshot.jobId, generation);
+    } catch (error) {
+      if (generation !== qaReportPollGeneration) return;
+      qaReportError = error instanceof Error ? error.message : String(error);
+      qaReportJob = null;
+    }
+  }
+
+  async function pollReport(jobId: string, generation: number): Promise<void> {
+    while (generation === qaReportPollGeneration) {
+      const snapshot = await bridge.reportStatus(jobId);
+      if (generation !== qaReportPollGeneration) return;
+      qaReportJob = snapshot;
+      if (REPORT_TERMINAL.has(snapshot.state)) {
+        if (snapshot.ready) {
+          const fetched = await bridge.reportGet(jobId);
+          if (generation !== qaReportPollGeneration) return;
+          qaReport = fetched.report;
+          // Some books unreadable: the report still stands, say which part is missing.
+          if (snapshot.error) qaReportError = snapshot.error;
+        } else {
+          qaReportError = snapshot.error
+            || (snapshot.state === "cancelled" ? "Report generation was cancelled." : "Report generation failed.");
+        }
+        return;
+      }
+      await new Promise<void>((resolve) => { qaReportPollTimer = setTimeout(resolve, 500); });
+    }
+  }
+
+  async function cancelReport(): Promise<void> {
+    if (!qaReportJob) return;
+    try {
+      qaReportJob = await bridge.reportCancel(qaReportJob.jobId);
+    } catch (error) {
+      qaReportError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  // A row in the report table → that verse in the editor, switching to the
+  // row's book first when it isn't the one currently open.
+  async function navigateToReportRow(bookId: string, chapter: string, verse: string): Promise<void> {
+    if (!$project) return;
+    const wanted = bookId.toLowerCase();
+    if ($project.bookId.toLowerCase() !== wanted) {
+      const path = $project.importedProjects?.find((book) => book.bookId.toLowerCase() === wanted)?.path
+        ?? bookProgress.find((book) => book.bookId.toLowerCase() === wanted)?.path;
+      if (!path) {
+        showNavigationNotice(`${bookId.toUpperCase()} is not in the open collection.`);
+        return;
+      }
+      if (!(await switchBook(path, false))) return;
+    }
+    await navigateToFinding(chapter, verse);
   }
 
   const VALIDATION_BOOK_IDS = new Set(["LUK", "PHP"]);
@@ -569,6 +677,7 @@
     showingDashboard = false;
     showingSemanticValidation = false;
     showingAlignmentReview = false;
+    showingReport = false;
     await activateChapter(chapter, verse);
   }
 
@@ -675,9 +784,10 @@
     !opened ? "home"
       : showingAlignmentReview ? "review"
       : showingSemanticValidation ? "validation"
+      : showingReport ? "report"
       : showingDashboard ? "dashboard"
       : "editor"
-  ) as "home" | "dashboard" | "validation" | "review" | "editor";
+  ) as "home" | "dashboard" | "validation" | "review" | "editor" | "report";
   $: projectName = $project?.projectName || $project?.bibleName || $project?.bookName || "";
   $: dashboardSubtitle = [
     $project?.targetLanguage,
@@ -694,7 +804,7 @@
   );
 </script>
 
-<div class="frame">
+<div class="frame print-expand">
   <TopBar
     {screen}
     {projectName}
@@ -703,6 +813,7 @@
     onOpenSettings={() => openSettings("ai")}
     onOpenConnections={() => openSettings("connections")}
     onOpenExport={() => exportOpen.set(true)}
+    onGenerateReport={openReportScreen}
     onGotoVerse={gotoVerse}
     onChapterChange={switchChapter}
     onBookChange={switchBook}
@@ -762,6 +873,16 @@
       advancedMode={$allowManualOverride}
       onOpenSemanticValidation={openSemanticValidation}
       onRequestAdvancedMode={() => openSettings("quality")}
+    />
+  {:else if screen === "report"}
+    <ProjectReportScreen
+      {projectName}
+      report={qaReport}
+      job={qaReportJob}
+      error={qaReportError}
+      onGenerate={generateReport}
+      onCancel={cancelReport}
+      onNavigate={navigateToReportRow}
     />
   {:else if screen === "review"}
     {#key $project?.path}

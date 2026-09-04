@@ -47,6 +47,13 @@ import type {
   AnalysisScope,
   AnalysisScopeStatus,
 } from "../types/analysisJob";
+import type {
+  ReportExportColumn,
+  ReportExportResult,
+  ReportGetResponse,
+  ReportJobSnapshot,
+  ReportRow,
+} from "../types/report";
 
 /**
  * Thin wrapper around Tauri's invoke() calling the real commands defined
@@ -181,6 +188,32 @@ export const bridge = {
 
   projectCollectionReport(): Promise<CollectionReport> {
     return call("project_collection_report");
+  },
+
+  // --- Whole-collection QA report (engine/tc_ai_bridge/qa_report.py) -------
+  // A background build: generate, poll status, fetch once with get. Export
+  // writes the rows the report screen has filtered down to.
+
+  reportGenerate(): Promise<ReportJobSnapshot> {
+    return call("report_generate");
+  },
+
+  reportStatus(jobId: string): Promise<ReportJobSnapshot> {
+    return call("report_status", { jobId });
+  },
+
+  reportGet(jobId: string): Promise<ReportGetResponse> {
+    return call("report_get", { jobId });
+  },
+
+  reportCancel(jobId: string): Promise<ReportJobSnapshot> {
+    return call("report_cancel", { jobId });
+  },
+
+  reportExport(
+    outputPath: string, format: "csv" | "tsv", rows: ReportRow[], columns: ReportExportColumn[],
+  ): Promise<ReportExportResult> {
+    return call("report_export", { outputPath, format, rows, columns });
   },
 
   inspectImport(path: string, metadata?: ImportMetadata): Promise<ImportPreview> {

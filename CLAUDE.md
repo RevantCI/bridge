@@ -73,7 +73,7 @@ with `python scripts/smoke_sidecars.py engine/dist/bridge-engine.exe`.
 
 `src-tauri/` has both: `cargo check`/`cargo build` for compile success, and a
 handful of real `#[test]` unit tests (`passage_semantic_wire::tests`,
-`sidecar::tests` — 5 as of Stage 9A.4) run with `cargo test`. Run both, not
+`sidecar::tests` — 6 as of the project QA report, 2026-09-04) run with `cargo test`. Run both, not
 just the compile check.
 
 ## Architecture
@@ -138,6 +138,10 @@ A raw Scripture import becomes a translationCore-compatible book project:
 <project>/.apps/translationCore/alignmentData/<book>/<chapter>.json
 <project>/.apps/translationCore/index/{translationNotes,translationWords}/<book>/
 <project>/.bridge/import.json                   SHA-256 provenance + per-tool capability status
+<project>/.bridge/progress.json                 per-book rollup: checked chapters + finding id → status
+<project>/.apps/translationCoreAI/checkFindings/<book>/<chapter>.json
+                                                the findings behind those ids, from the last succeeded
+                                                check job — what the project QA report reads
 ```
 
 `TranslationCoreProject` (`tc_ai_bridge/tc_project.py`) is the reader/writer

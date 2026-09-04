@@ -45,6 +45,8 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | A33 | Local development startup | Compile the desktop frontend, start an isolated local preview, and request its index and application bundle | Source + Desktop | PASS — `npm run test:dev-start` verifies the same deterministic build-and-preview path used by `npm run tauri dev`; live WebView DOM inspection confirms the app mount is populated instead of blank |
 | A34 | Issue resolution and Paratext handoff | Persist a resolution, reject target text outside the verse, queue/retry offline without duplicate XML threads, send once only for a matching confirmed live project, and refuse a wrong active project | Source + Manual | PASS — automated connector/resolution regressions pass, including the installed v0.7.4 companion's `project_notes` capability name; a live Paratext Project Note send and sent-state persistence after Bridge restart were manually confirmed |
 | A35 | Automatic issue-resolution lifecycle | Edit a verse with a saved issue, invalidate any prior pass, automatically recheck, resolve on grounded pass/not-applicable, reflag on problem, retain uncertainty/failure for human review, persist evidence and append-only audit | Source + Frontend + Manual | PASS — 9 focused resolution regressions include refusal to auto-close an ungrounded/low-confidence pass and explicit human acceptance of an Advanced AI proposal; local manual acceptance confirmed rationale/evidence/confidence, retryable cancellation, restart persistence, safe pending-human-review behavior and explicit Apply |
+| A36 | Project QA report | `report.generate/status/get/cancel/export` over a real check job's finding snapshot, lazy/missing siblings, tN/tW selection provenance (Bridge AI / human / translationCore), Ignore decisions, alignment-invalid marks, cached USFM findings, CSV/TSV export | Source | PASS — 11 tests in `tests/test_qa_report.py`; a raw `python main.py` stdio smoke of the same methods against a throwaway project |
+| A37 | Project QA report UI | Book list progress, book/category/fixed-by/result/severity/text filters, stat tiles, chart legends, table columns, CSV export through the save dialog, cancelled dialog, print for PDF, generation progress/cancel, empty/error states, verse navigation, paging | Frontend | PASS — 19 Vitest tests (`reportStats.test.ts`, `ProjectReportScreen.test.ts`); svelte-check 0/0 |
 
 ## Import workflows
 
@@ -89,6 +91,7 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | D08 | Sidecar crash/restart | UI reports failure and can recover without app restart | NOT RUN — transport restart path compiles; live kill still manual |
 | D09 | Checker error | Bounded, readable error with useful retry behavior | PASS |
 | D10 | Real Wildebeest | Real adapter is packaged and identifies itself | PASS — frozen smoke verifies usingRealEngine |
+| D11 | Generate report from the project screen, filter, click a verse, export CSV and print to PDF in the installed app | Report screen renders at 1366x768, filters scope charts and table together, verse link opens the editor on that verse (switching books), CSV opens in Excel with Tamil intact, print dialog shows only the report | NOT RUN — source and frontend tests pass; no real Tauri window was exercised this session |
 
 ## Project management
 
@@ -114,6 +117,8 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | E04 | ESFM content | Supported markers preserved or limitation made explicit | PASS — custom markers retained by source-template export |
 | E05 | Windows bundle | Both helper executables are present and runnable | PASS — Beta 4 app and NSIS installer produced; both workers are version-checked, hash-matched across staging locations, and exercised by the enhanced frozen smoke |
 | E06 | macOS/Linux bundles | Build, permissions and runtime behavior verified | BLOCKED |
+| E07 | QA report CSV/TSV export | Filtered rows written with a UTF-8 BOM, RFC-4180 quoting, the reviewer's column labels | PASS — source tests |
+| E08 | QA report PDF (print) | Only the report prints, every filtered row, across pages | NOT RUN — print CSS compiles and `window.print()` is invoked (Vitest); WebView2 print preview not exercised |
 
 ## Manual word alignment
 

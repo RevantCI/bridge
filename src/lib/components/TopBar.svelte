@@ -1,13 +1,15 @@
 <script lang="ts">
   import { project, currentChapter, navigationStatus } from "../stores";
 
-  export let screen: "home" | "dashboard" | "validation" | "review" | "editor";
+  export let screen: "home" | "dashboard" | "validation" | "review" | "editor" | "report";
   export let projectName = "";
   export let onGoHome: () => void;
   export let onGoToDashboard: () => void;
   export let onOpenSettings: () => void;
   export let onOpenConnections: () => void;
   export let onOpenExport: () => void;
+  // Project (dashboard) screen only: opens the whole-collection QA report.
+  export let onGenerateReport: () => void = () => {};
   export let onGotoVerse: (verse: string) => void;
   export let onChapterChange: (chapter: string) => void;
   export let onBookChange: (path: string) => void;
@@ -37,13 +39,13 @@
   }
 </script>
 
-<div class="topbar">
+<div class="topbar no-print">
   <div class="brand"><div class="mark" /> Bridge</div>
   <div class="divider" />
 
   <nav class="breadcrumb" aria-label="Navigation">
     <button class="crumb" class:current={screen === "home"} on:click={onGoHome}>Projects</button>
-    {#if screen === "dashboard" || screen === "validation" || screen === "review"}
+    {#if screen === "dashboard" || screen === "validation" || screen === "review" || screen === "report"}
       <span class="crumb-sep">›</span>
       {#if screen === "validation"}
         <button class="crumb" on:click={onGoToDashboard}>{projectName}</button>
@@ -53,6 +55,10 @@
         <button class="crumb" on:click={onGoToDashboard}>{projectName}</button>
         <span class="crumb-sep">›</span>
         <span class="crumb current">Alignment Review</span>
+      {:else if screen === "report"}
+        <button class="crumb" on:click={onGoToDashboard}>{projectName}</button>
+        <span class="crumb-sep">›</span>
+        <span class="crumb current">QA report</span>
       {:else}
         <span class="crumb current">{projectName}</span>
       {/if}
@@ -102,6 +108,9 @@
       Sync off
     {/if}
   </button>
+  {#if screen === "dashboard"}
+    <button class="btn primary" on:click={onGenerateReport}>Generate report</button>
+  {/if}
   {#if screen === "editor"}
     <button class="btn primary" disabled={!exportEnabled} on:click={onOpenExport}>Export</button>
   {/if}
