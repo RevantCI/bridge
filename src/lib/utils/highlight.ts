@@ -110,15 +110,19 @@ export function buildSegments(
     }
   }
 
-  // Only AI reviews that actually flag something get underlined. A tN/tW check
-  // the AI passed is not an issue, and underlining every check it looked at
-  // would light up most of the verse and make the marks meaningless as a
-  // problem signal. "not_applicable" is likewise not a finding.
+  // Every AI review with a proposed span is underlined, including verdict
+  // "pass". The mark is not a severity signal -- it is where the tN/tW check
+  // landed in this verse. A pass carries the exact selection the AI resolved,
+  // and in Manual (advanced) reviewer mode that proposal is the ONLY thing
+  // marking the words until a human applies it, because auto-application runs
+  // in Auto (basic) mode alone -- see BridgeEngine._apply_basic_ai_selections.
+  // Filtering passes out here left the verse blank until the reviewer selected
+  // text by hand. Reviews with nothing_to_select carry no span and so mark
+  // nothing anyway.
   //
   // New AI reviews carry exact translationCore occurrence metadata. Older cached
   // reviews fall back to unique-text matching rather than guessing a repeated span.
   for (const review of aiReviews) {
-    if (review.verdict !== "problem" && review.verdict !== "review") continue;
     const className = review.tool === "translationNotes" ? "m-tn" : "m-tw";
     const evidence = review.evidence_used
       .map((item) => String(item.title ?? item.identifier ?? item.kind ?? ""))

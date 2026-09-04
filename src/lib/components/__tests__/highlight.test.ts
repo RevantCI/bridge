@@ -56,10 +56,22 @@ describe("verse-text underlines", () => {
     expect(marked(segments)).toEqual([["beta", "m-tn"]]);
   });
 
-  it("leaves checks the AI passed unmarked", () => {
-    for (const verdict of ["pass", "not_applicable"] as const) {
+  it("underlines a proposal the AI passed, whatever the verdict", () => {
+    // The mark says "this is where the check landed", not "this is wrong".
+    // In Manual reviewer mode nothing is auto-applied, so a passing proposal
+    // is the only thing marking the words until a human applies it --
+    // filtering these out blanked the verse until you selected text by hand.
+    for (const verdict of ["pass", "problem", "review", "not_applicable"] as const) {
       const segments = buildSegments(TEXT, [], [], [aiReview({ verdict })]);
-      expect(marked(segments), `verdict ${verdict}`).toEqual([]);
+      expect(marked(segments), `verdict ${verdict}`).toEqual([["beta", "m-tn"]]);
     }
+  });
+
+  it("marks nothing when the AI proposed no span", () => {
+    const segments = buildSegments(TEXT, [], [], [aiReview({
+      verdict: "problem", nothing_to_select: true,
+      proposed_selections: [], proposed_selection_text: [],
+    })]);
+    expect(marked(segments)).toEqual([]);
   });
 });
