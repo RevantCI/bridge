@@ -3204,3 +3204,14 @@ Still open:
   is unverified - left alone deliberately rather than guessed at.
 
 Verified: `pytest tests/ greek_room_engine/tests/ -q` (589 passed, was 588).
+
+## Stage 9A.4 follow-up (3 of 3) — bounded the Bridge navigation publish retry (2026-09-04)
+
+`App.svelte`'s navigation-publish retry (added in `bcb9a7e` alongside the
+fingerprinting work) cleared `lastNavigationReference` on failure to re-enter
+the reactive publish block, with no attempt counter - a persistently failing
+`navigation.bridgeChanged` call would have spun one RPC every 800ms for the
+rest of the session. Capped at 3 attempts per reference, reset on success or
+when the reference changes.
+
+Verified: `npm run check`, `npm run test`, `npm run build` all still pass.

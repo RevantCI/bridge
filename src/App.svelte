@@ -51,6 +51,8 @@
   let lastNavigationReference = "";
   let navigationReference = "";
   let navigationRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let navigationRetryReference = "";
+  let navigationRetries = 0;
 
   function openSettings(pane: "ai" | "quality" | "connections" | "resources" | "security" = "ai"): void {
     settingsInitialPane = pane;
@@ -627,11 +629,23 @@
     lastNavigationReference = "";
   } else if (engineStatus === "ready" && navigationReference !== lastNavigationReference) {
     const publishedReference = navigationReference;
+    if (publishedReference !== navigationRetryReference) {
+      navigationRetryReference = publishedReference;
+      navigationRetries = 0;
+    }
     lastNavigationReference = publishedReference;
     void bridge.navigationBridgeChanged(publishedReference)
-      .then((state) => navigationStatus.set(state))
+      .then((state) => {
+        navigationStatus.set(state);
+        navigationRetries = 0;
+      })
       .catch((error) => {
         console.error("Could not publish Bridge navigation", error);
+        // Retrying by clearing lastNavigationReference re-enters this block, so
+        // the attempts must be bounded: a persistently failing publish would
+        // otherwise spin an RPC every 800ms for the rest of the session.
+        if (navigationRetries >= 3) return;
+        navigationRetries += 1;
         if (navigationRetryTimer) clearTimeout(navigationRetryTimer);
         navigationRetryTimer = setTimeout(() => {
           if (navigationReference === publishedReference && lastNavigationReference === publishedReference) {
