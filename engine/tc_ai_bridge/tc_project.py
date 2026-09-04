@@ -2078,6 +2078,41 @@ class TranslationCoreProject:
         _write_json_atomic(p, data)
         return p
 
+    # -- per-chapter check-finding snapshots ---------------------------------
+    #
+    # The progress rollup below records only finding id -> status; the
+    # findings themselves (Wildebeest spans, local alignment/editorial
+    # issues, explanations, suggested replacements) used to live only in the
+    # check job's in-memory result and were gone once it finished. The
+    # project QA report (qa_report.py) needs them, so a succeeded check job
+    # now leaves the chapter's findings here as well
+    # (BridgeEngine._on_check_job_complete). Read-only for everyone else.
+
+    def check_findings_snapshot_path(self, chapter: str | int) -> Path:
+        return self.companion_dir() / 'checkFindings' / self.book_id / f'{chapter}.json'
+
+    def save_check_findings_snapshot(self, chapter: str | int, verses: dict[str, list[dict[str, Any]]]) -> Path:
+        p = self.check_findings_snapshot_path(chapter)
+        _write_json_atomic(p, {
+            'schemaVersion': 1, 'bookId': self.book_id, 'chapter': str(chapter),
+            'updatedAt': self._timestamp()[0],
+            'verses': {str(v): list(findings) for v, findings in verses.items()},
+        })
+        return p
+
+    def load_check_findings_snapshot(self, chapter: str | int) -> dict[str, list[dict[str, Any]]]:
+        p = self.check_findings_snapshot_path(chapter)
+        if not p.exists():
+            return {}
+        try:
+            data = _read_json(p)
+        except Exception:
+            return {}
+        verses = data.get('verses') if isinstance(data, dict) else None
+        if not isinstance(verses, dict):
+            return {}
+        return {str(v): [f for f in findings if isinstance(f, dict)] for v, findings in verses.items() if isinstance(findings, list)}
+
     # -- per-book progress rollup --------------------------------------------
     #
     # Incrementally-updated summary of human-review and AI-check progress,

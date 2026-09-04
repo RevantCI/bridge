@@ -144,6 +144,79 @@ pub async fn project_collection_report(sidecar: State<'_, EngineSidecar>) -> Res
         .await
 }
 
+/// Whole-collection QA report (engine/tc_ai_bridge/qa_report.py). A
+/// background build: generate, poll status, fetch once with get.
+#[tauri::command]
+pub async fn report_generate(sidecar: State<'_, EngineSidecar>) -> Result<Value, String> {
+    sidecar
+        .send_request("report.generate", serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn report_status(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "report.status",
+            serde_json::json!({ "jobId": job_id.unwrap_or_default() }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn report_get(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "report.get",
+            serde_json::json!({ "jobId": job_id.unwrap_or_default() }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn report_cancel(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "report.cancel",
+            serde_json::json!({ "jobId": job_id.unwrap_or_default() }),
+        )
+        .await
+}
+
+/// Writes the rows the report screen has filtered down to as CSV/TSV at a
+/// path the user picked with pick_save_path. PDF is not here on purpose:
+/// the frontend prints its own print layout through the webview, which is
+/// the only renderer in the app that shapes Tamil/Odia/Hebrew correctly.
+#[tauri::command]
+pub async fn report_export(
+    sidecar: State<'_, EngineSidecar>,
+    output_path: String,
+    format: String,
+    rows: Value,
+    columns: Option<Value>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "report.export",
+            serde_json::json!({
+                "outputPath": output_path,
+                "format": format,
+                "rows": rows,
+                "columns": columns.unwrap_or(Value::Null),
+            }),
+        )
+        .await
+}
+
 #[tauri::command]
 pub async fn project_inspect_import(
     sidecar: State<'_, EngineSidecar>,

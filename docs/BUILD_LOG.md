@@ -3567,3 +3567,146 @@ session) is live and holds the sidecar binaries. Stage 9B.0 touched no Rust,
 `.rs`, or `tauri.conf.json` file, so this is contention with a running app, not
 a regression — but `cargo check`/`cargo test` still need a run once that dev
 session is stopped.
+
+## Project QA report — Generate report on the project screen (2026-09-04)
+
+Request: a **Generate report** button in the project (dashboard) top bar
+that lists every check Bridge has run and every issue it found across the
+whole collection — books with per-check progress on the left, an
+Allure-style right panel (filters, charts, an issue table with error
+category / book / chapter / verse / issue + explanation / AI proposal / fixed
+by / pass-fail) and CSV / TSV / PDF export of the filtered rows.
+
+### What existed, and the gap it exposed
+
+`project.report` (`ReportService.build_book_report`) is single-book and
+built for the dashboard's exception queue; `project.collectionReport`
+aggregates gates and coverage counts, not issues. Neither could list issues
+across books. Investigating what the collection actually has on disk turned
+up the real gap: **per-verse findings were never persisted.** A check job's
+Wildebeest and local (alignment / editorial / tC) findings lived only in the
+job's in-memory result; the progress rollup (`.bridge/progress.json`) kept
+finding *id → status* and nothing else, and `checkCache.json` only ever held
+the whole-book USFM/Names passes (the Wildebeest warm-up was reverted in
+issue #24). So a fully checked book had open Wildebeest findings recorded
+by id alone — nothing to put in a table.
+
+### Finding snapshots (`checkFindings/<book>/<chapter>.json`)
+
+`BridgeEngine._on_check_job_complete` now also writes
+`.apps/translationCoreAI/checkFindings/<book>/<chapter>.json` — the
+`QaFinding.to_dict()` list per verse for exactly the chapters a *succeeded*
+job covered, via `TranslationCoreProject.save_check_findings_snapshot`.
+Written after the rollup so a crash between the two leaves the rollup (what
+the dashboard reads) intact. The rollup stays authoritative for status; the
+snapshot only supplies content. `verse.runChecks` (the interactive
+single-verse path) does not write one — that path never updated the rollup
+either, and "checked" continues to mean "a chapter job succeeded".
+
+### `tc_ai_bridge/qa_report.py`
+
+`build_book_qa_report(project)` reads only persisted state — snapshots,
+`checkCache.json`, the rollup, `qaDecisions/`, the live tN/tW index,
+`checkData/{selections,verseEdits}`, `tools/wordAlignment/{completed,invalid}`,
+alignment chapter JSON and `aiReview/` — and returns per-book check
+coverage plus flat rows. Row rules worth knowing:
+
+- **Categories** are the report's own axis (`greekRoom`, `translationNotes`,
+  `translationWords`, `alignment`, `aiReview`), not `QaFinding.category`:
+  Wildebeest, USFM, Names and the local editorial checks all fold into one
+  Greek Room bucket with the engine kept on the row.
+- **Resolved / pass** = status not in {open, needs_discussion} — the exact
+  PASS rule `reporting._verse_coverage` already uses, so the report and the
+  dashboard's coverage bar never disagree.
+- **tN/tW rows come from the live index**, not the snapshot: a check
+  pending at the last job may have been selected since. Every check is a
+  row (pending / invalidated / stale = fail; selected / nothing-to-select =
+  pass), because a completed check with a provenance is the only thing that
+  can be "fixed by machine". Provenance comes from one walk of
+  `checkData/selections` (`_SelectionIndex`) instead of
+  `_latest_state_for_check`'s per-check glob — username `Bridge AI` →
+  machine, any other → human (named), no Bridge record → human
+  (`translationCore`). Staleness reproduces `check_staleness` exactly
+  (selection timestamp ≤ latest verse-edit timestamp).
+- A pending/invalidated tN/tW check the reviewer **Ignored** through
+  `verse.decide` is resolved by that human decision; the report re-derives
+  the finding id (`stable_finding_id`, a duplicate of
+  `bridge_service._stable_finding_id` pinned by a test because
+  `bridge_service` imports this module).
+- **AI proposal**: Greek Room `suggested_replacement`; tN/tW the AI review's
+  `suggested_correction` for that check (or `Select: …` from its proposed
+  selection text when nothing is selected yet). AI `qaIssues` are rows only
+  while the review is `current`; a stale review describes text that no
+  longer exists and is dropped rather than shown as an open failure.
+- **Alignment**: `WA_INVALID` rows for every currently-invalid mark (not
+  only chapters a job covered), plus whatever `ALIGN_*` findings the
+  snapshot holds.
+- **Check-level pass/fail** (the "checks run" tiles and chart) is separate
+  from row pass/fail: Greek Room per checked verse, tN/tW per check,
+  alignment per touched verse; untouched/unrun work is *not run*, never a
+  failure. AI review is advisory and excluded from those totals.
+- Lazy (never opened) and missing siblings are listed as not checked
+  without being materialized — generating a report must not turn into
+  normalizing the whole Bible.
+
+### `report_jobs.py` and the protocol
+
+`ReportJobManager` is the `ProjectSweepManager` pattern with its own lock
+domain (a report must never be refused because a sweep or chapter job is
+running). It builds one `TranslationCoreProject` per sibling on a worker
+thread and never touches `BridgeEngine.project`. Methods: `report.generate`
+(start), `report.status` (small snapshot, safe to poll every 500 ms),
+`report.get` (the payload, fetched once), `report.cancel`, and
+`report.export` (`{outputPath, format: csv|tsv, rows, columns}` — the
+frontend sends the rows it has filtered to; Python writes them with the
+`csv` module, UTF-8 BOM so Excel opens Tamil/Odia/Hebrew as text). Only the
+latest job's payload is kept in memory. Rust: five thin commands;
+`report.get`/`report.export` get the 180 s timeout class, the rest stay
+interactive (a sixth `sidecar::tests` case pins that).
+
+### Frontend
+
+- `TopBar`: **Generate report** (primary) on the dashboard screen; a
+  `QA report` breadcrumb on the new top-level `report` screen.
+- `App.svelte`: `showingReport`, a 500 ms poll (`generateReport` /
+  `pollReport`, generation-guarded like the check monitor), the payload kept
+  for the session, and `navigateToReportRow` (verse link in a row → that
+  verse in the editor, switching books first when needed). A `report_conflict`
+  on generate (double click) follows the running job instead of failing.
+- `ProjectReportScreen.svelte`: left panel = every book with Greek Room /
+  tN / tW / alignment / AI-review progress bars (clicking scopes the right
+  panel); right panel = one filter row (category chips, book, chapter, fixed
+  by, result, severity, search) that scopes the stat tiles, four charts
+  (issues by category donut, fixed-vs-unresolved bars, checks
+  passed/failed/not-run bars, fixed-by donut) and the table. Charts are
+  hand-drawn SVG/HTML (`ReportDonut`, `ReportBars`) — the app is offline, no
+  CDN chart library. Colours are the app's finding legend in the order tN,
+  tW, Greek Room, alignment, AI (violet, new `--ai` token) — validated with
+  the dataviz palette validator; the one WARN pair (amber↔green, deutan) is
+  covered by the mandatory legend + direct labels, and the fixed-by ring
+  uses cyan/violet/red because accent blue↔violet failed all-pairs. The
+  table pages 100 rows at a time.
+- **Export**: CSV/TSV via `pickSavePath` + `report.export`. **PDF = print**:
+  a `.print-root` / `.print-expand` / `.no-print` convention in `index.css`
+  prints only the right panel with every scroll container un-clipped, and
+  the table renders every filtered row while printing. A pure-Python PDF
+  writer was rejected on purpose: it cannot shape Tamil/Odia/Hebrew without
+  an embedded shaping engine, and the webview already does.
+- `utils/reportStats.ts` holds the filter/aggregate logic so it is
+  unit-testable without the DOM.
+
+### Verification
+
+`tests/test_qa_report.py` — 11 tests (snapshot written by a real check job
+and read back with a decision applied; lazy/missing siblings not
+materialized; tN/tW provenance for Bridge AI / human / translationCore /
+invalidated / nothing-to-select with an AI proposal merged in; Ignore on a
+pending tN check; a `WA_INVALID` mark; cached USFM findings + collection
+totals; export CSV/TSV with BOM and quoting; error paths). The complete Python
+suite passes. Frontend: 19 new Vitest tests (`reportStats.test.ts`,
+`ProjectReportScreen.test.ts`) — 151 total; `npm run check` 0/0; `npm run
+build` OK. `cargo check` and `cargo test` (6 tests) pass. A raw stdio smoke
+(`python main.py`: open → checks.start → report.generate/status/get/export)
+was run against a throwaway project. **Not run:** the installed desktop app
+— the report screen has not yet been looked at in a real Tauri window, and
+print-to-PDF has not been exercised in WebView2.

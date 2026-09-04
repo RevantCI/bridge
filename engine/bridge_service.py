@@ -77,6 +77,12 @@ from tc_ai_bridge.usfm import whitespace_tokens
 from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
 from tc_ai_bridge.reporting import ReportService
+from tc_ai_bridge.qa_report import (
+    aggregate_qa_report,
+    build_book_qa_report,
+    unopened_book_report,
+    write_report_rows,
+)
 from tc_ai_bridge.verse_evidence import resolve_verse_evidence
 from tc_ai_bridge.semantic_mapping_service import semantic_mappings_for_verse, confirm_semantic_mapping
 from tc_ai_bridge.semantic_validation_service import (
@@ -104,6 +110,14 @@ from project_sweep import (
     SweepConflict,
     SweepError,
     SweepNotFound,
+)
+from report_jobs import (
+    ReportBook,
+    ReportJobConflict,
+    ReportJobError,
+    ReportJobManager,
+    ReportJobNotFound,
+    ReportNotReady,
 )
 
 BRIDGE_VERSION = "0.8.0-beta.13"
@@ -230,6 +244,14 @@ class Methods:
     PROJECT_SWEEP_STATUS = "project.sweepStatus"
     PROJECT_SWEEP_CANCEL = "project.sweepCancel"
     PROJECT_COLLECTION_REPORT = "project.collectionReport"
+    # Whole-collection QA report (qa_report.py + report_jobs.py): a
+    # background build polled by status, fetched once with get, and an
+    # export of whatever rows the report screen has filtered down to.
+    REPORT_GENERATE = "report.generate"
+    REPORT_STATUS = "report.status"
+    REPORT_GET = "report.get"
+    REPORT_CANCEL = "report.cancel"
+    REPORT_EXPORT = "report.export"
     PROJECT_INSPECT_IMPORT = "project.inspectImport"
     PROJECT_IMPORT = "project.import"
     CHAPTER_VERSES = "chapter.verses"
@@ -432,6 +454,7 @@ class BridgeEngine:
         self._ai_review_jobs = AIReviewJobManager()
         self._analysis_jobs = AnalysisJobManager()
         self._project_sweep = ProjectSweepManager()
+        self._report_jobs = ReportJobManager()
         # AppSettings() with no path defaults to a real, persistent location
         # (%LOCALAPPDATA%/Bridge/data/settings.json on Windows — a subfolder
         # of the NSIS install dir, not the dir itself, so an uninstall can't
@@ -883,6 +906,84 @@ class BridgeEngine:
             materialize_lazy_project(book.path)
             reports.append(ReportService(TranslationCoreProject(book.path)).build_book_report())
         return ReportService.build_collection_report(reports)
+
+    # -- whole-collection QA report ---------------------------------------
+
+    def _report_books(self) -> list[ReportBook]:
+        """Every sibling in the open collection, lazy and missing ones
+        included -- unlike _sibling_sweep_books, the report must list a book
+        that was never opened (as 'not checked') rather than skip it."""
+        self._require_project()
+        siblings = collection_projects(str(self.project.path))
+        if not siblings:
+            siblings = [{
+                "path": str(self.project.path), "bookId": self.project.book_id,
+                "bookName": self.project.summary.book_name, "lazy": False,
+            }]
+        books: list[ReportBook] = []
+        for entry in siblings:
+            path = str(entry.get("path") or "")
+            books.append(ReportBook(
+                path=path, book_id=str(entry.get("bookId") or ""),
+                book_name=str(entry.get("bookName") or ""),
+                lazy=bool(entry.get("lazy")), missing=not Path(path).is_dir(),
+            ))
+        return books
+
+    def _report_project_name(self) -> str:
+        self._require_project()
+        bridge_project = self.project.manifest.get("bridge_project", {})
+        if isinstance(bridge_project, dict) and bridge_project.get("name"):
+            return str(bridge_project["name"])
+        resource = self.project.manifest.get("resource", {})
+        if isinstance(resource, dict) and resource.get("name"):
+            return str(resource["name"])
+        return self.project.summary.book_name
+
+    @staticmethod
+    def _build_report_book(book: ReportBook) -> dict[str, Any]:
+        """Runs on the report job's worker thread. Never materializes a lazy
+        sibling: a book nobody has opened has had no checks, and reading it
+        would turn 'generate a report' into 'normalize the whole Bible'."""
+        if book.missing or book.lazy:
+            return unopened_book_report(
+                book_id=book.book_id, book_name=book.book_name, path=book.path,
+                lazy=book.lazy, missing=book.missing,
+            )
+        try:
+            project = TranslationCoreProject(book.path)
+        except ProjectError as exc:
+            return unopened_book_report(
+                book_id=book.book_id, book_name=book.book_name, path=book.path,
+                lazy=False, missing=False, error=str(exc),
+            )
+        return build_book_qa_report(project, book_name=book.book_name)
+
+    def start_qa_report(self) -> dict[str, Any]:
+        books = self._report_books()
+        project_name = self._report_project_name()
+        return self._report_jobs.start(
+            books, build_book=self._build_report_book,
+            assemble=lambda reports: aggregate_qa_report(project_name, reports),
+        )
+
+    def qa_report_status(self, job_id: str = "") -> dict[str, Any]:
+        return self._report_jobs.status(job_id)
+
+    def qa_report_get(self, job_id: str = "") -> dict[str, Any]:
+        return self._report_jobs.get(job_id)
+
+    def cancel_qa_report(self, job_id: str = "") -> dict[str, Any]:
+        return self._report_jobs.cancel(job_id)
+
+    def export_qa_report(self, output_path: str, fmt: str, rows: list[dict[str, Any]],
+                         columns: list[dict[str, str]] | None = None) -> dict[str, Any]:
+        if not str(output_path or "").strip():
+            raise ProjectError("outputPath is required")
+        try:
+            return write_report_rows(output_path, fmt, rows, columns)
+        except ValueError as exc:
+            raise ProjectError(str(exc)) from exc
 
     # -- verse-level operations ------------------------------------------
 
@@ -2735,16 +2836,22 @@ class BridgeEngine:
             return
         try:
             by_chapter: dict[str, dict[str, dict[str, str]]] = {}
+            # The same findings twice over: id -> status for the rollup the
+            # dashboard reads, and the findings themselves for the project QA
+            # report (qa_report.py), which has nothing else to read them from.
+            snapshot_by_chapter: dict[str, dict[str, list[dict[str, Any]]]] = {}
             for result in job.results.values():
                 chapter = result.get("chapter")
                 verse = result.get("verse")
                 if chapter is None or verse is None or chapter not in job.spec.chapters:
                     continue
-                verse_findings = {
-                    str(f["id"]): str(f.get("status", FindingStatus.OPEN.value))
-                    for f in (result.get("findings") or []) if f.get("id")
+                findings = [
+                    f for f in (result.get("findings") or []) if isinstance(f, dict) and f.get("id")
+                ]
+                by_chapter.setdefault(str(chapter), {})[str(verse)] = {
+                    str(f["id"]): str(f.get("status", FindingStatus.OPEN.value)) for f in findings
                 }
-                by_chapter.setdefault(str(chapter), {})[str(verse)] = verse_findings
+                snapshot_by_chapter.setdefault(str(chapter), {})[str(verse)] = findings
 
             rollup = project.load_progress_rollup()
             chapters_dict = rollup.setdefault("chapters", {})
@@ -2758,6 +2865,10 @@ class BridgeEngine:
                 }
             self._recompute_progress_totals(project, rollup)
             project.save_progress_rollup(rollup)
+            # Written after the rollup so a crash between the two leaves the
+            # rollup -- what the dashboard reads -- intact.
+            for chapter, verses_map in snapshot_by_chapter.items():
+                project.save_check_findings_snapshot(chapter, verses_map)
         except Exception:
             pass
 
@@ -3278,6 +3389,19 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.cancel_project_sweep(p.get("jobId", "")))
             if m == Methods.PROJECT_COLLECTION_REPORT:
                 return EngineResponse.ok(request.id, result=self.build_collection_report())
+            if m == Methods.REPORT_GENERATE:
+                return EngineResponse.ok(request.id, result=self.start_qa_report())
+            if m == Methods.REPORT_STATUS:
+                return EngineResponse.ok(request.id, result=self.qa_report_status(p.get("jobId", "")))
+            if m == Methods.REPORT_GET:
+                return EngineResponse.ok(request.id, result=self.qa_report_get(p.get("jobId", "")))
+            if m == Methods.REPORT_CANCEL:
+                return EngineResponse.ok(request.id, result=self.cancel_qa_report(p.get("jobId", "")))
+            if m == Methods.REPORT_EXPORT:
+                return EngineResponse.ok(request.id, result=self.export_qa_report(
+                    p.get("outputPath", ""), p.get("format", "csv"),
+                    p.get("rows", []), p.get("columns"),
+                ))
             if m == Methods.PROJECT_INSPECT_IMPORT:
                 return EngineResponse.ok(request.id, result=self.inspect_project_import(
                     p["path"], p.get("metadata"),
@@ -3774,6 +3898,14 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "sweep_conflict", str(exc))
         except SweepError as exc:
             return EngineResponse.fail(request.id, "sweep_error", str(exc))
+        except ReportJobNotFound as exc:
+            return EngineResponse.fail(request.id, "report_not_found", str(exc))
+        except ReportJobConflict as exc:
+            return EngineResponse.fail(request.id, "report_conflict", str(exc))
+        except ReportNotReady as exc:
+            return EngineResponse.fail(request.id, "report_not_ready", str(exc))
+        except ReportJobError as exc:
+            return EngineResponse.fail(request.id, "report_error", str(exc))
         except AnalysisJobNotFound as exc:
             return EngineResponse.fail(request.id, "analysis_job_not_found", str(exc))
         except AnalysisJobConflict as exc:

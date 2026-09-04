@@ -86,6 +86,10 @@ fn request_timeout_seconds(method: &str) -> u64 {
         "ai.explain" => 300,
         // Logos starts a persistent -STA PowerShell helper on first use.
         "logos.getState" | "logos.setReference" => 20,
+        // A whole-Bible report payload (tens of thousands of rows) takes a
+        // while to serialize and ship over stdio; the export writes it
+        // back out. report.status/report.cancel stay interactive.
+        "report.get" | "report.export" => 180,
         _ => 30,
     }
 }
@@ -326,5 +330,14 @@ mod tests {
         assert_eq!(request_timeout_seconds("checks.status"), 30);
         assert_eq!(request_timeout_seconds("checks.cancel"), 30);
         assert_eq!(request_timeout_seconds("check.listForVerse"), 30);
+    }
+
+    #[test]
+    fn report_polling_stays_interactive_while_payload_transfer_has_headroom() {
+        assert_eq!(request_timeout_seconds("report.generate"), 30);
+        assert_eq!(request_timeout_seconds("report.status"), 30);
+        assert_eq!(request_timeout_seconds("report.cancel"), 30);
+        assert_eq!(request_timeout_seconds("report.get"), 180);
+        assert_eq!(request_timeout_seconds("report.export"), 180);
     }
 }
