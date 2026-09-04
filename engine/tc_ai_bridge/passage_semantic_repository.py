@@ -45,7 +45,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 9
+DATABASE_SCHEMA_VERSION = 10
 
 # Review priority, not alphabetical order — see _MIGRATION_V8.
 _SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
@@ -722,6 +722,39 @@ WHERE overall_status IN ('QUEUED','RUNNING');
 """
 
 
+# Stage 9A.4: keep the review queue tied to the canonical semantic scope that
+# produced each finding.  A separate association table is intentionally used
+# instead of target/display verse columns: source coverage may be realized in
+# another target verse, and both count and keyset pagination must filter the
+# same indexed result set before rows are returned.
+_MIGRATION_V10 = r"""
+CREATE TABLE qa_finding_scope_references (
+    finding_id TEXT NOT NULL REFERENCES qa_findings(id) ON DELETE CASCADE,
+    side TEXT NOT NULL CHECK(side IN ('SOURCE','TARGET')),
+    canonical_reference TEXT NOT NULL CHECK(length(canonical_reference) > 0),
+    PRIMARY KEY(finding_id,side,canonical_reference)
+);
+CREATE INDEX ix_qa_finding_scope_reference
+ON qa_finding_scope_references(canonical_reference,side,finding_id);
+
+INSERT OR IGNORE INTO qa_finding_scope_references(finding_id,side,canonical_reference)
+SELECT q.id,'SOURCE',refs.value
+FROM qa_findings q
+JOIN json_each(COALESCE(json_extract(q.payload_json,'$.sourceSemanticUnitIds'),'[]')) ids
+JOIN semantic_units units ON units.id=ids.value
+JOIN json_each(COALESCE(json_extract(units.payload_json,'$.canonicalReferences'),'[]')) refs
+WHERE typeof(refs.value)='text' AND length(trim(refs.value)) > 0;
+
+INSERT OR IGNORE INTO qa_finding_scope_references(finding_id,side,canonical_reference)
+SELECT q.id,'TARGET',refs.value
+FROM qa_findings q
+JOIN json_each(COALESCE(json_extract(q.payload_json,'$.targetSemanticUnitIds'),'[]')) ids
+JOIN semantic_units units ON units.id=ids.value
+JOIN json_each(COALESCE(json_extract(units.payload_json,'$.canonicalReferences'),'[]')) refs
+WHERE typeof(refs.value)='text' AND length(trim(refs.value)) > 0;
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -790,6 +823,10 @@ class FoundationRepository:
             if current < 9:
                 self._backup_before_migration(conn, current, 9)
                 self._apply_migration(conn, 9, _MIGRATION_V9)
+                current = 9
+            if current < 10:
+                self._backup_before_migration(conn, current, 10)
+                self._apply_migration(conn, 10, _MIGRATION_V10)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -2419,6 +2456,42 @@ class FoundationRepository:
             )
             conn.commit()
 
+    @staticmethod
+    def _replace_qa_finding_scope_references(
+        conn: sqlite3.Connection, finding_id: str,
+        source_unit_ids: tuple[str, ...], target_unit_ids: tuple[str, ...],
+    ) -> None:
+        """Index a finding by the canonical scope of its semantic units.
+
+        Source-coverage filtering deliberately follows source units, while
+        target-support filtering follows target units.  This is what keeps a
+        Greek PHP 1:3 unit visible when its Tamil realization is in 1:6,
+        without making every target-side 1:6 finding appear in a 1:3 queue.
+        """
+        conn.execute(
+            "DELETE FROM qa_finding_scope_references WHERE finding_id=?",
+            (finding_id,),
+        )
+        rows: set[tuple[str, str, str]] = set()
+        for side, unit_ids in (("SOURCE", source_unit_ids), ("TARGET", target_unit_ids)):
+            for unit_id in unit_ids:
+                row = conn.execute(
+                    "SELECT payload_json FROM semantic_units WHERE id=?", (unit_id,),
+                ).fetchone()
+                if row is None:
+                    continue
+                payload = json.loads(row[0])
+                for reference in payload.get("canonicalReferences") or ():
+                    normalized = str(reference).strip()
+                    if normalized:
+                        rows.add((finding_id, side, normalized))
+        if rows:
+            conn.executemany(
+                "INSERT INTO qa_finding_scope_references"
+                "(finding_id,side,canonical_reference) VALUES(?,?,?)",
+                sorted(rows),
+            )
+
     def save_qa_finding(self, finding: QaFinding) -> None:
         policy_id = self._ensure_policy(finding.policy_binding)
         payload = to_wire(finding)
@@ -2450,6 +2523,10 @@ class FoundationRepository:
                      finding.direction.value, finding.severity.value,
                      rank, chapter, verse, reference),
                 )
+                self._replace_qa_finding_scope_references(
+                    conn, finding.id, finding.source_semantic_unit_ids,
+                    finding.target_semantic_unit_ids,
+                )
                 conn.commit()
                 return
 
@@ -2462,6 +2539,11 @@ class FoundationRepository:
                 if field in stored:
                     merged[field] = stored[field]
             if _machine_fields(stored) == _machine_fields(merged):
+                self._replace_qa_finding_scope_references(
+                    conn, finding.id, finding.source_semantic_unit_ids,
+                    finding.target_semantic_unit_ids,
+                )
+                conn.commit()
                 return  # Nothing the machine produced actually changed.
             merged["revision"] = int(stored.get("revision", 1)) + 1
             conn.execute(
@@ -2472,6 +2554,10 @@ class FoundationRepository:
                  json.dumps(merged, ensure_ascii=False), finding.book, finding.kind.value,
                  finding.direction.value, finding.severity.value, rank, chapter, verse,
                  reference, finding.id),
+            )
+            self._replace_qa_finding_scope_references(
+                conn, finding.id, finding.source_semantic_unit_ids,
+                finding.target_semantic_unit_ids,
             )
             if stored.get("qaDisposition") != QaDisposition.UNRESOLVED.value:
                 # Leave an audit trail that a human-decided finding was
@@ -2574,6 +2660,7 @@ class FoundationRepository:
 
     def query_qa_findings(
         self, project_id: str, *, book: str = "", chapter: int | None = None,
+        canonical_references: tuple[str, ...] = (),
         kinds: tuple[str, ...] = (), severities: tuple[str, ...] = (),
         dispositions: tuple[str, ...] = (), review_statuses: tuple[str, ...] = (),
         lifecycle_statuses: tuple[str, ...] = (), order: str = "CANONICAL",
@@ -2609,6 +2696,26 @@ class FoundationRepository:
         if chapter is not None:
             where.append("sort_chapter=?")
             params.append(int(chapter))
+        selected_references = tuple(dict.fromkeys(
+            str(reference).strip() for reference in canonical_references
+        ))
+        if any(not reference for reference in selected_references):
+            raise FoundationValidationError(
+                "Canonical review-scope references must not be empty"
+            )
+        if selected_references:
+            # One JSON parameter avoids SQLite's host-parameter ceiling for a
+            # whole-book scope.  Direction chooses the semantic side whose
+            # canonical ownership determines queue membership.
+            where.append(
+                "EXISTS (SELECT 1 FROM qa_finding_scope_references scope "
+                "JOIN json_each(?) selected "
+                "ON selected.value=scope.canonical_reference "
+                "WHERE scope.finding_id=qa_findings.id AND scope.side="
+                "CASE qa_findings.direction WHEN 'TARGET_SUPPORT' THEN 'TARGET' "
+                "ELSE 'SOURCE' END)"
+            )
+            params.append(json.dumps(selected_references, ensure_ascii=False))
 
         filtered = " AND ".join(where)
         with self._connect() as conn:

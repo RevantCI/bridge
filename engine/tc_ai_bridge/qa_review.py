@@ -74,6 +74,7 @@ class QaReviewService:
 
     def get_queue(
         self, *, book: str = "", chapter: int | None = None,
+        canonical_references: tuple[str, ...] = (),
         kinds: tuple[str, ...] = (), severities: tuple[str, ...] = (),
         dispositions: tuple[str, ...] = (), review_statuses: tuple[str, ...] = (),
         lifecycle_statuses: tuple[str, ...] = (), order: str = "CANONICAL",
@@ -81,7 +82,8 @@ class QaReviewService:
     ) -> dict[str, Any]:
         """One page of the review queue, in deterministic order."""
         page = self.repository.query_qa_findings(
-            self.project_id, book=book or "", chapter=chapter, kinds=kinds,
+            self.project_id, book=book or "", chapter=chapter,
+            canonical_references=canonical_references, kinds=kinds,
             severities=severities, dispositions=dispositions,
             review_statuses=review_statuses, lifecycle_statuses=lifecycle_statuses,
             order=order, limit=limit, cursor=cursor,

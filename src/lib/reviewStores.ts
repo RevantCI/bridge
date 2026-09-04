@@ -22,6 +22,7 @@ import type {
 export interface ReviewFilters {
   book: string;
   chapter: number | null;
+  canonicalReferences: string[];
   kinds: string[];
   severities: string[];
   dispositions: QaDisposition[];
@@ -32,6 +33,7 @@ export interface ReviewFilters {
 export const EMPTY_FILTERS: ReviewFilters = {
   book: "",
   chapter: null,
+  canonicalReferences: [],
   kinds: [],
   severities: [],
   dispositions: [],
@@ -40,6 +42,7 @@ export const EMPTY_FILTERS: ReviewFilters = {
 };
 
 const PAGE_SIZE = 50;
+let queueGeneration = 0;
 
 export const reviewFilters = writable<ReviewFilters>({ ...EMPTY_FILTERS });
 export const reviewQueue = writable<QaFindingSummary[]>([]);
@@ -65,6 +68,9 @@ function toQueryFilters(filters: ReviewFilters, cursor: string): ReviewQueueFilt
   return {
     book: filters.book || undefined,
     chapter: filters.chapter ?? undefined,
+    canonicalReferences: filters.canonicalReferences.length
+      ? filters.canonicalReferences
+      : undefined,
     kinds: filters.kinds.length ? filters.kinds : undefined,
     severities: filters.severities.length ? (filters.severities as never) : undefined,
     dispositions: filters.dispositions.length ? filters.dispositions : undefined,
@@ -79,20 +85,23 @@ function toQueryFilters(filters: ReviewFilters, cursor: string): ReviewQueueFilt
 
 /** Load the first page for the current filters, discarding anything held. */
 export async function loadQueue(): Promise<void> {
+  const generation = ++queueGeneration;
   reviewLoading.set(true);
   reviewError.set("");
   try {
     const page = await bridge.qaReviewGetQueue(toQueryFilters(get(reviewFilters), ""));
+    if (generation !== queueGeneration) return;
     reviewQueue.set(page.findings);
     reviewTotal.set(page.totalCount);
     reviewCursor.set(page.nextCursor);
   } catch (error) {
+    if (generation !== queueGeneration) return;
     reviewError.set(String(error));
     reviewQueue.set([]);
     reviewTotal.set(0);
     reviewCursor.set("");
   } finally {
-    reviewLoading.set(false);
+    if (generation === queueGeneration) reviewLoading.set(false);
   }
 }
 
@@ -100,9 +109,11 @@ export async function loadQueue(): Promise<void> {
 export async function loadMoreFindings(): Promise<void> {
   const cursor = get(reviewCursor);
   if (!cursor || get(reviewLoading)) return;
+  const generation = queueGeneration;
   reviewLoading.set(true);
   try {
     const page = await bridge.qaReviewGetQueue(toQueryFilters(get(reviewFilters), cursor));
+    if (generation !== queueGeneration) return;
     // Guard against a page arriving after the filters changed underneath it.
     reviewQueue.update((existing) => {
       const seen = new Set(existing.map((item) => item.id));
@@ -111,10 +122,32 @@ export async function loadMoreFindings(): Promise<void> {
     reviewTotal.set(page.totalCount);
     reviewCursor.set(page.nextCursor);
   } catch (error) {
-    reviewError.set(String(error));
+    if (generation === queueGeneration) reviewError.set(String(error));
   } finally {
-    reviewLoading.set(false);
+    if (generation === queueGeneration) reviewLoading.set(false);
   }
+}
+
+/**
+ * Replace the canonical scope used by every queue page and clear rows from
+ * the previous scope immediately. Historical rows remain in SQLite and will
+ * reappear when their canonical scope is selected again.
+ */
+export function setReviewCanonicalScope(references: string[]): void {
+  const normalized = [...new Set(references.map((reference) => reference.trim()).filter(Boolean))];
+  const current = get(reviewFilters).canonicalReferences;
+  if (current.length === normalized.length
+      && current.every((reference, index) => reference === normalized[index])) return;
+  queueGeneration += 1;
+  reviewFilters.update((filters) => ({ ...filters, canonicalReferences: normalized }));
+  reviewQueue.set([]);
+  reviewTotal.set(0);
+  reviewCursor.set("");
+  reviewLoading.set(false);
+  reviewError.set("");
+  selectedFindingId.set(null);
+  selectedDetail.set(null);
+  detailError.set("");
 }
 
 export async function selectFinding(findingId: string | null): Promise<void> {
@@ -252,6 +285,7 @@ export async function addReviewerNote(findingId: string, note: string): Promise<
 }
 
 export function resetReviewState(): void {
+  queueGeneration += 1;
   reviewFilters.set({ ...EMPTY_FILTERS });
   reviewQueue.set([]);
   reviewTotal.set(0);

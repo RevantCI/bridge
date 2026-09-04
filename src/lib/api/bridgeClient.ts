@@ -652,6 +652,7 @@ export const bridge = {
     return call("qa_review_get_queue", {
       book: filters.book,
       chapter: filters.chapter,
+      canonicalReferences: filters.canonicalReferences,
       kinds: filters.kinds,
       severities: filters.severities,
       dispositions: filters.dispositions,

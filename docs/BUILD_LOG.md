@@ -10,6 +10,44 @@ Updated: 2026-09-04
 > continuously-updated detailed record; `DEVELOPER_GUIDE.md` is what to read
 > first to get oriented.
 
+## Stage 9A.4 follow-up - QA queue follows the active canonical scope (2026-09-04)
+
+Installed acceptance showed that analysis correctly ran a newly selected
+range, but `AlignmentQaMode` then refreshed `qaReview.getQueue` without that
+range. The backend therefore returned every persisted project finding: after
+PHP 1:3-1:6 followed by PHP 1:1, both scopes appeared together.
+
+Schema v10 adds `qa_finding_scope_references`, populated from each finding's
+source and target semantic units and backfilled during migration. Queue
+filtering now occurs in SQLite before total count, ordering and keyset
+pagination. `SOURCE_COVERAGE` follows canonical source-unit ownership;
+`TARGET_SUPPORT` follows canonical target-unit ownership. This keeps a Greek
+PHP 1:3 relationship in the selected source scope even when Tamil realizes it
+in 1:6, without filtering only by the displayed target verse. Existing rows,
+human dispositions, notes and append-only history are never deleted.
+
+The complete wire path now carries `canonicalReferences` through Svelte,
+TypeScript, Tauri/Rust, the Python protocol/service and the repository. Scope
+input changes clear the previous queue immediately; late responses are
+generation-gated; the persisted completed job is authoritative for an
+affected-only run. The UI identifies the default as **Review scope: Current
+analysis range**.
+
+Verification: 42 focused queue/migration tests, 101 repository/runtime/review
+tests, 126 frontend tests, 5 Rust tests, and the complete 599-test Python suite
+pass. Svelte/TypeScript reports 0 errors and 0 warnings; Cargo check, the
+production frontend build, frozen-sidecar rebuild, Tauri release build and
+NSIS packaging pass. The exact installer was installed successfully, and a
+disposable installed-sidecar acceptance verified 26 persisted findings split
+13/13 between PHP 1:1 and PHP 1:3-1:6, restored a reviewed decision/note after
+switching back, retained a real cross-verse 1:3-to-1:6 association, and
+reported scoped pagination/counts accurately.
+
+Separate blocker: the repository-wide frozen smoke reaches project import but
+currently expects `exactDuplicate` where the engine returns
+`possibleDuplicate`. No duplicate-import code was changed in this scoped fix.
+Stage 9B remains unstarted.
+
 ## Stage 9A.4 — Analysis orchestration and queue population (2026-09-03)
 
 The previously recorded empty-queue product gap is resolved. Alignment

@@ -528,6 +528,16 @@ def test_review_apis_round_trip_over_the_protocol(english: PassageSemanticRuntim
     assert queue["result"]["totalCount"] >= 1
     finding = queue["result"]["findings"][0]
 
+    scoped = _call(bridge, "qaReview.getQueue", {
+        "canonicalReferences": ["PHP 1:3"], "limit": 200,
+    })
+    outside = _call(bridge, "qaReview.getQueue", {
+        "canonicalReferences": ["PHP 1:1"], "limit": 200,
+    })
+    assert scoped["success"] is True
+    assert scoped["result"]["totalCount"] == queue["result"]["totalCount"]
+    assert outside["result"]["totalCount"] == 0
+
     detail = _call(bridge, "qaReview.getFinding", {"findingId": finding["id"]})
     assert detail["success"] is True
     assert "location" in detail["result"] and "meaning" in detail["result"]

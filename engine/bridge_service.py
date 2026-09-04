@@ -3603,6 +3603,7 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.qa_review_get_queue(
                     book=str(p.get("book") or ""),
                     chapter=(int(p["chapter"]) if p.get("chapter") not in (None, "") else None),
+                    canonical_references=tuple(p.get("canonicalReferences") or ()),
                     kinds=tuple(p.get("kinds") or ()),
                     severities=tuple(p.get("severities") or ()),
                     dispositions=tuple(p.get("dispositions") or ()),

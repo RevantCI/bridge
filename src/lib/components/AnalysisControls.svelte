@@ -16,6 +16,7 @@
   const dispatch = createEventDispatcher<{
     completed: { job: AnalysisJobSnapshot; scopeStatus: AnalysisScopeStatus };
     scopeStatus: AnalysisScopeStatus;
+    scopeInvalidated: void;
   }>();
 
   const STAGES: Array<{ id: AnalysisStage; label: string }> = [
@@ -181,6 +182,10 @@
         void refreshScopeStatus();
         return;
       }
+      if (scope.kind === "AFFECTED") {
+        scopeStatus = startStatus;
+        dispatch("scopeStatus", startStatus);
+      }
       const startedJob = await bridge.analysisJobStart(
         scope, startStatus.analysisFingerprint,
       );
@@ -221,6 +226,7 @@
     scopeStatus = null;
     statusSelectionSignature = "";
     error = "";
+    dispatch("scopeInvalidated");
     // Typing a range fires per keystroke; resolve the settled value once.
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(() => {

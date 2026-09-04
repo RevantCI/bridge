@@ -368,6 +368,17 @@ def test_passage_evidence_qa_exportability_and_review_round_trip(tmp_path: Path)
         qa_engine_version="bridge-qa-audit-v1", qa_policy_version="qa-policy-v1", fingerprint="test-fingerprint",
     )
     repo.save_qa_finding(finding)
+    with repo._connect() as conn:
+        scope_rows = conn.execute(
+            "SELECT side,canonical_reference FROM qa_finding_scope_references "
+            "WHERE finding_id=? ORDER BY side,canonical_reference", (finding.id,),
+        ).fetchall()
+    assert [(row["side"], row["canonical_reference"]) for row in scope_rows] == [
+        ("SOURCE", "PHP 1:1"), ("TARGET", "PHP 1:1"),
+    ]
+    assert [item["id"] for item in repo.query_qa_findings(
+        "project-1", canonical_references=("PHP 1:1",),
+    )["findings"]] == [finding.id]
     repo.update_qa_disposition("qa-rich", QaDisposition.NEEDS_DISCUSSION, 1, "Reviewer")
     reviews = repo.review_records("QA_FINDING", "qa-rich")
     assert reviews[0]["newQaDisposition"] == "NEEDS_DISCUSSION"

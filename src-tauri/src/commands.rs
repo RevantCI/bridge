@@ -1302,6 +1302,7 @@ pub async fn qa_review_get_queue(
     sidecar: State<'_, EngineSidecar>,
     book: Option<String>,
     chapter: Option<i64>,
+    canonical_references: Option<Vec<String>>,
     kinds: Option<Vec<String>>,
     severities: Option<Vec<String>>,
     dispositions: Option<Vec<String>>,
@@ -1317,6 +1318,7 @@ pub async fn qa_review_get_queue(
             serde_json::json!({
                 "book": book.unwrap_or_default(),
                 "chapter": chapter,
+                "canonicalReferences": canonical_references.unwrap_or_default(),
                 "kinds": kinds.unwrap_or_default(),
                 "severities": severities.unwrap_or_default(),
                 "dispositions": dispositions.unwrap_or_default(),

@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-
   import QaFindingDetail from "./QaFindingDetail.svelte";
   import QaFindingList from "./QaFindingList.svelte";
   import AnalysisControls from "./AnalysisControls.svelte";
-  import type { AnalysisScopeState } from "../types/analysisJob";
+  import type {
+    AnalysisJobSnapshot, AnalysisScopeState, AnalysisScopeStatus,
+  } from "../types/analysisJob";
   import type { QaDisposition, ReviewQueueOrder, ReviewerDecision } from "../types/qaReview";
   import {
     addReviewerNote,
@@ -20,6 +20,7 @@
     reviewLoading,
     reviewQueue,
     reviewTotal,
+    setReviewCanonicalScope,
     selectFinding,
     selectedDetail,
     selectedFindingId,
@@ -65,12 +66,10 @@
   let flash = "";
   let flashTone: "ok" | "warn" = "ok";
   let analysisState: AnalysisScopeState = "NOT_ANALYZED";
-
-  onMount(() => {
-    void loadQueue();
-  });
+  let scopeReady = false;
 
   async function applyFilters(): Promise<void> {
+    if (!scopeReady) return;
     await loadQueue();
     await selectFinding(null);
   }
@@ -138,10 +137,35 @@
     announce(result.ok ? "Note saved." : result.message, result.ok ? "ok" : "warn");
   }
 
-  async function analysisCompleted(): Promise<void> {
+  async function onScopeStatus(event: CustomEvent<AnalysisScopeStatus>): Promise<void> {
+    analysisState = event.detail.state;
+    scopeReady = true;
+    setReviewCanonicalScope(event.detail.canonicalReferences);
+    await loadQueue();
+    await selectFinding(null);
+  }
+
+  function onScopeInvalidated(): void {
+    scopeReady = false;
+    setReviewCanonicalScope([]);
+  }
+
+  async function analysisCompleted(
+    event: CustomEvent<{ job: AnalysisJobSnapshot }>,
+  ): Promise<void> {
+    // The completed persisted job is authoritative, especially for an
+    // AFFECTED run whose canonical references can be narrower than the base
+    // scope status refreshed after completion.
+    setReviewCanonicalScope(event.detail.job.canonicalReferences);
     await loadQueue();
     await selectFinding(null);
     announce("Analysis complete. The QA review queue has been refreshed.");
+  }
+
+  function scopeLabel(references: string[]): string {
+    if (!references.length) return "resolving...";
+    if (references.length === 1) return references[0];
+    return `${references[0]} - ${references[references.length - 1]}`;
   }
 </script>
 
@@ -149,9 +173,13 @@
   <AnalysisControls
     {chapter}
     {verse}
-    on:scopeStatus={(event) => { analysisState = event.detail.state; }}
+    on:scopeStatus={onScopeStatus}
+    on:scopeInvalidated={onScopeInvalidated}
     on:completed={analysisCompleted}
   />
+  <p class="review-scope" aria-live="polite">
+    Review scope: Current analysis range - {scopeLabel($reviewFilters.canonicalReferences)}
+  </p>
   <div class="filters" role="group" aria-label="Filter the review queue">
     <div class="filter-row">
       <span class="filter-label" id="filter-order">Order</span>
@@ -212,7 +240,7 @@
   {#if $reviewError}
     <p class="flash warn" role="alert">{$reviewError}</p>
   {/if}
-  {#if !$reviewLoading && $reviewTotal === 0}
+  {#if scopeReady && !$reviewLoading && $reviewTotal === 0}
     <p class="empty-state" role="status">
       {#if analysisState === "NOT_ANALYZED"}
         This range has not been analyzed yet. Choose a scope and run analysis.
@@ -262,6 +290,15 @@
 
 <style>
   .qa-mode { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+
+  .review-scope {
+    margin: 0;
+    padding: 0.35rem 0.6rem;
+    border-bottom: 1px solid #e5e7eb;
+    color: #4b5563;
+    font-size: 0.75rem;
+    flex: none;
+  }
 
   .filters {
     padding: 0.45rem 0.6rem;

@@ -101,6 +101,8 @@ export interface ReviewQueuePage {
 export interface ReviewQueueFilters {
   book?: string;
   chapter?: number;
+  /** Canonical semantic scope; source-owned for coverage and target-owned for support. */
+  canonicalReferences?: string[];
   kinds?: string[];
   severities?: QaFindingSeverity[];
   dispositions?: QaDisposition[];
