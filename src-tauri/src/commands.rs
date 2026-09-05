@@ -1462,6 +1462,162 @@ pub async fn qa_review_add_note(
         .await
 }
 
+// --- Stage 9B.2 correction proposal review (no Scripture application) ------
+
+#[tauri::command]
+pub async fn correction_get_eligibility(
+    sidecar: State<'_, EngineSidecar>,
+    finding_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.getEligibility",
+            serde_json::json!({"findingId": finding_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn correction_get_review_context(
+    sidecar: State<'_, EngineSidecar>,
+    finding_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.getReviewContext",
+            serde_json::json!({"findingId": finding_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn correction_get_proposal(
+    sidecar: State<'_, EngineSidecar>,
+    proposal_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.getProposal",
+            serde_json::json!({"proposalId": proposal_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn correction_list_for_finding(
+    sidecar: State<'_, EngineSidecar>,
+    finding_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.listForFinding",
+            serde_json::json!({"findingId": finding_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn correction_create_proposal(
+    sidecar: State<'_, EngineSidecar>,
+    finding_id: String,
+    intent: Value,
+    human_proposed_text: Option<String>,
+    explanation: Option<String>,
+    request_suggestion: Option<bool>,
+    actor_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.createProposal",
+            serde_json::json!({
+                "findingId": finding_id,
+                "intent": intent,
+                "humanProposedText": human_proposed_text.unwrap_or_default(),
+                "explanation": explanation.unwrap_or_default(),
+                "requestSuggestion": request_suggestion.unwrap_or(false),
+                "actorId": actor_id.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn correction_edit_proposal(
+    sidecar: State<'_, EngineSidecar>,
+    proposal_id: String,
+    proposed_text: String,
+    explanation: Option<String>,
+    expected_proposal_revision: i64,
+    actor_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.editProposal",
+            serde_json::json!({
+                "proposalId": proposal_id,
+                "proposedText": proposed_text,
+                "explanation": explanation.unwrap_or_default(),
+                "expectedProposalRevision": expected_proposal_revision,
+                "actorId": actor_id.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn correction_reject_proposal(
+    sidecar: State<'_, EngineSidecar>,
+    proposal_id: String,
+    expected_proposal_revision: i64,
+    actor_id: Option<String>,
+    note: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.rejectProposal",
+            serde_json::json!({
+                "proposalId": proposal_id,
+                "expectedProposalRevision": expected_proposal_revision,
+                "actorId": actor_id.unwrap_or_default(),
+                "note": note.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn correction_regenerate_proposal(
+    sidecar: State<'_, EngineSidecar>,
+    proposal_id: String,
+    expected_proposal_revision: i64,
+    actor_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.regenerateProposal",
+            serde_json::json!({
+                "proposalId": proposal_id,
+                "expectedProposalRevision": expected_proposal_revision,
+                "actorId": actor_id.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn correction_get_proposal_history(
+    sidecar: State<'_, EngineSidecar>,
+    proposal_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.getProposalHistory",
+            serde_json::json!({"proposalId": proposal_id}),
+        )
+        .await
+}
+
 #[tauri::command]
 pub async fn semantic_review_decide_location(
     sidecar: State<'_, EngineSidecar>,

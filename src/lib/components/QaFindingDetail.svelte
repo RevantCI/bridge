@@ -2,6 +2,7 @@
   import { createEventDispatcher } from "svelte";
 
   import EvidenceInspector from "./EvidenceInspector.svelte";
+  import CorrectionReviewPanel from "./CorrectionReviewPanel.svelte";
   import ReviewStatusBadge from "./ReviewStatusBadge.svelte";
   import type { QaFindingDetail, ReviewerDecision } from "../types/qaReview";
   import {
@@ -19,8 +20,8 @@
    * The finding detail pane: what Bridge found, why, and the four
    * conclusions a reviewer may reach.
    *
-   * There is deliberately no "Apply correction" here. Stage 9A classifies
-   * findings only; generating or applying replacement Scripture is Stage 9B.
+   * Stage 9B.2 adds proposal review below the existing evidence. It still has
+   * deliberately no path that applies a proposal to Scripture.
    */
   export let detail: QaFindingDetail | null = null;
   export let loading = false;
@@ -118,6 +119,7 @@
 
     <div class="evidence">
       <EvidenceInspector {detail} />
+      <CorrectionReviewPanel findingId={finding.id} findingRevision={finding.revision} />
     </div>
 
     <footer class="actions">
@@ -212,7 +214,7 @@
   .explanation { margin: 0.4rem 0 0.2rem; font-size: 0.86rem; line-height: 1.5; }
   .caveat { margin: 0; font-size: 0.75rem; color: #6b7280; font-style: italic; }
 
-  .evidence { padding: 0.75rem 0.9rem; flex: 1 1 auto; min-height: 0; }
+  .evidence { padding: 0.75rem 0.9rem; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: .9rem; }
 
   /* The decision controls must never sit below the fold on a small laptop:
      the pane scrolls, and these stay pinned to its bottom edge. */

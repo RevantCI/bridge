@@ -360,6 +360,7 @@ class Methods:
     # Stage 9B.0/9B.1 correction data surface. correction.applyProposal is
     # deliberately absent: no Scripture-changing command exists until 9B.3.
     CORRECTION_GET_ELIGIBILITY = "correction.getEligibility"
+    CORRECTION_GET_REVIEW_CONTEXT = "correction.getReviewContext"
     CORRECTION_GET_PROPOSAL = "correction.getProposal"
     CORRECTION_LIST_FOR_FINDING = "correction.listForFinding"
     CORRECTION_CREATE_PROPOSAL = "correction.createProposal"
@@ -2096,6 +2097,10 @@ class BridgeEngine:
         never re-derive it from a finding's fields."""
         return self._require_passage_semantic_runtime().correction_get_eligibility(finding_id)
 
+    def correction_get_review_context(self, finding_id: str) -> dict[str, Any]:
+        """Read-only current text and existing semantic grounding for 9B.2."""
+        return self._require_passage_semantic_runtime().correction_get_review_context(finding_id)
+
     def correction_get_proposal(self, proposal_id: str) -> dict[str, Any]:
         return self._require_passage_semantic_runtime().correction_get_proposal(proposal_id)
 
@@ -3830,6 +3835,10 @@ class BridgeEngine:
                 ))
             if m == Methods.CORRECTION_LIST_FOR_FINDING:
                 return EngineResponse.ok(request.id, result=self.correction_list_for_finding(
+                    str(p.get("findingId") or ""),
+                ))
+            if m == Methods.CORRECTION_GET_REVIEW_CONTEXT:
+                return EngineResponse.ok(request.id, result=self.correction_get_review_context(
                     str(p.get("findingId") or ""),
                 ))
             if m == Methods.CORRECTION_CREATE_PROPOSAL:

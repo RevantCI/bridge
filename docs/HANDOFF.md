@@ -1640,13 +1640,112 @@ The Stage 9B.0 Rust contention blocker is closed. Installed desktop acceptance
 was not part of this backend-only stage. The pre-existing coarse resource
 conflict policy remains deliberately conservative.
 
-## Next boundary: Stage 9B.2 only
+## Next boundary at the Stage 9B.1 checkpoint: Stage 9B.2 only
 
 Stage 9B.2 may present current/proposed wording, alternatives, evidence,
 provenance, history, and edit/reject/regenerate controls. It must not add an
 Apply action, mutate Scripture/translationCore data, rerun Stages 6B–8, mark a
 finding `CORRECTED`, or change export behavior. Stage 9B.2 requires explicit
-approval before implementation.
+approval before implementation. That approval was subsequently given and the
+completed Stage 9B.2 boundary is recorded below.
+
+---
+
+# 37.2 Stage 9B.2 — Correction Review UI (Complete, 2026-09-05)
+
+Stage 9B.2 connects the Stage 9B.1 proposal lifecycle to the authoritative
+`Alignment Review -> QA -> finding detail` workflow. A reviewer can now confirm
+a translation issue, create a human-authored correction offline or request an
+optional configured-provider suggestion, and inspect/edit/reject/regenerate
+proposal data without changing Scripture.
+
+### Runtime/UI architecture
+
+- `CorrectionReviewPanel.svelte` is embedded after the existing Stage 6B–8
+  evidence/history in `QaFindingDetail.svelte`; it is not a disconnected
+  correction application. Confirming a finding keeps it selected and its new
+  finding revision forces a fresh backend eligibility check.
+- Svelte calls `correction.getEligibility` as the sole eligibility authority.
+  Ineligible findings show backend reason text (stale finding, ambiguous or
+  rejected mapping, preserved-meaning override, resource conflict, and similar
+  blockers) instead of silently hiding the workflow. Existing proposals remain
+  visible history but become non-current when those blockers appear.
+- A narrow read-only `correction.getReviewContext` boundary resolves Stage 6B
+  span IDs through the persisted target inventory and then re-reads the current
+  editable target text. It supplies per-reference current content hash/revision
+  and exact half-open Unicode code-point coordinates. Recorded quote mismatch
+  drops the candidate rather than fuzzy-relocating it. No imported-USFM wording
+  is reintroduced.
+- The Python protocol is wired through Rust/Tauri and typed TypeScript client
+  methods for eligibility, review context, get/list, create, edit, reject,
+  regenerate, and history. Provider-bearing create/regenerate calls have the
+  existing AI network timeout class; read/edit/reject remain interactive.
+- Manual proposal creation stays available without an API key. “Suggest
+  wording” is shown only when a provider is configured, sends the exact reviewed
+  intent/span through Stage 9B.1, and returns a proposal requiring human review.
+- Existing proposal review shows current verse/context and highlighted exact
+  span (or an explicit `[n,n)` insertion caret), proposed text, alternatives,
+  reason, affected semantic dimension, source evidence, Stage 6B location,
+  tN/tW/TWL resources, truthful machine/human provenance, supersession, and
+  append-only event history.
+- Editing uses proposal revision CAS. A conflict reloads the current record and
+  tells the reviewer instead of retrying or overwriting. Rejection retains the
+  proposal/evidence/note/history. Regeneration uses Stage 9B.1 supersession and
+  keeps every prior proposal.
+- `unicodeDiff.ts` converts persisted code-point coordinates safely and diffs
+  grapheme clusters with `Intl.Segmenter` (code-point-safe fallback). Tests pin
+  Tamil combining text, Hebrew points, Greek diacritics, supplementary Unicode,
+  insertion, deletion, and replacement.
+- The panel has independently scrolling evidence/proposal content and a sibling
+  sticky action region. Controlled long-content fixtures exercise 1366 px and
+  820 px widths, long Tamil, long evidence, many alternatives and long history;
+  the existing QA list test keeps 1,000 rows virtualized.
+
+### Safety boundary and compatibility
+
+There is still no `correction.applyProposal`, `apply_scripture_edit()`,
+Scripture or translationCore mutation, post-edit Stage 6B/7/8 run, `CORRECTED`
+transition, or export change. UI regression tests assert that no functional
+Apply/Save/Replace-Scripture control exists. The companion database remains
+schema **v12**; Stage 9B.2 adds no migration. The Project QA Report Python,
+Rust, Svelte and documentation behavior remains a frozen regression boundary
+and no report implementation file was modified.
+
+Controlled acceptance fixtures cover a confirmed quantity issue through
+proposal/edit/history, a confirmed omission using a zero-length insertion, and
+the PHP 1:3 source meaning grounded at one unambiguous PHP 1:6 target span. The
+cross-verse case retains canonical semantic scope and never manufactures a
+same-verse lexical alignment.
+
+Verification on 2026-09-05:
+
+```text
+Stage 9B.2 focused frontend              68 passed / 6 files
+Stage 9B.0 + 9B.1 focused Python        90 passed
+Stage 5–9A.4 + Project Report backend   211 passed
+Project Report focused frontend          19 passed
+Full Python (engine + Greek Room)        707 passed
+Full frontend Vitest                     176 passed / 19 files
+npm run check                            0 errors / 0 warnings
+npm run build                            passed (existing chunk-size warning)
+cargo test                                7 passed
+cargo check                              passed
+git diff --check                         passed (line-ending notices only)
+```
+
+Installed/manual limitation: these acceptance paths were exercised with
+controlled runtime/UI fixtures and production compilation, not in an installed
+WebView2 build against a disposable real project. A real-window visual pass at
+1366x768/narrow width and provider-backed suggestion should be performed before
+release packaging.
+
+## Next boundary: Stage 9B.3 only
+
+Stage 9B.3 is the first possible explicit human Apply boundary. It must design
+and test strict current-text/proposal CAS, durable crash recovery, deliberate
+Scripture mutation, complete dependent-record staling, and rollback before any
+Apply control is exposed. Do not add application, realignment, Stage 6B–8
+reruns, `CORRECTED`, or export work without explicit approval.
 
 ---
 
@@ -1743,7 +1842,7 @@ Stage 7 — DOES THE LOCATED TARGET EXPRESSION PRESERVE IT? ✅ done
 Stage 8 — IS ANY SOURCE MEANING MISSING?
           IS ANY TARGET MEANING UNSUPPORTED?              ✅ done
         ↓
-Stage 9 — HUMAN REVIEW AND CORRECTION                     ◯ next
+Stage 9 — HUMAN REVIEW AND CORRECTION                     ◐ 9A–9B.2 done
 ```
 
 Do not collapse these stages.

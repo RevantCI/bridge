@@ -3812,3 +3812,105 @@ creation by the existing conservative policy; no installed-app acceptance was
 needed for this backend-only stage; proposal UI, Apply, strict Scripture-edit
 CAS, post-edit realignment/reanalysis, `CORRECTED`, and export are deliberately
 not implemented. Next authorized unit is Stage 9B.2 UI only, after approval.
+
+## Stage 9B.2 — correction review UI (2026-09-05)
+
+### Checkpoint and boundary
+
+Implementation started from committed Stage 9B.1 checkpoint `8722d0c`. The
+post-9B.0 Project QA Report surfaces were rechecked and treated as frozen: no
+report implementation file was modified. This stage adds proposal review only;
+it adds no Apply command, Scripture/translationCore writer, analysis rerun,
+`CORRECTED` transition, or export behavior.
+
+### Current-text review context
+
+The frontend could not safely construct `CorrectionIntent` from the existing QA
+detail payload: Stage 6B exposed stable span IDs/quotes, while Stage 9B.1
+requires the current per-reference target revision/hash and exact Unicode
+coordinates. A read-only `CorrectionWordingService.review_context()` was added
+rather than duplicating repository rules in Svelte. `correction.getReviewContext`
+resolves location span IDs through the stored Stage 6B run/target inventory,
+re-reads current editable target text, computes its current hash/revision, and
+returns an exact candidate only when the stored quote still matches at the same
+code-point coordinates. It never fuzzy-searches or relocates a stale span.
+Versification-normalized canonical references are retained from source semantic
+units and refined from a concrete target location when present.
+
+The method was wired through `passage_semantic_runtime.py`, `bridge_service.py`,
+nine thin Rust/Tauri correction commands, and typed `bridgeClient.ts` methods.
+Provider create/regenerate calls use the 260-second provider timeout; review
+reads and local proposal writes retain the 30-second interactive timeout.
+
+### Correction review workflow
+
+`CorrectionReviewPanel.svelte` now appears inside Alignment Review's QA finding
+detail, after the existing evidence inspector. It always asks backend
+`correction.getEligibility`; blocker reasons remain visible. Confirming a Stage
+9A finding leaves that item open instead of immediately advancing and increments
+the finding revision passed to the panel, which triggers a new eligibility and
+review-context load.
+
+Eligible findings expose one explicit start action and then separate offline
+`Write correction manually` and configured-provider `Suggest wording` paths.
+The draft requires an exact backend candidate span or a reviewer-selected
+grapheme-boundary insertion point. Existing proposals display:
+
+```text
+current target context + highlighted [start,end) span / insertion caret
+primary proposal + grapheme-safe diff + alternatives
+why / observed meaning / required meaning / failed dimension
+source evidence / target location / tN-tW-TWL resources
+machine/human provenance / provider metadata / append-only history
+```
+
+Alternative selection uses the existing CAS edit API and retains the same
+intent/span. Ordinary edits preserve the original provider suggestion.
+Revision conflict reloads and informs rather than silently retrying. Rejection
+keeps content and history. Regeneration creates a superseding proposal and keeps
+the earlier proposal selectable. Stale and newly ineligible proposal states are
+prominent and disable current actions.
+
+`unicodeDiff.ts` uses grapheme segmentation for display and explicit Unicode
+code-point slicing for persisted coordinates, including supplementary-plane
+characters. Insertion, deletion, and replacement are visually distinct.
+Evidence/proposal content has a capped independent scroll area; actions are a
+sibling sticky region. Long-content fixtures cover 1366 px and 820 px widths,
+long Tamil text/evidence/history and 12 alternatives. The existing 1,000-row QA
+fixture continues to verify list virtualization.
+
+### Verification
+
+Controlled UI/runtime fixtures demonstrate the quantity proposal/edit/history
+flow, a zero-length omission insertion, and PHP 1:3 source evidence attached to
+one exact PHP 1:6 target correction span. No test or UI path collapses this to a
+same-verse lexical alignment.
+
+```text
+Stage 9B.2 focused frontend              68 passed / 6 files
+Stage 9B.0 + 9B.1 focused Python        90 passed
+Stage 5–9A.4 + Project Report backend   211 passed
+Project Report focused frontend          19 passed
+Full Python (engine + Greek Room)        707 passed
+Full frontend Vitest                     176 passed / 19 files
+npm run check                            0 errors / 0 warnings
+npm run build                            passed; existing >500 kB chunk warning
+cargo test                                7 passed
+cargo check                              passed
+git diff --check                         passed; line-ending notices only
+```
+
+The companion database remains schema v12; there is no migration. Full Stage
+9B.1 byte-identity tests continue to pin Scripture/imported USFM/alignment files
+across create/edit/reject/regenerate, and the new review-context protocol test
+is read-only. The Project QA Report focused and full tests remain green.
+
+Installed/manual limitation: the new panel has not yet been inspected in a real
+installed WebView2 window or exercised against a live provider and disposable
+project. Production frontend compilation and controlled DOM/runtime acceptance
+are complete. Perform that visual/provider pass before release packaging.
+
+Next boundary is Stage 9B.3 only: explicit Apply, strict current-text/proposal
+CAS, durable transaction/recovery/rollback and dependent-record staling. It is
+not implemented and requires separate approval. Post-edit Stage 6B/7/8 reruns,
+`CORRECTED`, and export remain later work.

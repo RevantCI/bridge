@@ -48,6 +48,13 @@ import type {
   AnalysisScopeStatus,
 } from "../types/analysisJob";
 import type {
+  CorrectionEligibility,
+  CorrectionIntent,
+  CorrectionProposal,
+  CorrectionProposalEvent,
+  CorrectionReviewContext,
+} from "../types/correctionReview";
+import type {
   ReportExportColumn,
   ReportExportResult,
   ReportGetResponse,
@@ -732,6 +739,67 @@ export const bridge = {
     entityType: ReviewEntityType, entityId: string, note: string,
   ): Promise<{ history: ReviewRecord[] }> {
     return call("qa_review_add_note", { entityType, entityId, note });
+  },
+
+  // --- Stage 9B.2 correction proposal review (never applies Scripture) -----
+
+  correctionGetEligibility(findingId: string): Promise<CorrectionEligibility> {
+    return call("correction_get_eligibility", { findingId });
+  },
+
+  correctionGetReviewContext(findingId: string): Promise<CorrectionReviewContext> {
+    return call("correction_get_review_context", { findingId });
+  },
+
+  correctionGetProposal(proposalId: string): Promise<CorrectionProposal> {
+    return call("correction_get_proposal", { proposalId });
+  },
+
+  correctionListForFinding(
+    findingId: string,
+  ): Promise<{ findingId: string; proposals: CorrectionProposal[] }> {
+    return call("correction_list_for_finding", { findingId });
+  },
+
+  correctionCreateProposal(options: {
+    findingId: string;
+    intent: CorrectionIntent;
+    humanProposedText?: string;
+    explanation?: string;
+    requestSuggestion?: boolean;
+    actorId?: string;
+  }): Promise<CorrectionProposal> {
+    return call("correction_create_proposal", options);
+  },
+
+  correctionEditProposal(proposalId: string, options: {
+    proposedText: string;
+    explanation?: string;
+    expectedProposalRevision: number;
+    actorId?: string;
+  }): Promise<CorrectionProposal> {
+    return call("correction_edit_proposal", { proposalId, ...options });
+  },
+
+  correctionRejectProposal(proposalId: string, options: {
+    expectedProposalRevision: number;
+    actorId?: string;
+    note?: string;
+  }): Promise<CorrectionProposal> {
+    return call("correction_reject_proposal", { proposalId, ...options });
+  },
+
+  correctionRegenerateProposal(proposalId: string, options: {
+    expectedProposalRevision: number;
+    actorId?: string;
+  }): Promise<CorrectionProposal> {
+    return call("correction_regenerate_proposal", { proposalId, ...options });
+  },
+
+  correctionGetProposalHistory(
+    proposalId: string,
+  ): Promise<{ proposalId: string; events: CorrectionProposalEvent[] }> {
+    return call("correction_get_proposal_history", { proposalId });
   },
 
   /**

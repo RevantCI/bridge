@@ -97,7 +97,8 @@ describe("QaFindingDetail", () => {
     render(QaFindingDetail, { props: { detail: staleConfirmed() } });
     expect(screen.getByText("Confirmed translation issue")).toBeInTheDocument();
     expect(screen.getByText("Stale")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent(/must be re-evaluated|earlier revision/i);
+    expect(screen.getByText(/This finding was produced against an earlier revision/i))
+      .toHaveTextContent(/must be re-evaluated|earlier revision/i);
   });
 
   it("navigates to the next and previous finding", async () => {

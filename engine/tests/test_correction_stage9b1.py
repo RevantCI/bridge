@@ -161,6 +161,9 @@ class _Runtime:
         service = CorrectionWordingService(self, provider) if provider else self.correction_wording
         return service.create_proposal(**options)
 
+    def correction_get_review_context(self, finding_id: str):
+        return self.correction_wording.review_context(finding_id)
+
     def correction_edit_proposal(self, proposal_id: str, **options):
         return self.correction_wording.edit_proposal(proposal_id, **options)
 
@@ -699,3 +702,87 @@ def test_stage9b1_exposes_no_application_operation() -> None:
     assert "apply_proposal" not in public
     assert "apply_scripture_edit" not in public
     assert not hasattr(Methods, "CORRECTION_APPLY_PROPOSAL")
+
+
+def test_review_context_exposes_authoritative_text_revision_and_exact_location_span(
+    tmp_path: Path,
+) -> None:
+    runtime = _Runtime(tmp_path / "semantic.sqlite3")
+    start = TEXT.index("என் தேவனை")
+    end = start + len("என் தேவனை")
+    location = {
+        "id": "location-1", "runId": "location-run-1",
+        "locationOutcome": "LOCATED", "targetSpanIds": ["target-span-1"],
+        "targetDisplayedReferences": [REFERENCE],
+        "targetCanonicalReferences": [REFERENCE],
+    }
+
+    class ReviewWithLocation(_Review):
+        def get_finding(self, finding_id: str) -> dict:
+            detail = super().get_finding(finding_id)
+            detail["finding"].update({
+                "sourceSemanticUnitIds": ["source-unit-1"],
+                "displayedReferences": [REFERENCE],
+            })
+            detail["source"] = [{
+                "id": "source-unit-1", "rawSurface": "τῷ θεῷ μου",
+                "coverageDimension": "LEXICAL_CONTENT",
+                "displayedReferences": [REFERENCE],
+                "canonicalReferences": [REFERENCE],
+            }]
+            detail["location"] = [{"location": location, "alternatives": []}]
+            detail["meaning"] = [{"components": [{
+                "coverageDimension": "QUANTITY", "status": "CONTRADICTED",
+                "explanation": "The target says one where the source requires all.",
+            }]}]
+            return detail
+
+    runtime.qa_review = ReviewWithLocation()
+    runtime.repository.semantic_location_run = lambda run_id: {  # type: ignore[method-assign]
+        "id": run_id, "targetInventoryId": "target-inventory-1",
+    }
+    runtime.repository.target_inventory = lambda inventory_id: {  # type: ignore[method-assign]
+        "id": inventory_id,
+        "searchSpans": [{
+            "id": "target-span-1", "displayedReference": REFERENCE,
+            "startCodePoint": start, "endCodePoint": end,
+            "quote": TEXT[start:end],
+        }],
+    }
+
+    context = CorrectionWordingService(runtime).review_context("qa-1")
+    current = context["currentTargets"][0]
+    assert current["text"] == TEXT
+    assert current["targetContentHash"] == runtime.text_hash(TEXT)
+    assert current["targetTextRevision"] == runtime.text_revision(
+        REFERENCE, runtime.text_hash(TEXT),
+    )
+    assert context["candidateSpans"] == [{
+        "displayedReference": REFERENCE,
+        "canonicalReferences": [REFERENCE],
+        "startCodePoint": start,
+        "endCodePoint": end,
+        "originalText": "என் தேவனை",
+        "targetTextRevision": current["targetTextRevision"],
+        "targetContentHash": current["targetContentHash"],
+    }]
+    assert context["suggestedIntent"]["failedDimension"] == "QUANTITY"
+    assert context["suggestedIntent"]["affectedSourceSemanticUnitIds"] == ["source-unit-1"]
+
+
+def test_review_context_protocol_is_read_only_and_exposes_no_apply_method(tmp_path: Path) -> None:
+    from bridge_service import BridgeEngine
+    from greek_room_engine.protocol import EngineRequest
+
+    runtime = _Runtime(tmp_path / "semantic.sqlite3")
+    bridge = BridgeEngine()
+    bridge.project = object()
+    bridge.passage_semantic_runtime = runtime
+    before = runtime.repository.correction_proposals_for_finding("qa-1")
+    response = bridge.handle_request(EngineRequest(
+        id="review-context", method="correction.getReviewContext",
+        params={"findingId": "qa-1"},
+    )).to_dict()
+    assert response["success"] is True, response
+    assert response["result"]["currentTargets"][0]["text"] == TEXT
+    assert runtime.repository.correction_proposals_for_finding("qa-1") == before

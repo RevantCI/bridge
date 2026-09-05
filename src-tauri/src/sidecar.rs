@@ -81,7 +81,9 @@ fn request_timeout_seconds(method: &str) -> u64 {
         "verse.runChecks" => 150,
         // A single call to an OpenAI-compatible endpoint: ai_client.py's own HTTP
         // timeout is 240s (with retries on transient 5xx/429).
-        "alignment.aiPropose" => 260,
+        "alignment.aiPropose" | "correction.createProposal" | "correction.regenerateProposal" => {
+            260
+        }
         // ai.explain can make up to two sequential real model calls.
         "ai.explain" => 300,
         // Logos starts a persistent -STA PowerShell helper on first use.
@@ -339,5 +341,17 @@ mod tests {
         assert_eq!(request_timeout_seconds("report.cancel"), 30);
         assert_eq!(request_timeout_seconds("report.get"), 180);
         assert_eq!(request_timeout_seconds("report.export"), 180);
+    }
+
+    #[test]
+    fn correction_reads_stay_interactive_while_provider_wording_has_headroom() {
+        assert_eq!(request_timeout_seconds("correction.getEligibility"), 30);
+        assert_eq!(request_timeout_seconds("correction.getReviewContext"), 30);
+        assert_eq!(request_timeout_seconds("correction.editProposal"), 30);
+        assert_eq!(request_timeout_seconds("correction.createProposal"), 260);
+        assert_eq!(
+            request_timeout_seconds("correction.regenerateProposal"),
+            260
+        );
     }
 }

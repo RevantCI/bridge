@@ -122,7 +122,12 @@
         ? ` Promoted ${result.promoted.length} coverage account${result.promoted.length === 1 ? "" : "s"}.`
         : "";
       announce(`Decision recorded.${promoted}`);
-      await goToNextUnresolved();
+      // A confirmed issue now becomes eligible for Stage 9B.2 correction
+      // review. Keep it open so the refreshed detail can expose that workflow;
+      // the other conclusions continue the established review cadence.
+      if (event.detail.disposition !== "CONFIRMED_TRANSLATION_ERROR") {
+        await goToNextUnresolved();
+      }
     } else {
       announce(result.message, "warn");
     }

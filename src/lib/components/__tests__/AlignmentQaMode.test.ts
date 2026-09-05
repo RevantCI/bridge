@@ -1,16 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 
-const { queue, scopeStatus, startJob, jobStatus, cancelJob } = vi.hoisted(() => ({
-  queue: vi.fn(), scopeStatus: vi.fn(), startJob: vi.fn(), jobStatus: vi.fn(), cancelJob: vi.fn(),
+const {
+  queue, getFinding, decide, eligibility, correctionContext, correctionList, correctionHistory,
+  settings, scopeStatus, startJob, jobStatus, cancelJob,
+} = vi.hoisted(() => ({
+  queue: vi.fn(), getFinding: vi.fn(), decide: vi.fn(), eligibility: vi.fn(),
+  correctionContext: vi.fn(), correctionList: vi.fn(), correctionHistory: vi.fn(), settings: vi.fn(),
+  scopeStatus: vi.fn(), startJob: vi.fn(), jobStatus: vi.fn(), cancelJob: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
   bridge: {
     qaReviewGetQueue: queue,
-    qaReviewGetFinding: vi.fn(),
-    qaReviewDecideFinding: vi.fn(),
+    qaReviewGetFinding: getFinding,
+    qaReviewDecideFinding: decide,
     qaReviewAddNote: vi.fn(),
+    correctionGetEligibility: eligibility,
+    correctionGetReviewContext: correctionContext,
+    correctionListForFinding: correctionList,
+    correctionGetProposalHistory: correctionHistory,
+    getSettings: settings,
     analysisJobGetScopeStatus: scopeStatus,
     analysisJobStart: startJob,
     analysisJobStatus: jobStatus,
@@ -21,6 +31,7 @@ vi.mock("../../api/bridgeClient", () => ({
 import AlignmentQaMode from "../AlignmentQaMode.svelte";
 import { resetReviewState } from "../../reviewStores";
 import type { AnalysisJobSnapshot, AnalysisScopeState } from "../../types/analysisJob";
+import { detail, summary } from "./fixtures";
 
 const capability = {
   semanticRetrieval: "LIMITED" as const,
@@ -69,6 +80,17 @@ describe("AlignmentQaMode analysis states", () => {
     resetReviewState();
     vi.clearAllMocks();
     queue.mockResolvedValue({ findings: [], nextCursor: "", totalCount: 0, order: "CANONICAL" });
+    correctionContext.mockResolvedValue({
+      findingId: "qa-finding-0001", currentTargets: [], candidateSpans: [],
+      suggestedIntent: {
+        failedDimension: "LEXICAL_CONTENT", observedMeaning: "missing",
+        requiredMeaning: "required", affectedSourceSemanticUnitIds: ["source-unit-1"],
+      },
+      sourceEvidence: [], resources: [], location: [],
+    });
+    correctionList.mockResolvedValue({ findingId: "qa-finding-0001", proposals: [] });
+    correctionHistory.mockResolvedValue({ proposalId: "", events: [] });
+    settings.mockResolvedValue({ hasApiKey: false, reviewerName: "Reviewer" });
   });
 
   it.each([
@@ -154,5 +176,44 @@ describe("AlignmentQaMode analysis states", () => {
     expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({
       canonicalReferences: ["PHP 1:5"],
     }));
+  });
+
+  it("keeps a newly confirmed issue open and refreshes correction eligibility", async () => {
+    const unresolved = detail();
+    const confirmed = {
+      ...unresolved.finding,
+      qaDisposition: "CONFIRMED_TRANSLATION_ERROR" as const,
+      reviewStatus: "HUMAN_APPROVED" as const,
+      revision: 2,
+    };
+    scopeStatus.mockResolvedValue(scope("CURRENT"));
+    queue.mockResolvedValue({
+      findings: [summary()], nextCursor: "", totalCount: 1, order: "CANONICAL",
+    });
+    getFinding.mockResolvedValue(unresolved);
+    eligibility.mockResolvedValueOnce({
+      findingId: unresolved.finding.id, eligible: false,
+      reasons: [{ code: "DISPOSITION_NOT_CONFIRMED", detail: "Confirm the finding first.", entityType: "QA_FINDING", entityId: unresolved.finding.id }],
+      findingRevision: 1, currentTargetContentHash: "hash-1", displayedReferences: ["PHP 1:3"],
+      engineVersion: "eligibility-v1", existingProposalIds: [],
+    }).mockResolvedValue({
+      findingId: unresolved.finding.id, eligible: true,
+      reasons: [{ code: "ELIGIBLE", detail: "Eligible.", entityType: "", entityId: "" }],
+      findingRevision: 2, currentTargetContentHash: "hash-1", displayedReferences: ["PHP 1:3"],
+      engineVersion: "eligibility-v1", existingProposalIds: [],
+    });
+    decide.mockResolvedValue({
+      finding: confirmed, history: [], promotedCoverageAccountIds: [],
+    });
+
+    render(AlignmentQaMode, { props: { chapter: "1", verse: "3" } });
+    const findingOption = await waitFor(() =>
+      within(screen.getByRole("listbox")).getByRole("option"));
+    await fireEvent.click(findingOption);
+    expect(await screen.findByText("Confirm the finding first.")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Confirm translation issue" }));
+    expect(await screen.findByRole("button", { name: "Create correction proposal" })).toBeInTheDocument();
+    expect(getFinding).toHaveBeenCalledTimes(1);
+    expect(eligibility).toHaveBeenCalledTimes(2);
   });
 });

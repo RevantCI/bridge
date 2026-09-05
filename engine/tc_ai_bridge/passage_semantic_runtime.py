@@ -1342,6 +1342,9 @@ class PassageSemanticRuntime:
     def correction_get_eligibility(self, finding_id: str) -> dict[str, Any]:
         return self.correction_eligibility.evaluate(finding_id).to_dict()
 
+    def correction_get_review_context(self, finding_id: str) -> dict[str, Any]:
+        return self.correction_wording.review_context(finding_id)
+
     def correction_get_proposal(self, proposal_id: str) -> dict[str, Any]:
         return self.repository.correction_proposal(proposal_id)
 

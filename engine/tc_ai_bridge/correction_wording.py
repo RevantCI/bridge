@@ -285,6 +285,176 @@ class CorrectionWordingService:
             "policyVersion": CORRECTION_WORDING_POLICY_VERSION,
         }
 
+    def review_context(self, finding_id: str) -> dict[str, Any]:
+        """Return the current-text grounding the Stage 9B.2 UI needs.
+
+        This is deliberately read-only.  The browser must not recreate target
+        revisions or try to turn Stage 6B span ids into coordinates itself:
+        those identities are owned by the runtime/repository and a mismatch at
+        this boundary must remain visible rather than being fuzzy-relocated.
+        """
+        detail = self.runtime.qa_review.get_finding(finding_id)
+        finding = detail.get("finding") or {}
+        texts = self.eligibility.current_text_snapshot()
+        eligibility = self.eligibility.evaluate(finding_id)
+
+        references: list[str] = [
+            str(item) for item in finding.get("displayedReferences") or ()
+        ]
+        references.extend(str(item) for item in eligibility.displayed_references)
+        sources = detail.get("source") or detail.get("sourceSemanticUnits") or []
+        canonical_by_displayed: dict[str, list[str]] = {}
+        for unit in sources:
+            if not isinstance(unit, dict):
+                continue
+            displayed = [str(item) for item in unit.get("displayedReferences") or ()]
+            canonical = [str(item) for item in unit.get("canonicalReferences") or ()]
+            if len(displayed) == len(canonical):
+                for shown, normalized in zip(displayed, canonical):
+                    canonical_by_displayed.setdefault(shown, []).append(normalized)
+            elif len(displayed) == 1 and canonical:
+                canonical_by_displayed.setdefault(displayed[0], []).extend(canonical)
+        candidate_rows: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        seen_span_ids: set[str] = set()
+        for entry in detail.get("location") or ():
+            location = entry.get("location") if isinstance(entry, dict) else None
+            if not isinstance(location, dict):
+                continue
+            references.extend(
+                str(item) for item in location.get("targetDisplayedReferences") or ()
+            )
+            run_id = str(location.get("runId") or "")
+            if not run_id:
+                continue
+            try:
+                run = self.repository.semantic_location_run(run_id)
+                inventory = self.repository.target_inventory(
+                    str(run.get("targetInventoryId") or "")
+                )
+            except (FoundationValidationError, AttributeError):
+                continue
+            spans = {
+                str(span.get("id") or ""): span
+                for span in inventory.get("searchSpans") or ()
+                if isinstance(span, dict)
+            }
+            for span_id in location.get("targetSpanIds") or ():
+                key = str(span_id)
+                if key in seen_span_ids or key not in spans:
+                    continue
+                seen_span_ids.add(key)
+                candidate_rows.append((location, spans[key]))
+
+        references = list(dict.fromkeys(reference for reference in references if reference))
+        current_targets: list[dict[str, Any]] = []
+        target_by_reference: dict[str, dict[str, Any]] = {}
+        for reference in references:
+            if reference not in texts:
+                continue
+            text = texts[reference]
+            content_hash = self.runtime.text_hash(text)
+            revision = self.runtime.text_revision(reference, content_hash)
+            target = {
+                "displayedReference": reference,
+                # Prefer the existing versification-normalized semantic unit
+                # identity. Stage 6B target location refines this below when a
+                # concrete target span exists. Application remains forbidden.
+                "canonicalReferences": list(dict.fromkeys(
+                    canonical_by_displayed.get(reference) or [reference]
+                )),
+                "text": text,
+                "targetTextRevision": revision,
+                "targetContentHash": content_hash,
+            }
+            current_targets.append(target)
+            target_by_reference[reference] = target
+
+        candidate_spans: list[dict[str, Any]] = []
+        for location, span in candidate_rows:
+            reference = str(span.get("displayedReference") or "")
+            target = target_by_reference.get(reference)
+            if target is None:
+                continue
+            start = int(span.get("startCodePoint") or 0)
+            end = int(span.get("endCodePoint") or 0)
+            text = str(target["text"])
+            if not 0 <= start <= end <= len(text):
+                continue
+            original = text[start:end]
+            recorded_quote = str(span.get("quote") or "")
+            if recorded_quote and original != recorded_quote:
+                # Current-text eligibility will explain the stale mismatch.
+                # Never relocate it to a similar substring here.
+                continue
+            canonical = [
+                str(item) for item in location.get("targetCanonicalReferences") or ()
+            ]
+            if len(canonical) != 1:
+                canonical = [reference]
+            target["canonicalReferences"] = canonical
+            candidate_spans.append({
+                "displayedReference": reference,
+                "canonicalReferences": canonical,
+                "startCodePoint": start,
+                "endCodePoint": end,
+                "originalText": original,
+                "targetTextRevision": target["targetTextRevision"],
+                "targetContentHash": target["targetContentHash"],
+            })
+
+        failed_dimension = "OTHER"
+        observed_meaning = str(finding.get("explanation") or "")
+        for meaning in detail.get("meaning") or ():
+            for component in meaning.get("components") or ():
+                status = str(component.get("status") or "")
+                if status not in {"", "PRESERVED", "NOT_APPLICABLE"}:
+                    failed_dimension = str(component.get("coverageDimension") or "OTHER")
+                    observed_meaning = str(component.get("explanation") or observed_meaning)
+                    break
+            if failed_dimension != "OTHER":
+                break
+        if failed_dimension == "OTHER":
+            for account in detail.get("coverage") or ():
+                candidate_dimension = str(account.get("coverageDimension") or "")
+                if candidate_dimension:
+                    failed_dimension = candidate_dimension
+                    break
+        source_ids = [str(unit.get("id")) for unit in sources if unit.get("id")]
+        source_surfaces = [
+            str(unit.get("rawSurface") or unit.get("normalizedSurface") or "")
+            for unit in sources
+            if unit.get("rawSurface") or unit.get("normalizedSurface")
+        ]
+        required_meaning = (
+            "Preserve the source meaning: " + "; ".join(source_surfaces)
+            if source_surfaces else "Preserve the source semantic obligation."
+        )
+        return {
+            "findingId": finding_id,
+            "currentTargets": current_targets,
+            "candidateSpans": candidate_spans,
+            "suggestedIntent": {
+                "failedDimension": failed_dimension,
+                "observedMeaning": observed_meaning,
+                "requiredMeaning": required_meaning,
+                "affectedSourceSemanticUnitIds": source_ids,
+            },
+            "sourceEvidence": sources,
+            "resources": detail.get("resources") or [],
+            "location": [
+                {
+                    "id": str((entry.get("location") or {}).get("id") or ""),
+                    "displayedReferences": (
+                        (entry.get("location") or {}).get("targetDisplayedReferences") or []
+                    ),
+                    "quote": str(
+                        (entry.get("location") or {}).get("targetQuote") or ""
+                    ),
+                }
+                for entry in detail.get("location") or [] if isinstance(entry, dict)
+            ],
+        }
+
     def _build_proposal(
         self, *, finding_id: str, intent: CorrectionIntent, context: dict[str, Any],
         human_proposed_text: str, explanation: str, request_suggestion: bool,
