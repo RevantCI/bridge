@@ -1749,6 +1749,137 @@ reruns, `CORRECTED`, or export work without explicit approval.
 
 ---
 
+# 37.3 Stage 9B.3a — Strict Persistence, Recovery, and Invalidation Foundation
+
+Stage 9B.3a is complete on the Stage 9B.2 checkpoint `c0d0151`. It adds the
+durable safety foundation for a future explicit correction Apply, but it still
+does not expose Apply or write Scripture.
+
+### Schema v13 and application ledger
+
+The passage-semantic companion database is now schema **v13**. Migration v13
+backs up the existing SQLite database, gives token instances explicit
+`lifecycleStatus`/`revision`, adds target-token and target-semantic-unit
+dependency edges, and rebuilds `correction_application_intents` around an exact
+immutable mutation snapshot. Legacy design-only application rows are retained
+as `RECOVERY_REQUIRED`; missing hashes or coordinates are never inferred.
+
+Each application persists the proposal/finding revisions, target and canonical
+references, separate source-provenance references, current target revision and
+hash, half-open Unicode code-point span and original text, replacement
+snapshot, intended final hash, prepared invalidation ID, translationCore
+journal ID, explicit actor, timestamps, failure/recovery/result metadata, and
+state revision. `UNIQUE(proposal_id, expected_proposal_revision)` makes retries
+idempotent. Repository writes use `BEGIN IMMEDIATE`, foreign keys, and revision
+CAS. The durable state machine is:
+
+```text
+PREPARED -> APPLYING -> APPLIED_SCRIPTURE -> INVALIDATED -> COMPLETED
+    |           |               |                |
+    +---------- FAILED          +----------------+-> RECOVERY_REQUIRED
+```
+
+Invalid transitions and stale state revisions fail explicitly. A duplicate
+request in PREPARED, APPLYING, APPLIED_SCRIPTURE, or COMPLETED returns the same
+application; it cannot create a second insertion opportunity.
+
+### Startup and crash recovery
+
+Project open now performs recovery in this order:
+
+```text
+construct TranslationCoreProject
+-> recover incomplete translationCore filesystem journals
+-> stop in RECOVERY_REQUIRED if rollback is incomplete
+-> construct PassageSemanticRuntime
+-> replay prepared target invalidations
+-> synchronize current editable JSON text
+-> reconcile incomplete correction applications
+-> expose the project
+```
+
+Semantic initialization therefore never fingerprints a known partially written
+chapter. A failed filesystem rollback leaves review/read paths available but
+sets `correctionWritesBlocked=true` and does not construct the semantic runtime.
+
+`CorrectionApplicationRecoveryCoordinator` is hash-exact and contains no
+writer. Current hash equal to the before hash means no committed correction;
+an interrupted PREPARED/APPLYING attempt becomes FAILED. Current hash equal to
+the intended-after hash is never applied again: recovery only completes the
+prepared semantic invalidation and idempotent proposal/finding bookkeeping.
+Proposal verification becomes PENDING, the old finding remains historical,
+and its QA disposition is not changed to CORRECTED. A hash matching neither
+snapshot, a journal/hash contradiction, an unrecoverable invalidation, or
+conflicting proposal finalization enters RECOVERY_REQUIRED. Successfully
+committed Scripture is never automatically rolled back because later semantic
+work failed.
+
+The crash matrix covers no PREPARED record, after PREPARED, filesystem writing,
+filesystem rollback, committed Scripture before invalidation, invalidation
+before finalization, proposal metadata before ledger finalization, and
+before/during affected analysis. Stage 9B.3a does not start affected analysis;
+the completed attempt records `affectedAnalysisStarted=false`.
+
+### Currentness, backups, and compatibility
+
+Target token instances are immutable historical identities with explicit
+ACTIVE/STALE lifecycle and revision. Target tokens depend on
+`TARGET_REFERENCE`; target semantic units depend on `TARGET_INVENTORY`. A
+target edit stales both children while source token history remains ACTIVE.
+Rebuilding the exact same content-addressed inventory may reactivate its exact
+instances without relocating human work. The shared dependency-type invariant
+now scans every Python module that writes dependency edges and includes
+`TOKEN_INSTANCE`.
+
+The existing SQLite backup/integrity path can record a pre-mutation backup
+path, SHA-256, timestamp, and application ID. The strict future writer context
+is defined for Stage 9B.3b, including exact target revision/hash, original verse
+and span, intended final verse, invalidation ID, and application ID. It is not
+accepted by or passed to `apply_scripture_edit()` yet. The future implementation
+must preserve the composed verse byte-for-byte and must not call `.strip()`.
+
+No correction API, Rust command, or frontend Apply control was added. Existing
+`apply_scripture_edit()`, translationCore alignment invalidation,
+`bottomWords`/word-bank reconciliation, edit audit, imported USFM, and export
+behavior are unchanged. The PHP regression retains source provenance PHP 1:3
+and editable target PHP 1:6 without inventing a same-verse lexical alignment.
+The full gate also exposed a Windows checkout defect in the independently
+hash-verified Strong's provenance files: `.gitattributes` now preserves the
+vendored Hebrew and Greek lexicon directories byte-for-byte, matching the
+existing UHB/UGNT protection. No resource content changed.
+
+Verification on 2026-09-05:
+
+```text
+Stage 9B.3a focused Python               34 passed
+Stage 9B.0 + 9B.1 Python                 90 passed
+foundation/runtime Python                61 passed
+Stage 5-8 Python                         90 passed
+Stage 9A.4 + Project QA Report Python   126 passed
+frontend Vitest                         176 passed / 19 files
+npm run check                            0 errors / 0 warnings
+npm run build                            passed; existing >500 kB chunk warning
+cargo test                                7 passed
+cargo check                              passed
+git diff --check                         passed; line-ending notices only
+full Python + Greek Room                742 passed
+```
+
+Installed desktop acceptance is not part of this non-mutating foundation
+checkpoint.
+
+### Next boundary: Stage 9B.3b only
+
+Stage 9B.3b may implement the explicit human application command and strict
+mode on the one canonical `apply_scripture_edit()` path. It must re-run
+eligibility immediately before mutation, verify every persisted snapshot and
+the one-verse/one-span boundary, prepare the semantic invalidation and backup
+before the edit, and retain the v13 recovery protocol. It must not silently
+relocate spans, introduce a second Scripture writer, mark CORRECTED, or start
+Stage 6B-8 reruns unless separately approved. No Stage 9B.3b work has begun.
+
+---
+
 # 38. Export Architecture (Planned, Post-Stage-9)
 
 The rich Bridge model is authoritative. Do not force passage-aware semantic

@@ -106,6 +106,8 @@ export interface TokenInstance {
   strong: string | null;
   morphology: string | null;
   morphologicalFeatures: Record<string, string>;
+  lifecycleStatus: LifecycleStatus;
+  revision: number;
 }
 
 export interface SemanticUnit {

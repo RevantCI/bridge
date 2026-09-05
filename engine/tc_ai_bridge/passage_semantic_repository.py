@@ -22,6 +22,8 @@ import uuid
 from .passage_semantic_models import (
     ActorType,
     Cardinality,
+    CorrectionApplicationIntent,
+    CorrectionApplicationState,
     CorrectionProposal,
     CorrectionProposalV2,
     VerificationStatus,
@@ -43,11 +45,12 @@ from .passage_semantic_models import (
     TokenInstance,
     TokenLineage,
     TokenLayer,
+    TokenSide,
     to_wire,
 )
 
 
-DATABASE_SCHEMA_VERSION = 12
+DATABASE_SCHEMA_VERSION = 13
 
 # The one authoritative record_type -> table map for the dependency graph.
 #
@@ -75,6 +78,7 @@ RECORD_DEPENDENCY_TABLES: dict[str, str] = {
     "MEANING_ASSESSMENT": "meaning_assessments",
     "QA_RUN": "qa_audit_runs",
     "SEMANTIC_UNIT": "semantic_units",
+    "TOKEN_INSTANCE": "token_instances",
 }
 
 # Upstream-only dependency anchors. They are legitimate `depends_on_type`
@@ -892,6 +896,121 @@ FROM correction_proposals;
 """
 
 
+_MIGRATION_V13 = r"""
+-- Target token instances are immutable historical identities, but their
+-- currentness is explicit. Source instances remain ACTIVE when target text
+-- changes because their resource identity is independent.
+ALTER TABLE token_instances ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'ACTIVE'
+    CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED'));
+ALTER TABLE token_instances ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1);
+UPDATE token_instances
+SET payload_json=json_set(json_set(payload_json,'$.lifecycleStatus','ACTIVE'),'$.revision',1);
+
+-- The v11 table was design-only. Rebuild it with the complete exact snapshot
+-- and preserve any hand-created legacy rows as RECOVERY_REQUIRED: missing
+-- coordinates/final hashes must never be guessed into a mutation-ready state.
+DROP INDEX IF EXISTS ix_correction_application_proposal;
+ALTER TABLE correction_application_intents RENAME TO correction_application_intents_v12;
+CREATE TABLE correction_application_intents (
+    application_id TEXT PRIMARY KEY,
+    proposal_id TEXT NOT NULL REFERENCES correction_proposals(id),
+    finding_id TEXT NOT NULL REFERENCES qa_findings(id),
+    project_id TEXT NOT NULL,
+    expected_proposal_revision INTEGER NOT NULL CHECK(expected_proposal_revision >= 1),
+    expected_finding_revision INTEGER NOT NULL CHECK(expected_finding_revision >= 1),
+    target_displayed_reference TEXT NOT NULL,
+    canonical_references_json TEXT NOT NULL,
+    source_provenance_references_json TEXT NOT NULL,
+    expected_target_revision TEXT NOT NULL,
+    expected_target_content_hash TEXT NOT NULL,
+    expected_start_code_point INTEGER NOT NULL CHECK(expected_start_code_point >= 0),
+    expected_end_code_point INTEGER NOT NULL CHECK(expected_end_code_point >= expected_start_code_point),
+    expected_original_text TEXT NOT NULL,
+    replacement_text_snapshot TEXT NOT NULL,
+    intended_final_verse_hash TEXT NOT NULL,
+    pending_invalidation_id TEXT NOT NULL,
+    translation_core_journal_transaction_id TEXT NOT NULL DEFAULT '',
+    actor_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT,
+    application_state TEXT NOT NULL CHECK(application_state IN (
+        'PREPARED','APPLYING','APPLIED_SCRIPTURE','INVALIDATED','COMPLETED','FAILED','RECOVERY_REQUIRED'
+    )),
+    state_revision INTEGER NOT NULL CHECK(state_revision >= 1),
+    failure_code TEXT NOT NULL DEFAULT '',
+    recovery_metadata_json TEXT NOT NULL DEFAULT '{}',
+    result_metadata_json TEXT NOT NULL DEFAULT '{}',
+    payload_json TEXT NOT NULL,
+    UNIQUE(proposal_id, expected_proposal_revision)
+);
+INSERT INTO correction_application_intents(
+    application_id,proposal_id,finding_id,project_id,expected_proposal_revision,
+    expected_finding_revision,target_displayed_reference,canonical_references_json,
+    source_provenance_references_json,expected_target_revision,expected_target_content_hash,
+    expected_start_code_point,expected_end_code_point,expected_original_text,
+    replacement_text_snapshot,intended_final_verse_hash,pending_invalidation_id,
+    translation_core_journal_transaction_id,actor_json,created_at,updated_at,completed_at,
+    application_state,state_revision,failure_code,recovery_metadata_json,result_metadata_json,payload_json
+)
+SELECT old.application_id,old.proposal_id,p.qa_finding_id,old.project_id,
+       old.expected_correction_revision,old.expected_finding_revision,
+       COALESCE(json_extract(p.payload_json,'$.intent.affectedTargetSpan.displayedReference'),''),
+       COALESCE(json_extract(p.payload_json,'$.intent.affectedTargetSpan.canonicalReferences'),'[]'),
+       COALESCE(json_extract(p.payload_json,'$.affectedReferences'),'[]'),
+       old.expected_target_revision,
+       COALESCE(json_extract(old.payload_json,'$.expectedTargetContentHashes[0]'),
+                json_extract(p.payload_json,'$.intent.affectedTargetSpan.targetContentHash'),''),
+       COALESCE(json_extract(p.payload_json,'$.intent.affectedTargetSpan.startCodePoint'),0),
+       COALESCE(json_extract(p.payload_json,'$.intent.affectedTargetSpan.endCodePoint'),0),
+       old.expected_original_text,COALESCE(json_extract(p.payload_json,'$.proposedText'),''),'','', '',
+       json_object('actorType','MIGRATION','actorId','schema-v13'),old.created_at,old.created_at,
+       old.completed_at,'RECOVERY_REQUIRED',1,'MIGRATED_INCOMPLETE_APPLICATION_SNAPSHOT',
+       json_object('legacyPayload',json(old.payload_json)),'{}',
+       json_object('applicationId',old.application_id,'proposalId',old.proposal_id,
+                   'findingId',p.qa_finding_id,'projectId',old.project_id,
+                   'expectedProposalRevision',old.expected_correction_revision,
+                   'expectedFindingRevision',old.expected_finding_revision,
+                   'targetDisplayedReference',COALESCE(json_extract(p.payload_json,'$.intent.affectedTargetSpan.displayedReference'),''),
+                   'canonicalReferences',json(COALESCE(json_extract(p.payload_json,'$.intent.affectedTargetSpan.canonicalReferences'),'[]')),
+                   'sourceProvenanceReferences',json(COALESCE(json_extract(p.payload_json,'$.affectedReferences'),'[]')),
+                   'expectedTargetRevision',old.expected_target_revision,
+                   'expectedTargetContentHash',COALESCE(json_extract(old.payload_json,'$.expectedTargetContentHashes[0]'),''),
+                   'expectedStartCodePoint',COALESCE(json_extract(p.payload_json,'$.intent.affectedTargetSpan.startCodePoint'),0),
+                   'expectedEndCodePoint',COALESCE(json_extract(p.payload_json,'$.intent.affectedTargetSpan.endCodePoint'),0),
+                   'expectedOriginalText',old.expected_original_text,'replacementTextSnapshot',COALESCE(json_extract(p.payload_json,'$.proposedText'),''),
+                   'intendedFinalVerseHash','','pendingInvalidationId','','translationCoreJournalTransactionId','',
+                   'actor',json_object('actorType','MIGRATION','actorId','schema-v13'),
+                   'createdAt',old.created_at,'updatedAt',old.created_at,'applicationState','RECOVERY_REQUIRED',
+                   'stateRevision',1,'failureCode','MIGRATED_INCOMPLETE_APPLICATION_SNAPSHOT',
+                   'recoveryMetadata',json_object('legacyPayload',json(old.payload_json)),'resultMetadata',json_object())
+FROM correction_application_intents_v12 old
+JOIN correction_proposals p ON p.id=old.proposal_id;
+DROP TABLE correction_application_intents_v12;
+CREATE INDEX ix_correction_application_proposal
+ON correction_application_intents(proposal_id,application_state);
+CREATE INDEX ix_correction_application_incomplete
+ON correction_application_intents(project_id,application_state,created_at);
+CREATE UNIQUE INDEX ux_correction_application_pending_invalidation
+ON correction_application_intents(pending_invalidation_id)
+WHERE pending_invalidation_id <> '';
+CREATE UNIQUE INDEX ux_correction_application_tc_journal
+ON correction_application_intents(translation_core_journal_transaction_id)
+WHERE translation_core_journal_transaction_id <> '';
+
+-- Existing target instances and units gain the same dependency edges new
+-- writes receive. The U+241F delimiter is the repository's canonical anchor.
+INSERT OR IGNORE INTO record_dependencies(record_type,record_id,depends_on_type,depends_on_id)
+SELECT 'TOKEN_INSTANCE',id,'TARGET_REFERENCE',
+       json_extract(payload_json,'$.projectId') || '␟' || upper(json_extract(payload_json,'$.book')) || '␟' || json_extract(payload_json,'$.displayedReference')
+FROM token_instances
+WHERE side='TARGET' AND json_extract(payload_json,'$.projectId') IS NOT NULL;
+INSERT OR IGNORE INTO record_dependencies(record_type,record_id,depends_on_type,depends_on_id)
+SELECT 'SEMANTIC_UNIT',semantic_unit_id,'TARGET_INVENTORY',inventory_id
+FROM target_inventory_units;
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -972,6 +1091,10 @@ class FoundationRepository:
             if current < 12:
                 self._backup_before_migration(conn, current, 12)
                 self._apply_migration(conn, 12, _MIGRATION_V12)
+                current = 12
+            if current < 13:
+                self._backup_before_migration(conn, current, 13)
+                self._apply_migration(conn, 13, _MIGRATION_V13)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -1230,6 +1353,377 @@ class FoundationRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def target_invalidation(self, intent_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM pending_invalidations WHERE id=?", (intent_id,),
+            ).fetchone()
+        return None if row is None else dict(row)
+
+    # --- Stage 9B.3a correction application ledger -----------------------
+
+    @staticmethod
+    def _application_payload(row: sqlite3.Row) -> dict[str, Any]:
+        payload = json.loads(row["payload_json"])
+        payload.update({
+            "applicationId": row["application_id"],
+            "proposalId": row["proposal_id"],
+            "findingId": row["finding_id"],
+            "projectId": row["project_id"],
+            "expectedProposalRevision": int(row["expected_proposal_revision"]),
+            "expectedFindingRevision": int(row["expected_finding_revision"]),
+            "targetDisplayedReference": row["target_displayed_reference"],
+            "canonicalReferences": json.loads(row["canonical_references_json"]),
+            "sourceProvenanceReferences": json.loads(row["source_provenance_references_json"]),
+            "expectedTargetRevision": row["expected_target_revision"],
+            "expectedTargetContentHash": row["expected_target_content_hash"],
+            "expectedStartCodePoint": int(row["expected_start_code_point"]),
+            "expectedEndCodePoint": int(row["expected_end_code_point"]),
+            "expectedOriginalText": row["expected_original_text"],
+            "replacementTextSnapshot": row["replacement_text_snapshot"],
+            "intendedFinalVerseHash": row["intended_final_verse_hash"],
+            "pendingInvalidationId": row["pending_invalidation_id"],
+            "translationCoreJournalTransactionId": row["translation_core_journal_transaction_id"],
+            "actor": json.loads(row["actor_json"]),
+            "createdAt": row["created_at"], "updatedAt": row["updated_at"],
+            "completedAt": row["completed_at"],
+            "applicationState": row["application_state"],
+            "stateRevision": int(row["state_revision"]),
+            "failureCode": row["failure_code"],
+            "recoveryMetadata": json.loads(row["recovery_metadata_json"]),
+            "resultMetadata": json.loads(row["result_metadata_json"]),
+        })
+        return payload
+
+    def _insert_application_intent(
+        self, conn: sqlite3.Connection, intent: CorrectionApplicationIntent,
+    ) -> None:
+        payload = to_wire(intent)
+        conn.execute(
+            "INSERT INTO correction_application_intents("
+            "application_id,proposal_id,finding_id,project_id,expected_proposal_revision,"
+            "expected_finding_revision,target_displayed_reference,canonical_references_json,"
+            "source_provenance_references_json,expected_target_revision,expected_target_content_hash,"
+            "expected_start_code_point,expected_end_code_point,expected_original_text,"
+            "replacement_text_snapshot,intended_final_verse_hash,pending_invalidation_id,"
+            "translation_core_journal_transaction_id,actor_json,created_at,updated_at,completed_at,"
+            "application_state,state_revision,failure_code,recovery_metadata_json,result_metadata_json,payload_json"
+            ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                intent.application_id, intent.proposal_id, intent.finding_id,
+                intent.project_id, intent.expected_proposal_revision,
+                intent.expected_finding_revision, intent.target_displayed_reference,
+                json.dumps(intent.canonical_references, ensure_ascii=False),
+                json.dumps(intent.source_provenance_references, ensure_ascii=False),
+                intent.expected_target_revision, intent.expected_target_content_hash,
+                intent.expected_start_code_point, intent.expected_end_code_point,
+                intent.expected_original_text, intent.replacement_text_snapshot,
+                intent.intended_final_verse_hash, intent.pending_invalidation_id,
+                intent.translation_core_journal_transaction_id,
+                json.dumps(to_wire(intent.actor), ensure_ascii=False),
+                intent.created_at, intent.updated_at, intent.completed_at,
+                intent.application_state.value, intent.state_revision,
+                intent.failure_code,
+                json.dumps(intent.recovery_metadata, ensure_ascii=False),
+                json.dumps(intent.result_metadata, ensure_ascii=False),
+                json.dumps(payload, ensure_ascii=False),
+            ),
+        )
+
+    def _validate_application_snapshot(
+        self, conn: sqlite3.Connection, intent: CorrectionApplicationIntent,
+    ) -> None:
+        if intent.application_state != CorrectionApplicationState.PREPARED or intent.state_revision != 1:
+            raise FoundationValidationError(
+                "A new correction application must begin at PREPARED revision 1"
+            )
+        if intent.actor.actor_type != ActorType.HUMAN:
+            raise FoundationValidationError(
+                "Correction application requires explicit human action"
+            )
+        proposal = conn.execute(
+            "SELECT qa_finding_id,project_id,revision FROM correction_proposals WHERE id=?",
+            (intent.proposal_id,),
+        ).fetchone()
+        if proposal is None:
+            raise FoundationValidationError(f"Unknown correction proposal: {intent.proposal_id}")
+        if (
+            proposal["qa_finding_id"] != intent.finding_id
+            or proposal["project_id"] != intent.project_id
+            or int(proposal["revision"]) != intent.expected_proposal_revision
+        ):
+            raise FoundationConflict("Correction proposal snapshot revision conflict")
+        finding = conn.execute(
+            "SELECT project_id,revision FROM qa_findings WHERE id=?", (intent.finding_id,),
+        ).fetchone()
+        if finding is None:
+            raise FoundationValidationError(f"Unknown QA finding: {intent.finding_id}")
+        if (
+            finding["project_id"] != intent.project_id
+            or int(finding["revision"]) != intent.expected_finding_revision
+        ):
+            raise FoundationConflict("QA finding snapshot revision conflict")
+        book = intent.target_displayed_reference.split(" ", 1)[0].upper()
+        target = conn.execute(
+            "SELECT text_hash,text_revision FROM current_target_revisions "
+            "WHERE project_id=? AND book=? AND displayed_reference=?",
+            (intent.project_id, book, intent.target_displayed_reference),
+        ).fetchone()
+        if target is None or (
+            target["text_hash"] != intent.expected_target_content_hash
+            or target["text_revision"] != intent.expected_target_revision
+        ):
+            raise FoundationConflict("Current target snapshot does not match application target snapshot")
+
+    def prepare_application_intent(
+        self, intent: CorrectionApplicationIntent, *, previous_text_hash: str,
+    ) -> dict[str, Any]:
+        """Atomically prepare invalidation and persist one idempotent attempt.
+
+        This method records only metadata. It never opens or writes Scripture.
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT * FROM correction_application_intents "
+                "WHERE proposal_id=? AND expected_proposal_revision=?",
+                (intent.proposal_id, intent.expected_proposal_revision),
+            ).fetchone()
+            if existing is not None:
+                conn.commit()
+                return self._application_payload(existing)
+            self._validate_application_snapshot(conn, intent)
+            if previous_text_hash != intent.expected_target_content_hash:
+                raise FoundationConflict("Current target snapshot does not match prepared target snapshot")
+            now = self._now()
+            conn.execute(
+                "INSERT INTO pending_invalidations VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    intent.pending_invalidation_id, intent.project_id,
+                    intent.target_displayed_reference.split(" ", 1)[0].upper(),
+                    intent.target_displayed_reference, previous_text_hash,
+                    intent.intended_final_verse_hash, "PREPARED", 0, "", now, now,
+                ),
+            )
+            self._insert_application_intent(conn, intent)
+            row = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE application_id=?",
+                (intent.application_id,),
+            ).fetchone()
+            conn.commit()
+        return self._application_payload(row)
+
+    def create_application_intent(self, intent: CorrectionApplicationIntent) -> dict[str, Any]:
+        """Persist against an already PREPARED invalidation, with CAS validation."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT * FROM correction_application_intents "
+                "WHERE proposal_id=? AND expected_proposal_revision=?",
+                (intent.proposal_id, intent.expected_proposal_revision),
+            ).fetchone()
+            if existing is not None:
+                conn.commit()
+                return self._application_payload(existing)
+            self._validate_application_snapshot(conn, intent)
+            pending = conn.execute(
+                "SELECT * FROM pending_invalidations WHERE id=? AND state='PREPARED'",
+                (intent.pending_invalidation_id,),
+            ).fetchone()
+            if pending is None:
+                raise FoundationConflict("Application invalidation is not PREPARED")
+            if (
+                pending["project_id"] != intent.project_id
+                or pending["displayed_reference"] != intent.target_displayed_reference
+                or pending["previous_text_hash"] != intent.expected_target_content_hash
+                or pending["expected_text_hash"] != intent.intended_final_verse_hash
+            ):
+                raise FoundationConflict("Prepared invalidation does not match application snapshot")
+            self._insert_application_intent(conn, intent)
+            row = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE application_id=?",
+                (intent.application_id,),
+            ).fetchone()
+            conn.commit()
+        return self._application_payload(row)
+
+    def application_intent(self, application_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE application_id=?",
+                (application_id,),
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(f"Unknown correction application: {application_id}")
+        return self._application_payload(row)
+
+    get_application_intent = application_intent
+
+    def find_application_by_proposal_revision(
+        self, proposal_id: str, expected_proposal_revision: int,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM correction_application_intents "
+                "WHERE proposal_id=? AND expected_proposal_revision=?",
+                (proposal_id, expected_proposal_revision),
+            ).fetchone()
+        return None if row is None else self._application_payload(row)
+
+    find_by_proposal_revision = find_application_by_proposal_revision
+
+    def list_incomplete_applications(self, project_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE project_id=? "
+                "AND application_state NOT IN ('COMPLETED','FAILED') ORDER BY created_at,application_id",
+                (project_id,),
+            ).fetchall()
+        return [self._application_payload(row) for row in rows]
+
+    @staticmethod
+    def _state(value: str | CorrectionApplicationState) -> CorrectionApplicationState:
+        return value if isinstance(value, CorrectionApplicationState) else CorrectionApplicationState(str(value))
+
+    def transition_application_state(
+        self, application_id: str, *,
+        expected_state: str | CorrectionApplicationState,
+        expected_state_revision: int,
+        new_state: str | CorrectionApplicationState,
+        failure_code: str = "",
+        recovery_metadata: dict[str, Any] | None = None,
+        result_metadata: dict[str, Any] | None = None,
+        translation_core_journal_transaction_id: str | None = None,
+    ) -> dict[str, Any]:
+        expected = self._state(expected_state)
+        target = self._state(new_state)
+        if not CorrectionApplicationIntent.can_transition(expected, target):
+            raise FoundationConflict(
+                f"Invalid correction application transition: {expected.value} -> {target.value}"
+            )
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE application_id=?",
+                (application_id,),
+            ).fetchone()
+            if row is None:
+                raise FoundationValidationError(f"Unknown correction application: {application_id}")
+            if row["application_state"] != expected.value or int(row["state_revision"]) != expected_state_revision:
+                raise FoundationConflict("Correction application state revision conflict")
+            recovery = json.loads(row["recovery_metadata_json"])
+            recovery.update(recovery_metadata or {})
+            result = json.loads(row["result_metadata_json"])
+            result.update(result_metadata or {})
+            now = self._now()
+            completed = now if target in {
+                CorrectionApplicationState.COMPLETED, CorrectionApplicationState.FAILED,
+            } else row["completed_at"]
+            journal_id = (
+                translation_core_journal_transaction_id
+                if translation_core_journal_transaction_id is not None
+                else row["translation_core_journal_transaction_id"]
+            )
+            payload = self._application_payload(row)
+            payload.update({
+                "applicationState": target.value,
+                "stateRevision": expected_state_revision + 1,
+                "failureCode": failure_code,
+                "recoveryMetadata": recovery,
+                "resultMetadata": result,
+                "translationCoreJournalTransactionId": journal_id,
+                "updatedAt": now, "completedAt": completed,
+            })
+            changed = conn.execute(
+                "UPDATE correction_application_intents SET application_state=?,state_revision=state_revision+1,"
+                "failure_code=?,recovery_metadata_json=?,result_metadata_json=?,"
+                "translation_core_journal_transaction_id=?,updated_at=?,completed_at=?,payload_json=? "
+                "WHERE application_id=? AND application_state=? AND state_revision=?",
+                (
+                    target.value, failure_code, json.dumps(recovery, ensure_ascii=False),
+                    json.dumps(result, ensure_ascii=False), journal_id, now, completed,
+                    json.dumps(payload, ensure_ascii=False), application_id, expected.value,
+                    expected_state_revision,
+                ),
+            ).rowcount
+            if changed != 1:
+                raise FoundationConflict("Correction application state revision conflict")
+            updated = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE application_id=?",
+                (application_id,),
+            ).fetchone()
+            conn.commit()
+        return self._application_payload(updated)
+
+    transition_application_state_cas = transition_application_state
+
+    def record_recovery_required(
+        self, application_id: str, *, expected_state_revision: int,
+        failure_code: str, recovery_metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        current = self.application_intent(application_id)
+        if current["applicationState"] == CorrectionApplicationState.RECOVERY_REQUIRED.value:
+            return current
+        return self.transition_application_state(
+            application_id,
+            expected_state=current["applicationState"],
+            expected_state_revision=expected_state_revision,
+            new_state=CorrectionApplicationState.RECOVERY_REQUIRED,
+            failure_code=failure_code, recovery_metadata=recovery_metadata,
+        )
+
+    record_application_recovery_required = record_recovery_required
+
+    def record_application_backup(
+        self, application_id: str, *, backup_root: str | Path,
+        expected_state_revision: int,
+    ) -> dict[str, Any]:
+        current = self.application_intent(application_id)
+        if int(current["stateRevision"]) != expected_state_revision:
+            raise FoundationConflict("Correction application state revision conflict")
+        directory = self.backup(
+            backup_root, reason=f"correction application {application_id} pre-mutation backup",
+        )
+        manifest_path = directory / "backup-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["applicationId"] = application_id
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
+        )
+        metadata = dict(current["recoveryMetadata"])
+        metadata["semanticDatabaseBackup"] = {
+            "path": str(directory), "sha256": manifest["sha256"],
+            "createdAt": manifest["createdAt"], "applicationId": application_id,
+        }
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE application_id=?",
+                (application_id,),
+            ).fetchone()
+            if row is None or int(row["state_revision"]) != expected_state_revision:
+                raise FoundationConflict("Correction application state revision conflict")
+            payload = self._application_payload(row)
+            now = self._now()
+            payload.update({
+                "recoveryMetadata": metadata, "stateRevision": expected_state_revision + 1,
+                "updatedAt": now,
+            })
+            conn.execute(
+                "UPDATE correction_application_intents SET recovery_metadata_json=?,"
+                "state_revision=state_revision+1,updated_at=?,payload_json=? "
+                "WHERE application_id=? AND state_revision=?",
+                (json.dumps(metadata, ensure_ascii=False), now,
+                 json.dumps(payload, ensure_ascii=False), application_id,
+                 expected_state_revision),
+            )
+            updated = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE application_id=?",
+                (application_id,),
+            ).fetchone()
+            conn.commit()
+        return self._application_payload(updated)
+
     @staticmethod
     def target_dependency_id(project_id: str, book: str, displayed_reference: str) -> str:
         return "\u241f".join((project_id, book.upper(), displayed_reference))
@@ -1296,11 +1790,21 @@ class FoundationRepository:
                     if parent is None or parent["side"] != instance.side.value:
                         raise FoundationValidationError("Token parent must exist on the same side")
                 conn.execute(
-                    "INSERT INTO token_instances VALUES(?,?,?,?,?,?,?,?)",
+                    "INSERT INTO token_instances VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (instance.id, instance.lineage_id, instance.side.value, instance.token_layer.value,
                      instance.parent_instance_id, instance.text_revision, instance.instance_fingerprint,
-                     json.dumps(payload, ensure_ascii=False),),
+                     json.dumps(payload, ensure_ascii=False), instance.lifecycle_status.value,
+                     instance.revision),
                 )
+                if instance.side == TokenSide.TARGET and instance.project_id:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)",
+                        ("TOKEN_INSTANCE", instance.id, "TARGET_REFERENCE",
+                         self.target_dependency_id(
+                             instance.project_id, instance.book,
+                             instance.displayed_reference,
+                         )),
+                    )
                 conn.commit()
             except sqlite3.IntegrityError as exc:
                 raise FoundationValidationError(f"Invalid token instance: {exc}") from exc
@@ -1347,12 +1851,22 @@ class FoundationRepository:
                     ):
                         raise FoundationValidationError("Unknown target token parent")
                     conn.execute(
-                        "INSERT INTO token_instances VALUES(?,?,?,?,?,?,?,?)",
+                        "INSERT INTO token_instances VALUES(?,?,?,?,?,?,?,?,?,?)",
                         (instance.id, instance.lineage_id, instance.side.value,
                          instance.token_layer.value, instance.parent_instance_id,
                          instance.text_revision, instance.instance_fingerprint,
-                         json.dumps(payload, ensure_ascii=False)),
+                         json.dumps(payload, ensure_ascii=False),
+                         instance.lifecycle_status.value, instance.revision),
                     )
+                    if instance.side == TokenSide.TARGET and instance.project_id:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)",
+                            ("TOKEN_INSTANCE", instance.id, "TARGET_REFERENCE",
+                             self.target_dependency_id(
+                                 instance.project_id, instance.book,
+                                 instance.displayed_reference,
+                             )),
+                        )
                 conn.commit()
             except sqlite3.IntegrityError as exc:
                 conn.rollback()
@@ -1743,6 +2257,42 @@ class FoundationRepository:
                 "INSERT OR IGNORE INTO target_inventory_units VALUES(?,?)",
                 [(inventory_id, item) for item in unit_ids],
             )
+            # Content-addressed target records can become current again only
+            # when the exact same inventory fingerprint is rebuilt (for
+            # example, an edit is deliberately reverted). Preserve identity
+            # and review data while making currentness explicit.
+            for token_id in token_ids:
+                token = conn.execute(
+                    "SELECT side,lifecycle_status,revision,payload_json FROM token_instances WHERE id=?",
+                    (token_id,),
+                ).fetchone()
+                if token is not None and token["side"] == "TARGET" and token["lifecycle_status"] != "ACTIVE":
+                    token_payload = json.loads(token["payload_json"])
+                    token_payload.update({
+                        "lifecycleStatus": "ACTIVE", "revision": int(token["revision"]) + 1,
+                    })
+                    conn.execute(
+                        "UPDATE token_instances SET lifecycle_status='ACTIVE',revision=revision+1,payload_json=? WHERE id=?",
+                        (json.dumps(token_payload, ensure_ascii=False), token_id),
+                    )
+            for unit_id in unit_ids:
+                unit = conn.execute(
+                    "SELECT side,lifecycle_status,revision,payload_json FROM semantic_units WHERE id=?",
+                    (unit_id,),
+                ).fetchone()
+                if unit is not None and unit["side"] == "TARGET" and unit["lifecycle_status"] != "ACTIVE":
+                    unit_payload = json.loads(unit["payload_json"])
+                    unit_payload.update({
+                        "lifecycleStatus": "ACTIVE", "revision": int(unit["revision"]) + 1,
+                    })
+                    conn.execute(
+                        "UPDATE semantic_units SET lifecycle_status='ACTIVE',revision=revision+1,payload_json=? WHERE id=?",
+                        (json.dumps(unit_payload, ensure_ascii=False), unit_id),
+                    )
+                conn.execute(
+                    "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)",
+                    ("SEMANTIC_UNIT", unit_id, "TARGET_INVENTORY", inventory_id),
+                )
             conn.executemany(
                 "INSERT OR IGNORE INTO target_search_spans VALUES(?,?,?,?,?,?,?)",
                 [(item["id"], inventory_id, item["displayedReference"], item["kind"],

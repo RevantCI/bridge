@@ -39,6 +39,15 @@ wire_enum!(QaDisposition {
     NeedsDiscussion,
     Corrected
 });
+wire_enum!(CorrectionApplicationState {
+    Prepared,
+    Applying,
+    AppliedScripture,
+    Invalidated,
+    Completed,
+    Failed,
+    RecoveryRequired
+});
 wire_enum!(TokenSide { Source, Target });
 wire_enum!(TokenLayer {
     Orthographic,
@@ -337,6 +346,8 @@ pub struct TokenInstance {
     pub strong: Option<String>,
     pub morphology: Option<String>,
     pub morphological_features: HashMap<String, String>,
+    pub lifecycle_status: LifecycleStatus,
+    pub revision: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -779,6 +790,59 @@ pub struct CorrectionProposal {
     pub applied_by: Option<String>,
     pub applied_at: Option<String>,
     pub revision: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CorrectionApplicationActor {
+    pub actor_type: ActorType,
+    pub actor_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CorrectionApplicationIntent {
+    pub application_id: String,
+    pub proposal_id: String,
+    pub finding_id: String,
+    pub project_id: String,
+    pub expected_proposal_revision: u64,
+    pub expected_finding_revision: u64,
+    pub target_displayed_reference: String,
+    pub canonical_references: Vec<String>,
+    pub source_provenance_references: Vec<String>,
+    pub expected_target_revision: String,
+    pub expected_target_content_hash: String,
+    pub expected_start_code_point: usize,
+    pub expected_end_code_point: usize,
+    pub expected_original_text: String,
+    pub replacement_text_snapshot: String,
+    pub intended_final_verse_hash: String,
+    pub pending_invalidation_id: String,
+    pub translation_core_journal_transaction_id: String,
+    pub actor: CorrectionApplicationActor,
+    pub created_at: String,
+    pub updated_at: String,
+    pub application_state: CorrectionApplicationState,
+    pub state_revision: u64,
+    pub completed_at: Option<String>,
+    pub failure_code: String,
+    pub recovery_metadata: HashMap<String, serde_json::Value>,
+    pub result_metadata: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StrictScriptureEditContext {
+    pub expected_target_revision: String,
+    pub expected_target_content_hash: String,
+    pub expected_original_verse_text: String,
+    pub expected_start_code_point: usize,
+    pub expected_end_code_point: usize,
+    pub expected_original_span_text: String,
+    pub intended_final_verse_text: String,
+    pub pending_invalidation_id: String,
+    pub application_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -1403,6 +1467,11 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<QaDisposition>("\"CONFIRMED_TRANSLATION_ERROR\"").unwrap(),
             QaDisposition::ConfirmedTranslationError
+        );
+        assert_eq!(
+            serde_json::from_str::<CorrectionApplicationState>("\"APPLIED_SCRIPTURE\"")
+                .unwrap(),
+            CorrectionApplicationState::AppliedScripture
         );
         assert_eq!(
             serde_json::from_str::<Cardinality>("\"SOURCE_TO_NULL\"").unwrap(),

@@ -691,7 +691,7 @@ def test_correction_wording_module_contains_no_scripture_writer() -> None:
 
 def test_fresh_database_has_stage9b1_history_migration(tmp_path: Path) -> None:
     repo = FoundationRepository(tmp_path / "semantic.sqlite3")
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 12
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 13
     assert repo.recovery_check()["ok"] is True
 
 

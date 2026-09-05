@@ -132,6 +132,20 @@ class TransactionJournal:
                 d['_journalPath']=str(p); out.append(d)
         return out
 
+    def get(self, transaction_id: str) -> dict[str, Any] | None:
+        """Return one durable journal record without changing recovery state."""
+        if not transaction_id:
+            return None
+        path = self.root / f'{transaction_id}.json'
+        if not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text('utf-8'))
+        except (OSError, ValueError):
+            return None
+        data['_journalPath'] = str(path)
+        return data
+
     def recover_all(self) -> list[dict[str, Any]]:
         results=[]
         for d in self.pending():

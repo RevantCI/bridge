@@ -21,8 +21,10 @@
     { "$ref": "#/$defs/SemanticLocationRun" },
     { "$ref": "#/$defs/MeaningAssessment" },
     { "$ref": "#/$defs/MeaningAnalysisRun" },
-    { "$ref": "#/$defs/ReviewRecord" }
-    ,{ "$ref": "#/$defs/Exportability" }
+    { "$ref": "#/$defs/ReviewRecord" },
+    { "$ref": "#/$defs/CorrectionApplicationIntent" },
+    { "$ref": "#/$defs/StrictScriptureEditContext" },
+    { "$ref": "#/$defs/Exportability" }
   ],
   "$defs": {
     "ReviewStatus": {
@@ -36,6 +38,10 @@
     "QaDisposition": {
       "type": "string",
       "enum": ["UNRESOLVED", "CONFIRMED_TRANSLATION_ERROR", "ACCEPTABLE_TRANSLATION", "FALSE_POSITIVE", "NEEDS_DISCUSSION", "CORRECTED"]
+    },
+    "CorrectionApplicationState": {
+      "type": "string",
+      "enum": ["PREPARED", "APPLYING", "APPLIED_SCRIPTURE", "INVALIDATED", "COMPLETED", "FAILED", "RECOVERY_REQUIRED"]
     },
     "TokenSide": { "type": "string", "enum": ["SOURCE", "TARGET"] },
     "TokenLayer": { "type": "string", "enum": ["ORTHOGRAPHIC", "SUBTOKEN", "MORPHEME"] },
@@ -153,7 +159,7 @@
     "TokenInstance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "lineageId", "side", "projectId", "resourceId", "resourceVersion", "resourceHash", "textRevision", "book", "displayedReference", "canonicalReferences", "index", "occurrence", "occurrences", "span", "rawForm", "normalizedForm", "normalizationProfile", "tokenizationVersion", "tokenLayer", "tokenKind", "parentInstanceId", "instanceFingerprint", "lemma", "strong", "morphology", "morphologicalFeatures"],
+      "required": ["id", "lineageId", "side", "projectId", "resourceId", "resourceVersion", "resourceHash", "textRevision", "book", "displayedReference", "canonicalReferences", "index", "occurrence", "occurrences", "span", "rawForm", "normalizedForm", "normalizationProfile", "tokenizationVersion", "tokenLayer", "tokenKind", "parentInstanceId", "instanceFingerprint", "lemma", "strong", "morphology", "morphologicalFeatures", "lifecycleStatus", "revision"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "lineageId": { "type": "string", "minLength": 1 },
@@ -181,7 +187,9 @@
         "lemma": { "type": ["string", "null"] },
         "strong": { "type": ["string", "null"] },
         "morphology": { "type": ["string", "null"] },
-        "morphologicalFeatures": { "type": "object", "additionalProperties": { "type": "string" } }
+        "morphologicalFeatures": { "type": "object", "additionalProperties": { "type": "string" } },
+        "lifecycleStatus": { "$ref": "#/$defs/LifecycleStatus" },
+        "revision": { "type": "integer", "minimum": 1 }
       }
     },
     "SemanticUnitBase": {
@@ -571,6 +579,62 @@
         "newQaDisposition": { "oneOf": [{ "$ref": "#/$defs/QaDisposition" }, { "type": "null" }] },
         "actorType": { "$ref": "#/$defs/ActorType" }, "actorId": { "type": "string" }, "note": { "type": "string" },
         "baseRevision": { "type": "integer", "minimum": 1 }, "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "CorrectionApplicationActor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actorType", "actorId"],
+      "properties": {
+        "actorType": { "$ref": "#/$defs/ActorType" },
+        "actorId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "CorrectionApplicationIntent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["applicationId", "proposalId", "findingId", "projectId", "expectedProposalRevision", "expectedFindingRevision", "targetDisplayedReference", "canonicalReferences", "sourceProvenanceReferences", "expectedTargetRevision", "expectedTargetContentHash", "expectedStartCodePoint", "expectedEndCodePoint", "expectedOriginalText", "replacementTextSnapshot", "intendedFinalVerseHash", "pendingInvalidationId", "translationCoreJournalTransactionId", "actor", "createdAt", "updatedAt", "applicationState", "stateRevision", "completedAt", "failureCode", "recoveryMetadata", "resultMetadata"],
+      "properties": {
+        "applicationId": { "type": "string", "minLength": 1 },
+        "proposalId": { "type": "string", "minLength": 1 },
+        "findingId": { "type": "string", "minLength": 1 },
+        "projectId": { "type": "string", "minLength": 1 },
+        "expectedProposalRevision": { "type": "integer", "minimum": 1 },
+        "expectedFindingRevision": { "type": "integer", "minimum": 1 },
+        "targetDisplayedReference": { "type": "string", "minLength": 1 },
+        "canonicalReferences": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
+        "sourceProvenanceReferences": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "expectedTargetRevision": { "type": "string", "minLength": 1 },
+        "expectedTargetContentHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "expectedStartCodePoint": { "type": "integer", "minimum": 0 },
+        "expectedEndCodePoint": { "type": "integer", "minimum": 0 },
+        "expectedOriginalText": { "type": "string" },
+        "replacementTextSnapshot": { "type": "string" },
+        "intendedFinalVerseHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "pendingInvalidationId": { "type": "string", "minLength": 1 },
+        "translationCoreJournalTransactionId": { "type": "string" },
+        "actor": { "$ref": "#/$defs/CorrectionApplicationActor" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "applicationState": { "$ref": "#/$defs/CorrectionApplicationState" },
+        "stateRevision": { "type": "integer", "minimum": 1 },
+        "completedAt": { "type": ["string", "null"], "format": "date-time" },
+        "failureCode": { "type": "string" },
+        "recoveryMetadata": { "type": "object" },
+        "resultMetadata": { "type": "object" }
+      }
+    },
+    "StrictScriptureEditContext": {
+      "type": "object", "additionalProperties": false,
+      "required": ["expectedTargetRevision", "expectedTargetContentHash", "expectedOriginalVerseText", "expectedStartCodePoint", "expectedEndCodePoint", "expectedOriginalSpanText", "intendedFinalVerseText", "pendingInvalidationId", "applicationId"],
+      "properties": {
+        "expectedTargetRevision": { "type": "string", "minLength": 1 },
+        "expectedTargetContentHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "expectedOriginalVerseText": { "type": "string" },
+        "expectedStartCodePoint": { "type": "integer", "minimum": 0 },
+        "expectedEndCodePoint": { "type": "integer", "minimum": 0 },
+        "expectedOriginalSpanText": { "type": "string" },
+        "intendedFinalVerseText": { "type": "string" },
+        "pendingInvalidationId": { "type": "string", "minLength": 1 },
+        "applicationId": { "type": "string", "minLength": 1 }
       }
     },
     "Exportability": {

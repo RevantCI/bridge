@@ -2,3 +2,5 @@
 # from the reproducible generator/upstream release on every platform.
 engine/resources/hbo/bibles/uhb/v3.0.0_unfoldingWord/** -text -diff
 engine/resources/el-x-koine/bibles/ugnt/v0.34_unfoldingWord/** -text -diff
+engine/resources/hbo/lexicons/strongs/v1.0.2_openscriptures/** -text -diff
+engine/resources/el-x-koine/lexicons/strongs/v1.0.2_openscriptures/** -text -diff

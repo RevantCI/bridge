@@ -538,6 +538,33 @@ class BridgeEngine:
             raise ProjectError(str(exc)) from exc
         self.project = candidate
         self.passage_semantic_runtime = None
+        # Filesystem recovery must precede semantic initialization. Otherwise
+        # the semantic runtime could fingerprint a partially written chapter
+        # that the translationCore journal then rolls back.
+        tc_recovery = candidate.recover_incomplete_transactions()
+        recovery_failed = any(
+            str(item.get("status") or "") == "recovery_required"
+            for item in tc_recovery
+        )
+        if recovery_failed:
+            self._passage_semantic_status = {
+                "available": False, "readOnly": True,
+                "state": "RECOVERY_REQUIRED",
+                "correctionWritesBlocked": True,
+                "translationCoreRecovery": tc_recovery,
+                "error": "An incomplete translationCore filesystem transaction could not be rolled back safely.",
+            }
+            info = self._project_info()
+            siblings = collection_projects(path)
+            if siblings:
+                info["importedProjects"] = siblings
+            info.update({
+                "projectId": registered["projectId"],
+                "collectionId": registered.get("collectionId", ""),
+                "managed": registered.get("managed", False),
+                "passageSemantic": dict(self._passage_semantic_status),
+            })
+            return info
         self._passage_semantic_status = {
             "available": False, "readOnly": True, "state": "UNAVAILABLE",
         }
@@ -546,7 +573,10 @@ class BridgeEngine:
             candidate.attach_passage_semantic_runtime(runtime)
             self.passage_semantic_runtime = runtime
             self._analysis_jobs.bind_runtime(runtime)
-            self._passage_semantic_status = {"state": "READY", **runtime.status()}
+            self._passage_semantic_status = {
+                "state": "READY", **runtime.status(),
+                "translationCoreRecovery": tc_recovery,
+            }
         except Exception as exc:
             # Scripture/tC access remains fully usable. Semantic APIs expose the
             # recovery diagnostic rather than making project.open fail.

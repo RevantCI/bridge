@@ -67,7 +67,7 @@ def repo(tmp_path: Path) -> FoundationRepository:
 # --- Schema v8 queue indexes retained through later migrations -------------
 
 def test_schema_v8_adds_queue_columns_and_indexes(repo: FoundationRepository) -> None:
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 12
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 13
     with repo._connect() as conn:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(qa_findings)")}
         indexes = {row[1] for row in conn.execute("PRAGMA index_list(qa_findings)")}
@@ -103,7 +103,7 @@ def test_v7_database_upgrades_and_backfills_queue_columns(tmp_path: Path) -> Non
     conn.close()
 
     upgraded = FoundationRepository(database)
-    assert upgraded.schema_version() == DATABASE_SCHEMA_VERSION == 12
+    assert upgraded.schema_version() == DATABASE_SCHEMA_VERSION == 13
     with upgraded._connect() as conn:
         row = conn.execute(
             "SELECT book,kind,direction,severity,severity_rank FROM qa_findings WHERE id='legacy-1'"

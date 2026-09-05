@@ -3914,3 +3914,116 @@ Next boundary is Stage 9B.3 only: explicit Apply, strict current-text/proposal
 CAS, durable transaction/recovery/rollback and dependent-record staling. It is
 not implemented and requires separate approval. Post-edit Stage 6B/7/8 reruns,
 `CORRECTED`, and export remain later work.
+
+## Stage 9B.3a — strict persistence/recovery foundation (2026-09-05)
+
+### Boundary
+
+Implemented only the non-mutating foundation approved after the Stage 9B.3
+preflight. There is still no `correction.applyProposal`, Rust/Tauri Apply
+command, frontend Apply control, strict writer invocation, correction-driven
+chapter JSON write, affected Stage 6B-8 run, CORRECTED transition, or export
+change. The Project QA Report remains a frozen regression surface.
+
+### Test-first implementation
+
+Added `tests/test_correction_stage9b3a.py` before the implementation. Its first
+collection exposed an undeclared `jsonschema` test dependency; the test was
+corrected to validate exact canonical-schema fields/enums using the repository's
+existing dependency-free schema strategy rather than widening production or
+development dependencies.
+
+Database schema advanced from v12 to **v13**. Migration v13:
+
+- creates a pre-migration SQLite backup through the established backup path;
+- adds lifecycle/revision columns to immutable token instances and backfills
+  their JSON payloads;
+- adds historical target-token -> `TARGET_REFERENCE` and target semantic-unit
+  -> `TARGET_INVENTORY` edges;
+- rebuilds the design-only correction application table with the full exact
+  snapshot, state revision, failure/recovery/result metadata, and a uniqueness
+  constraint on proposal ID + expected proposal revision;
+- preserves legacy application records as non-runnable
+  `RECOVERY_REQUIRED` history rather than guessing missing coordinates/hashes.
+
+Python, canonical JSON Schema, Rust serde wire types, and TypeScript wire types
+now agree on `CorrectionApplicationState`, `CorrectionApplicationActor`, the
+v13 application intent, token-instance currentness, and the frozen
+`StrictScriptureEditContext` contract.
+
+Repository operations now atomically prepare application intent plus target
+invalidation, retrieve/find/list attempts, enforce legal transitions with
+revision CAS, record recovery-required evidence, and prepare a checksummed
+semantic database backup linked to the application. Retries in every durable
+state return the original attempt. An invalidation-preparation mismatch rolls
+the transaction back, leaving no mutation-ready record.
+
+Project startup calls `TranslationCoreProject.recover_incomplete_transactions()`
+before constructing `PassageSemanticRuntime`. An incomplete rollback exposes
+`RECOVERY_REQUIRED`/`correctionWritesBlocked` without allowing semantic startup
+against partial Scripture. Runtime startup then replays prepared invalidations,
+synchronizes authoritative current JSON text, and runs the new exact-hash
+`CorrectionApplicationRecoveryCoordinator`.
+
+Recovery never writes Scripture. Before-hash attempts are failed as not
+committed; intended-after attempts are never applied twice and continue only
+through invalidation and idempotent proposal/finding bookkeeping; neither-hash
+and journal/invalidation contradictions fail closed into RECOVERY_REQUIRED.
+Proposal bookkeeping is itself restart-safe: a crash after stamping applied
+metadata but before completing the application ledger does not stamp it twice.
+Application records set verification PENDING and leave the finding disposition
+unchanged; applied still does not mean CORRECTED. No semantic failure rolls
+back already committed Scripture.
+
+Target invalidation now stales target token instances directly and target
+semantic units through their inventory dependency, retaining both as history.
+Source token instances remain current. Exact content-addressed inventory
+rebuilds may reactivate only the exact old token/unit identities. The common
+dependency invariant was widened to scan all edge-writing package modules.
+
+Unicode snapshot tests cover Tamil combining marks, Hebrew niqqud/cantillation,
+Greek precomposed/decomposed forms, supplementary-plane characters, and a
+zero-length insertion. PHP source provenance 1:3 and editable target 1:6 remain
+separate, and no lexical group is created. A byte-hash guard proves all 9B.3a
+operations leave chapter JSON, preserved imported USFM, and translationCore
+alignment data unchanged.
+
+The full suite found one unrelated Windows checkout defect: the Strong's
+`PROVENANCE.json` files are hash-verified at runtime, but their lexicon
+directories were missing the `-text -diff` protection already used for UHB and
+UGNT. Git therefore checked the LF blobs out as CRLF and both resource hashes
+failed. `.gitattributes` now preserves both vendored Strong's trees byte-for-
+byte; a regression test pins those rules. The normalized files exactly match
+their committed content and expected checksums.
+
+### Verification
+
+```text
+Stage 9B.3a focused Python               34 passed
+Stage 9B.0 + 9B.1 Python                 90 passed
+foundation/runtime Python                61 passed
+Stage 5-8 Python                         90 passed
+Stage 9A.4 + Project QA Report Python   126 passed
+frontend Vitest                         176 passed / 19 files
+npm run check                            0 errors / 0 warnings
+npm run build                            passed; existing >500 kB chunk warning
+cargo test                                7 passed
+cargo check                              passed
+git diff --check                         passed; line-ending notices only
+full Python + Greek Room                742 passed in 21m29s
+```
+
+No installed acceptance run was required because this checkpoint has no
+user-facing Apply action and must not mutate Scripture.
+
+### Remaining Stage 9B.3b blockers
+
+`TranslationCoreProject.apply_scripture_edit()` still does not accept the
+strict context. Stage 9B.3b must add exact proposal/finding/current-target CAS,
+one-verse/one-contiguous-span application, re-evaluate correction eligibility
+immediately before mutation, create the backup and prepared invalidation first,
+then reuse that canonical tC writer and its alignment/word-bank/edit-audit
+behavior. The composed final verse must not be stripped. Stage 9B.3a exposes no
+application protocol, so explicit human Apply, duplicate-submit orchestration,
+and installed acceptance remain for Stage 9B.3b. Affected analysis and positive
+verification remain later boundaries unless separately approved.

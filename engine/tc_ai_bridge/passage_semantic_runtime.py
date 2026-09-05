@@ -58,6 +58,7 @@ from .meaning_analysis import MeaningAnalysisEngine
 from .qa_audit import QaAuditEngine
 from .correction_eligibility import CorrectionEligibilityService
 from .correction_wording import CorrectionWordingService
+from .correction_application_recovery import CorrectionApplicationRecoveryCoordinator
 from .qa_review import QaReviewService
 
 
@@ -517,6 +518,8 @@ class PassageSemanticRuntime:
         self.qa_review = QaReviewService(self)
         self.correction_eligibility = CorrectionEligibilityService(self)
         self.correction_wording = CorrectionWordingService(self)
+        self.correction_application_recovery = CorrectionApplicationRecoveryCoordinator(self)
+        self.application_recovery = self.correction_application_recovery.reconcile_incomplete()
         self._migrate_legacy_companions()
 
     def _identity_fingerprint(self) -> str:
@@ -1193,6 +1196,10 @@ class PassageSemanticRuntime:
             "databasePath": str(self.path), "projectId": self.project_id,
             "book": self.book, "replayedInvalidations": self.replayed_invalidations,
             "recovery": recovery,
+            "correctionWritesBlocked": bool(
+                self.application_recovery.get("correctionWritesBlocked")
+            ),
+            "applicationRecovery": dict(self.application_recovery),
         }
 
     def project_metadata(self) -> dict[str, Any]:

@@ -26,7 +26,9 @@ from tc_ai_bridge.correction_eligibility import (
     CorrectionEligibilityService,
 )
 from tc_ai_bridge.passage_semantic_models import (
+    ActorType,
     AffectedTargetSpan,
+    CorrectionApplicationActor,
     CorrectionApplicationIntent,
     CorrectionApplicationState,
     CorrectionCreationMode,
@@ -427,7 +429,7 @@ def _v2_proposal(proposal_id: str = "prop-v2", finding_id: str = "qa-1") -> Corr
 
 def test_fresh_database_is_at_current_schema(tmp_path: Path) -> None:
     repo = FoundationRepository(tmp_path / "semantic.sqlite3")
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 12
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 13
 
 
 def test_v10_to_current_migration_preserves_legacy_proposals(tmp_path: Path) -> None:
@@ -465,7 +467,7 @@ def test_v10_to_current_migration_preserves_legacy_proposals(tmp_path: Path) -> 
     conn.close()
 
     upgraded = FoundationRepository(database)
-    assert upgraded.schema_version() == 12
+    assert upgraded.schema_version() == 13
     assert (tmp_path / "backups").is_dir(), "migration must back up before upgrading"
     assert upgraded.recovery_check()["ok"] is True
 
@@ -580,21 +582,31 @@ def test_application_intent_states_cover_the_recovery_window() -> None:
 
 
 def test_application_intent_is_separate_from_the_proposal(tmp_path: Path) -> None:
+    before_hash = hashlib.sha256(b"before").hexdigest()
+    after_hash = hashlib.sha256(b"after").hexdigest()
     intent = CorrectionApplicationIntent(
         application_id="app-1", proposal_id="prop-v2", project_id="project-1",
-        expected_correction_revision=1, expected_finding_revision=2,
-        expected_target_revision="rev-1", expected_target_content_hashes=("hash-1",),
-        expected_original_text=TEXT[:4], state=CorrectionApplicationState.PREPARED,
-        created_at="2026-09-04T00:00:00Z",
+        finding_id="qa-1", expected_proposal_revision=1,
+        expected_finding_revision=2, target_displayed_reference=VERSE,
+        canonical_references=(VERSE,), source_provenance_references=(VERSE,),
+        expected_target_revision="rev-1", expected_target_content_hash=before_hash,
+        expected_start_code_point=0, expected_end_code_point=4,
+        expected_original_text=TEXT[:4], replacement_text_snapshot="replacement",
+        intended_final_verse_hash=after_hash, pending_invalidation_id="pending-1",
+        translation_core_journal_transaction_id="",
+        actor=CorrectionApplicationActor(actor_type=ActorType.HUMAN, actor_id="reviewer"),
+        created_at="2026-09-04T00:00:00Z", updated_at="2026-09-04T00:00:00Z",
+        application_state=CorrectionApplicationState.PREPARED, state_revision=1,
     )
     wire = to_wire(intent)
-    assert wire["state"] == "PREPARED"
-    assert wire["expectedTargetContentHashes"] == ["hash-1"]
+    assert wire["applicationState"] == "PREPARED"
+    assert wire["expectedTargetContentHash"] == before_hash
     # Every precondition an apply must re-check lives on the intent, and none
     # of them is stored on the proposal -- that separation is the design.
     preconditions = {
-        "expectedCorrectionRevision", "expectedFindingRevision", "expectedTargetRevision",
-        "expectedTargetContentHashes", "expectedOriginalText",
+        "expectedProposalRevision", "expectedFindingRevision", "expectedTargetRevision",
+        "expectedTargetContentHash", "expectedStartCodePoint", "expectedEndCodePoint",
+        "expectedOriginalText",
     }
     assert preconditions <= set(wire)
     assert not (preconditions & set(to_wire(_v2_proposal())))
@@ -604,8 +616,8 @@ def test_application_intent_is_separate_from_the_proposal(tmp_path: Path) -> Non
         columns = {row[1] for row in conn.execute(
             "PRAGMA table_info(correction_application_intents)")}
     assert {"application_id", "proposal_id", "expected_target_revision",
-            "expected_original_text", "state", "recovery_required"} <= columns
-    assert repo.schema_version() == 12
+            "expected_original_text", "application_state", "state_revision"} <= columns
+    assert repo.schema_version() == 13
 
 
 # --- Dependency graph invariants --------------------------------------------
@@ -626,21 +638,25 @@ def test_every_writable_dependency_type_is_registered() -> None:
 def _dependency_types_written_by_source() -> set[str]:
     """Every literal used as a record/depends-on type across the writing modules.
 
-    Both modules are scanned, not just the repository: SOURCE_RESOURCE edges are
-    written from the runtime, and a repository-only scan missed them -- which is
-    the very drift this test exists to catch.
+    Every package module is considered, not just the repository:
+    SOURCE_RESOURCE edges are written from the runtime, and a repository-only
+    scan missed them -- which is the very drift this test exists to catch.
     """
     import re
 
-    from tc_ai_bridge import passage_semantic_runtime as runtime_module
-
     types: set[str] = set()
-    for module in (repository_module, runtime_module):
-        source = Path(module.__file__).read_text(encoding="utf-8")
+    package = Path(repository_module.__file__).parent
+    scanned: list[Path] = []
+    for path in package.glob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        if "record_dependencies" not in source and "add_record_dependency" not in source:
+            continue
+        scanned.append(path)
         pattern = r'\(\s*"([A-Z_]+)"\s*,\s*[^,\n]+,\s*\n?\s*"([A-Z_]+)"\s*,'
         for match in re.finditer(pattern, source):
             types.add(match.group(1))
             types.add(match.group(2))
+    assert scanned, "no dependency-writing modules were scanned"
     assert types, "source scan found no dependency edges; the pattern has drifted"
     assert "SOURCE_RESOURCE" in types, (
         "the scan no longer sees runtime-written edges; widen it before trusting it"

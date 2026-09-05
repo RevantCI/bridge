@@ -63,6 +63,63 @@ export type CorrectionCreationMode =
 
 export type VerificationStatus = "NOT_RUN" | "PENDING" | "PASSED" | "FAILED" | "UNCERTAIN";
 
+export type CorrectionApplicationState =
+  | "PREPARED"
+  | "APPLYING"
+  | "APPLIED_SCRIPTURE"
+  | "INVALIDATED"
+  | "COMPLETED"
+  | "FAILED"
+  | "RECOVERY_REQUIRED";
+
+export interface CorrectionApplicationActor {
+  actorType: "HUMAN" | "AI" | "SYSTEM" | "MIGRATION";
+  actorId: string;
+}
+
+export interface CorrectionApplicationIntent {
+  applicationId: string;
+  proposalId: string;
+  findingId: string;
+  projectId: string;
+  expectedProposalRevision: number;
+  expectedFindingRevision: number;
+  targetDisplayedReference: string;
+  canonicalReferences: string[];
+  sourceProvenanceReferences: string[];
+  expectedTargetRevision: string;
+  expectedTargetContentHash: string;
+  expectedStartCodePoint: number;
+  expectedEndCodePoint: number;
+  expectedOriginalText: string;
+  replacementTextSnapshot: string;
+  intendedFinalVerseHash: string;
+  pendingInvalidationId: string;
+  translationCoreJournalTransactionId: string;
+  actor: CorrectionApplicationActor;
+  createdAt: string;
+  updatedAt: string;
+  applicationState: CorrectionApplicationState;
+  stateRevision: number;
+  completedAt: string | null;
+  failureCode: string;
+  recoveryMetadata: Record<string, unknown>;
+  resultMetadata: Record<string, unknown>;
+}
+
+/** Frozen contract for Stage 9B.3b; no current API sends it to a writer. */
+export interface StrictScriptureEditContext {
+  expectedTargetRevision: string;
+  expectedTargetContentHash: string;
+  expectedOriginalVerseText: string;
+  expectedStartCodePoint: number;
+  expectedEndCodePoint: number;
+  expectedOriginalSpanText: string;
+  intendedFinalVerseText: string;
+  pendingInvalidationId: string;
+  applicationId: string;
+}
+
 export interface CorrectionProviderMetadata {
   providerName: string;
   model: string;

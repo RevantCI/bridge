@@ -494,6 +494,8 @@ class TokenInstance:
     strong: str | None = None
     morphology: str | None = None
     morphological_features: dict[str, str] = field(default_factory=dict)
+    lifecycle_status: LifecycleStatus = LifecycleStatus.ACTIVE
+    revision: int = 1
 
 
 @dataclass(frozen=True)
@@ -993,29 +995,128 @@ class CorrectionApplicationState(StrEnum):
 
 
 @dataclass(frozen=True)
+class CorrectionApplicationActor:
+    actor_type: ActorType
+    actor_id: str
+
+
+@dataclass(frozen=True)
 class CorrectionApplicationIntent:
-    """Design-only in 9B.0: the durable record 9B.3's application will need.
+    """Durable, exact snapshot for one idempotent correction attempt.
 
     Every ``expected_*`` field is an optimistic-concurrency precondition
-    captured at PREPARE time. If any of them no longer matches at APPLY time the
-    attempt must move to INVALIDATED rather than writing Scripture -- the whole
-    point of recording them separately from the proposal.
+    captured at PREPARE time. Stage 9B.3a persists and recovers this record but
+    deliberately does not execute the Scripture edit it describes.
     """
 
     application_id: str
     proposal_id: str
+    finding_id: str
     project_id: str
-    expected_correction_revision: int
+    expected_proposal_revision: int
     expected_finding_revision: int
+    target_displayed_reference: str
+    canonical_references: tuple[str, ...]
+    source_provenance_references: tuple[str, ...]
     expected_target_revision: str
-    expected_target_content_hashes: tuple[str, ...]
+    expected_target_content_hash: str
+    expected_start_code_point: int
+    expected_end_code_point: int
     expected_original_text: str
-    state: CorrectionApplicationState
+    replacement_text_snapshot: str
+    intended_final_verse_hash: str
+    pending_invalidation_id: str
+    translation_core_journal_transaction_id: str
+    actor: CorrectionApplicationActor
     created_at: str
+    updated_at: str
+    application_state: CorrectionApplicationState
+    state_revision: int
     completed_at: str | None = None
     failure_code: str = ""
-    failure_detail: str = ""
-    recovery_required: bool = False
+    recovery_metadata: dict[str, Any] = field(default_factory=dict)
+    result_metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.expected_proposal_revision < 1 or self.expected_finding_revision < 1:
+            raise ValueError("Application revisions must be positive")
+        if self.state_revision < 1:
+            raise ValueError("Application state revision must be positive")
+        if self.expected_start_code_point < 0:
+            raise ValueError("Application span start must not be negative")
+        if self.expected_end_code_point < self.expected_start_code_point:
+            raise ValueError("Application span end must not precede its start")
+        if len(self.expected_original_text) != (
+            self.expected_end_code_point - self.expected_start_code_point
+        ):
+            raise ValueError("Application original text must match its code-point span")
+        if not self.canonical_references:
+            raise ValueError("Application requires canonical target references")
+        for label, value in (
+            ("expected target", self.expected_target_content_hash),
+            ("intended final verse", self.intended_final_verse_hash),
+        ):
+            if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+                raise ValueError(f"Application {label} hash must be lowercase SHA-256")
+
+    @staticmethod
+    def can_transition(
+        current: CorrectionApplicationState, target: CorrectionApplicationState,
+    ) -> bool:
+        transitions = {
+            CorrectionApplicationState.PREPARED: {
+                CorrectionApplicationState.APPLYING,
+                CorrectionApplicationState.FAILED,
+                CorrectionApplicationState.RECOVERY_REQUIRED,
+            },
+            CorrectionApplicationState.APPLYING: {
+                CorrectionApplicationState.APPLIED_SCRIPTURE,
+                CorrectionApplicationState.FAILED,
+                CorrectionApplicationState.RECOVERY_REQUIRED,
+            },
+            CorrectionApplicationState.APPLIED_SCRIPTURE: {
+                CorrectionApplicationState.INVALIDATED,
+                CorrectionApplicationState.RECOVERY_REQUIRED,
+            },
+            CorrectionApplicationState.INVALIDATED: {
+                CorrectionApplicationState.COMPLETED,
+                CorrectionApplicationState.RECOVERY_REQUIRED,
+            },
+            CorrectionApplicationState.COMPLETED: set(),
+            CorrectionApplicationState.FAILED: set(),
+            CorrectionApplicationState.RECOVERY_REQUIRED: set(),
+        }
+        return target in transitions[current]
+
+
+@dataclass(frozen=True)
+class StrictScriptureEditContext:
+    """Frozen Stage 9B.3b contract; Stage 9B.3a never passes it to a writer."""
+
+    expected_target_revision: str
+    expected_target_content_hash: str
+    expected_original_verse_text: str
+    expected_start_code_point: int
+    expected_end_code_point: int
+    expected_original_span_text: str
+    intended_final_verse_text: str
+    pending_invalidation_id: str
+    application_id: str
+
+    def __post_init__(self) -> None:
+        if self.expected_start_code_point < 0:
+            raise ValueError("Strict edit span start must not be negative")
+        if self.expected_end_code_point < self.expected_start_code_point:
+            raise ValueError("Strict edit span end must not precede its start")
+        if len(self.expected_original_span_text) != (
+            self.expected_end_code_point - self.expected_start_code_point
+        ):
+            raise ValueError("Strict edit original text must match its code-point span")
+        if len(self.expected_target_content_hash) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in self.expected_target_content_hash
+        ):
+            raise ValueError("Strict edit target hash must be lowercase SHA-256")
 
 
 @dataclass(frozen=True)
