@@ -1426,12 +1426,12 @@ At the end of Stage 9A:
 
 ---
 
-# 37. NEXT TASK — Stage 9B.1: Correction Wording Generation
+# 37. Stage 9B.0 Baseline for Correction Wording
 
 **Stage 9B.0 (schema/API design and dependency repair) is DONE** as of
 2026-09-04. It was explicitly scoped to the backend foundation and stopped
-there. **Stage 9B.1 must not begin until the 9B.0 report is reviewed and
-explicitly approved.**
+there. Stage 9B.1 was subsequently reviewed, explicitly approved, and completed;
+see the Stage 9B.1 record below.
 
 ## What 9B.0 delivered
 
@@ -1485,23 +1485,22 @@ Full engineering narrative in [`BUILD_LOG.md`](BUILD_LOG.md) under "Stage 9B.0
 
 Tests: `engine/tests/test_correction_stage9b0.py`, 55 passing.
 
-## Blockers to clear before / during 9B.1
+## Historical blockers recorded before Stage 9B.1
 
-1. **Rust gates unverified for 9B.0.** `cargo check` / `cargo test` could not
+1. **Resolved in Stage 9B.1: Rust gates.** `cargo check` / `cargo test` could not
    run: a live `tauri dev` session held the sidecar binaries and
    `tauri_build::try_build` failed with `PermissionDenied`. Stage 9B.0 touched
    no `.rs` or `tauri.conf.json` file, so this is contention rather than a
-   regression — but run both once no dev session is active.
+   regression. Both are now green with no dev session active.
 2. **`apply_scripture_edit()` has no strict mode.** It takes no
    `expected_target_revision`, `expected_target_content_hash` or
    `expected_old_text`, so it cannot fail closed on a concurrent edit.
    `test_apply_scripture_edit_still_lacks_the_strict_preconditions` pins this
    and will fail the moment those parameters land — that is 9B.3's signal to
    update it. **Required before 9B.3, not before 9B.1.**
-3. **No wording-generation contract yet.** v2 accepts an empty
-   `proposedText`. 9B.1 must define how an intent becomes text, what evidence
-   justifies the wording, and how a human edits it — without weakening the
-   exact-span contract.
+3. **Resolved in Stage 9B.1: wording-generation contract.** The provider,
+   provenance, alternatives, evidence, edit/reject/regenerate, CAS, and exact
+   pre-persistence recheck contract is recorded below.
 4. **Resource-conflict rule is coarse.** Any entry in
    `conflictingEvidenceIds` blocks eligibility. If some conflicts are
    acceptable to correct through, that policy needs deciding.
@@ -1550,6 +1549,104 @@ Still-open questions carried forward from before 9B.0:
 
 If repository reality conflicts with this document, report the conflict
 instead of silently changing assumptions (§39).
+
+---
+
+# 37.1 Stage 9B.1 — Correction Wording Generation (Complete, 2026-09-05)
+
+Implemented against `main` at baseline `5df5c0d`; the Project QA Report merged
+after the older Stage 9B.0 checkpoint was treated as frozen behavior. No
+Project QA Report, frontend, Rust, Scripture, translationCore, analysis, or
+export file was changed for Stage 9B.1.
+
+The completed boundary is:
+
+```text
+confirmed QA issue
+  -> backend eligibility
+  -> exact CorrectionIntent
+  -> human wording (offline) OR optional provider suggestion
+  -> persisted proposal
+  -> edit / reject / regenerate proposal data
+```
+
+Key implementation facts:
+
+- `tc_ai_bridge/correction_wording.py` owns the wording service and narrow
+  provider protocol. Implementations are `NoCorrectionSuggestionProvider`,
+  deterministic `FixtureCorrectionSuggestionProvider`, and
+  `ConfiguredCorrectionSuggestionProvider`, which adapts Bridge's existing
+  Responses-compatible client without coupling persistence to OpenAI.
+- Human-authored wording works with no API key, model, or network. If a
+  suggestion is requested but the provider is unavailable, supplied human
+  wording is saved with `PROVIDER_UNAVAILABLE`; an empty request fails closed.
+- Provider context is limited to the correction intent, current exact target
+  verse/span, relevant passage references, Stage 6B locations, Stage 7 meaning,
+  Stage 8 QA/coverage, and relevant resource evidence. Credentials are never
+  part of the context or persisted metadata. The existing privacy-manifest
+  mechanism records the sent field classes and confirms no unrelated project
+  files are included.
+- Generation is constrained to repair the confirmed failed semantic dimension,
+  preserve unaffected meaning and target-language naturalness, and make the
+  smallest defensible change. Output remains a suggestion; it cannot approve
+  itself, mutate alignment, change QA disposition, or change Scripture.
+- Creation modes are independent of review/lifecycle/disposition/verification:
+  `HUMAN_AUTHORED`, `MACHINE_SUGGESTED`, and
+  `MACHINE_SUGGESTED_HUMAN_EDITED` (legacy values remain readable).
+- A proposal contains one primary wording and zero or more alternatives. The
+  alternatives inherit the proposal's one exact `CorrectionIntent`, target
+  span, revision, and hash, and retain their own wording, explanation,
+  evidence, creation mode, and provider metadata. A different span requires a
+  different proposal/intent.
+- Eligibility and exact current target text are checked before generation and
+  again immediately before persistence, closing the provider-latency window.
+  Repository insertion also rejects a competing ACTIVE/INACTIVE owner inside
+  the same SQLite transaction. There is no fuzzy relocation.
+- Editing requires exact proposal CAS and a current ACTIVE proposal. Editing a
+  machine suggestion preserves `originalSuggestedText` and records the new
+  creation mode. Rejection sets `HUMAN_REJECTED` + `INACTIVE` without deleting
+  wording. Regeneration atomically marks the old proposal `SUPERSEDED` and
+  inserts a new record with `supersedesProposalId`.
+- Companion database schema is now **v12**. The append-only
+  `correction_proposal_events` table records `CREATED`, `SUGGESTED`, `EDITED`,
+  `REJECTED`, `SUPERSEDED`, and `STALE` with actor, timestamp, base/new
+  revision, reason, provider metadata, and full proposal snapshot. Migration
+  backs up first and adds a `MIGRATION`-actor creation snapshot for pre-v12
+  proposals rather than inventing a human action.
+- Python protocol additions: `correction.createProposal`,
+  `correction.editProposal`, `correction.rejectProposal`,
+  `correction.regenerateProposal`, and `correction.getProposalHistory`.
+  Existing get/list/eligibility methods remain. **There is still no
+  `correction.applyProposal`.**
+- Exact spans remain half-open Unicode code-point coordinates
+  `[startCodePoint,endCodePoint)`. A genuine omission remains a zero-length
+  insertion `[n,n)` with empty `originalText`; Tamil combining sequences,
+  Hebrew marks, Greek diacritics, and supplementary-plane text are covered.
+
+Verification on 2026-09-05:
+
+```text
+Stage 9B.1 focused Python                 33 passed
+Full Python (engine + Greek Room)        705 passed
+Frontend Vitest (incl. Project report)   151 passed / 17 files
+npm run check                            0 errors / 0 warnings
+npm run build                            passed (existing chunk-size warning)
+cargo test                               6 passed
+cargo check                              passed
+git diff --check                         passed (line-ending notices only)
+```
+
+The Stage 9B.0 Rust contention blocker is closed. Installed desktop acceptance
+was not part of this backend-only stage. The pre-existing coarse resource
+conflict policy remains deliberately conservative.
+
+## Next boundary: Stage 9B.2 only
+
+Stage 9B.2 may present current/proposed wording, alternatives, evidence,
+provenance, history, and edit/reject/regenerate controls. It must not add an
+Apply action, mutate Scripture/translationCore data, rerun Stages 6B–8, mark a
+finding `CORRECTED`, or change export behavior. Stage 9B.2 requires explicit
+approval before implementation.
 
 ---
 

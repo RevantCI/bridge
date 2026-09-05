@@ -3710,3 +3710,105 @@ build` OK. `cargo check` and `cargo test` (6 tests) pass. A raw stdio smoke
 was run against a throwaway project. **Not run:** the installed desktop app
 — the report screen has not yet been looked at in a real Tauri window, and
 print-to-PDF has not been exercised in WebView2.
+
+## Stage 9B.1 — correction wording generation only (2026-09-05)
+
+Baseline: `main` / `5df5c0d`. The Project QA Report added after `c7488df` was
+identified across Python, Rust, Svelte, tests, and docs before implementation
+and kept as a frozen regression boundary. No report implementation file was
+modified.
+
+### Architecture and safety boundary
+
+Added `tc_ai_bridge/correction_wording.py` with a vendor-neutral
+`CorrectionSuggestionProvider` contract and three implementations: no-provider
+(offline human flow), deterministic fixture provider, and an adapter over the
+existing configured Responses-compatible client. Provider input is restricted
+to the exact `CorrectionIntent`, current target span/verse and relevant passage
+context, source/target semantic units, locations, meaning assessments,
+coverage/QA reasoning, and relevant resource evidence. The prompt requires the
+smallest defensible semantic repair and forbids unrelated stylistic rewriting.
+
+Provider output is never authoritative. It cannot change Scripture, QA
+disposition, alignment, review approval, or verification. Provider/model,
+prompt-policy version, response fingerprint, evidence IDs, alternatives and
+warnings are persisted; keys, authorization headers and secret settings are
+not. The configured adapter updates the existing AI privacy manifest with the
+actual Stage 9B.1 context field classes and marks unrelated project files as
+not sent.
+
+`CorrectionProposalV2` now carries alternative wordings, provider metadata,
+warnings, original machine wording, location relationship IDs, and an optional
+`supersedesProposalId`. Canonical creation modes add `MACHINE_SUGGESTED` and
+`MACHINE_SUGGESTED_HUMAN_EDITED` while retaining old enum values for existing
+data. Alternatives share the parent's exact intent/span/revision/hash and keep
+their own wording, explanation, evidence and provenance.
+
+Eligibility and current-text/span validation run once before any provider call
+and again immediately before persistence. This prevents a slow provider result
+from being saved after the finding or target changed. The SQLite insert also
+checks competing ACTIVE/INACTIVE ownership inside `BEGIN IMMEDIATE`, closing
+the concurrent-create race. All comparisons remain exact Unicode code-point
+comparisons; no fuzzy search or silent span relocation was introduced.
+
+Human proposal editing requires `expectedProposalRevision`, rejects stale or
+inactive proposals, retains the original machine wording, and appends history.
+Rejection keeps all proposal data and sets `HUMAN_REJECTED` / `INACTIVE`.
+Regeneration is one transaction: the old row becomes `SUPERSEDED`, and a new
+row with `supersedesProposalId` is inserted. It never overwrites the reviewed
+record.
+
+### Persistence and APIs
+
+Database schema advanced from v11 to **v12**. Migration creates
+`correction_proposal_events` with full snapshots and controlled events:
+`CREATED`, `SUGGESTED`, `EDITED`, `REJECTED`, `SUPERSEDED`, `STALE`. Every
+event records actor, timestamp, base/new revision, note/reason and provider
+metadata. Existing proposals receive a migration-authored creation snapshot;
+the standard pre-migration SQLite backup remains in force.
+
+Python sidecar protocol additions:
+
+```text
+correction.createProposal
+correction.editProposal
+correction.rejectProposal
+correction.regenerateProposal
+correction.getProposalHistory
+```
+
+Existing `correction.getEligibility`, `correction.getProposal`, and
+`correction.listForFinding` remain. No `correction.applyProposal` exists.
+There is no Stage 9B.1 frontend or Rust command because correction UI and Apply
+remain outside this stage.
+
+### Tests and regression gates
+
+`engine/tests/test_correction_stage9b1.py`: **33 passed**. Coverage includes
+real backend eligibility, immediate pre-persistence recheck, offline human
+wording, provider fallback/privacy/provenance, deterministic suggestions,
+alternative ownership, all requested semantic repair shapes, exact span/hash/
+revision storage, CAS conflict, stale edit, original-suggestion preservation,
+rejection, atomic supersession, zero-length omission insertion, multilingual
+Unicode spans, protocol round trips, restart/recovery, append-only history, and
+byte-identical chapter JSON/imported USFM/alignment artifacts across every
+Stage 9B.1 operation.
+
+Final gates:
+
+```text
+full Python suite                         705 passed
+frontend Vitest                          151 passed (17 files)
+ProjectReportScreen/reportStats          included and green
+npm run check                            0 errors, 0 warnings
+npm run build                            passed; existing large-chunk warning
+cargo test                               6 passed
+cargo check                              passed
+git diff --check                         passed; only CRLF notices
+```
+
+Remaining limitations: unresolved resource conflicts still block proposal
+creation by the existing conservative policy; no installed-app acceptance was
+needed for this backend-only stage; proposal UI, Apply, strict Scripture-edit
+CAS, post-edit realignment/reanalysis, `CORRECTED`, and export are deliberately
+not implemented. Next authorized unit is Stage 9B.2 UI only, after approval.

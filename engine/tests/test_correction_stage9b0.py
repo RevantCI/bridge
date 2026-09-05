@@ -400,7 +400,7 @@ def test_span_rejects_incoherent_offsets() -> None:
         )
 
 
-# --- Schema v11 / legacy proposals ------------------------------------------
+# --- Schema v12 / legacy proposals ------------------------------------------
 
 def _v2_proposal(proposal_id: str = "prop-v2", finding_id: str = "qa-1") -> CorrectionProposalV2:
     span = AffectedTargetSpan(
@@ -425,12 +425,12 @@ def _v2_proposal(proposal_id: str = "prop-v2", finding_id: str = "qa-1") -> Corr
     )
 
 
-def test_fresh_database_is_at_v11(tmp_path: Path) -> None:
+def test_fresh_database_is_at_current_schema(tmp_path: Path) -> None:
     repo = FoundationRepository(tmp_path / "semantic.sqlite3")
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 11
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 12
 
 
-def test_v10_to_v11_migration_preserves_legacy_proposals(tmp_path: Path) -> None:
+def test_v10_to_current_migration_preserves_legacy_proposals(tmp_path: Path) -> None:
     """A real v10 database with a v1 proposal upgrades, keeps its history, and
     does not silently acquire a span it never had."""
     database = tmp_path / "semantic.sqlite3"
@@ -465,7 +465,7 @@ def test_v10_to_v11_migration_preserves_legacy_proposals(tmp_path: Path) -> None
     conn.close()
 
     upgraded = FoundationRepository(database)
-    assert upgraded.schema_version() == 11
+    assert upgraded.schema_version() == 12
     assert (tmp_path / "backups").is_dir(), "migration must back up before upgrading"
     assert upgraded.recovery_check()["ok"] is True
 
@@ -479,6 +479,9 @@ def test_v10_to_v11_migration_preserves_legacy_proposals(tmp_path: Path) -> None
     # The whole point: a legacy row has no exact span or content hash, so it
     # must never become applicable by migration alone.
     assert listed[0]["applicable"] is False
+    migration_history = upgraded.correction_proposal_history("prop-legacy")
+    assert [event["eventType"] for event in migration_history] == ["CREATED"]
+    assert migration_history[0]["actorType"] == "MIGRATION"
 
 
 def test_legacy_v1_proposal_written_today_is_still_not_applicable(tmp_path: Path) -> None:
@@ -602,7 +605,7 @@ def test_application_intent_is_separate_from_the_proposal(tmp_path: Path) -> Non
             "PRAGMA table_info(correction_application_intents)")}
     assert {"application_id", "proposal_id", "expected_target_revision",
             "expected_original_text", "state", "recovery_required"} <= columns
-    assert repo.schema_version() == 11
+    assert repo.schema_version() == 12
 
 
 # --- Dependency graph invariants --------------------------------------------

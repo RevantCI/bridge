@@ -57,6 +57,7 @@ from .semantic_location import SemanticLocationEngine
 from .meaning_analysis import MeaningAnalysisEngine
 from .qa_audit import QaAuditEngine
 from .correction_eligibility import CorrectionEligibilityService
+from .correction_wording import CorrectionWordingService
 from .qa_review import QaReviewService
 
 
@@ -515,6 +516,7 @@ class PassageSemanticRuntime:
         self.qa_audit = QaAuditEngine(self)
         self.qa_review = QaReviewService(self)
         self.correction_eligibility = CorrectionEligibilityService(self)
+        self.correction_wording = CorrectionWordingService(self)
         self._migrate_legacy_companions()
 
     def _identity_fingerprint(self) -> str:
@@ -1348,6 +1350,25 @@ class PassageSemanticRuntime:
             "findingId": finding_id,
             "proposals": self.repository.correction_proposals_for_finding(finding_id),
         }
+
+    def correction_create_proposal(
+        self, *, provider: Any = None, **options: Any,
+    ) -> dict[str, Any]:
+        service = CorrectionWordingService(self, provider) if provider is not None else self.correction_wording
+        return service.create_proposal(**options)
+
+    def correction_edit_proposal(self, proposal_id: str, **options: Any) -> dict[str, Any]:
+        return self.correction_wording.edit_proposal(proposal_id, **options)
+
+    def correction_reject_proposal(self, proposal_id: str, **options: Any) -> dict[str, Any]:
+        return self.correction_wording.reject_proposal(proposal_id, **options)
+
+    def correction_regenerate_proposal(
+        self, proposal_id: str, *, provider: Any, **options: Any,
+    ) -> dict[str, Any]:
+        return CorrectionWordingService(self, provider).regenerate_proposal(
+            proposal_id, **options,
+        )
 
     def semantic_review_decide_location(
         self, relationship_id: str, decision: str, **options: Any,

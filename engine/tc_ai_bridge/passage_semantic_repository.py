@@ -47,7 +47,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 11
+DATABASE_SCHEMA_VERSION = 12
 
 # The one authoritative record_type -> table map for the dependency graph.
 #
@@ -854,6 +854,44 @@ ON correction_application_intents(proposal_id, state);
 """
 
 
+# Stage 9B.1 keeps proposal wording history independently of the mutable
+# current proposal row.  Every edit/rejection/supersession is append-only and
+# carries the full proposal snapshot that was current after that event.
+_MIGRATION_V12 = r"""
+CREATE TABLE correction_proposal_events (
+    id TEXT PRIMARY KEY,
+    proposal_id TEXT NOT NULL REFERENCES correction_proposals(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL CHECK(event_type IN (
+        'CREATED','SUGGESTED','EDITED','REJECTED','SUPERSEDED','STALE'
+    )),
+    actor_type TEXT NOT NULL CHECK(actor_type IN ('HUMAN','AI','SYSTEM','MIGRATION')),
+    actor_id TEXT NOT NULL,
+    base_revision INTEGER NOT NULL CHECK(base_revision >= 0),
+    new_revision INTEGER NOT NULL CHECK(new_revision >= 1),
+    reason TEXT NOT NULL DEFAULT '',
+    provider_metadata_json TEXT NOT NULL DEFAULT '{}',
+    proposal_snapshot_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX ix_correction_proposal_events
+ON correction_proposal_events(proposal_id,created_at,id);
+
+-- Existing Stage 9B.0 proposals are historical data, not blank slates.  Give
+-- each one an auditable migration snapshot without inventing a human action.
+INSERT INTO correction_proposal_events(
+    id,proposal_id,event_type,actor_type,actor_id,base_revision,new_revision,
+    reason,provider_metadata_json,proposal_snapshot_json,created_at
+)
+SELECT
+    'migration-created:' || id,id,'CREATED','MIGRATION','schema-v12',
+    CASE WHEN revision > 1 THEN revision - 1 ELSE 0 END,revision,
+    'Proposal existed before append-only Stage 9B.1 history.',
+    COALESCE(json_extract(payload_json,'$.providerMetadata'),'{}'),
+    payload_json,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+FROM correction_proposals;
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -930,6 +968,10 @@ class FoundationRepository:
             if current < 11:
                 self._backup_before_migration(conn, current, 11)
                 self._apply_migration(conn, 11, _MIGRATION_V11)
+                current = 11
+            if current < 12:
+                self._backup_before_migration(conn, current, 12)
+                self._apply_migration(conn, 12, _MIGRATION_V12)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -2940,6 +2982,7 @@ class FoundationRepository:
         payload.setdefault("proposalSchemaVersion", 1)
         payload.setdefault("verificationStatus", VerificationStatus.NOT_RUN.value)
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             conn.execute(
                 f"INSERT INTO correction_proposals({self._CORRECTION_PROPOSAL_COLUMNS}) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -2947,6 +2990,11 @@ class FoundationRepository:
                  proposal.applied_target_revision, policy_id, proposal.review_status.value, proposal.lifecycle_status.value,
                  proposal.revision, json.dumps(payload, ensure_ascii=False),
                  1, VerificationStatus.NOT_RUN.value, 0),
+            )
+            self._append_correction_event(
+                conn, proposal=payload, event_type="CREATED",
+                actor_type=ActorType.MIGRATION, actor_id="legacy-proposal-writer",
+                base_revision=0, reason="Legacy schema-v1 proposal retained as non-applicable history.",
             )
             conn.commit()
 
@@ -2959,49 +3007,231 @@ class FoundationRepository:
         take the proposal's eligibility with it.
         """
         policy_id = self._ensure_policy(proposal.policy_binding)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._insert_correction_proposal_v2(conn, proposal, policy_id)
+            self._append_correction_event(
+                conn, proposal=to_wire(proposal), event_type="CREATED",
+                actor_type=ActorType.HUMAN, actor_id=proposal.created_by,
+                base_revision=0, reason=proposal.explanation,
+            )
+            if proposal.provider_metadata is not None:
+                self._append_correction_event(
+                    conn, proposal=to_wire(proposal), event_type="SUGGESTED",
+                    actor_type=ActorType.AI,
+                    actor_id=(proposal.provider_metadata.model or proposal.provider_metadata.provider_name),
+                    base_revision=0, reason=proposal.explanation,
+                )
+            conn.commit()
+
+    def _insert_correction_proposal_v2(
+        self, conn: sqlite3.Connection, proposal: CorrectionProposalV2, policy_id: str,
+    ) -> None:
         payload = to_wire(proposal)
         span = proposal.intent.affected_target_span
-        with self._connect() as conn:
-            conn.execute(
-                f"INSERT INTO correction_proposals({self._CORRECTION_PROPOSAL_COLUMNS}) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (proposal.id, proposal.project_id, proposal.qa_finding_id,
-                 span.target_text_revision, proposal.applied_target_revision, policy_id,
-                 proposal.review_status.value, proposal.lifecycle_status.value,
-                 proposal.revision, json.dumps(payload, ensure_ascii=False),
-                 proposal.proposal_schema_version, proposal.verification_status.value,
-                 1 if proposal.is_applicable else 0),
+        owner = conn.execute(
+            "SELECT id FROM correction_proposals WHERE qa_finding_id=? "
+            "AND lifecycle_status IN ('ACTIVE','INACTIVE') LIMIT 1",
+            (proposal.qa_finding_id,),
+        ).fetchone()
+        if owner is not None:
+            raise FoundationConflict(
+                f"Correction proposal {owner['id']} already owns this finding"
             )
-            edges: list[tuple[str, str, str, str]] = [
-                ("CORRECTION_PROPOSAL", proposal.id, "QA_FINDING", proposal.qa_finding_id),
-            ]
-            for reference in dict.fromkeys(
-                (*span.canonical_references, *proposal.affected_references)
-            ):
-                edges.append((
-                    "CORRECTION_PROPOSAL", proposal.id, "TARGET_REFERENCE",
-                    self.target_dependency_id(proposal.project_id, self._book_of(reference), reference),
-                ))
-            for unit_id in proposal.intent.affected_source_semantic_unit_ids:
-                edges.append(
-                    ("CORRECTION_PROPOSAL", proposal.id, "SEMANTIC_UNIT", unit_id)
-                )
-            for assessment_id in proposal.meaning_assessment_ids:
-                edges.append(
-                    ("CORRECTION_PROPOSAL", proposal.id, "MEANING_ASSESSMENT", assessment_id)
-                )
-            for relationship_id in proposal.semantic_relationship_ids:
-                edges.append(
-                    ("CORRECTION_PROPOSAL", proposal.id, "SEMANTIC_RELATIONSHIP", relationship_id)
-                )
-            for evidence_id in proposal.evidence_ids:
-                edges.append(
-                    ("CORRECTION_PROPOSAL", proposal.id, "EVIDENCE_RECORD", evidence_id)
-                )
-            conn.executemany(
-                "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)", edges,
+        conn.execute(
+            f"INSERT INTO correction_proposals({self._CORRECTION_PROPOSAL_COLUMNS}) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (proposal.id, proposal.project_id, proposal.qa_finding_id,
+             span.target_text_revision, proposal.applied_target_revision, policy_id,
+             proposal.review_status.value, proposal.lifecycle_status.value,
+             proposal.revision, json.dumps(payload, ensure_ascii=False),
+             proposal.proposal_schema_version, proposal.verification_status.value,
+             1 if proposal.is_applicable else 0),
+        )
+        edges: list[tuple[str, str, str, str]] = [
+            ("CORRECTION_PROPOSAL", proposal.id, "QA_FINDING", proposal.qa_finding_id),
+        ]
+        for reference in dict.fromkeys(
+            (*span.canonical_references, *proposal.affected_references)
+        ):
+            edges.append((
+                "CORRECTION_PROPOSAL", proposal.id, "TARGET_REFERENCE",
+                self.target_dependency_id(proposal.project_id, self._book_of(reference), reference),
+            ))
+        for unit_id in proposal.intent.affected_source_semantic_unit_ids:
+            edges.append(("CORRECTION_PROPOSAL", proposal.id, "SEMANTIC_UNIT", unit_id))
+        for assessment_id in proposal.meaning_assessment_ids:
+            edges.append(("CORRECTION_PROPOSAL", proposal.id, "MEANING_ASSESSMENT", assessment_id))
+        for relationship_id in (*proposal.semantic_relationship_ids, *proposal.location_relationship_ids):
+            edge_type = (
+                "LOCATION_RELATIONSHIP" if relationship_id in proposal.location_relationship_ids
+                else "SEMANTIC_RELATIONSHIP"
+            )
+            edges.append(("CORRECTION_PROPOSAL", proposal.id, edge_type, relationship_id))
+        for evidence_id in proposal.evidence_ids:
+            # Stage 7 component evidence can be inline in a meaning assessment
+            # rather than an evidence_records row. It remains cited in the
+            # proposal payload, while the assessment dependency above owns its
+            # invalidation. Register a generic edge only for durable records;
+            # otherwise recovery would correctly flag a dangling dependency.
+            if conn.execute(
+                "SELECT 1 FROM evidence_records WHERE id=?", (evidence_id,),
+            ).fetchone() is not None:
+                edges.append(("CORRECTION_PROPOSAL", proposal.id, "EVIDENCE_RECORD", evidence_id))
+        conn.executemany("INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)", edges)
+
+    def _append_correction_event(
+        self, conn: sqlite3.Connection, *, proposal: dict[str, Any], event_type: str,
+        actor_type: ActorType, actor_id: str, base_revision: int, reason: str = "",
+    ) -> None:
+        conn.execute(
+            "INSERT INTO correction_proposal_events VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (str(uuid.uuid4()), str(proposal["id"]), event_type, actor_type.value,
+             actor_id, base_revision, int(proposal["revision"]), reason,
+             json.dumps(proposal.get("providerMetadata") or {}, ensure_ascii=False),
+             json.dumps(proposal, ensure_ascii=False), self._now()),
+        )
+
+    def update_correction_proposal_wording(
+        self, proposal_id: str, *, proposed_text: str, explanation: str,
+        creation_mode: str, review_status: ReviewStatus, expected_revision: int,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        """CAS-update proposal wording while retaining an append-only snapshot."""
+        if expected_revision < 1:
+            raise FoundationValidationError("expected_revision must be at least 1")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM correction_proposals WHERE id=?", (proposal_id,),
+            ).fetchone()
+            if row is None:
+                raise FoundationValidationError(f"Unknown correction proposal: {proposal_id}")
+            if int(row["revision"]) != expected_revision:
+                raise FoundationConflict("Correction proposal revision conflict")
+            payload = json.loads(row["payload_json"])
+            payload.update({
+                "proposedText": proposed_text,
+                "explanation": explanation,
+                "creationMode": creation_mode,
+                "reviewStatus": review_status.value,
+                "revision": expected_revision + 1,
+            })
+            changed = conn.execute(
+                "UPDATE correction_proposals SET review_status=?,revision=revision+1,payload_json=? "
+                "WHERE id=? AND revision=?",
+                (review_status.value, json.dumps(payload, ensure_ascii=False),
+                 proposal_id, expected_revision),
+            ).rowcount
+            if changed != 1:
+                raise FoundationConflict("Correction proposal revision conflict")
+            self._append_correction_event(
+                conn, proposal=payload, event_type="EDITED", actor_type=ActorType.HUMAN,
+                actor_id=actor_id, base_revision=expected_revision, reason=explanation,
             )
             conn.commit()
+        return self.correction_proposal(proposal_id)
+
+    def reject_correction_proposal(
+        self, proposal_id: str, *, expected_revision: int, actor_id: str, reason: str,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM correction_proposals WHERE id=?", (proposal_id,),
+            ).fetchone()
+            if row is None:
+                raise FoundationValidationError(f"Unknown correction proposal: {proposal_id}")
+            if int(row["revision"]) != expected_revision:
+                raise FoundationConflict("Correction proposal revision conflict")
+            payload = json.loads(row["payload_json"])
+            payload.update({
+                "reviewStatus": ReviewStatus.HUMAN_REJECTED.value,
+                "lifecycleStatus": LifecycleStatus.INACTIVE.value,
+                "revision": expected_revision + 1,
+            })
+            changed = conn.execute(
+                "UPDATE correction_proposals SET review_status=?,lifecycle_status=?,"
+                "revision=revision+1,payload_json=? WHERE id=? AND revision=?",
+                (ReviewStatus.HUMAN_REJECTED.value, LifecycleStatus.INACTIVE.value,
+                 json.dumps(payload, ensure_ascii=False), proposal_id, expected_revision),
+            ).rowcount
+            if changed != 1:
+                raise FoundationConflict("Correction proposal revision conflict")
+            self._append_correction_event(
+                conn, proposal=payload, event_type="REJECTED", actor_type=ActorType.HUMAN,
+                actor_id=actor_id, base_revision=expected_revision, reason=reason,
+            )
+            conn.commit()
+        return self.correction_proposal(proposal_id)
+
+    def supersede_and_save_correction_proposal(
+        self, old_proposal_id: str, *, expected_revision: int,
+        replacement: CorrectionProposalV2, actor_id: str,
+    ) -> dict[str, Any]:
+        """Atomically preserve the old proposal and insert its replacement."""
+        policy_id = self._ensure_policy(replacement.policy_binding)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM correction_proposals WHERE id=?", (old_proposal_id,),
+            ).fetchone()
+            if row is None:
+                raise FoundationValidationError(f"Unknown correction proposal: {old_proposal_id}")
+            if int(row["revision"]) != expected_revision:
+                raise FoundationConflict("Correction proposal revision conflict")
+            if replacement.supersedes_proposal_id != old_proposal_id:
+                raise FoundationValidationError("Replacement must identify the proposal it supersedes")
+            old = json.loads(row["payload_json"])
+            old.update({
+                "lifecycleStatus": LifecycleStatus.SUPERSEDED.value,
+                "revision": expected_revision + 1,
+            })
+            changed = conn.execute(
+                "UPDATE correction_proposals SET lifecycle_status=?,revision=revision+1,payload_json=? "
+                "WHERE id=? AND revision=?",
+                (LifecycleStatus.SUPERSEDED.value, json.dumps(old, ensure_ascii=False),
+                 old_proposal_id, expected_revision),
+            ).rowcount
+            if changed != 1:
+                raise FoundationConflict("Correction proposal revision conflict")
+            self._append_correction_event(
+                conn, proposal=old, event_type="SUPERSEDED", actor_type=ActorType.HUMAN,
+                actor_id=actor_id, base_revision=expected_revision,
+                reason=f"Superseded by {replacement.id}",
+            )
+            self._insert_correction_proposal_v2(conn, replacement, policy_id)
+            self._append_correction_event(
+                conn, proposal=to_wire(replacement), event_type="CREATED",
+                actor_type=ActorType.HUMAN, actor_id=actor_id, base_revision=0,
+                reason=replacement.explanation,
+            )
+            if replacement.provider_metadata is not None:
+                self._append_correction_event(
+                    conn, proposal=to_wire(replacement), event_type="SUGGESTED",
+                    actor_type=ActorType.AI,
+                    actor_id=(replacement.provider_metadata.model
+                              or replacement.provider_metadata.provider_name),
+                    base_revision=0, reason=replacement.explanation,
+                )
+            conn.commit()
+        return self.correction_proposal(replacement.id)
+
+    def correction_proposal_history(self, proposal_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM correction_proposal_events WHERE proposal_id=? "
+                "ORDER BY created_at,id", (proposal_id,),
+            ).fetchall()
+        return [{
+            "id": row["id"], "proposalId": row["proposal_id"],
+            "eventType": row["event_type"], "actorType": row["actor_type"],
+            "actorId": row["actor_id"], "baseRevision": row["base_revision"],
+            "newRevision": row["new_revision"], "reason": row["reason"],
+            "providerMetadata": json.loads(row["provider_metadata_json"]),
+            "proposalSnapshot": json.loads(row["proposal_snapshot_json"]),
+            "createdAt": row["created_at"],
+        } for row in rows]
 
     @staticmethod
     def _book_of(displayed_reference: str) -> str:
@@ -3359,6 +3589,18 @@ class FoundationRepository:
                     statement, (json.dumps(payload, ensure_ascii=False), record_id),
                 ).rowcount
                 changed += updated
+                if updated and record_type == "CORRECTION_PROPOSAL":
+                    conn.execute(
+                        "INSERT INTO correction_proposal_events "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (str(uuid.uuid4()), record_id, "STALE", ActorType.SYSTEM.value,
+                         "dependency-invalidation",
+                         max(0, int(payload.get("revision", 1)) - 1),
+                         int(payload.get("revision", 1)),
+                         f"Dependency {current_type}:{current_id} became stale.", "{}",
+                         json.dumps(payload, ensure_ascii=False),
+                         datetime.now(timezone.utc).isoformat()),
+                    )
                 # Dependency propagation is independent of whether this record
                 # was already stale. A downstream record must not remain current.
                 queue.append((record_type, record_id))

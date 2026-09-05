@@ -231,7 +231,9 @@ class CorrectionEligibilityService:
 
     # --- Eligibility --------------------------------------------------------
 
-    def evaluate(self, finding_id: str) -> CorrectionEligibility:
+    def evaluate(
+        self, finding_id: str, *, ignore_proposal_ids: tuple[str, ...] = (),
+    ) -> CorrectionEligibility:
         """Every rule is evaluated; reasons accumulate rather than short-circuit.
 
         A reviewer fixing one blocker only to meet the next is a bad loop, so
@@ -259,7 +261,9 @@ class CorrectionEligibilityService:
         current_hash, text_reasons = self._check_current_text(finding, displayed)
         reasons.extend(text_reasons)
 
-        existing, conflict_reasons = self._check_existing_corrections(finding_id)
+        existing, conflict_reasons = self._check_existing_corrections(
+            finding_id, ignore_proposal_ids=ignore_proposal_ids,
+        )
         reasons.extend(conflict_reasons)
 
         return CorrectionEligibility(
@@ -459,7 +463,7 @@ class CorrectionEligibilityService:
         return (current_hashes[0] if current_hashes else ""), reasons
 
     def _check_existing_corrections(
-        self, finding_id: str,
+        self, finding_id: str, *, ignore_proposal_ids: tuple[str, ...] = (),
     ) -> tuple[tuple[str, ...], list[EligibilityReason]]:
         try:
             proposals = self.repository.correction_proposals_for_finding(finding_id)
@@ -467,9 +471,12 @@ class CorrectionEligibilityService:
             return (), []
         reasons: list[EligibilityReason] = []
         ids: list[str] = []
+        ignored = frozenset(ignore_proposal_ids)
         for proposal in proposals:
             proposal_id = str(proposal.get("id") or "")
             ids.append(proposal_id)
+            if proposal_id in ignored:
+                continue
             lifecycle = str(proposal.get("lifecycleStatus") or "")
             applied = bool(proposal.get("appliedTargetRevision"))
             if applied or lifecycle in {item.value for item in _CONFLICTING_LIFECYCLES}:

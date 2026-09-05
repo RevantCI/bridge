@@ -66,6 +66,10 @@ from tc_ai_bridge.alignment_engine import (
 from tc_ai_bridge.aligned_usfm import AlignedUsfmError, render_aligned_verse
 from tc_ai_bridge.alignment_reliability import structural_issues
 from tc_ai_bridge.ai_client import AIError, OpenAIResponsesClient, Transport
+from tc_ai_bridge.correction_wording import (
+    ConfiguredCorrectionSuggestionProvider,
+    CorrectionWordingService,
+)
 from tc_ai_bridge.knowledge_base import KnowledgeBaseError
 from tc_ai_bridge.paratext_connector import ParatextConnectorClient, ParatextConnectorError
 from tc_ai_bridge.logos_connector import LogosConnectorClient, LogosConnectorError
@@ -353,11 +357,16 @@ class Methods:
     QA_REVIEW_GET_FINDING = "qaReview.getFinding"
     QA_REVIEW_DECIDE_FINDING = "qaReview.decideFinding"
     QA_REVIEW_ADD_NOTE = "qaReview.addNote"
-    # Stage 9B.0 read-only correction surface. correction.applyProposal is
+    # Stage 9B.0/9B.1 correction data surface. correction.applyProposal is
     # deliberately absent: no Scripture-changing command exists until 9B.3.
     CORRECTION_GET_ELIGIBILITY = "correction.getEligibility"
     CORRECTION_GET_PROPOSAL = "correction.getProposal"
     CORRECTION_LIST_FOR_FINDING = "correction.listForFinding"
+    CORRECTION_CREATE_PROPOSAL = "correction.createProposal"
+    CORRECTION_EDIT_PROPOSAL = "correction.editProposal"
+    CORRECTION_REJECT_PROPOSAL = "correction.rejectProposal"
+    CORRECTION_REGENERATE_PROPOSAL = "correction.regenerateProposal"
+    CORRECTION_GET_PROPOSAL_HISTORY = "correction.getProposalHistory"
     SEMANTIC_REVIEW_DECIDE_LOCATION = "semanticReview.decideLocation"
     SEMANTIC_REVIEW_DECIDE_MEANING = "semanticReview.decideMeaning"
     REVIEW_HISTORY_GET_ENTITY_HISTORY = "reviewHistory.getEntityHistory"
@@ -2093,6 +2102,49 @@ class BridgeEngine:
     def correction_list_for_finding(self, finding_id: str) -> dict[str, Any]:
         return self._require_passage_semantic_runtime().correction_list_for_finding(finding_id)
 
+    def correction_create_proposal(self, **options: Any) -> dict[str, Any]:
+        runtime = self._require_passage_semantic_runtime()
+        request_suggestion = bool(options.get("request_suggestion"))
+        client: OpenAIResponsesClient | None = None
+        provider = None
+        if request_suggestion and self.settings.get_api_key():
+            client = self._ai_client()
+            provider = ConfiguredCorrectionSuggestionProvider(
+                client, provider_name=self.settings.provider or "openai-compatible",
+            )
+        result = runtime.correction_create_proposal(provider=provider, **options)
+        if client is not None:
+            self.settings.record_ai_usage(client.last_usage.total_tokens, client.last_cost_usd)
+        return result
+
+    def correction_edit_proposal(self, proposal_id: str, **options: Any) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().correction_edit_proposal(
+            proposal_id, **options,
+        )
+
+    def correction_reject_proposal(self, proposal_id: str, **options: Any) -> dict[str, Any]:
+        return self._require_passage_semantic_runtime().correction_reject_proposal(
+            proposal_id, **options,
+        )
+
+    def correction_regenerate_proposal(self, proposal_id: str, **options: Any) -> dict[str, Any]:
+        client = self._ai_client()
+        provider = ConfiguredCorrectionSuggestionProvider(
+            client, provider_name=self.settings.provider or "openai-compatible",
+        )
+        result = self._require_passage_semantic_runtime().correction_regenerate_proposal(
+            proposal_id, provider=provider, **options,
+        )
+        self.settings.record_ai_usage(client.last_usage.total_tokens, client.last_cost_usd)
+        return result
+
+    def correction_get_proposal_history(self, proposal_id: str) -> dict[str, Any]:
+        runtime = self._require_passage_semantic_runtime()
+        return {
+            "proposalId": proposal_id,
+            "events": runtime.repository.correction_proposal_history(proposal_id),
+        }
+
     def qa_review_add_note(
         self, entity_type: str, entity_id: str, note: str,
     ) -> dict[str, Any]:
@@ -3779,6 +3831,40 @@ class BridgeEngine:
             if m == Methods.CORRECTION_LIST_FOR_FINDING:
                 return EngineResponse.ok(request.id, result=self.correction_list_for_finding(
                     str(p.get("findingId") or ""),
+                ))
+            if m == Methods.CORRECTION_CREATE_PROPOSAL:
+                return EngineResponse.ok(request.id, result=self.correction_create_proposal(
+                    finding_id=str(p.get("findingId") or ""),
+                    intent=CorrectionWordingService._intent_from_wire(p.get("intent") or {}),
+                    human_proposed_text=str(p.get("humanProposedText") or ""),
+                    explanation=str(p.get("explanation") or ""),
+                    request_suggestion=bool(p.get("requestSuggestion") or False),
+                    actor_id=str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                ))
+            if m == Methods.CORRECTION_EDIT_PROPOSAL:
+                return EngineResponse.ok(request.id, result=self.correction_edit_proposal(
+                    str(p.get("proposalId") or ""),
+                    proposed_text=str(p.get("proposedText") or ""),
+                    explanation=str(p.get("explanation") or ""),
+                    expected_revision=int(p.get("expectedProposalRevision") or 0),
+                    actor_id=str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                ))
+            if m == Methods.CORRECTION_REJECT_PROPOSAL:
+                return EngineResponse.ok(request.id, result=self.correction_reject_proposal(
+                    str(p.get("proposalId") or ""),
+                    expected_revision=int(p.get("expectedProposalRevision") or 0),
+                    actor_id=str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                    reason=str(p.get("reason") or p.get("note") or ""),
+                ))
+            if m == Methods.CORRECTION_REGENERATE_PROPOSAL:
+                return EngineResponse.ok(request.id, result=self.correction_regenerate_proposal(
+                    str(p.get("proposalId") or ""),
+                    expected_revision=int(p.get("expectedProposalRevision") or 0),
+                    actor_id=str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                ))
+            if m == Methods.CORRECTION_GET_PROPOSAL_HISTORY:
+                return EngineResponse.ok(request.id, result=self.correction_get_proposal_history(
+                    str(p.get("proposalId") or ""),
                 ))
             if m == Methods.SEMANTIC_REVIEW_DECIDE_LOCATION:
                 return EngineResponse.ok(request.id, result=self.semantic_review_decide_location(

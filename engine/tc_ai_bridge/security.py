@@ -27,4 +27,4 @@ def scan_tree_for_secrets(root:Path)->list[str]:
 
 def ai_payload_manifest(reference:str,fields:dict[str,Any])->dict[str,Any]:
     """Human-readable privacy manifest; actual content stays local unless listed."""
-    return {'reference':reference,'sentFields':sorted(fields.keys()),'containsScripture':bool(fields.get('tamil_verse')),'containsOriginalLanguage':bool(fields.get('hebrew_topWords') or fields.get('hebrew')),'containsTranslationHelps':bool(fields.get('translationCore_checks') or fields.get('evidence_catalog')),'unrelatedProjectFilesSent':False}
+    return {'reference':reference,'sentFields':sorted(fields.keys()),'containsScripture':bool(fields.get('tamil_verse') or fields.get('currentTarget') or fields.get('targetPassageContext')),'containsOriginalLanguage':bool(fields.get('hebrew_topWords') or fields.get('hebrew') or fields.get('sourceSemanticUnits')),'containsTranslationHelps':bool(fields.get('translationCore_checks') or fields.get('evidence_catalog') or fields.get('resourceEvidence')),'unrelatedProjectFilesSent':False}

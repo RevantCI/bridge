@@ -823,10 +823,36 @@ class VerificationStatus(StrEnum):
 
 
 class CorrectionCreationMode(StrEnum):
+    # Stage 9B.1 canonical vocabulary.  The older values below remain readable
+    # because existing companion databases may already contain them.
+    MACHINE_SUGGESTED = "MACHINE_SUGGESTED"
+    MACHINE_SUGGESTED_HUMAN_EDITED = "MACHINE_SUGGESTED_HUMAN_EDITED"
     AI_GENERATED = "AI_GENERATED"
     HUMAN_AUTHORED = "HUMAN_AUTHORED"
     HUMAN_MODIFIED_AI = "HUMAN_MODIFIED_AI"
     MIGRATED_LEGACY = "MIGRATED_LEGACY"
+
+
+@dataclass(frozen=True)
+class CorrectionProviderMetadata:
+    """Non-secret provenance for optional machine wording."""
+
+    provider_name: str
+    model: str
+    model_version_id: str = ""
+    prompt_policy_version: str = "correction-wording-v1"
+    response_fingerprint: str = ""
+
+
+@dataclass(frozen=True)
+class CorrectionWordingAlternative:
+    """An unselected alternative returned with a primary suggestion."""
+
+    proposed_text: str
+    explanation: str = ""
+    evidence_ids: tuple[str, ...] = ()
+    creation_mode: CorrectionCreationMode = CorrectionCreationMode.MACHINE_SUGGESTED
+    provider_metadata: CorrectionProviderMetadata | None = None
 
 
 @dataclass(frozen=True)
@@ -919,6 +945,12 @@ class CorrectionProposalV2:
     applied_at: str | None = None
     revision: int = 1
     proposal_schema_version: int = CORRECTION_PROPOSAL_SCHEMA_VERSION
+    alternatives: tuple[CorrectionWordingAlternative, ...] = ()
+    provider_metadata: CorrectionProviderMetadata | None = None
+    warnings: tuple[str, ...] = ()
+    original_suggested_text: str | None = None
+    location_relationship_ids: tuple[str, ...] = ()
+    supersedes_proposal_id: str | None = None
 
     @property
     def is_applicable(self) -> bool:
