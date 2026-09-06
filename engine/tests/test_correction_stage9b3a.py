@@ -373,7 +373,7 @@ def test_application_and_strict_context_validate_against_canonical_schema() -> N
         assert f"pub {rust_field}:" in rust
 
 
-def test_strict_future_writer_context_is_defined_but_not_executed() -> None:
+def test_strict_writer_context_is_available_only_as_an_explicit_keyword() -> None:
     contract = StrictScriptureEditContext(
         expected_target_revision="r1", expected_target_content_hash=_hash("original verse"),
         expected_original_verse_text="original verse", expected_start_code_point=2,
@@ -382,7 +382,8 @@ def test_strict_future_writer_context_is_defined_but_not_executed() -> None:
         application_id="application-1")
     assert to_wire(contract)["pendingInvalidationId"] == "pending-1"
     import inspect
-    assert "strict_context" not in inspect.signature(TranslationCoreProject.apply_scripture_edit).parameters
+    parameter = inspect.signature(TranslationCoreProject.apply_scripture_edit).parameters["strict_context"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def _write_project(root: Path) -> Path:
@@ -587,13 +588,10 @@ def test_semantic_backup_records_application_checksum_and_timestamp(tmp_path: Pa
     assert metadata["createdAt"]
 
 
-def test_stage9b3a_exposes_no_apply_api_ui_or_scripture_writer() -> None:
+def test_stage9b3a_recovery_coordinator_still_contains_no_scripture_writer() -> None:
     root = Path(__file__).parents[2]
     service_source = (root / "engine" / "bridge_service.py").read_text(encoding="utf-8")
-    assert "CORRECTION_APPLY_PROPOSAL =" not in service_source
-    assert "Methods.CORRECTION_APPLY_PROPOSAL" not in service_source
-    assert "correction_apply_proposal" not in (root / "src-tauri" / "src" / "commands.rs").read_text(encoding="utf-8")
-    assert "Apply correction" not in (root / "src" / "lib" / "components" / "CorrectionReviewPanel.svelte").read_text(encoding="utf-8")
+    assert "CORRECTION_APPLY_PROPOSAL =" in service_source
     recovery_source = (root / "engine" / "tc_ai_bridge" / "correction_application_recovery.py").read_text(encoding="utf-8")
     for forbidden in ("write_text(", "apply_scripture_edit(", "json.dump("):
         assert forbidden not in recovery_source

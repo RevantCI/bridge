@@ -1876,7 +1876,52 @@ eligibility immediately before mutation, verify every persisted snapshot and
 the one-verse/one-span boundary, prepare the semantic invalidation and backup
 before the edit, and retain the v13 recovery protocol. It must not silently
 relocate spans, introduce a second Scripture writer, mark CORRECTED, or start
-Stage 6B-8 reruns unless separately approved. No Stage 9B.3b work has begun.
+Stage 6B-8 reruns unless separately approved.
+
+# 37.4 Stage 9B.3b — Strict Explicit-Human Correction Application
+
+Stage 9B.3b is implemented on the schema-v13/`189b5d8` foundation. It adds the
+first Scripture-changing correction action, but only behind an eligible,
+ACTIVE, human-reviewed v2 proposal and a dedicated confirmation dialog.
+
+The application service reloads proposal/finding state, re-runs backend
+eligibility while ignoring only the proposal being applied, checks revisions,
+and validates the exact target revision, SHA-256, Python code-point span and
+original text. It atomically persists the application plus PREPARED
+invalidation and a checksummed semantic DB backup before delegating the exact
+composed verse to `BridgeEngine.edit_verse()` →
+`TranslationCoreProject.apply_scripture_edit()`. Strict mode never strips,
+fuzzy-matches, or relocates reviewed text and adds no second Scripture writer.
+
+The canonical writer retains translationCore reconciliation, invalid marker,
+completed-marker removal, word-bank movement, verse-edit audit, tN/tW
+`verseEdits`, filesystem backup and journal rollback. The journal is linked to
+the application/proposal and intended final hash. Application states advance
+by CAS through PREPARED, APPLYING, APPLIED_SCRIPTURE, INVALIDATED and
+COMPLETED. Duplicate/retried requests use proposal ID plus reviewed proposal
+revision and cannot apply an insertion twice.
+
+After commit, semantic invalidation stales dependent target and Stage 6B-8
+records without deleting history. Verification remains PENDING; the finding
+becomes STALE while retaining CONFIRMED_TRANSLATION_ERROR. No analysis starts,
+no verification verdict is invented, and CORRECTED is never written.
+
+The UI exposes `Review application` only for current eligible
+HUMAN_MODIFIED/HUMAN_APPROVED wording. Its modal shows refs, exact target/span,
+CURRENT, PROPOSED FINAL, Unicode-safe diff, and alignment/verification
+warnings. Only `Apply correction` invokes the new API. Both approved APIs are
+wired through Python, Rust/Tauri and TypeScript.
+
+Focused tests cover Tamil, pointed Hebrew, decomposed Greek, supplementary
+Unicode, replacement/insertion/deletion, retry idempotency, edit conflicts,
+USFM/unrelated-verse preservation, alignment invalidation, stale finding state
+and PENDING verification.
+
+### Next boundary: installed Stage 9B.3b acceptance, then Stage 9B.3c only
+
+Use a disposable project for confirmation, exact mutation, alignment state,
+restart persistence and concurrent-edit rejection. Do not begin affected
+analysis until this checkpoint is reviewed and explicitly approved.
 
 ---
 

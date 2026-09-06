@@ -49,6 +49,7 @@ import type {
 } from "../types/analysisJob";
 import type {
   CorrectionEligibility,
+  CorrectionApplicationIntent,
   CorrectionIntent,
   CorrectionProposal,
   CorrectionProposalEvent,
@@ -741,7 +742,7 @@ export const bridge = {
     return call("qa_review_add_note", { entityType, entityId, note });
   },
 
-  // --- Stage 9B.2 correction proposal review (never applies Scripture) -----
+  // --- Stage 9B correction proposal review / explicit-human application ----
 
   correctionGetEligibility(findingId: string): Promise<CorrectionEligibility> {
     return call("correction_get_eligibility", { findingId });
@@ -800,6 +801,21 @@ export const bridge = {
     proposalId: string,
   ): Promise<{ proposalId: string; events: CorrectionProposalEvent[] }> {
     return call("correction_get_proposal_history", { proposalId });
+  },
+
+  correctionApplyProposal(options: {
+    proposalId: string;
+    expectedProposalRevision: number;
+    findingId: string;
+    expectedFindingRevision: number;
+    applicationId: string;
+    actor: { actorType: "HUMAN"; actorId: string };
+  }): Promise<CorrectionApplicationIntent> {
+    return call("correction_apply_proposal", options);
+  },
+
+  correctionGetApplicationStatus(applicationId: string): Promise<CorrectionApplicationIntent> {
+    return call("correction_get_application_status", { applicationId });
   },
 
   /**

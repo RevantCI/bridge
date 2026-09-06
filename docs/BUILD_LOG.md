@@ -4027,3 +4027,48 @@ behavior. The composed final verse must not be stripped. Stage 9B.3a exposes no
 application protocol, so explicit human Apply, duplicate-submit orchestration,
 and installed acceptance remain for Stage 9B.3b. Affected analysis and positive
 verification remain later boundaries unless separately approved.
+
+## Stage 9B.3b — strict explicit-human correction application (2026-09-05)
+
+Implemented the first authorized correction write on schema v13. The new
+application service owns eligibility, CAS and idempotency orchestration but
+does not write project files. It prepares the ledger, invalidation and semantic
+backup, then invokes the existing `BridgeEngine.edit_verse()` →
+`TranslationCoreProject.apply_scripture_edit()` path with a strict context.
+Ordinary manual-edit trimming is unchanged; strict correction output is exact.
+
+Strict mode checks the current full verse/hash/revision and exact code-point
+span/original text, rejects relocation, reuses the prepared invalidation, and
+links the translationCore journal to the application/proposal/final hash. The
+existing alignment reconciliation, invalid marker, completed removal,
+wordBank behavior, tN/tW verseEdits, audit, backup and rollback remain intact.
+
+`correction.applyProposal` and `correction.getApplicationStatus` now cross
+Python, Rust/Tauri and TypeScript. The UI requires reviewed wording and a
+separate confirmation with CURRENT, PROPOSED FINAL, Unicode-safe diff, exact
+target/span, and alignment/pending-verification warnings.
+
+Success reaches COMPLETED, stales dependent semantic/QA records, leaves
+verification PENDING and preserves CONFIRMED_TRANSLATION_ERROR. It starts no
+analysis and never writes CORRECTED. Duplicate requests resume/return the
+proposal-revision application and cannot write twice.
+
+```text
+Stage 9B.3b focused Python                9 passed
+Stage 9B.3a + corrected historical guard 44 passed
+frontend Vitest                         177 passed / 19 files
+npm run check                            0 errors / 0 warnings
+npm run build                            passed; existing >500 kB warning
+cargo test                                7 passed
+cargo check                              passed
+full Python + Greek Room                750 passed, 1 obsolete guard failed
+obsolete guard rerun                    passed (included in focused 44)
+git diff --check                         passed; line-ending notices only
+```
+
+The full-suite failure was the obsolete Stage 9B.1 assertion that the Apply
+protocol must not exist. Stage 9B.3b intentionally introduces it; the updated
+guard still proves the Stage 9B.1 wording service has no writer. Installed
+acceptance remains required on a disposable project. Stage 9B.3c affected
+analysis, verification verdicts, CORRECTED, export and multi-verse correction
+remain out of scope.

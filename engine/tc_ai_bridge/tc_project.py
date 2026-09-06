@@ -1913,20 +1913,50 @@ class TranslationCoreProject:
         self._validate_verse_raw(raw)
         return raw
 
-    def apply_scripture_edit(self, chapter: str | int, verse: str | int, new_text: str, username: str = 'AI Bridge Reviewer', tags: list[str] | None = None, context_id: dict[str, Any] | None = None) -> dict[str, Any]:
+    def apply_scripture_edit(self, chapter: str | int, verse: str | int, new_text: str, username: str = 'AI Bridge Reviewer', tags: list[str] | None = None, context_id: dict[str, Any] | None = None, *, strict_context: Any | None = None, journal_prepared_callback: Any | None = None, journal_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         """Human-only target verse edit with tC-compatible stale propagation and rollback."""
         if str(verse) == 'front':
             raise ProjectError('Front-matter editing is not enabled in v0.6; edit a numbered verse.')
-        new_text = str(new_text).strip()
+        # Ordinary manual edits retain their historical trimming behaviour.
+        # A reviewed correction is already an exact code-point replacement;
+        # trimming it here would silently mutate text outside the approved span.
+        new_text = str(new_text) if strict_context is not None else str(new_text).strip()
         if not new_text:
             raise ProjectError('Scripture verse may not be empty.')
         chapter_path = self.book_dir / f'{chapter}.json'
         chapter_data = self.target_chapter(chapter)
         old_text = str(chapter_data.get(str(verse), ''))
+        if strict_context is not None:
+            import hashlib
+            actual_hash = hashlib.sha256(old_text.encode('utf-8')).hexdigest()
+            if old_text != strict_context.expected_original_verse_text:
+                raise ProjectError('REVISION_CONFLICT: target verse text changed since review.')
+            if actual_hash != strict_context.expected_target_content_hash:
+                raise ProjectError('REVISION_CONFLICT: target verse hash changed since review.')
+            start = strict_context.expected_start_code_point
+            end = strict_context.expected_end_code_point
+            if not 0 <= start <= end <= len(old_text):
+                raise ProjectError('REVISION_CONFLICT: reviewed correction span is no longer valid.')
+            if old_text[start:end] != strict_context.expected_original_span_text:
+                raise ProjectError('REVISION_CONFLICT: reviewed correction span text changed.')
+            if new_text != strict_context.intended_final_verse_text:
+                raise ProjectError('REVISION_CONFLICT: proposed final verse does not match the reviewed correction.')
+            if self.passage_semantic_runtime is not None:
+                reference = self.passage_semantic_runtime.reference(str(chapter), str(verse), self.book_id.upper())
+                current = self.passage_semantic_runtime.repository.current_target_revision(
+                    self.passage_semantic_runtime.project_id, self.book_id.upper(), reference,
+                )
+                if current is None or current.get('textRevision') != strict_context.expected_target_revision:
+                    raise ProjectError('REVISION_CONFLICT: target revision changed since review.')
+                pending = self.passage_semantic_runtime.repository.target_invalidation(
+                    strict_context.pending_invalidation_id,
+                )
+                if pending is None or pending.get('state') != 'PREPARED':
+                    raise ProjectError('Correction semantic invalidation is not prepared.')
         if old_text == new_text:
             raise ProjectError('No Scripture text change detected.')
         semantic_intent = ''
-        if self.passage_semantic_runtime is not None:
+        if strict_context is None and self.passage_semantic_runtime is not None:
             try:
                 semantic_intent = self.passage_semantic_runtime.prepare_target_edit(
                     str(chapter), str(verse), old_text, new_text,
@@ -1950,7 +1980,14 @@ class TranslationCoreProject:
         tx_paths=[chapter_path,alignment_path,completed,invalid,edit_path,*index_paths]
         existed={str(x.resolve()):x.exists() for x in tx_paths}
         backup = self._backup_paths(tx_paths, 'scriptureEdit')
-        journal_tx=self.journal.begin('scriptureEdit',tx_paths); self.journal.mark_writing(journal_tx)
+        journal_tx=self.journal.begin('scriptureEdit',tx_paths)
+        if journal_prepared_callback is not None:
+            try:
+                journal_prepared_callback(journal_tx.transaction_id)
+            except Exception as exc:
+                self.journal.rollback(journal_tx, str(exc))
+                raise
+        self.journal.mark_writing(journal_tx)
         new_alignment = self._reconcile_alignment_after_target_edit(chapter, verse, new_text)
         if context_id is None:
             context_id = {'reference': {'bookId': self.book_id, 'chapter': int(chapter) if str(chapter).isdigit() else str(chapter), 'verse': int(verse) if str(verse).isdigit() else str(verse)}, 'tool': 'translationCoreAI', 'groupId': 'human-scripture-edit'}
@@ -1993,9 +2030,11 @@ class TranslationCoreProject:
                 try: self.journal.rollback(journal_tx,str(e))
                 except Exception: pass
             self._index_cache.clear(); self._checks_by_verse_cache = None; raise
-        self.journal.commit(journal_tx,{'operation':'scriptureEdit','chapter':str(chapter),'verse':str(verse)})
+        commit_metadata = {'operation':'scriptureEdit','chapter':str(chapter),'verse':str(verse)}
+        commit_metadata.update(journal_metadata or {})
+        self.journal.commit(journal_tx, commit_metadata)
         semantic_invalidation: dict[str, Any] = {}
-        if semantic_intent and self.passage_semantic_runtime is not None:
+        if strict_context is None and semantic_intent and self.passage_semantic_runtime is not None:
             try:
                 semantic_invalidation = self.passage_semantic_runtime.complete_target_edit(
                     semantic_intent, str(chapter), str(verse),
@@ -2017,7 +2056,7 @@ class TranslationCoreProject:
             _write_json_atomic(audit, {'operation':'scriptureEdit','verseBefore':old_text,'verseAfter':new_text,'tags':list(tags or ['meaning']),'username':username,'backup':str(backup),'modifiedTimestamp':iso})
         except Exception:
             pass
-        return {'oldText': old_text, 'newText': new_text, 'backup': str(backup), 'verseEdit': str(edit_path), 'alignmentInvalid': str(invalid), 'indexesTouched': touched, 'semanticInvalidation': semantic_invalidation}
+        return {'oldText': old_text, 'newText': new_text, 'backup': str(backup), 'verseEdit': str(edit_path), 'alignmentInvalid': str(invalid), 'indexesTouched': touched, 'semanticInvalidation': semantic_invalidation, 'journalTransactionId': journal_tx.transaction_id}
 
     def record_qa_decision(self, chapter: str | int, verse: str | int, issue_key: str, decision: str, note: str = '', issue: dict[str, Any] | None = None) -> Path:
         iso, safe = self._timestamp()

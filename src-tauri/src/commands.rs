@@ -1462,7 +1462,7 @@ pub async fn qa_review_add_note(
         .await
 }
 
-// --- Stage 9B.2 correction proposal review (no Scripture application) ------
+// --- Stage 9B correction proposal review and explicit-human application ----
 
 #[tauri::command]
 pub async fn correction_get_eligibility(
@@ -1614,6 +1614,45 @@ pub async fn correction_get_proposal_history(
         .send_request(
             "correction.getProposalHistory",
             serde_json::json!({"proposalId": proposal_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn correction_apply_proposal(
+    sidecar: State<'_, EngineSidecar>,
+    proposal_id: String,
+    expected_proposal_revision: i64,
+    finding_id: String,
+    expected_finding_revision: i64,
+    application_id: String,
+    actor: Value,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.applyProposal",
+            serde_json::json!({
+                "proposalId": proposal_id,
+                "expectedProposalRevision": expected_proposal_revision,
+                "findingId": finding_id,
+                "expectedFindingRevision": expected_finding_revision,
+                "applicationId": application_id,
+                "actor": actor,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn correction_get_application_status(
+    sidecar: State<'_, EngineSidecar>,
+    application_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.getApplicationStatus",
+            serde_json::json!({"applicationId": application_id}),
         )
         .await
 }

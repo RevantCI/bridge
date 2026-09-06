@@ -3789,10 +3789,17 @@ class FoundationRepository:
 
     def correction_proposal(self, proposal_id: str) -> dict[str, Any]:
         with self._connect() as conn:
-            row = conn.execute("SELECT payload_json FROM correction_proposals WHERE id=?", (proposal_id,)).fetchone()
+            row = conn.execute(
+                "SELECT payload_json,proposal_schema_version,verification_status,applicable "
+                "FROM correction_proposals WHERE id=?", (proposal_id,),
+            ).fetchone()
         if row is None:
             raise FoundationValidationError(f"Unknown correction proposal: {proposal_id}")
-        return json.loads(row[0])
+        payload = json.loads(row["payload_json"])
+        payload["proposalSchemaVersion"] = int(row["proposal_schema_version"])
+        payload["verificationStatus"] = row["verification_status"]
+        payload["applicable"] = bool(row["applicable"])
+        return payload
 
     def correction_proposals_for_finding(self, finding_id: str) -> list[dict[str, Any]]:
         """Every proposal against one finding, newest revision last.

@@ -107,7 +107,7 @@ export interface CorrectionApplicationIntent {
   resultMetadata: Record<string, unknown>;
 }
 
-/** Frozen contract for Stage 9B.3b; no current API sends it to a writer. */
+/** Internal strict-writer contract. Clients never supply its text or spans. */
 export interface StrictScriptureEditContext {
   expectedTargetRevision: string;
   expectedTargetContentHash: string;

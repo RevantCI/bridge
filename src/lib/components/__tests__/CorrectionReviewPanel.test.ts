@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   edit: vi.fn(),
   reject: vi.fn(),
   regenerate: vi.fn(),
+  apply: vi.fn(),
   settings: vi.fn(),
 }));
 
@@ -23,6 +24,7 @@ vi.mock("../../api/bridgeClient", () => ({
     correctionEditProposal: api.edit,
     correctionRejectProposal: api.reject,
     correctionRegenerateProposal: api.regenerate,
+    correctionApplyProposal: api.apply,
     getSettings: api.settings,
   },
 }));
@@ -151,6 +153,19 @@ describe("CorrectionReviewPanel", () => {
     api.edit.mockResolvedValue({ ...proposal, proposedText: "திருத்திய உரை", revision: 2, creationMode: "MACHINE_SUGGESTED_HUMAN_EDITED" });
     api.reject.mockResolvedValue({ ...proposal, reviewStatus: "HUMAN_REJECTED", lifecycleStatus: "INACTIVE", revision: 2 });
     api.regenerate.mockResolvedValue({ ...proposal, id: "proposal-2", supersedesProposalId: "proposal-1" });
+    api.apply.mockResolvedValue({
+      applicationId: "application-1", proposalId: "proposal-1", findingId: "qa-quantity",
+      projectId: "project-1", expectedProposalRevision: 2, expectedFindingRevision: 2,
+      targetDisplayedReference: "PHP 1:5", canonicalReferences: ["PHP 1:5"],
+      sourceProvenanceReferences: [], expectedTargetRevision: "target-revision-5",
+      expectedTargetContentHash: "target-hash-5", expectedStartCodePoint: affectedStart,
+      expectedEndCodePoint: affectedEnd, expectedOriginalText: affectedText,
+      replacementTextSnapshot: "அனைவரும்", intendedFinalVerseHash: "hash",
+      pendingInvalidationId: "pending-1", translationCoreJournalTransactionId: "journal-1",
+      actor: { actorType: "HUMAN", actorId: "Reviewer" }, createdAt: "now", updatedAt: "now",
+      applicationState: "COMPLETED", stateRevision: 5, completedAt: "now", failureCode: "",
+      recoveryMetadata: {}, resultMetadata: { verificationStatus: "PENDING", affectedAnalysisStarted: false },
+    });
   });
 
   it("shows backend blocker reasons and no active creation control", async () => {
@@ -363,5 +378,26 @@ describe("CorrectionReviewPanel", () => {
     edit.focus();
     expect(edit).toHaveFocus();
     expect(screen.queryByRole("button", { name: /apply correction|apply to scripture|save to scripture|replace verse/i })).toBeNull();
+  });
+
+  it("requires a reviewed proposal and a distinct confirmation before applying", async () => {
+    const reviewed = { ...proposal, reviewStatus: "HUMAN_MODIFIED", revision: 2 };
+    api.list.mockResolvedValue({ findingId: "qa-quantity", proposals: [reviewed] });
+    api.list.mockResolvedValueOnce({ findingId: "qa-quantity", proposals: [reviewed] })
+      .mockResolvedValue({ findingId: "qa-quantity", proposals: [{ ...reviewed, lifecycleStatus: "STALE", verificationStatus: "PENDING", revision: 4 }] });
+    render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+    expect(screen.queryByRole("button", { name: "Apply correction" })).toBeNull();
+    await fireEvent.click(await screen.findByRole("button", { name: "Review application" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm correction application" });
+    expect(within(dialog).getByText("CURRENT")).toBeInTheDocument();
+    expect(within(dialog).getByText("PROPOSED FINAL")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Word Alignment becomes invalid\/reviewable/i)).toBeInTheDocument();
+    await fireEvent.click(within(dialog).getByRole("button", { name: "Apply correction" }));
+    await waitFor(() => expect(api.apply).toHaveBeenCalledWith(expect.objectContaining({
+      proposalId: "proposal-1", expectedProposalRevision: 2,
+      findingId: "qa-quantity", expectedFindingRevision: 2,
+      actor: { actorType: "HUMAN", actorId: "Reviewer" },
+    })));
+    expect(await screen.findByText("Scripture updated. Semantic verification is pending.")).toBeInTheDocument();
   });
 });

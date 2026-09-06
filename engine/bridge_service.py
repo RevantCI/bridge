@@ -70,6 +70,7 @@ from tc_ai_bridge.correction_wording import (
     ConfiguredCorrectionSuggestionProvider,
     CorrectionWordingService,
 )
+from tc_ai_bridge.correction_application import CorrectionApplicationService
 from tc_ai_bridge.knowledge_base import KnowledgeBaseError
 from tc_ai_bridge.paratext_connector import ParatextConnectorClient, ParatextConnectorError
 from tc_ai_bridge.logos_connector import LogosConnectorClient, LogosConnectorError
@@ -357,8 +358,8 @@ class Methods:
     QA_REVIEW_GET_FINDING = "qaReview.getFinding"
     QA_REVIEW_DECIDE_FINDING = "qaReview.decideFinding"
     QA_REVIEW_ADD_NOTE = "qaReview.addNote"
-    # Stage 9B.0/9B.1 correction data surface. correction.applyProposal is
-    # deliberately absent: no Scripture-changing command exists until 9B.3.
+    # Stage 9B correction data surface. Apply is the explicit-human-only
+    # Stage 9B.3b operation; it never starts affected analysis.
     CORRECTION_GET_ELIGIBILITY = "correction.getEligibility"
     CORRECTION_GET_REVIEW_CONTEXT = "correction.getReviewContext"
     CORRECTION_GET_PROPOSAL = "correction.getProposal"
@@ -368,6 +369,8 @@ class Methods:
     CORRECTION_REJECT_PROPOSAL = "correction.rejectProposal"
     CORRECTION_REGENERATE_PROPOSAL = "correction.regenerateProposal"
     CORRECTION_GET_PROPOSAL_HISTORY = "correction.getProposalHistory"
+    CORRECTION_APPLY_PROPOSAL = "correction.applyProposal"
+    CORRECTION_GET_APPLICATION_STATUS = "correction.getApplicationStatus"
     SEMANTIC_REVIEW_DECIDE_LOCATION = "semanticReview.decideLocation"
     SEMANTIC_REVIEW_DECIDE_MEANING = "semanticReview.decideMeaning"
     REVIEW_HISTORY_GET_ENTITY_HISTORY = "reviewHistory.getEntityHistory"
@@ -463,6 +466,7 @@ class BridgeEngine:
         self._check_jobs = CheckJobManager()
         self._ai_review_jobs = AIReviewJobManager()
         self._analysis_jobs = AnalysisJobManager()
+        self._correction_application_service: CorrectionApplicationService | None = None
         self._project_sweep = ProjectSweepManager()
         self._report_jobs = ReportJobManager()
         # AppSettings() with no path defaults to a real, persistent location
@@ -538,6 +542,7 @@ class BridgeEngine:
             raise ProjectError(str(exc)) from exc
         self.project = candidate
         self.passage_semantic_runtime = None
+        self._correction_application_service = None
         # Filesystem recovery must precede semantic initialization. Otherwise
         # the semantic runtime could fingerprint a partially written chapter
         # that the translationCore journal then rolls back.
@@ -572,6 +577,7 @@ class BridgeEngine:
             runtime = PassageSemanticRuntime(candidate, str(registered["projectId"]))
             candidate.attach_passage_semantic_runtime(runtime)
             self.passage_semantic_runtime = runtime
+            self._correction_application_service = CorrectionApplicationService(runtime, self.edit_verse)
             self._analysis_jobs.bind_runtime(runtime)
             self._passage_semantic_status = {
                 "state": "READY", **runtime.status(),
@@ -2180,6 +2186,18 @@ class BridgeEngine:
             "events": runtime.repository.correction_proposal_history(proposal_id),
         }
 
+    def correction_apply_proposal(self, **options: Any) -> dict[str, Any]:
+        self._require_passage_semantic_runtime()
+        if self._correction_application_service is None:
+            raise ProjectError("Correction application service is unavailable")
+        return self._correction_application_service.apply(**options)
+
+    def correction_get_application_status(self, application_id: str) -> dict[str, Any]:
+        self._require_passage_semantic_runtime()
+        if self._correction_application_service is None:
+            raise ProjectError("Correction application service is unavailable")
+        return self._correction_application_service.get_status(application_id)
+
     def qa_review_add_note(
         self, entity_type: str, entity_id: str, note: str,
     ) -> dict[str, Any]:
@@ -3044,7 +3062,7 @@ class BridgeEngine:
             "approvedFindingCount": approved_finding_count,
         }
 
-    def edit_verse(self, chapter: str, verse: str, new_text: str) -> dict[str, Any]:
+    def edit_verse(self, chapter: str, verse: str, new_text: str, **strict_options: Any) -> dict[str, Any]:
         """Human-authorized scripture edit.
 
         tc_project.TranslationCoreProject.apply_scripture_edit() already
@@ -3082,7 +3100,7 @@ class BridgeEngine:
         Accepted as a known limitation, same tradeoff as the two functions
         it depends on."""
         self._require_project()
-        result = self.project.apply_scripture_edit(chapter, verse, new_text)
+        result = self.project.apply_scripture_edit(chapter, verse, new_text, **strict_options)
         self._consistency_findings_by_book.pop(str(self.project.path), None)
         resolutions = self.project.list_issue_resolutions(chapter, verse)
         return {
@@ -3904,6 +3922,23 @@ class BridgeEngine:
             if m == Methods.CORRECTION_GET_PROPOSAL_HISTORY:
                 return EngineResponse.ok(request.id, result=self.correction_get_proposal_history(
                     str(p.get("proposalId") or ""),
+                ))
+            if m == Methods.CORRECTION_APPLY_PROPOSAL:
+                actor = p.get("actor") or {
+                    "actorType": "HUMAN",
+                    "actorId": str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                }
+                return EngineResponse.ok(request.id, result=self.correction_apply_proposal(
+                    proposal_id=str(p.get("proposalId") or ""),
+                    expected_proposal_revision=int(p.get("expectedProposalRevision") or 0),
+                    finding_id=str(p.get("findingId") or ""),
+                    expected_finding_revision=int(p.get("expectedFindingRevision") or 0),
+                    application_id=str(p.get("applicationId") or ""),
+                    actor=dict(actor),
+                ))
+            if m == Methods.CORRECTION_GET_APPLICATION_STATUS:
+                return EngineResponse.ok(request.id, result=self.correction_get_application_status(
+                    str(p.get("applicationId") or ""),
                 ))
             if m == Methods.SEMANTIC_REVIEW_DECIDE_LOCATION:
                 return EngineResponse.ok(request.id, result=self.semantic_review_decide_location(

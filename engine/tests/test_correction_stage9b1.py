@@ -695,13 +695,13 @@ def test_fresh_database_has_stage9b1_history_migration(tmp_path: Path) -> None:
     assert repo.recovery_check()["ok"] is True
 
 
-def test_stage9b1_exposes_no_application_operation() -> None:
+def test_stage9b1_wording_service_still_exposes_no_application_operation() -> None:
     from bridge_service import Methods
 
     public = set(dir(CorrectionWordingService))
     assert "apply_proposal" not in public
     assert "apply_scripture_edit" not in public
-    assert not hasattr(Methods, "CORRECTION_APPLY_PROPOSAL")
+    assert hasattr(Methods, "CORRECTION_APPLY_PROPOSAL")
 
 
 def test_review_context_exposes_authoritative_text_revision_and_exact_location_span(

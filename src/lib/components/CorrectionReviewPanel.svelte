@@ -3,6 +3,7 @@
   import type {
     AffectedTargetSpan,
     CorrectionEligibility,
+    CorrectionApplicationIntent,
     CorrectionIntent,
     CorrectionProposal,
     CorrectionProposalEvent,
@@ -46,6 +47,8 @@
   let editText = "";
   let editExplanation = "";
   let reviewNote = "";
+  let confirmationOpen = false;
+  let application: CorrectionApplicationIntent | null = null;
 
   $: reviewKey = `${findingId}:${findingRevision}`;
   $: if (findingId && reviewKey !== loadedReviewKey) {
@@ -63,6 +66,12 @@
     ? visualContextSegments(selectedTarget.text, selectedSpan.startCodePoint, selectedSpan.endCodePoint)
     : null;
   $: diff = selectedProposal ? graphemeDiff(selectedProposal.currentText, selectedProposal.proposedText) : [];
+  $: finalVerse = selectedTarget && selectedSpan && selectedProposal
+    ? Array.from(selectedTarget.text).slice(0, selectedSpan.startCodePoint).join("")
+      + selectedProposal.proposedText
+      + Array.from(selectedTarget.text).slice(selectedSpan.endCodePoint).join("")
+    : "";
+  $: finalDiff = selectedTarget ? graphemeDiff(selectedTarget.text, finalVerse) : [];
   $: proposalBlockingReasons = (eligibility?.reasons ?? []).filter((reason) =>
     reason.code !== "ELIGIBLE"
     && !(reason.code === "CONFLICTING_CORRECTION"
@@ -72,6 +81,13 @@
     selectedProposal?.lifecycleStatus === "ACTIVE" && proposalBlockingReasons.length === 0,
   );
   $: providerAvailable = Boolean(settings?.hasApiKey);
+  $: proposalReviewed = Boolean(
+    selectedProposal?.reviewStatus === "HUMAN_MODIFIED"
+      || selectedProposal?.reviewStatus === "HUMAN_APPROVED",
+  );
+  $: mayApply = Boolean(
+    proposalCurrent && proposalReviewed && selectedProposal?.verificationStatus === "NOT_RUN",
+  );
   $: insertionTarget = context?.currentTargets.find((item) => item.displayedReference === selectedReference)
     ?? context?.currentTargets[0] ?? null;
   $: insertionBoundaries = insertionTarget ? graphemeBoundariesInCodePoints(insertionTarget.text) : [0];
@@ -140,6 +156,51 @@
     selectedProposalId = proposals.some((item) => item.id === preferredId)
       ? preferredId : chooseLatest(proposals);
     await loadHistory(selectedProposalId);
+  }
+
+  function newApplicationId(): string {
+    return globalThis.crypto?.randomUUID?.()
+      ?? `correction-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+
+  async function applyCorrection(): Promise<void> {
+    if (!selectedProposal || !mayApply) return;
+    busy = true;
+    error = "";
+    const applicationId = application?.applicationId || newApplicationId();
+    try {
+      application = await bridge.correctionApplyProposal({
+        proposalId: selectedProposal.id,
+        expectedProposalRevision: selectedProposal.revision,
+        findingId,
+        expectedFindingRevision: eligibility?.findingRevision || findingRevision,
+        applicationId,
+        actor: { actorType: "HUMAN", actorId: settings?.reviewerName || "human" },
+      });
+      confirmationOpen = false;
+      if (application.applicationState === "COMPLETED") {
+        notice = "Scripture updated. Semantic verification is pending.";
+        const [nextEligibility, nextContext] = await Promise.all([
+          bridge.correctionGetEligibility(findingId),
+          bridge.correctionGetReviewContext(findingId),
+        ]);
+        eligibility = nextEligibility;
+        context = nextContext;
+        await reloadProposals(selectedProposal.id);
+      } else {
+        notice = `Correction application: ${application.applicationState}`;
+      }
+    } catch (exc) {
+      if (/revision[_ ]conflict|REVISION_CONFLICT/i.test(message(exc))) {
+        confirmationOpen = false;
+        await loadAll(loadedReviewKey);
+        error = "Scripture changed since this correction was reviewed. Nothing was applied; review the current text and create a new proposal.";
+      } else {
+        error = message(exc);
+      }
+    } finally {
+      busy = false;
+    }
   }
 
   function draftSpan(): AffectedTargetSpan | null {
@@ -296,7 +357,7 @@
   <header class="title-row">
     <div>
       <h4 id="correction-title">Correction</h4>
-      <p>Proposal review only. Scripture is unchanged.</p>
+      <p>Review wording first; Scripture changes only through explicit Apply confirmation.</p>
     </div>
     {#if selectedProposal}
       <span class="status" class:stale={selectedProposal.lifecycleStatus === "STALE"}>
@@ -468,10 +529,44 @@
             {#if providerAvailable}
               <button type="button" class="secondary" disabled={busy || !proposalCurrent} on:click={regenerate}>Generate another suggestion</button>
             {/if}
+            {#if mayApply}
+              <button type="button" class="apply" disabled={busy} on:click={() => (confirmationOpen = true)}>Review application</button>
+            {/if}
           </div>
         {/if}
-        <p class="boundary">Proposal actions update companion review data only.</p>
+        {#if selectedProposal && !proposalReviewed && proposalCurrent}
+          <p class="boundary">Edit or choose this wording to record human review before application.</p>
+        {:else if application?.applicationState === "COMPLETED"}
+          <p class="boundary">Verification PENDING. No affected analysis was started.</p>
+        {:else}
+          <p class="boundary">Scripture changes only after the separate confirmation below.</p>
+        {/if}
       </div>
+
+      {#if confirmationOpen && selectedProposal && selectedTarget && selectedSpan}
+        <div class="confirm-backdrop" role="presentation">
+          <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="apply-title">
+            <h5 id="apply-title">Confirm correction application</h5>
+            <p><strong>Finding/source:</strong> {selectedProposal.affectedReferences.join(", ")}</p>
+            <p><strong>Target verse:</strong> {selectedSpan.displayedReference}</p>
+            <p><strong>{selectedSpan.startCodePoint === selectedSpan.endCodePoint ? "Insertion point" : "Affected span"}:</strong> [{selectedSpan.startCodePoint}, {selectedSpan.endCodePoint})</p>
+            <h6>CURRENT</h6>
+            <p class="scripture confirmation-text">{selectedTarget.text}</p>
+            <h6>PROPOSED FINAL</h6>
+            <p class="scripture confirmation-text">{finalVerse}</p>
+            <div class="diff" aria-label="Final verse diff">
+              {#each finalDiff as part}
+                {#if part.kind === "removed"}<del>{part.text}</del>{:else if part.kind === "inserted"}<ins>{part.text}</ins>{:else}<span>{part.text}</span>{/if}
+              {/each}
+            </div>
+            <p class="apply-warning">Applying changes this one exact span. Word Alignment becomes invalid/reviewable. Semantic verification is a separate later step and will remain pending.</p>
+            <div class="buttons">
+              <button type="button" class="apply" disabled={busy} on:click={applyCorrection}>{busy ? "Applying…" : "Apply correction"}</button>
+              <button type="button" class="secondary" disabled={busy} on:click={() => (confirmationOpen = false)}>Cancel</button>
+            </div>
+          </section>
+        </div>
+      {/if}
     {:else if eligibility && !eligibility.eligible}
       <div class="unavailable">
         <h5>Correction proposal unavailable</h5>
@@ -584,12 +679,17 @@
   button { font: inherit; font-size: .77rem; border: 1px solid #2563eb; color: #1d4ed8; background: #fff; border-radius: 4px; padding: .35rem .6rem; cursor: pointer; }
   button.secondary { border-color: #94a3b8; color: #334155; }
   button.danger { border-color: #dc2626; color: #b91c1c; }
+  button.apply { background: #1d4ed8; color: #fff; font-weight: 650; }
   button:disabled { opacity: .5; cursor: not-allowed; }
   button:focus-visible, textarea:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
   .create { margin: .75rem; align-self: flex-start; }
   .draft-form { margin-top: .6rem; max-height: 22rem; overflow-y: auto; padding-right: .25rem; }
   .unavailable ul { margin-bottom: 0; padding-left: 1.2rem; }
   .boundary { margin-top: .35rem; }
+  .confirm-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(15, 23, 42, .55); display: grid; place-items: center; padding: 1rem; }
+  .confirm-dialog { width: min(42rem, 100%); max-height: calc(100vh - 2rem); overflow-y: auto; background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 20px 50px rgba(15,23,42,.35); }
+  .confirmation-text { border: 1px solid #e2e8f0; border-radius: 4px; padding: .5rem; }
+  .apply-warning { margin-top: .75rem; padding: .55rem; border-left: 4px solid #d97706; background: #fffbeb; font-size: .78rem; }
   @media (max-width: 900px) {
     .review-scroll { max-height: 19rem; }
     dl { grid-template-columns: 1fr; gap: .1rem; }
