@@ -80,3 +80,6 @@ Thumbs.db
 # If you ever point a fixture-building test at a path inside the repo
 # instead of tmp_path, this catches the companion dir it would create.
 .apps/translationCoreAI/
+.pytest-tmp/
+.test-temp-*/
+test-temp-*/
