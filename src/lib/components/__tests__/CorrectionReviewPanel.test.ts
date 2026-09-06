@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
+import userEvent from "@testing-library/user-event";
 
 const api = vi.hoisted(() => ({
   eligibility: vi.fn(),
@@ -97,6 +98,9 @@ const proposal = {
 
 const reviewContext = {
   findingId: "qa-quantity",
+  findingDisplayedReferences: ["PHP 1:5"],
+  sourceSemanticReferences: ["PHP 1:5"],
+  sourceCanonicalReferences: ["PHP 1:5"],
   currentTargets: [{
     displayedReference: "PHP 1:5",
     canonicalReferences: ["PHP 1:5"],
@@ -327,15 +331,28 @@ describe("CorrectionReviewPanel", () => {
     const crossVerseSpan = {
       ...intent.affectedTargetSpan,
       displayedReference: "PHP 1:6",
-      canonicalReferences: ["PHP 1:3"],
+      canonicalReferences: ["PHP 1:6"],
     };
     api.list.mockResolvedValue({
       findingId: "qa-quantity",
-      proposals: [{ ...proposal, intent: { ...intent, affectedTargetSpan: crossVerseSpan } }],
+      proposals: [{
+        ...proposal,
+        affectedReferences: ["PHP 1:6"],
+        reviewStatus: "HUMAN_MODIFIED",
+        revision: 2,
+        intent: {
+          ...intent,
+          affectedSourceSemanticUnitIds: ["source-quantity"],
+          affectedTargetSpan: crossVerseSpan,
+        },
+      }],
     });
     api.context.mockResolvedValue({
       ...reviewContext,
-      currentTargets: [{ ...reviewContext.currentTargets[0], displayedReference: "PHP 1:6", canonicalReferences: ["PHP 1:3"] }],
+      findingDisplayedReferences: ["PHP 1:6"],
+      sourceSemanticReferences: ["PHP 1:3"],
+      sourceCanonicalReferences: ["PHP 1:3"],
+      currentTargets: [{ ...reviewContext.currentTargets[0], displayedReference: "PHP 1:6", canonicalReferences: ["PHP 1:6"] }],
       candidateSpans: [crossVerseSpan],
       sourceEvidence: [{ id: "source-quantity", rawSurface: "τῷ θεῷ μου", displayedReferences: ["PHP 1:3"] }],
     });
@@ -343,6 +360,14 @@ describe("CorrectionReviewPanel", () => {
     expect(await screen.findByText("PHP 1:6")).toBeInTheDocument();
     expect(screen.getByText("τῷ θεῷ μου")).toBeInTheDocument();
     expect(screen.getByText(`Affected span [${affectedStart}, ${affectedEnd})`)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Review application" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm correction application" });
+    expect(within(dialog).getByText("Source semantic reference:").closest("p")).toHaveTextContent("PHP 1:3");
+    expect(within(dialog).getByText("Finding display reference:").closest("p")).toHaveTextContent("PHP 1:6");
+    expect(within(dialog).getByText("Target verse:").closest("p")).toHaveTextContent("PHP 1:6");
+    expect(within(dialog).getByText("Affected span:").closest("p")).toHaveTextContent(
+      `[${affectedStart}, ${affectedEnd})`,
+    );
   });
 
   it.each([1366, 820])(
@@ -400,4 +425,52 @@ describe("CorrectionReviewPanel", () => {
     })));
     expect(await screen.findByText("Scripture updated. Semantic verification is pending.")).toBeInTheDocument();
   });
+
+  it("opens Review application by pointer with a mixed-build review context", async () => {
+    const reviewed = { ...proposal, reviewStatus: "HUMAN_MODIFIED", revision: 2 };
+    const {
+      findingDisplayedReferences: _findingReferences,
+      sourceSemanticReferences: _sourceReferences,
+      sourceCanonicalReferences: _sourceCanonicalReferences,
+      ...legacyContext
+    } = reviewContext;
+    api.list.mockResolvedValue({ findingId: "qa-quantity", proposals: [reviewed] });
+    api.context.mockResolvedValue({
+      ...legacyContext,
+      sourceEvidence: [{
+        id: "source-quantity", rawSurface: "τῷ θεῷ μου",
+        displayedReferences: ["PHP 1:3"], canonicalReferences: ["PHP 1:3"],
+      }],
+    });
+    const user = userEvent.setup();
+    render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+    const button = await screen.findByRole("button", { name: "Review application" });
+    expect(button).toBeEnabled();
+    expect(getComputedStyle(button).pointerEvents).not.toBe("none");
+    expect(getComputedStyle(button.closest("[data-correction-actions]")! as Element).pointerEvents).not.toBe("none");
+    await user.click(button);
+
+    const dialog = screen.getByRole("dialog", { name: "Confirm correction application" });
+    expect(within(dialog).getByText("Source semantic reference:").closest("p")).toHaveTextContent("PHP 1:3");
+    expect(api.apply).not.toHaveBeenCalled();
+  });
+
+  it.each(["{Enter}", " "])(
+    "opens Review application by keyboard activation %s",
+    async (key) => {
+      const reviewed = { ...proposal, reviewStatus: "HUMAN_MODIFIED", revision: 2 };
+      api.list.mockResolvedValue({ findingId: "qa-quantity", proposals: [reviewed] });
+      const user = userEvent.setup();
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      const button = await screen.findByRole("button", { name: "Review application" });
+      button.focus();
+      expect(button).toHaveFocus();
+      await user.keyboard(key);
+
+      expect(screen.getByRole("dialog", { name: "Confirm correction application" })).toBeInTheDocument();
+      expect(api.apply).not.toHaveBeenCalled();
+    },
+  );
 });

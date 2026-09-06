@@ -239,6 +239,47 @@ def test_human_authored_proposal_works_offline_and_remains_unapproved(tmp_path: 
     assert TEXT == before
 
 
+def test_new_cross_verse_proposal_keeps_source_and_target_references_distinct(
+    tmp_path: Path,
+) -> None:
+    runtime = _Runtime(tmp_path / "semantic.sqlite3")
+    base = _intent(runtime)
+    base_span = base.affected_target_span
+    intent = CorrectionIntent(
+        failed_dimension=base.failed_dimension,
+        observed_meaning=base.observed_meaning,
+        required_meaning=base.required_meaning,
+        affected_source_semantic_unit_ids=("source-unit-php-1-3",),
+        affected_target_span=AffectedTargetSpan(
+            displayed_reference="PHP 1:6",
+            canonical_references=("PHP 1:6",),
+            start_code_point=base_span.start_code_point,
+            end_code_point=base_span.end_code_point,
+            original_text=base_span.original_text,
+            target_text_revision=base_span.target_text_revision,
+            target_content_hash=base_span.target_content_hash,
+        ),
+    )
+    context = runtime.qa_review.get_finding("qa-1")
+    context["finding"]["sourceSemanticUnitIds"] = ["source-unit-php-1-3"]
+    context["source"] = [{
+        "id": "source-unit-php-1-3",
+        "displayedReferences": ["PHP 1:3"],
+        "canonicalReferences": ["PHP 1:3"],
+        "rawSurface": "τῷ θεῷ μου",
+    }]
+
+    proposal = CorrectionWordingService(runtime)._build_proposal(
+        finding_id="qa-1", intent=intent, context=context,
+        human_proposed_text="என் தேவனையே", explanation="Reviewed wording.",
+        request_suggestion=False, actor_id="Reviewer",
+    )
+
+    assert to_wire(proposal)["affectedReferences"] == ["PHP 1:3", "PHP 1:6"]
+    assert proposal.intent.affected_source_semantic_unit_ids == ("source-unit-php-1-3",)
+    assert proposal.intent.affected_target_span.displayed_reference == "PHP 1:6"
+
+
 def test_provider_suggestion_persists_metadata_evidence_and_alternatives(tmp_path: Path) -> None:
     runtime = _Runtime(tmp_path / "semantic.sqlite3")
     provider = _FixtureProvider()
@@ -768,6 +809,9 @@ def test_review_context_exposes_authoritative_text_revision_and_exact_location_s
     }]
     assert context["suggestedIntent"]["failedDimension"] == "QUANTITY"
     assert context["suggestedIntent"]["affectedSourceSemanticUnitIds"] == ["source-unit-1"]
+    assert context["findingDisplayedReferences"] == [REFERENCE]
+    assert context["sourceSemanticReferences"] == [REFERENCE]
+    assert context["sourceCanonicalReferences"] == [REFERENCE]
 
 
 def test_review_context_protocol_is_read_only_and_exposes_no_apply_method(tmp_path: Path) -> None:

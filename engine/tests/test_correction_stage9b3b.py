@@ -7,23 +7,29 @@ from pathlib import Path
 
 import pytest
 
+from bridge_service import BridgeEngine
+from greek_room_engine.protocol import EngineRequest
 from tc_ai_bridge.correction_application import CorrectionApplicationService
 from tc_ai_bridge.passage_semantic_models import (
     AffectedTargetSpan, CorrectionCreationMode, CorrectionIntent,
     CorrectionProposalV2, CoverageDimension, LifecycleStatus, PolicyBinding,
-    ReviewStatus,
+    ReviewStatus, StrictScriptureEditContext,
 )
 from tc_ai_bridge.passage_semantic_repository import FoundationConflict, FoundationValidationError
 from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime
-from tc_ai_bridge.tc_project import TranslationCoreProject
+from tc_ai_bridge.secret_store import AppSettings
+from tc_ai_bridge.tc_project import ProjectError, TranslationCoreProject
 
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _fixture(tmp_path: Path, before: str, original: str, replacement: str):
-    root = tmp_path / "project"
+def _fixture(
+    tmp_path: Path, before: str, original: str, replacement: str, *,
+    project_root: Path | None = None,
+):
+    root = project_root or tmp_path / "project"
     alignment = root / ".apps" / "translationCore" / "alignmentData" / "php"
     alignment.mkdir(parents=True)
     (root / "php").mkdir(parents=True)
@@ -45,10 +51,26 @@ def _fixture(tmp_path: Path, before: str, original: str, replacement: str):
     runtime = PassageSemanticRuntime(project, "project-1")
     project.attach_passage_semantic_runtime(runtime)
     repo = runtime.repository
+    source_unit_id = "source-unit-php-1-3"
+    repo.create_minimal_semantic_unit(source_unit_id, project_id="project-1")
+    source_unit = repo.semantic_unit(source_unit_id)
+    source_unit.update({
+        "displayedReferences": ["PHP 1:3"],
+        "canonicalReferences": ["PHP 1:3"],
+        "rawSurface": "τῷ θεῷ μου",
+        "normalizedSurface": "τῷ θεῷ μου",
+    })
+    with repo._connect() as conn:
+        conn.execute(
+            "UPDATE semantic_units SET payload_json=? WHERE id=?",
+            (json.dumps(source_unit, ensure_ascii=False), source_unit_id),
+        )
+        conn.commit()
     repo.create_qa_finding("finding-1", "project-1")
     finding = repo.qa_finding("finding-1")
     finding.update({
         "book": "PHP", "displayedReferences": ["PHP 1:6"],
+        "sourceSemanticUnitIds": [source_unit_id],
         "targetContentHashes": [_hash(before)],
         "qaDisposition": "CONFIRMED_TRANSLATION_ERROR",
         "reviewStatus": "HUMAN_APPROVED", "lifecycleStatus": "ACTIVE",
@@ -67,7 +89,7 @@ def _fixture(tmp_path: Path, before: str, original: str, replacement: str):
         intent=CorrectionIntent(
             failed_dimension=CoverageDimension.LEXICAL_CONTENT,
             observed_meaning="missing", required_meaning="required",
-            affected_source_semantic_unit_ids=(),
+            affected_source_semantic_unit_ids=(source_unit_id,),
             affected_target_span=AffectedTargetSpan(
                 displayed_reference="PHP 1:6", canonical_references=("PHP 1:6",),
                 start_code_point=start, end_code_point=start + len(original),
@@ -75,7 +97,10 @@ def _fixture(tmp_path: Path, before: str, original: str, replacement: str):
                 target_content_hash=_hash(before),
             ),
         ),
-        affected_references=("PHP 1:3", "PHP 1:6"), current_text=original,
+        # Reproduce the installed legacy proposal: this overloaded field kept
+        # only the target reference. Application must recover source provenance
+        # from the durable source semantic-unit identity.
+        affected_references=("PHP 1:6",), current_text=original,
         proposed_text=replacement, explanation="reviewed correction", evidence_ids=(),
         semantic_relationship_ids=(), meaning_assessment_ids=(), created_by="Reviewer",
         created_at="2026-09-05T00:00:00Z",
@@ -101,6 +126,35 @@ def _apply(service, finding_revision=1, proposal_revision=1, application_id="app
         application_id=application_id,
         actor={"actorType": "HUMAN", "actorId": "Reviewer"},
     )
+
+
+def _call(engine: BridgeEngine, method: str, params: dict) -> dict:
+    return engine.handle_request(
+        EngineRequest(id="stage9b3b-integration", method=method, params=params)
+    ).to_dict()
+
+
+def test_cross_verse_prepare_preserves_source_and_target_references_without_editing(
+    tmp_path: Path,
+) -> None:
+    before = "நான் உங்களை நினைக்கும் போதெல்லாம் என் தேவனை ஸ்தோத்திரிக்கிறேன்."
+    _root, project, _runtime, service, _finding, proposal = _fixture(
+        tmp_path, before, "என் தேவனை", "என் தேவனையே",
+    )
+
+    prepared = service._prepare(
+        proposal_id="proposal-1", expected_proposal_revision=1,
+        finding_id="finding-1", expected_finding_revision=1,
+        application_id="prepare-cross-verse", actor_id="Reviewer",
+    )
+
+    assert prepared["sourceProvenanceReferences"] == ["PHP 1:3"]
+    assert prepared["targetDisplayedReference"] == "PHP 1:6"
+    assert prepared["canonicalReferences"] == ["PHP 1:6"]
+    assert prepared["expectedStartCodePoint"] == proposal.intent.affected_target_span.start_code_point
+    assert prepared["expectedEndCodePoint"] == proposal.intent.affected_target_span.end_code_point
+    assert project.target_verse_text("1", "6") == before
+    assert project.target_verse_text("1", "3") == "unchanged source-corresponding target"
 
 
 @pytest.mark.parametrize("before,original,replacement", [
@@ -168,3 +222,133 @@ def test_unreviewed_proposal_is_not_applicable(tmp_path: Path) -> None:
     with pytest.raises(FoundationValidationError, match="reviewed by a human"):
         _apply(service)
     assert project.target_verse_text("1", "6") == "before"
+
+
+def test_installed_style_apply_persists_completed_ledger_after_disk_reopen(
+    tmp_path: Path,
+) -> None:
+    """The desktop-managed project path is the authoritative acceptance path.
+
+    Exercise the real protocol, close every in-memory object, and reopen the
+    same on-disk project before asserting the application, proposal, and
+    finding state. This prevents an acceptance check from accidentally reading
+    the source folder that Bridge copied during import.
+    """
+    before = "நான் உங்களை நினைக்கும் போதெல்லாம் என் தேவனை ஸ்தோத்திரிக்கிறேன்."
+    replacement = "என் தேவனையே"
+    app_data = tmp_path / "Bridge" / "data"
+    managed = app_data / "projects" / "ta_irv_php"
+    root, _project, _runtime, _service, finding, proposal = _fixture(
+        tmp_path, before, "என் தேவனை", replacement, project_root=managed,
+    )
+    identity = root / ".bridge" / "project.json"
+    identity.parent.mkdir(parents=True, exist_ok=True)
+    identity.write_text(json.dumps({
+        "schemaVersion": 1, "projectId": "project-1", "collectionId": "",
+        "sourceFingerprint": "installed-style-fixture",
+        "createdAt": "2026-09-06T00:00:00Z",
+    }), encoding="utf-8")
+
+    settings_path = app_data / "settings.json"
+    engine = BridgeEngine(settings=AppSettings(path=settings_path))
+    opened = _call(engine, "project.open", {"path": str(root)})
+    assert opened["success"] is True, opened
+    assert Path(opened["result"]["path"]).resolve() == root.resolve()
+
+    applied = _call(engine, "correction.applyProposal", {
+        "proposalId": proposal.id,
+        "expectedProposalRevision": proposal.revision,
+        "findingId": finding["id"],
+        "expectedFindingRevision": finding["revision"],
+        "applicationId": "installed-style-apply-1",
+        "actor": {"actorType": "HUMAN", "actorId": "Reviewer"},
+    })
+    assert applied["success"] is True, applied
+    assert applied["result"]["applicationState"] == "COMPLETED"
+
+    # Recreate the service/runtime from disk. No assertion below relies on the
+    # objects that performed the write.
+    restarted = BridgeEngine(settings=AppSettings(path=settings_path))
+    reopened = _call(restarted, "project.open", {
+        "path": str(root), "projectId": "project-1",
+    })
+    assert reopened["success"] is True, reopened
+    status = _call(restarted, "correction.getApplicationStatus", {
+        "applicationId": "installed-style-apply-1",
+    })
+    assert status["success"] is True, status
+    application = status["result"]
+    assert application["applicationState"] == "COMPLETED"
+    assert application["sourceProvenanceReferences"] == ["PHP 1:3"]
+    assert application["targetDisplayedReference"] == "PHP 1:6"
+
+    repository = restarted.passage_semantic_runtime.repository
+    with repository._connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM correction_application_intents "
+            "WHERE proposal_id=? AND expected_proposal_revision=?",
+            (proposal.id, proposal.revision),
+        ).fetchone()[0]
+    assert count == 1
+    persisted_proposal = repository.correction_proposal(proposal.id)
+    assert persisted_proposal["appliedTargetRevision"]
+    assert persisted_proposal["appliedBy"] == "Reviewer"
+    assert persisted_proposal["appliedAt"]
+    assert persisted_proposal["verificationStatus"] == "PENDING"
+    persisted_finding = repository.qa_finding(finding["id"])
+    assert persisted_finding["lifecycleStatus"] == "STALE"
+    assert persisted_finding["qaDisposition"] == "CONFIRMED_TRANSLATION_ERROR"
+    start = before.index("என் தேவனை")
+    expected = before[:start] + replacement + before[start + len("என் தேவனை"):]
+    assert restarted.project.target_verse_text("1", "6") == expected
+
+
+def test_application_persistence_failure_leaves_scripture_and_alignment_byte_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _project, runtime, service, _finding, _proposal = _fixture(
+        tmp_path, "before original after", "original", "reviewed",
+    )
+    chapter = root / "php" / "1.json"
+    alignment = root / ".apps" / "translationCore" / "alignmentData" / "php" / "1.json"
+    before = (chapter.read_bytes(), alignment.read_bytes())
+
+    def fail_persistence(*_args, **_kwargs):
+        raise OSError("simulated durable application persistence failure")
+
+    monkeypatch.setattr(runtime.repository, "prepare_application_intent", fail_persistence)
+    with pytest.raises(OSError, match="durable application persistence failure"):
+        _apply(service)
+    assert (chapter.read_bytes(), alignment.read_bytes()) == before
+    assert not (root / ".apps" / "translationCore" / "tools" / "wordAlignment" / "invalid" / "1" / "6.json").exists()
+
+
+def test_strict_writer_rejects_prepared_invalidation_without_application_ledger(
+    tmp_path: Path,
+) -> None:
+    root, project, runtime, _service, _finding, _proposal = _fixture(
+        tmp_path, "before original after", "original", "reviewed",
+    )
+    before = project.target_verse_text("1", "6")
+    final = "before reviewed after"
+    current = runtime.repository.current_target_revision("project-1", "PHP", "PHP 1:6")
+    invalidation_id = runtime.repository.prepare_target_invalidation(
+        project_id="project-1", book="PHP", displayed_reference="PHP 1:6",
+        previous_text_hash=_hash(before), expected_text_hash=_hash(final),
+    )
+    strict = StrictScriptureEditContext(
+        expected_target_revision=current["textRevision"],
+        expected_target_content_hash=_hash(before),
+        expected_original_verse_text=before,
+        expected_start_code_point=7, expected_end_code_point=15,
+        expected_original_span_text="original", intended_final_verse_text=final,
+        pending_invalidation_id=invalidation_id,
+        application_id="missing-application-ledger",
+    )
+    chapter_before = (root / "php" / "1.json").read_bytes()
+    with pytest.raises(ProjectError, match="CORRECTION_APPLICATION_NOT_DURABLE"):
+        project.apply_scripture_edit(
+            "1", "6", final, strict_context=strict,
+            journal_prepared_callback=lambda _transaction_id: None,
+        )
+    assert (root / "php" / "1.json").read_bytes() == chapter_before

@@ -196,6 +196,10 @@ export interface CorrectionCurrentTarget {
 
 export interface CorrectionReviewContext {
   findingId: string;
+  /** Optional during a rolling desktop upgrade; current sidecars always send these. */
+  findingDisplayedReferences?: string[];
+  sourceSemanticReferences?: string[];
+  sourceCanonicalReferences?: string[];
   currentTargets: CorrectionCurrentTarget[];
   candidateSpans: AffectedTargetSpan[];
   suggestedIntent: Omit<CorrectionIntent, "affectedTargetSpan">;

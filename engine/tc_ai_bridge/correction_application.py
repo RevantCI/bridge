@@ -143,7 +143,7 @@ class CorrectionApplicationService:
         return proposal, finding, reference, current
 
     def _prepare(self, **request: Any) -> dict[str, Any]:
-        proposal, _finding, reference, current = self._validated_snapshot(
+        proposal, finding, reference, current = self._validated_snapshot(
             request["proposal_id"], request["expected_proposal_revision"],
             request["finding_id"], request["expected_finding_revision"],
         )
@@ -152,10 +152,7 @@ class CorrectionApplicationService:
         replacement = str(proposal.get("proposedText") or "")
         final = current[:start] + replacement + current[end:]
         final_hash = self.runtime.text_hash(final)
-        source_refs = tuple(
-            str(x) for x in proposal.get("affectedReferences") or ()
-            if str(x) != reference
-        )
+        source_refs = self._source_provenance_references(proposal, finding)
         now = self._now()
         intent = CorrectionApplicationIntent(
             application_id=request["application_id"], proposal_id=request["proposal_id"],
@@ -185,6 +182,51 @@ class CorrectionApplicationService:
             backup_root=self.repository.path.parent / "correction-application-backups",
             expected_state_revision=int(application["stateRevision"]),
         )
+
+    def _source_provenance_references(
+        self, proposal: dict[str, Any], finding: dict[str, Any],
+    ) -> tuple[str, ...]:
+        """Resolve source provenance independently from the editable target.
+
+        Proposal v2 historically overloaded ``affectedReferences`` with target
+        coordinates.  Source semantic-unit identities are the durable authority
+        and preserve cross-verse provenance for both new and already persisted
+        proposals.  The affected-reference fallback is retained only for legacy
+        records that predate semantic-unit linkage.
+        """
+        intent = proposal.get("intent") or {}
+        source_unit_ids = tuple(
+            str(item) for item in intent.get("affectedSourceSemanticUnitIds") or ()
+            if str(item).strip()
+        ) or tuple(
+            str(item) for item in finding.get("sourceSemanticUnitIds") or ()
+            if str(item).strip()
+        )
+        references: list[str] = []
+        for unit_id in source_unit_ids:
+            unit = self.repository.semantic_unit(unit_id)
+            if unit.get("projectId") != self.runtime.project_id:
+                raise FoundationValidationError(
+                    f"Source semantic unit belongs to another project: {unit_id}"
+                )
+            if unit.get("side") != "SOURCE":
+                raise FoundationValidationError(
+                    f"Correction provenance unit is not SOURCE: {unit_id}"
+                )
+            values = unit.get("canonicalReferences") or unit.get("displayedReferences") or ()
+            references.extend(str(item) for item in values if str(item).strip())
+        if references:
+            return tuple(dict.fromkeys(references))
+
+        span = intent.get("affectedTargetSpan") or {}
+        target_references = {
+            str(span.get("displayedReference") or ""),
+            *(str(item) for item in span.get("canonicalReferences") or ()),
+        }
+        return tuple(dict.fromkeys(
+            str(item) for item in proposal.get("affectedReferences") or ()
+            if str(item).strip() and str(item) not in target_references
+        ))
 
     def _execute(self, application: dict[str, Any]) -> dict[str, Any]:
         if application["applicationState"] == CorrectionApplicationState.APPLYING.value:

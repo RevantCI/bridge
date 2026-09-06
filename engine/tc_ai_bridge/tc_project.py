@@ -1913,6 +1913,63 @@ class TranslationCoreProject:
         self._validate_verse_raw(raw)
         return raw
 
+    def _require_durable_correction_application(
+        self, strict_context: Any, *, reference: str, new_text: str,
+        required_state: str, transaction_id: str = '',
+    ) -> dict[str, Any]:
+        """Fail closed unless strict correction state is durably journaled.
+
+        The application service normally owns this ordering. Enforcing the
+        same contract at the canonical Scripture writer prevents a future or
+        accidental direct strict-mode call from changing Scripture with only a
+        prepared semantic invalidation and no recoverable application ledger.
+        """
+        import hashlib
+
+        runtime = self.passage_semantic_runtime
+        if runtime is None:
+            raise ProjectError(
+                'CORRECTION_APPLICATION_NOT_DURABLE: semantic runtime is unavailable.'
+            )
+        if not strict_context.application_id:
+            raise ProjectError(
+                'CORRECTION_APPLICATION_NOT_DURABLE: application identity is missing.'
+            )
+        try:
+            application = runtime.repository.application_intent(
+                strict_context.application_id
+            )
+        except Exception as exc:
+            raise ProjectError(
+                'CORRECTION_APPLICATION_NOT_DURABLE: application record was not persisted.'
+            ) from exc
+
+        final_hash = hashlib.sha256(new_text.encode('utf-8')).hexdigest()
+        mismatches: list[str] = []
+        expected = {
+            'projectId': runtime.project_id,
+            'targetDisplayedReference': reference,
+            'expectedTargetRevision': strict_context.expected_target_revision,
+            'expectedTargetContentHash': strict_context.expected_target_content_hash,
+            'expectedStartCodePoint': strict_context.expected_start_code_point,
+            'expectedEndCodePoint': strict_context.expected_end_code_point,
+            'expectedOriginalText': strict_context.expected_original_span_text,
+            'intendedFinalVerseHash': final_hash,
+            'pendingInvalidationId': strict_context.pending_invalidation_id,
+            'applicationState': required_state,
+        }
+        for field, value in expected.items():
+            if application.get(field) != value:
+                mismatches.append(field)
+        if transaction_id and application.get('translationCoreJournalTransactionId') != transaction_id:
+            mismatches.append('translationCoreJournalTransactionId')
+        if mismatches:
+            raise ProjectError(
+                'CORRECTION_APPLICATION_NOT_DURABLE: application snapshot mismatch: '
+                + ', '.join(sorted(set(mismatches)))
+            )
+        return application
+
     def apply_scripture_edit(self, chapter: str | int, verse: str | int, new_text: str, username: str = 'AI Bridge Reviewer', tags: list[str] | None = None, context_id: dict[str, Any] | None = None, *, strict_context: Any | None = None, journal_prepared_callback: Any | None = None, journal_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         """Human-only target verse edit with tC-compatible stale propagation and rollback."""
         if str(verse) == 'front':
@@ -1928,6 +1985,10 @@ class TranslationCoreProject:
         old_text = str(chapter_data.get(str(verse), ''))
         if strict_context is not None:
             import hashlib
+            if journal_prepared_callback is None:
+                raise ProjectError(
+                    'CORRECTION_APPLICATION_NOT_DURABLE: journal transition callback is required.'
+                )
             actual_hash = hashlib.sha256(old_text.encode('utf-8')).hexdigest()
             if old_text != strict_context.expected_original_verse_text:
                 raise ProjectError('REVISION_CONFLICT: target verse text changed since review.')
@@ -1953,6 +2014,14 @@ class TranslationCoreProject:
                 )
                 if pending is None or pending.get('state') != 'PREPARED':
                     raise ProjectError('Correction semantic invalidation is not prepared.')
+                self._require_durable_correction_application(
+                    strict_context, reference=reference, new_text=new_text,
+                    required_state='PREPARED',
+                )
+            else:
+                raise ProjectError(
+                    'CORRECTION_APPLICATION_NOT_DURABLE: semantic runtime is unavailable.'
+                )
         if old_text == new_text:
             raise ProjectError('No Scripture text change detected.')
         semantic_intent = ''
@@ -1984,6 +2053,15 @@ class TranslationCoreProject:
         if journal_prepared_callback is not None:
             try:
                 journal_prepared_callback(journal_tx.transaction_id)
+                if strict_context is not None:
+                    reference = self.passage_semantic_runtime.reference(
+                        str(chapter), str(verse), self.book_id.upper()
+                    )
+                    self._require_durable_correction_application(
+                        strict_context, reference=reference, new_text=new_text,
+                        required_state='APPLYING',
+                        transaction_id=journal_tx.transaction_id,
+                    )
             except Exception as exc:
                 self.journal.rollback(journal_tx, str(exc))
                 raise

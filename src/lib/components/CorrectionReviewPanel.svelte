@@ -91,9 +91,41 @@
   $: insertionTarget = context?.currentTargets.find((item) => item.displayedReference === selectedReference)
     ?? context?.currentTargets[0] ?? null;
   $: insertionBoundaries = insertionTarget ? graphemeBoundariesInCodePoints(insertionTarget.text) : [0];
+  $: sourceSemanticReferences = correctionSourceReferences(context);
+  $: findingDisplayReferences = uniqueReferences(
+    context?.findingDisplayedReferences?.length
+      ? context.findingDisplayedReferences
+      : eligibility?.displayedReferences ?? [],
+  );
 
   function message(exc: unknown): string {
     return exc instanceof Error ? exc.message : String(exc);
+  }
+
+  function uniqueReferences(values: unknown): string[] {
+    if (!Array.isArray(values)) return [];
+    return [...new Set(values.map(String).map((item) => item.trim()).filter(Boolean))];
+  }
+
+  function correctionSourceReferences(value: CorrectionReviewContext | null): string[] {
+    const explicit = uniqueReferences(value?.sourceSemanticReferences);
+    if (explicit.length) return explicit;
+
+    // A rolling/mixed desktop build may briefly pair this frontend with the
+    // older 9B.3b sidecar. Source evidence already owns the durable source
+    // references; never infer them from the editable target span.
+    return uniqueReferences((value?.sourceEvidence ?? []).flatMap((item) => {
+      const displayed = uniqueReferences(item.displayedReferences);
+      return displayed.length ? displayed : uniqueReferences(item.canonicalReferences);
+    }));
+  }
+
+  function openApplicationReview(): void {
+    if (!selectedProposal || !selectedTarget || !selectedSpan) {
+      error = "Correction application context is incomplete. Nothing was applied; reload this finding.";
+      return;
+    }
+    confirmationOpen = true;
   }
 
   function chooseLatest(items: CorrectionProposal[]): string {
@@ -530,7 +562,7 @@
               <button type="button" class="secondary" disabled={busy || !proposalCurrent} on:click={regenerate}>Generate another suggestion</button>
             {/if}
             {#if mayApply}
-              <button type="button" class="apply" disabled={busy} on:click={() => (confirmationOpen = true)}>Review application</button>
+              <button type="button" class="apply" disabled={busy} on:click={openApplicationReview}>Review application</button>
             {/if}
           </div>
         {/if}
@@ -547,7 +579,11 @@
         <div class="confirm-backdrop" role="presentation">
           <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="apply-title">
             <h5 id="apply-title">Confirm correction application</h5>
-            <p><strong>Finding/source:</strong> {selectedProposal.affectedReferences.join(", ")}</p>
+            <p><strong>Source semantic reference:</strong> {sourceSemanticReferences.join(", ") || "Unavailable"}</p>
+            {#if findingDisplayReferences.length
+              && findingDisplayReferences.join("|") !== sourceSemanticReferences.join("|")}
+              <p><strong>Finding display reference:</strong> {findingDisplayReferences.join(", ")}</p>
+            {/if}
             <p><strong>Target verse:</strong> {selectedSpan.displayedReference}</p>
             <p><strong>{selectedSpan.startCodePoint === selectedSpan.endCodePoint ? "Insertion point" : "Affected span"}:</strong> [{selectedSpan.startCodePoint}, {selectedSpan.endCodePoint})</p>
             <h6>CURRENT</h6>
@@ -670,7 +706,8 @@
   .history-provenance { display: block; color: #4b5563; font-size: .69rem; }
   .history p { margin: .15rem 0 .4rem; }
   .muted { color: #6b7280; }
-  .review-actions { position: sticky; bottom: 0; padding: .65rem .75rem; border-top: 1px solid #dbeafe; background: #f8faff; }
+  .review-actions { position: sticky; z-index: 3; isolation: isolate; bottom: 0; padding: .65rem .75rem; border-top: 1px solid #dbeafe; background: #f8faff; pointer-events: auto; }
+  .review-actions textarea, .review-actions button { position: relative; z-index: 1; pointer-events: auto; }
   label, legend { font-size: .76rem; color: #374151; }
   textarea, select, input[type="range"] { width: 100%; box-sizing: border-box; font: inherit; margin: .18rem 0 .45rem; }
   textarea, select { border: 1px solid #cbd5e1; border-radius: 4px; padding: .35rem .45rem; resize: vertical; }
@@ -686,7 +723,7 @@
   .draft-form { margin-top: .6rem; max-height: 22rem; overflow-y: auto; padding-right: .25rem; }
   .unavailable ul { margin-bottom: 0; padding-left: 1.2rem; }
   .boundary { margin-top: .35rem; }
-  .confirm-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(15, 23, 42, .55); display: grid; place-items: center; padding: 1rem; }
+  .confirm-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(15, 23, 42, .55); display: grid; place-items: center; padding: 1rem; pointer-events: auto; }
   .confirm-dialog { width: min(42rem, 100%); max-height: calc(100vh - 2rem); overflow-y: auto; background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 20px 50px rgba(15,23,42,.35); }
   .confirmation-text { border: 1px solid #e2e8f0; border-radius: 4px; padding: .5rem; }
   .apply-warning { margin-top: .75rem; padding: .55rem; border-left: 4px solid #d97706; background: #fffbeb; font-size: .78rem; }

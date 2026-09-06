@@ -246,6 +246,27 @@ class CorrectionWordingService:
                     ids.append(str(item["id"]))
         return tuple(dict.fromkeys(ids))
 
+    @staticmethod
+    def _source_semantic_references(
+        context: dict[str, Any], *, canonical: bool,
+    ) -> tuple[str, ...]:
+        """Resolve source provenance from source units, never from a target span.
+
+        A QA finding's denormalized display reference may intentionally point at
+        the editable target location.  Cross-verse source provenance therefore
+        has to come from the source semantic units attached to the finding.
+        """
+        sources = context.get("source") or context.get("sourceSemanticUnits") or ()
+        primary_key = "canonicalReferences" if canonical else "displayedReferences"
+        fallback_key = "displayedReferences" if canonical else "canonicalReferences"
+        references: list[str] = []
+        for unit in sources:
+            if not isinstance(unit, dict):
+                continue
+            values = unit.get(primary_key) or unit.get(fallback_key) or ()
+            references.extend(str(item) for item in values if str(item).strip())
+        return tuple(dict.fromkeys(references))
+
     def _provider_context(
         self, finding_id: str, intent: CorrectionIntent, context: dict[str, Any],
     ) -> dict[str, Any]:
@@ -303,6 +324,12 @@ class CorrectionWordingService:
         ]
         references.extend(str(item) for item in eligibility.displayed_references)
         sources = detail.get("source") or detail.get("sourceSemanticUnits") or []
+        source_displayed_references = self._source_semantic_references(
+            detail, canonical=False,
+        )
+        source_canonical_references = self._source_semantic_references(
+            detail, canonical=True,
+        )
         canonical_by_displayed: dict[str, list[str]] = {}
         for unit in sources:
             if not isinstance(unit, dict):
@@ -431,6 +458,12 @@ class CorrectionWordingService:
         )
         return {
             "findingId": finding_id,
+            "findingDisplayedReferences": list(dict.fromkeys(
+                str(item) for item in finding.get("displayedReferences") or ()
+                if str(item).strip()
+            )),
+            "sourceSemanticReferences": list(source_displayed_references),
+            "sourceCanonicalReferences": list(source_canonical_references),
             "currentTargets": current_targets,
             "candidateSpans": candidate_spans,
             "suggestedIntent": {
@@ -526,7 +559,10 @@ class CorrectionWordingService:
         return CorrectionProposalV2(
             id=str(uuid.uuid4()), qa_finding_id=finding_id,
             project_id=self.runtime.project_id, intent=intent,
-            affected_references=span.canonical_references,
+            affected_references=tuple(dict.fromkeys((
+                *self._source_semantic_references(context, canonical=True),
+                *span.canonical_references,
+            ))),
             current_text=span.original_text, proposed_text=proposed_text,
             explanation=explanation,
             evidence_ids=tuple(evidence_ids),
