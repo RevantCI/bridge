@@ -4723,3 +4723,58 @@ failed on its own assertion.
 Nothing in this touches the Svelte tree; the same session's context-menu
 changes compiled and tested clean throughout. Worth stating because the report
 arrived as "error on running the app" immediately after a frontend change.
+
+## `correction.applyProposal` sidecar timeout (2026-09-07)
+
+`request_timeout_seconds()` in `src-tauri/src/sidecar.rs` had no arm for
+`correction.applyProposal`, so Stage 9B.3b's Scripture-changing apply ran on
+the `_ => 30` default. Confirmed by reading the table, not assumed: every
+other expensive method has an explicit commented arm, including the two
+sibling correction methods added in the same stage at 260s.
+
+Verified what the call actually does before picking a number.
+`CorrectionApplicationService.apply()` persists the application intent and
+PREPARED invalidation, then `record_application_backup()` →
+`PassageSemanticRepository.backup()`, which is a full `sqlite3` backup of the
+project's semantic DB followed by `hashlib.sha256(backup_db.read_bytes())` —
+a whole-file read into memory. It then delegates to `edit_verse()` →
+`apply_scripture_edit()` for translationCore reconciliation, marker handling,
+word-bank movement, the verse-edit audit, tN/tW `verseEdits`, a filesystem
+backup and a journal write.
+
+Measured rather than guessed, driving the real service through the Stage
+9B.3b fixture (`_fixture`/`_apply` in `tests/test_correction_stage9b3b.py`)
+with the semantic DB padded to a range of sizes. `scripts/inspect_correction_application.py`
+was not usable for this: it is a read-only inspector for an already-applied
+correction on an installed project and times nothing.
+
+```text
+db size      apply     backup   applicationState
+ 0.57MB     0.447s     0.017s   COMPLETED
+ 8.59MB     0.953s     0.090s   COMPLETED
+28.61MB     1.205s     0.222s   COMPLETED
+100.71MB    1.220s     0.533s   COMPLETED
+200.84MB    1.596s     1.051s   COMPLETED
+```
+
+Each row is a real apply — the Tamil verse text changed, a journal transaction
+id was written, and a backup DB appeared under
+`correction-application-backups/`. The 0.57MB baseline is a two-verse project
+and matches the ~500–600KB the Stage 9B.3b artifacts showed. Backup cost is
+linear at roughly 5ms/MB.
+
+So 30s was **not** actually tight on this hardware (NVMe, warm cache) — worth
+stating plainly, because the reported concern was a real design gap rather
+than a live failure. The reason to fix it anyway: this is whole-file I/O, so
+antivirus scanning the copy, a spinning disk or a sync-backed project folder
+can cost an order of magnitude more, and a 200MB DB needs only ~20x slower I/O
+to cross 30s. The failure direction is bad — Rust stops waiting while Python
+is mid-apply, so the user is told the correction failed when it may already be
+written and journalled.
+
+Set to 180s: the table's existing class for expensive local I/O (`report.get`,
+`project.inspectImport`), leaving ~110x headroom on the measurement.
+`getApplicationStatus` and `reanalyzeAffected` deliberately stay on the
+default — a ledger read and a background-job start have nothing to wait for.
+Covered by `sidecar::tests::correction_apply_has_room_for_a_full_semantic_db_backup`;
+`cargo test` 11 passed.

@@ -148,6 +148,32 @@ fn request_timeout_seconds(method: &str) -> u64 {
         // snapshot -- it must stay interactive, and so must status/cancel,
         // or cancelling a long run becomes impossible.
         "triage.results" => 180,
+        // The one Scripture-changing correction action, and the only method
+        // here whose cost tracks project size rather than a provider call.
+        // Before it returns it persists the application intent and PREPARED
+        // invalidation, takes a full sqlite backup of the project's semantic
+        // DB plus a whole-file SHA-256 of it, then runs the translationCore
+        // apply: reconciliation, marker handling, word-bank movement, the
+        // verse-edit audit, tN/tW verseEdits, a filesystem backup and a
+        // journal write.
+        //
+        // Measured end to end through the real service (Stage 9B.3b fixture,
+        // NVMe, warm cache): 0.45s at the 0.57MB DB a two-verse project
+        // produces, 1.20s at 100MB, 1.60s at 200MB, with the backup itself
+        // scaling linearly at about 5ms per MB. 30s is not tight on that
+        // hardware -- but it is whole-file I/O, so antivirus scanning the
+        // copy, a spinning disk or a sync-backed folder can cost an order of
+        // magnitude more, and a 200MB DB needs only ~20x slower I/O to cross
+        // 30s. A false timeout is the bad direction here: Rust stops waiting
+        // while Python is mid-apply, so the user is told the correction
+        // failed when it may already be written and journalled. 180 is the
+        // table's existing class for expensive local I/O (report.get,
+        // project.inspectImport) and leaves ~110x headroom on the measurement.
+        //
+        // getApplicationStatus and reanalyzeAffected are deliberately not
+        // here: the first is a ledger read and the second only starts a
+        // background job, so both must stay interactive at the default.
+        "correction.applyProposal" => 180,
         _ => 30,
     }
 }
@@ -518,5 +544,20 @@ mod tests {
             request_timeout_seconds("correction.regenerateProposal"),
             260
         );
+    }
+
+    /// The Scripture-changing apply is the one correction method whose cost
+    /// tracks project size, so it must not sit on the `_ => 30` default it
+    /// fell through to before. Its two siblings must stay interactive: a
+    /// ledger read and a background-job start have nothing to wait for, and
+    /// giving them a long timeout would only delay reporting a dead sidecar.
+    #[test]
+    fn correction_apply_has_room_for_a_full_semantic_db_backup() {
+        assert_eq!(request_timeout_seconds("correction.applyProposal"), 180);
+        assert_eq!(
+            request_timeout_seconds("correction.getApplicationStatus"),
+            30
+        );
+        assert_eq!(request_timeout_seconds("correction.reanalyzeAffected"), 30);
     }
 }
