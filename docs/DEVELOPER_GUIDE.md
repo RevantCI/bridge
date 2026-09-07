@@ -334,10 +334,10 @@ focus restore, and viewport clamping (`positionInsideViewport`, `EDGE_GAP = 8`).
 Two very different surfaces mount it, and **neither owns it** — put dismissal
 or positioning behaviour in the component, and only the action list in a caller:
 
-| Caller | Findings from | Decisions written as |
-|---|---|---|
-| `VerseList.svelte` (verse editor) | `findingsByVerse` store — engine `QaFinding`s | `FindingStatus` via `decideLocalFinding`, shared with `ReviewPanel.svelte` |
-| `AlignmentQaMode.svelte` (QA review queue) | `QaFindingList.svelte` rows, which dispatch `contextmenu` upward | `QaDisposition` via `decideFinding`, labels from `REVIEWER_ACTIONS` |
+| Caller | Findings from | Menu offers | Decisions written as |
+|---|---|---|---|
+| `VerseList.svelte` (verse editor) | `findingsByVerse` store — engine `QaFinding`s | **Accept finding** (applies the proposed correction, then files the accept) / **Ignore** | `FindingStatus` via `decideLocalFinding`, shared with `ReviewPanel.svelte` |
+| `AlignmentQaMode.svelte` (QA review queue) | `QaFindingList.svelte` rows, which dispatch `contextmenu` upward | **Apply proposed fix** plus the four `REVIEWER_ACTIONS` | `QaDisposition` via `decideFinding`, labels from `REVIEWER_ACTIONS` |
 
 Three rules a new contributor will otherwise get wrong:
 
@@ -354,6 +354,19 @@ Three rules a new contributor will otherwise get wrong:
    problem"; `Accept translation as correct` = "there is no problem"). Every
    item carries a `title` hint saying which way it points. Don't unify the two
    models to make the labels match.
+4. **The editor menu mirrors `ReviewPanel`'s own two actions on an open Greek
+   Room finding, and should keep doing so.** It deliberately has no separate
+   apply-fix item: applying a correction and accepting the finding that
+   prompted it are one act, so `Accept finding` does both when
+   `suggested_replacement` and offsets are present and files the accept alone
+   when they are not. A correction that fails to apply is *not* accepted
+   instead — surface the reason and leave the menu open.
+5. **Key decisions by the displayed verse string, not `QaFinding.verse`.**
+   That field is a numeric anchor (`bridge_service.py:238` takes the first
+   numeric component), so a verse bridge `3-4` becomes `3` and the decision
+   lands under the wrong reference and misses the `"chapter:verse"` store key.
+   `ReviewPanel` uses `$currentChapter`/`$selectedVerse`; `VerseList` carries
+   the exact verse on its `contextMenu` state for the same reason.
 
 ---
 

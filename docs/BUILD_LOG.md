@@ -4562,3 +4562,73 @@ which does not lay out or paint, so `positionInsideViewport` near a real window
 edge, the active-finding ring, focus restore on Escape, and the apply →
 re-check → underline-clears sequence have never been seen rendered. Matrix rows
 M37-M41 exist for exactly that.
+
+### Follow-up the same day: two actions, not four (`afefbbc`)
+
+User review of the shipped menu, against a real Hindi Ephesians project:
+`Apply proposed fix` and `Accept finding` are the same act to a reviewer,
+and `Reject finding` / `Needs discussion` were noise. The menu is now
+exactly what `ReviewPanel` offers on an open Greek Room finding:
+
+- **Accept finding** — applies the proposed correction through the existing
+  `applySuggestedFindingFix` (edit → save → re-check → the save hook files the
+  accept), or, when the check proposed no replacement, records the accept
+  directly and leaves the verse text alone. The `title` hint says which of the
+  two it is about to do.
+- **Ignore** — `decideLocalFinding(..., "ignored")`, which moves the finding
+  into the panel's **Ignored** accordion and drops its underline (the
+  `highlightFindings` filter already excludes `ignored`).
+
+Removing the separate apply item also disposes of the awkward case the
+original issue tried to legislate for ("show it disabled rather than hiding it
+so the menu doesn't shift position"): with two items that are always enabled,
+the menu is a fixed size for every finding. That issue-#38 bullet is therefore
+satisfied in effect but no longer literally — there is nothing left to grey
+out. Worth knowing before someone "restores" it.
+
+**A failed correction is not silently accepted.** `applySuggestedFindingFix`
+already refuses a stale fix (`original_text` no longer matching the span) and
+an edit that cannot start; on any of those the reason is shown and the menu
+stays open rather than falling through to a plain accept. Tested.
+
+`rejected` and `needs_discussion` remain valid `FindingStatus` values in the
+engine (`greek_room_engine/models/finding.py:17-23`) — nothing writes them from
+the UI now, which is the status quo ante for `rejected`: `ReviewPanel` never
+had a control for either, and rendered both as an open finding with a raw
+`badge-decided` badge.
+
+#### A real bug found while rewriting the handler
+
+The decide path was passing `String(finding.chapter)` / `String(finding.verse)`.
+Those are **numeric anchors** — `_qaissue_to_finding` takes the first numeric
+component (`bridge_service.py:238`) precisely because USFM verse bridges
+(`\v 3-4`) and segments (`3a`) are real input. So on a bridged verse the menu
+filed its decision under `"3"`, while `ReviewPanel.decide()` — which uses
+`$currentChapter`/`$selectedVerse`, the exact displayed strings — filed the
+same decision under `"3-4"`. Two routes to the same decision, two different
+keys, and the local `findingsByVerse` update silently missed because the store
+key `"1:3"` does not exist.
+
+Fixed by carrying the exact verse on the `contextMenu` state and keying off
+`$currentChapter` + that verse. This is issue #38's own "must go through the
+same code that the review panel uses so decisions stay keyed by stable finding
+id" criterion — the finding id was stable, but the verse it was filed under was
+not. Matrix row M42 covers verifying it against a bridged book.
+
+**Still unfixed, and safe:** `applySuggestedFindingFix` (`verseEditor.ts:137-139`)
+has the same `String(finding.chapter)`/`String(finding.verse)` pattern for its
+own `verseTexts` lookup. On a bridged verse that lookup misses and it returns
+"The verse text is no longer loaded." — it fails loudly and writes nothing,
+rather than editing the wrong verse, so it was left alone rather than widened
+into this change.
+
+#### Verification
+
+```text
+frontend Vitest                288 passed / 24 files (285 before, +3 net;
+                               2 menu tests replaced by 5)
+npm run check                    0 errors / 0 warnings
+npm run build                  passed; existing >500 kB warning
+```
+
+Still not run: the installed desktop app. Nothing under `engine/` was touched.
