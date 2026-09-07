@@ -169,4 +169,27 @@ describe("VerseList footnote handling", () => {
     const marks = Array.from(document.querySelectorAll("mark")).map((m) => m.textContent);
     expect(marks).toContain(word);
   });
+
+  it("opens finding actions from an underlined span and keeps a missing fix disabled", async () => {
+    seed("alpha beta", [finding({
+      start_offset: 0, end_offset: 5, original_text: "alpha", suggested_replacement: null,
+    })]);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector("mark") as HTMLElement, {
+      clientX: 25, clientY: 35,
+    });
+    expect(screen.getByRole("menu", { name: /Actions for Possible spelling issue/i }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Apply proposed fix" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Needs discussion" })).toBeEnabled();
+  });
+
+  it("enables apply when the underlined finding carries an exact replacement", async () => {
+    seed("alpha beta", [finding({
+      start_offset: 0, end_offset: 5, original_text: "alpha", suggested_replacement: "omega",
+    })]);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector("mark") as HTMLElement);
+    expect(screen.getByRole("menuitem", { name: "Apply proposed fix" })).toBeEnabled();
+  });
 });

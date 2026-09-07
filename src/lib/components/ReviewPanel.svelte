@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
+  import { decideLocalFinding } from "../findingActions";
   import AlignmentModal from "./AlignmentModal.svelte";
   import TranslationHelpsReview from "./TranslationHelpsReview.svelte";
   import { aiJobAppliesToReference, isAIReviewJobActive } from "../utils/aiJobScope";
@@ -61,15 +62,10 @@
     if (!$selectedVerse || decisionSaveState[findingId] === "saving") return;
     const chapter = $currentChapter;
     const verse = $selectedVerse;
-    const key = verseKey(chapter, verse);
     decisionSaveState = { ...decisionSaveState, [findingId]: "saving" };
     decisionSaveError = { ...decisionSaveError, [findingId]: "" };
     try {
-      await bridge.decideVerse(chapter, verse, findingId, status);
-      findingsByVerse.update((map) => {
-        const list = (map[key] ?? []).map((f) => (f.id === findingId ? { ...f, status } : f));
-        return { ...map, [key]: list };
-      });
+      await decideLocalFinding(chapter, verse, findingId, status);
       decisionSaveState = { ...decisionSaveState, [findingId]: "saved" };
       window.setTimeout(() => {
         if (decisionSaveState[findingId] !== "saved") return;
