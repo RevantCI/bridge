@@ -167,7 +167,7 @@ def main() -> int:
             info = request("info", "engine.info", {})
             if not info.get("success"):
                 raise SystemExit(f"Request info failed: {info}")
-            if info.get("result", {}).get("bridgeVersion") != "0.8.0-beta.15":
+            if info.get("result", {}).get("bridgeVersion") != "0.9.0":
                 raise SystemExit(f"Frozen engine version is stale or inconsistent: {info}")
             wildebeest = (
                 info.get("result", {})
