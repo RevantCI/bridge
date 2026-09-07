@@ -218,7 +218,8 @@ export async function decideFinding(
   disposition: ReviewerDecision,
   options: { note?: string; promote?: boolean } = {},
 ): Promise<DecisionOutcome> {
-  const detail = get(selectedDetail);
+  const loadedDetail = get(selectedDetail);
+  const detail = loadedDetail?.finding.id === findingId ? loadedDetail : null;
   const summary = get(reviewQueue).find((item) => item.id === findingId);
   const revision = detail?.finding?.revision ?? summary?.revision;
   if (revision === undefined) {

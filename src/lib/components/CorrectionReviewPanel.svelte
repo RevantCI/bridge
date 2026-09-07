@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
+  import { applyCorrectionProposal, newCorrectionApplicationId } from "../correctionApplication";
   import type {
     AffectedTargetSpan,
     CorrectionEligibility,
@@ -390,24 +391,18 @@
     return affectedState === "RUNNING" ? labels[job.currentStage] ?? "Preparing affected analysis…" : affectedState;
   }
 
-  function newApplicationId(): string {
-    return globalThis.crypto?.randomUUID?.()
-      ?? `correction-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  }
-
   async function applyCorrection(): Promise<void> {
     if (!selectedProposal || !mayApply) return;
     busy = true;
     error = "";
-    const applicationId = application?.applicationId || newApplicationId();
+    const applicationId = application?.applicationId || newCorrectionApplicationId();
     try {
-      application = await bridge.correctionApplyProposal({
-        proposalId: selectedProposal.id,
-        expectedProposalRevision: selectedProposal.revision,
+      application = await applyCorrectionProposal({
         findingId,
-        expectedFindingRevision: eligibility?.findingRevision || findingRevision,
+        findingRevision: eligibility?.findingRevision || findingRevision,
+        proposal: selectedProposal,
+        actorId: settings?.reviewerName || "human",
         applicationId,
-        actor: { actorType: "HUMAN", actorId: settings?.reviewerName || "human" },
       });
       confirmationOpen = false;
       if (application.applicationState === "COMPLETED") {

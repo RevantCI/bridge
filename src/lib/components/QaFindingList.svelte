@@ -32,6 +32,7 @@
   const dispatch = createEventDispatcher<{
     select: { id: string };
     loadMore: void;
+    contextmenu: { id: string; x: number; y: number };
   }>();
 
   const ROW_HEIGHT = 76;
@@ -85,7 +86,18 @@
   }
 
   function onKeydown(event: KeyboardEvent): void {
-    if (event.key === "ArrowDown") {
+    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+      event.preventDefault();
+      const finding = findings.find((item) => item.id === selectedId) ?? findings[0];
+      if (!finding) return;
+      const row = document.getElementById(`finding-${finding.id}`);
+      const rect = row?.getBoundingClientRect();
+      dispatch("contextmenu", {
+        id: finding.id,
+        x: rect?.left ?? 8,
+        y: rect?.bottom ?? 8,
+      });
+    } else if (event.key === "ArrowDown") {
       event.preventDefault();
       move(1);
     } else if (event.key === "ArrowUp") {
@@ -127,6 +139,7 @@
     on:keydown={onKeydown}
     role="listbox"
     tabindex="0"
+    aria-keyshortcuts="Shift+F10"
     aria-label="Possible issues awaiting review"
     aria-activedescendant={selectedId ? `finding-${selectedId}` : undefined}
   >
@@ -144,10 +157,19 @@
           aria-selected={finding.id === selectedId}
           tabindex="-1"
           on:click={() => dispatch("select", { id: finding.id })}
+          on:contextmenu|preventDefault={(event) => dispatch("contextmenu", {
+            id: finding.id,
+            x: event.clientX,
+            y: event.clientY,
+          })}
           on:keydown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               dispatch("select", { id: finding.id });
+            } else if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+              event.preventDefault();
+              const rect = event.currentTarget.getBoundingClientRect();
+              dispatch("contextmenu", { id: finding.id, x: rect.left, y: rect.bottom });
             }
           }}
         >
