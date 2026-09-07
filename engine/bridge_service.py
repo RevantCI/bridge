@@ -34,7 +34,9 @@ from greek_room_engine.adapters.names_adapter import NamesCheckError
 from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity, FindingStatus, EvidenceItem
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
-from tc_ai_bridge.tc_project import TranslationCoreProject, ProjectError, read_progress_rollup
+from tc_ai_bridge.tc_project import (
+    TranslationCoreProject, ProjectError, read_progress_rollup, read_triage_records,
+)
 from tc_ai_bridge.project_import import (
     apply_resource_materialization,
     collection_projects,
@@ -89,6 +91,10 @@ from tc_ai_bridge.qa_report import (
     unopened_book_report,
     write_report_rows,
 )
+from tc_ai_bridge.triage import (
+    OVERRIDE_VERDICTS,
+    run_book_triage,
+)
 from tc_ai_bridge.verse_evidence import resolve_verse_evidence
 from tc_ai_bridge.semantic_mapping_service import semantic_mappings_for_verse, confirm_semantic_mapping
 from tc_ai_bridge.semantic_validation_service import (
@@ -124,6 +130,13 @@ from report_jobs import (
     ReportJobManager,
     ReportJobNotFound,
     ReportNotReady,
+)
+from triage_jobs import (
+    TriageBook,
+    TriageJobConflict,
+    TriageJobError,
+    TriageJobManager,
+    TriageJobNotFound,
 )
 
 BRIDGE_VERSION = "0.8.0-beta.13"
@@ -258,6 +271,16 @@ class Methods:
     REPORT_GET = "report.get"
     REPORT_CANCEL = "report.cancel"
     REPORT_EXPORT = "report.export"
+    # Optional, online-only AI triage of Greek Room findings (triage.py +
+    # triage_jobs.py). An overlay on the report: it scores how likely each
+    # finding is to be a false positive so the report screen can hide the
+    # noisiest ones. Nothing in the offline check/report flow depends on it.
+    TRIAGE_RUN = "triage.run"
+    TRIAGE_STATUS = "triage.status"
+    TRIAGE_CANCEL = "triage.cancel"
+    TRIAGE_OVERRIDE = "triage.override"
+    TRIAGE_CLEAR = "triage.clear"
+    TRIAGE_RESULTS = "triage.results"
     PROJECT_INSPECT_IMPORT = "project.inspectImport"
     PROJECT_IMPORT = "project.import"
     CHAPTER_VERSES = "chapter.verses"
@@ -472,6 +495,12 @@ class BridgeEngine:
         self._correction_affected_analysis_service: CorrectionAffectedAnalysisService | None = None
         self._project_sweep = ProjectSweepManager()
         self._report_jobs = ReportJobManager()
+        self._triage_jobs = TriageJobManager()
+        # Guards each book's triage store against a triage.override arriving
+        # on the dispatcher thread while the triage worker is mid-merge. One
+        # process-wide lock is enough: a triage write is a small whole-file
+        # rewrite, and only one triage run exists at a time.
+        self._triage_lock = threading.RLock()
         # AppSettings() with no path defaults to a real, persistent location
         # (%LOCALAPPDATA%/Bridge/data/settings.json on Windows — a subfolder
         # of the NSIS install dir, not the dir itself, so an uninstall can't
@@ -1037,6 +1066,195 @@ class BridgeEngine:
             return write_report_rows(output_path, fmt, rows, columns)
         except ValueError as exc:
             raise ProjectError(str(exc)) from exc
+
+    # -- AI triage (optional, online-only) --------------------------------
+    #
+    # Scores how likely each persisted Greek Room finding is to be a false
+    # positive, so the report screen can hide the noisiest ones behind a
+    # slider. Strictly an overlay: no check, report, decision or export path
+    # reads a triage verdict, and triage never rewrites a finding.
+
+    def _triage_books(self, book: str = "") -> list[TriageBook]:
+        """Books to triage. Unlike the report's book list this skips lazy and
+        missing siblings: a book nobody has opened has had no checks, so it
+        has no findings to triage, and materializing it to discover that
+        would turn 'triage this collection' into 'normalize the whole Bible'."""
+        books: list[TriageBook] = []
+        wanted = str(book or "").strip().lower()
+        for entry in self._report_books():
+            if entry.lazy or entry.missing:
+                continue
+            if wanted and entry.book_id.lower() != wanted:
+                continue
+            books.append(TriageBook(
+                path=entry.path, book_id=entry.book_id, book_name=entry.book_name,
+            ))
+        return books
+
+    def _triage_client(self) -> tuple[Any, str]:
+        """(client, "") when triage can run, (None, reason) when it cannot.
+
+        Goes through _ai_client rather than testing settings.get_api_key()
+        directly so that triage.results' "available" flag and triage.run's
+        "unavailable" state can never disagree about whether the button
+        should be enabled — they ask the same question the same way.
+        """
+        try:
+            return self._ai_client(), ""
+        except AIError as exc:
+            return None, str(exc)
+
+    def start_triage(self, book: str = "", force: bool = False) -> dict[str, Any]:
+        """Start a background triage run.
+
+        Returns an "unavailable" status rather than raising when no API key
+        is configured: triage is optional and online-only, and a project with
+        no key is a supported state, not an error the reviewer must dismiss.
+        """
+        self._require_project()
+        client, reason = self._triage_client()
+        if client is None:
+            return {
+                "state": "unavailable",
+                "message": reason,
+                "jobId": "",
+                "totalBooks": 0,
+            }
+
+        books = self._triage_books(book)
+        if not books:
+            return {
+                "state": "unavailable",
+                "message": (
+                    "No opened books in this collection have findings to triage. "
+                    "Run checks first."
+                ),
+                "jobId": "",
+                "totalBooks": 0,
+            }
+
+        model = client.model
+        settings = self.settings
+        lock = self._triage_lock
+
+        def run_book(entry: TriageBook, progress: Any, cancel: threading.Event) -> dict[str, Any]:
+            project = TranslationCoreProject(entry.path)
+
+            def record_usage() -> None:
+                settings.record_ai_usage(client.last_usage.total_tokens, client.last_cost_usd)
+
+            return run_book_triage(
+                project,
+                call_model=client.triage_batch,
+                model=model,
+                lock=lock,
+                force=force,
+                cancel=cancel,
+                progress=progress,
+                on_usage=record_usage,
+            )
+
+        return self._triage_jobs.start(books, run_book=run_book, force=force)
+
+    def triage_status(self, job_id: str = "") -> dict[str, Any]:
+        return self._triage_jobs.status(job_id)
+
+    def cancel_triage(self, job_id: str = "") -> dict[str, Any]:
+        return self._triage_jobs.cancel(job_id)
+
+    def _triage_project_for_book(self, book: str) -> TranslationCoreProject:
+        wanted = str(book or "").strip().lower()
+        if not wanted or wanted == self.project.book_id:
+            return self.project
+        for entry in self._report_books():
+            if entry.book_id.lower() == wanted and not entry.missing and not entry.lazy:
+                return TranslationCoreProject(entry.path)
+        raise ProjectError(f"No opened book '{book}' in this collection.")
+
+    def override_triage(self, book: str, finding_hash: str, verdict: str = "") -> dict[str, Any]:
+        """Record (or clear) a reviewer's thumbs up/down on one triage verdict.
+
+        An override always wins over the model's verdict and is never
+        re-sent to the model, so this is also how a reviewer stops paying for
+        a finding they have already judged.
+        """
+        self._require_project()
+        key = str(finding_hash or "").strip()
+        if not key:
+            raise ProjectError("A triage hash is required.")
+        value = str(verdict or "").strip().lower()
+        if value and value not in OVERRIDE_VERDICTS:
+            raise ProjectError(
+                f"verdict must be one of {', '.join(OVERRIDE_VERDICTS)}, or empty to clear."
+            )
+        project = self._triage_project_for_book(book)
+        with self._triage_lock:
+            records = project.load_triage_records()
+            record = records.get(key)
+            if not isinstance(record, dict):
+                raise ProjectError(f"No triage result for '{key}'.")
+            if value:
+                record["userOverride"] = {
+                    "verdict": value, "timestamp": project.timestamp_iso(),
+                }
+            else:
+                record["userOverride"] = None
+            records[key] = record
+            project.save_triage_records(records)
+        return {"bookId": project.book_id, "hash": key, "record": record}
+
+    def clear_triage(self, book: str = "") -> dict[str, Any]:
+        """Drop cached verdicts so the next run re-buys them — the escape
+        hatch for a prompt-tuning session."""
+        self._require_project()
+        active = self._triage_jobs.active()
+        if active is not None:
+            raise TriageJobConflict(
+                f"Triage run {active['jobId']} is {active['state']}; cancel it before clearing."
+            )
+        cleared: list[str] = []
+        with self._triage_lock:
+            for entry in self._triage_books(book):
+                try:
+                    project = TranslationCoreProject(entry.path)
+                except ProjectError:
+                    continue
+                if project.clear_triage_records():
+                    cleared.append(project.book_id)
+        return {"cleared": cleared}
+
+    def triage_results(self, book: str = "") -> dict[str, Any]:
+        """Every stored verdict for the collection, as {hash: record}.
+
+        Read straight off disk per book rather than from a job, so verdicts
+        survive a restart and the report screen can merge them without a
+        triage run having happened this session. Hashes embed the book id, so
+        one flat map cannot collide across books.
+        """
+        self._require_project()
+        entries: dict[str, Any] = {}
+        books: list[dict[str, Any]] = []
+        wanted = str(book or "").strip().lower()
+        for entry in self._report_books():
+            if entry.missing or (wanted and entry.book_id.lower() != wanted):
+                continue
+            records = read_triage_records(entry.path, entry.book_id) or {}
+            entries.update(records)
+            books.append({
+                "bookId": entry.book_id, "bookName": entry.book_name,
+                "count": len(records),
+            })
+        active = self._triage_jobs.active()
+        client, reason = self._triage_client()
+        return {
+            "entries": entries,
+            "books": books,
+            "total": len(entries),
+            "running": active is not None,
+            "jobId": active["jobId"] if active else "",
+            "available": client is not None,
+            "unavailableReason": reason,
+        }
 
     # -- verse-level operations ------------------------------------------
 
@@ -3450,6 +3668,7 @@ class BridgeEngine:
             "paratextUsername": self.settings.paratext_username,
             "paratextNavigation": self.settings.paratext_navigation,
             "logosNavigation": self.settings.logos_navigation,
+            "triageHideThreshold": self.settings.triage_hide_threshold,
             "hasApiKey": bool(self.settings.get_api_key()),
             "aiUsage": self.settings.get_ai_usage_totals(),
         }
@@ -3471,6 +3690,8 @@ class BridgeEngine:
             self.settings.paratext_navigation = bool(kwargs["paratextNavigation"])
         if "logosNavigation" in kwargs:
             self.settings.logos_navigation = bool(kwargs["logosNavigation"])
+        if "triageHideThreshold" in kwargs:
+            self.settings.triage_hide_threshold = kwargs["triageHideThreshold"]
         self._navigation.configure(
             paratext=self.settings.paratext_navigation,
             logos=self.settings.logos_navigation,
@@ -3528,6 +3749,22 @@ class BridgeEngine:
                     p.get("outputPath", ""), p.get("format", "csv"),
                     p.get("rows", []), p.get("columns"),
                 ))
+            if m == Methods.TRIAGE_RUN:
+                return EngineResponse.ok(request.id, result=self.start_triage(
+                    p.get("book", ""), bool(p.get("force", False)),
+                ))
+            if m == Methods.TRIAGE_STATUS:
+                return EngineResponse.ok(request.id, result=self.triage_status(p.get("jobId", "")))
+            if m == Methods.TRIAGE_CANCEL:
+                return EngineResponse.ok(request.id, result=self.cancel_triage(p.get("jobId", "")))
+            if m == Methods.TRIAGE_OVERRIDE:
+                return EngineResponse.ok(request.id, result=self.override_triage(
+                    p.get("book", ""), p.get("hash", ""), p.get("verdict", ""),
+                ))
+            if m == Methods.TRIAGE_CLEAR:
+                return EngineResponse.ok(request.id, result=self.clear_triage(p.get("book", "")))
+            if m == Methods.TRIAGE_RESULTS:
+                return EngineResponse.ok(request.id, result=self.triage_results(p.get("book", "")))
             if m == Methods.PROJECT_INSPECT_IMPORT:
                 return EngineResponse.ok(request.id, result=self.inspect_project_import(
                     p["path"], p.get("metadata"),
@@ -4093,6 +4330,12 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "report_not_ready", str(exc))
         except ReportJobError as exc:
             return EngineResponse.fail(request.id, "report_error", str(exc))
+        except TriageJobNotFound as exc:
+            return EngineResponse.fail(request.id, "triage_not_found", str(exc))
+        except TriageJobConflict as exc:
+            return EngineResponse.fail(request.id, "triage_conflict", str(exc))
+        except TriageJobError as exc:
+            return EngineResponse.fail(request.id, "triage_error", str(exc))
         except AnalysisJobNotFound as exc:
             return EngineResponse.fail(request.id, "analysis_job_not_found", str(exc))
         except AnalysisJobConflict as exc:

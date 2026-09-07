@@ -44,6 +44,7 @@ Sources, all already on disk:
 from __future__ import annotations
 
 import csv
+import time
 import hashlib
 from collections import Counter
 from datetime import datetime, timezone
@@ -704,7 +705,18 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def build_book_qa_report(project: TranslationCoreProject, *, book_name: str = "") -> dict[str, Any]:
-    return _BookReportBuilder(project, book_name).build()
+    """Build one book's report, recording how long it took.
+
+    durationMs exists because nothing in this repo has ever measured report
+    generation -- there is no baseline to argue any optimisation against, and
+    installed-app report generation is still an unrun row in the QA matrix.
+    It is measured here rather than in report_jobs so a directly-called
+    build (tests, project.report) reports it too.
+    """
+    started = time.perf_counter()
+    report = _BookReportBuilder(project, book_name).build()
+    report["durationMs"] = round((time.perf_counter() - started) * 1000, 1)
+    return report
 
 
 def _placeholder_checks() -> dict[str, Any]:
@@ -743,6 +755,9 @@ def unopened_book_report(*, book_id: str, book_name: str, path: str, lazy: bool,
         "checkResults": {"run": 0, "passed": 0, "failed": 0},
         "issues": summarize_rows([]),
         "rows": [],
+        # Genuinely zero: saying "not checked" costs no I/O at all, which is
+        # the whole point of not materializing a lazy sibling to find out.
+        "durationMs": 0.0,
     }
 
 

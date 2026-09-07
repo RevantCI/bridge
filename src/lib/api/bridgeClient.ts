@@ -62,7 +62,12 @@ import type {
   ReportGetResponse,
   ReportJobSnapshot,
   ReportRow,
+  TriageJobSnapshot,
+  TriageOverrideResponse,
+  TriageResultsResponse,
+  TriageRunResponse,
 } from "../types/report";
+import type { TriageOverrideVerdict } from "../types/finding";
 
 /**
  * Thin wrapper around Tauri's invoke() calling the real commands defined
@@ -223,6 +228,36 @@ export const bridge = {
     outputPath: string, format: "csv" | "tsv", rows: ReportRow[], columns: ReportExportColumn[],
   ): Promise<ReportExportResult> {
     return call("report_export", { outputPath, format, rows, columns });
+  },
+
+  // --- AI triage (engine/tc_ai_bridge/triage.py) --------------------------
+  // Optional and online-only. Verdicts are persisted per book as the run
+  // produces them, so triageResults reads disk rather than a job — results
+  // survive a restart, and a cancelled run keeps whatever it already paid for.
+
+  triageRun(book = "", force = false): Promise<TriageRunResponse> {
+    return call("triage_run", { book, force });
+  },
+
+  triageStatus(jobId: string): Promise<TriageJobSnapshot> {
+    return call("triage_status", { jobId });
+  },
+
+  triageCancel(jobId: string): Promise<TriageJobSnapshot> {
+    return call("triage_cancel", { jobId });
+  },
+
+  /** An empty verdict clears the override and returns the finding to the model. */
+  triageOverride(book: string, hash: string, verdict: TriageOverrideVerdict | ""): Promise<TriageOverrideResponse> {
+    return call("triage_override", { book, hash, verdict });
+  },
+
+  triageClear(book = ""): Promise<{ cleared: string[] }> {
+    return call("triage_clear", { book });
+  },
+
+  triageResults(book = ""): Promise<TriageResultsResponse> {
+    return call("triage_results", { book });
   },
 
   inspectImport(path: string, metadata?: ImportMetadata): Promise<ImportPreview> {

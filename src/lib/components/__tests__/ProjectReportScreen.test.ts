@@ -153,7 +153,8 @@ describe("ProjectReportScreen", () => {
     const onCancel = vi.fn();
     const job: ReportJobSnapshot = {
       jobId: "j1", state: "running", totalBooks: 66, completedBooks: 12, percent: 18, currentBook: "exo",
-      failedBooks: [], error: null, createdAt: "", finishedAt: null, ready: false,
+      failedBooks: [], bookDurationsMs: {}, totalDurationMs: 0,
+      error: null, createdAt: "", finishedAt: null, ready: false,
     };
     mount({ job, onCancel });
     expect(screen.getByRole("status")).toHaveTextContent("Generating report… 12/66 books · EXO");

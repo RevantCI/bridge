@@ -7,6 +7,7 @@ export function reportRow(overrides: Partial<ReportRow> = {}): ReportRow {
     issue: "Mixed script", explanation: "Latin character inside Tamil text.", aiProposal: "",
     aiVerdict: "", status: "open", resolution: "unresolved", result: "fail", fixedBy: "",
     fixedByDetail: "", decidedAt: "", note: "", selection: "",
+    triageHash: "hash-rut-x",
     ...overrides,
   };
 }
@@ -39,6 +40,7 @@ export function reportBook(overrides: Partial<ReportBookSummary> = {}): ReportBo
       total: 0, resolved: 0, unresolved: 0, byCategory: {}, openBySeverity: {},
       byFixedBy: { human: 0, machine: 0, unresolved: 0 },
     },
+    durationMs: 42.5,
     ...overrides,
   };
 }

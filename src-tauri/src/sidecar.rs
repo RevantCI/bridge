@@ -92,6 +92,12 @@ fn request_timeout_seconds(method: &str) -> u64 {
         // while to serialize and ship over stdio; the export writes it
         // back out. report.status/report.cancel stay interactive.
         "report.get" | "report.export" => 180,
+        // A whole-Bible triage map is one record per finding across every
+        // book; the same serialize-and-ship cost as report.get, so the same
+        // class. triage.run only starts a background job and returns a
+        // snapshot -- it must stay interactive, and so must status/cancel,
+        // or cancelling a long run becomes impossible.
+        "triage.results" => 180,
         _ => 30,
     }
 }
@@ -341,6 +347,18 @@ mod tests {
         assert_eq!(request_timeout_seconds("report.cancel"), 30);
         assert_eq!(request_timeout_seconds("report.get"), 180);
         assert_eq!(request_timeout_seconds("report.export"), 180);
+    }
+
+    #[test]
+    fn triage_polling_stays_interactive_while_the_results_map_has_headroom() {
+        // triage.run returns a job snapshot immediately; only the verdict map
+        // is large. Cancel must never queue behind a whole-Bible payload.
+        assert_eq!(request_timeout_seconds("triage.run"), 30);
+        assert_eq!(request_timeout_seconds("triage.status"), 30);
+        assert_eq!(request_timeout_seconds("triage.cancel"), 30);
+        assert_eq!(request_timeout_seconds("triage.override"), 30);
+        assert_eq!(request_timeout_seconds("triage.clear"), 30);
+        assert_eq!(request_timeout_seconds("triage.results"), 180);
     }
 
     #[test]
