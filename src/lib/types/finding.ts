@@ -16,6 +16,32 @@ export interface EvidenceItem {
   value: string;
 }
 
+export type TriageVerdict = "true_positive" | "false_positive" | "uncertain";
+/** A reviewer's thumbs up/down. Never "uncertain" — a human either agrees or doesn't. */
+export type TriageOverrideVerdict = "true_positive" | "false_positive";
+
+/**
+ * One AI-triage verdict, as stored in
+ * .apps/translationCoreAI/triage/<book>.json and returned by triage.results.
+ * Mirrors tc_ai_bridge/triage.py's make_record. `confidence` is 0-100 and
+ * expresses the model's certainty about its own verdict — it is a ranking
+ * signal, not a calibrated probability.
+ */
+export interface TriageRecord {
+  findingId: string;
+  chapter: string;
+  verse: string;
+  checkType: string;
+  family: string;
+  verdict: TriageVerdict;
+  confidence: number;
+  reason: string;
+  model: string;
+  timestamp: string;
+  /** Set by triage.override. Always wins over `verdict`. */
+  userOverride: { verdict: TriageOverrideVerdict; timestamp: string } | null;
+}
+
 export interface QaFinding {
   id: string;
   project_id: string;
@@ -839,6 +865,9 @@ export interface SettingsData {
   paratextUsername: string;
   paratextNavigation: boolean;
   logosNavigation: boolean;
+  /** Report screen: hide findings AI triage rated this likely (50-100) to be
+   * a false positive. 0 means off. Default 90. */
+  triageHideThreshold: number;
   hasApiKey: boolean;
   aiUsage: { tokens: number; estimatedCostUSD: number };
 }

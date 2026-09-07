@@ -201,7 +201,16 @@ class OpenAIResponsesClient:
     def _effective_reasoning_effort(self) -> str:
         return self.last_reasoning_effort or 'provider-default'
 
-    def _post_structured(self, instructions: str, input_text: str, schema_name: str, schema: dict[str, Any]) -> dict[str, Any]:
+    def _post_text(self, instructions: str, input_text: str, schema_name: str, schema: dict[str, Any]) -> str:
+        """Issue one Responses API call and return its raw output text.
+
+        Split out of _post_structured so a caller that must tolerate a
+        provider ignoring the JSON schema (fenced output, a bare array, a
+        preamble) can parse defensively instead of taking _post_structured's
+        hard AIError. Everything about the request — the reasoning guard, the
+        unsupported-parameter retry, usage and cost accounting — is shared;
+        only the parse differs.
+        """
         payload: dict[str, Any] = {
             'model': self.model,
             'store': False,
@@ -251,6 +260,10 @@ class OpenAIResponsesClient:
         text = self._extract_text(response)
         if not text:
             raise AIError('OpenAI response contained no output text.')
+        return text
+
+    def _post_structured(self, instructions: str, input_text: str, schema_name: str, schema: dict[str, Any]) -> dict[str, Any]:
+        text = self._post_text(instructions, input_text, schema_name, schema)
         try:
             result = json.loads(text)
         except json.JSONDecodeError as e:
@@ -258,6 +271,39 @@ class OpenAIResponsesClient:
         if not isinstance(result, dict):
             raise AIError('OpenAI structured output was not an object.')
         return result
+
+    # Schema for one AI-triage batch. Strict json_schema is still sent (it is
+    # what OpenAI itself honours), but tc_ai_bridge/triage.py parses the raw
+    # text defensively because OpenAI-compatible endpoints behind
+    # api_base_url frequently ignore it.
+    TRIAGE_SCHEMA: dict[str, Any] = {
+        'type': 'object',
+        'additionalProperties': False,
+        'required': ['results'],
+        'properties': {
+            'results': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['finding_id', 'verdict', 'confidence', 'reason'],
+                    'properties': {
+                        'finding_id': {'type': 'string'},
+                        'verdict': {
+                            'type': 'string',
+                            'enum': ['true_positive', 'false_positive', 'uncertain'],
+                        },
+                        'confidence': {'type': 'integer', 'minimum': 0, 'maximum': 100},
+                        'reason': {'type': 'string'},
+                    },
+                },
+            },
+        },
+    }
+
+    def triage_batch(self, instructions: str, input_text: str) -> str:
+        """One AI-triage batch. Returns raw output text for the caller to parse."""
+        return self._post_text(instructions, input_text, 'finding_triage', self.TRIAGE_SCHEMA)
 
     def test_connection(self) -> dict[str, Any]:
         """Authenticate the API key and confirm the configured model is accessible without generating tokens."""

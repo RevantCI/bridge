@@ -4188,3 +4188,207 @@ Installer:
 (55,732,149 bytes; SHA-256
 `EF666F73475D4609D53B9F9D22AD4BF7A651F7D279584DA130D0254C93DF8DAD`).
 Stage 9B.3c installed acceptance may resume. Stage 9B.4 remains unauthorized.
+
+## AI triage — false-positive scoring for Greek Room findings (2026-09-07)
+
+Greek Room says what is *objectively* suspicious, which by design includes a
+lot that is fine: punctuation correct for the language, real reduplication,
+an inflecting proper noun. This adds an optional, **online-only** pass that
+scores how likely each already-persisted finding is to be a false positive,
+and a slider on the QA report that hides the noisiest ones.
+
+Strictly an overlay. No check, report, decision or export path reads a
+verdict; a `QaFinding` is never rewritten; with no API key and no stored
+verdicts the report screen renders exactly as it did before. That is the
+local-first constraint, and the component test
+`renders exactly as before when no triage has ever run` pins it.
+
+### Two questions answered before any code
+
+**Was the report UI actually built?** Yes — `ProjectReportScreen.svelte`,
+`report.generate/status/get/cancel/export`, `qa_report.py`, `report_jobs.py`.
+The slider depends on it, so this was checked first rather than assumed.
+
+**Did the `reasoning.effort` guard exist?** Yes, under a different name:
+`OpenAIResponsesClient._model_supports_reasoning_effort()`
+(`ai_client.py:126`) gates the parameter to `o1`/`o3`/`o4`/`gpt-5` prefixes,
+with a 400-response fallback at `:175` and a test at
+`test_ai_client_compatibility.py:22`. No separate guard commit was needed.
+
+### Storage: one JSON file per book, not per chapter, and not SQLite
+
+The user asked whether this and the report's other inputs should move to a
+database. Measured first, on the real 66-book collections under
+`%LOCALAPPDATA%\Bridge\data\projects`:
+
+| Probe | Result |
+|---|---|
+| First open of any small JSON file (Windows) | **~20–27 ms**, size-independent; second open ~0.1 ms |
+| 1,189 tC index files (11.2 MB) | 23.7 s cold, 146 ms warm |
+| `build_book_qa_report`, Judges (618 verses, 4,483 rows) | tC index read **8.8 s cold → 85 ms warm**; everything else ~1 s cold |
+| Semantic DB open + `PRAGMA integrity_check` (35 MB) | 15 ms + **817 ms**, on every `FoundationRepository` construction |
+
+File *count* dominates, not bytes — the on-access-scan signature. So triage
+stores one `.apps/translationCoreAI/triage/<book>.json` per book: 66 files
+read in ~2 s where 1,189 per-chapter files would take ~25–30 s.
+
+SQLite was rejected for this, despite already shipping in Bridge
+(`passageSemantic/bridge-semantic.sqlite3`, schema v13). The companion
+directory is **per book**, so "one query for the collection" does not exist —
+every option is 66 stores. Joining the existing DB would additionally inherit
+the passage-semantic runtime's `RECOVERY_REQUIRED`/read-only states, a v14
+migration with a full-DB backup per book, and that 817 ms integrity check per
+open. A separate small `.sqlite3` would be ~2x the work for the same 66 files.
+The one measured SQLite number in this repo also points away from it: Stage 8
+is 81–92% commit time because of a connection-per-save pattern (see the Stage
+8 profiling table earlier in this log).
+
+**On moving the report's inputs to a DB: no.** Four of the report's nine
+sources (`index/{tN,tW}`, `checkData/{selections,verseEdits}`,
+`tools/wordAlignment`, `alignmentData`) are translationCore's own format,
+read live by design, and are also the measured hot spot — a Bridge-owned
+index of the other five removes under 10% of cold time while creating a
+second source of truth. Worse, there is no cheap staleness check when tC,
+Paratext or a `git pull` edits the project outside Bridge: NTFS directory
+mtimes change only for direct children, so noticing a new selection file
+means stat-ing all ~31k verse directories — the walk the index was meant to
+avoid. Only **Tier 1 (measure)** was done here.
+
+### Tier 1: the report now records how long it took
+
+`build_book_qa_report` records `durationMs`, and the job snapshot carries
+`bookDurationsMs`/`totalDurationMs`. Nothing in this repo had ever measured
+report generation — the 2026-09-04 report entry records test counts only, and
+`QA_TEST_MATRIX` D11 (installed-app report generation) is still NOT RUN — so
+there was no baseline any optimisation could have been argued against.
+Measuring first is the whole change.
+
+### Design points worth keeping
+
+**The triage hash is not the finding id.** Records are keyed by a sha256 of
+book/chapter/verse/check-type plus NFC- and whitespace-normalised evidence
+(`original_text`, `suggested_replacement`, `explanation`, evidence pairs).
+Deliberately *not* `_stable_finding_id`, whose entire purpose is to stay
+stable across an edit so a human decision survives — whereas a verdict about
+evidence that changed is worthless and must be discarded. Offsets are
+excluded, so text shifting inside a verse does not orphan every verdict in
+it. `chapter`/`verse` come from the snapshot's *row keys*, which preserve
+verse bridges (`3-4`) and segments (`3a`); `QaFinding`'s own fields are ints
+that collapse both (gotcha 12).
+
+**One enumeration path.** `_BookReport._persisted_findings` moved into
+`triage.py` and both the report builder and the triage worker call it. Had
+they diverged, triage would have bought verdicts for rows the report never
+shows, or left visible rows permanently unscored.
+
+**Four prompt families, all reachable.** Routing was written against the
+check types the engines actually emit, not invented ones — `usfm.<slug>`
+(`usfm_adapter.py:277`), `wildebeest.*` (`:148-224`),
+`names.spelling_similarity` (`names_adapter.py:368`),
+`alignment.inconsistent_rendering` (`bridge_service.py:2716`), plus
+`local_checks.py`'s uppercase codes, which carry a *variable* language prefix
+(`TA_`/`LANG_`, `:45`) and so match on substring rather than prefix. Category
+alone was not enough: every Wildebeest check carries category `unicode`
+whatever it looked at, so category routing would never have reached the
+consistency prompt at all. A test asserts every family is reachable.
+
+**`_post_text` split out of `_post_structured`.** Strict `json_schema` is
+still sent, but OpenAI-compatible endpoints behind `api_base_url` (vLLM, LM
+Studio, Ollama) routinely ignore it and wrap output in markdown fences, so
+triage parses raw text itself — fences stripped, `{"results": [...]}`, a bare
+array and `{"findings": [...]}` all accepted, and a provider answering
+`0.0-1.0` instead of `0-100` rescaled (only strictly between 0 and 1; reading
+`1.0` as 100 would be the dangerous direction).
+
+### Two defects found by driving a live sidecar
+
+Unit tests passed and the real protocol path still had bugs — the standing
+rule in this repo, again. Driving a real `main.py` with a key configured and
+`api_base_url` pointing at a closed port:
+
+1. **Every failure blamed the parser.** A connection refusal stored the reason
+   *"The model's response for this batch could not be parsed"* — a string
+   shown to the reviewer on the finding, sending them to debug the wrong
+   thing. Network and parse failures now say which happened.
+2. **A run whose every batch failed reported `succeeded`** with no error,
+   because only a failed *book* set one. A reviewer would read that as "every
+   finding has been judged" when nothing had. Such a run is now `failed`; a
+   partly-failed one stays `succeeded` but carries the failure in its message.
+
+In both cases the findings are still recorded as `uncertain` at confidence 0 —
+the one shape the slider can never hide, so a finding nobody judged always
+stays visible.
+
+### The hiding rule
+
+Only a `false_positive` verdict at or above the threshold hides anything.
+`uncertain` and `true_positive` are always shown, whatever the confidence,
+because hiding a real translation error is a far worse failure than leaving a
+false positive on screen. Default 90, floor 50, with an off position. A
+reviewer's thumbs-down hides regardless of the model's confidence — a human
+judgement is definite, not a scored guess — and a thumbs-up always reveals.
+An override is never re-sent even under `force`, so overriding is also how a
+reviewer stops paying for a finding they have already judged.
+
+Triage hiding is deliberately **not** part of `ReportFilters`: folding it in
+would make "Clear filters" silently unhide findings the reviewer chose to
+hide, and make the filtered-row count ambiguous about which mechanism removed
+a row. Filters run first, so "N hidden" always counts within what the filters
+selected, and the hidden set is computed even while revealed so the count
+stays truthful.
+
+### Concurrency
+
+`triage.override` (dispatcher thread) and the run worker both load-merge-save
+the same book file under one `BridgeEngine._triage_lock`, and the worker
+re-reads immediately before merging each batch, so an override recorded while
+a request was in flight survives. A test gates a fake client mid-call and
+overrides underneath it. This is the same lost-update class
+`.bridge/progress.json` still has between `_on_check_job_complete` (worker)
+and `_apply_decision_to_progress` (dispatcher) — unchanged here, still open.
+
+The job's cancel event is handed to the per-book callback rather than looked
+up after `start()` returns, so a cancel in the first instants of a run cannot
+be missed. A cancelled run also skips the prune pass: its picture of which
+findings still exist is incomplete, and pruning against it would delete
+verdicts it never reached.
+
+### Verification
+
+```text
+triage focused Python (module + RPC)    100 passed
+full Python + Greek Room                866 passed (765 before this work)
+frontend Vitest                         262 passed / 22 files (192 before)
+npm run check                             0 errors / 0 warnings
+npm run build                           passed; existing >500 kB warning
+cargo test                                8 passed (6 before, +2 triage timeout class)
+raw stdio smoke, no API key             triage.run -> unavailable; override -> clean error;
+                                        report.generate unaffected; sidecar alive
+raw stdio smoke, dead endpoint          run -> failed; uncertain/0 records stored with a
+                                        network reason; ping still answers; exit 0
+```
+
+**NOT run, and not claimed:** live model behaviour (no request has ever been
+sent to a real provider — every test and smoke uses an injected callable, a
+fake transport or a closed port), so prompt quality and real verdict
+distribution are entirely unmeasured; the installed desktop app, so the
+slider, thumbs and progress line have never been seen rendered (Vitest uses
+jsdom, which does not lay out or paint); and the frozen PyInstaller sidecar,
+which needs a `build-sidecars.ps1` run.
+
+### Two follow-ups this deliberately did not do
+
+1. **`checkFindings` snapshots are fat.** ~1.2 KB per finding (~350 MB of
+   JSON for a checked Bible), and 55–80% of the rows in the real snapshots are
+   `translationCore`-category rows `qa_report` discards at `:353-356`. The
+   snapshot writer persists all 24 `QaFinding` keys; the report reads ~9.
+   Slimming it (schemaVersion 2, reader tolerating v1) is the real
+   Bridge-owned report cost, and is worth doing *after* Tier 1 timings confirm
+   it against a real collection.
+2. **`_tree_fingerprint` still hashes everything under `.apps/`**
+   (`project_registry.py:74-88`), so any Bridge-written file there makes a
+   hand-placed project look like a `possibleDuplicate` of itself on
+   re-inspect. Flagged 2026-09-02 for `passageSemantic/`, still open; triage
+   adds one more file per book of the same class. The fix belongs in
+   `_tree_fingerprint`, not in each feature that writes state.
+

@@ -1,14 +1,21 @@
 import type { QaReport, ReportBookSummary, ReportRow } from "../../types/report";
 
 export function reportRow(overrides: Partial<ReportRow> = {}): ReportRow {
-  return {
+  const row: ReportRow = {
     id: "rut:x", category: "greekRoom", engine: "wildebeest", checkType: "wildebeest.script.mixed",
     severity: "high", book: "rut", bookName: "Ruth", chapter: "1", verse: "1", reference: "RUT 1:1",
     issue: "Mixed script", explanation: "Latin character inside Tamil text.", aiProposal: "",
     aiVerdict: "", status: "open", resolution: "unresolved", result: "fail", fixedBy: "",
-    fixedByDetail: "", decidedAt: "", note: "", selection: "",
+    fixedByDetail: "", decidedAt: "", note: "", selection: "", triageHash: "",
     ...overrides,
   };
+  // Mirror what qa_report._add_finding_rows actually stamps: a triage hash on
+  // Greek Room rows only, unique per row. Sharing one hash across rows would
+  // make a single verdict silently apply to all of them.
+  if (overrides.triageHash === undefined) {
+    row.triageHash = row.category === "greekRoom" ? `hash-${row.id}` : "";
+  }
+  return row;
 }
 
 export function reportBook(overrides: Partial<ReportBookSummary> = {}): ReportBookSummary {
@@ -39,6 +46,7 @@ export function reportBook(overrides: Partial<ReportBookSummary> = {}): ReportBo
       total: 0, resolved: 0, unresolved: 0, byCategory: {}, openBySeverity: {},
       byFixedBy: { human: 0, machine: 0, unresolved: 0 },
     },
+    durationMs: 42.5,
     ...overrides,
   };
 }

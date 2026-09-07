@@ -6,6 +6,7 @@ import json
 import os
 from ctypes import wintypes
 from pathlib import Path
+from typing import Any
 
 
 class SecretStoreError(RuntimeError):
@@ -190,6 +191,33 @@ class AppSettings:
     @api_base_url.setter
     def api_base_url(self, value: str) -> None:
         self.data['api_base_url'] = str(value or '').strip()
+        self.save_sanitized()
+
+    @property
+    def triage_hide_threshold(self) -> int:
+        """Report screen: hide findings AI triage rated this likely (0-100) to
+        be a false positive. 0 means the slider is off and nothing is hidden.
+
+        Default 90, deliberately conservative — hiding a real translation
+        error is a much worse failure than leaving a false positive on
+        screen. Kept in settings rather than per project because it is a
+        reviewer's tolerance, not a property of the text.
+        """
+        try:
+            value = int(self.data.get('triage_hide_threshold', 90))
+        except (TypeError, ValueError):
+            return 90
+        if value <= 0:
+            return 0
+        return max(50, min(100, value))
+
+    @triage_hide_threshold.setter
+    def triage_hide_threshold(self, value: Any) -> None:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            number = 90
+        self.data['triage_hide_threshold'] = 0 if number <= 0 else max(50, min(100, number))
         self.save_sanitized()
 
     @property

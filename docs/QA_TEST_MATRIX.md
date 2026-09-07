@@ -92,6 +92,8 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 | D09 | Checker error | Bounded, readable error with useful retry behavior | PASS |
 | D10 | Real Wildebeest | Real adapter is packaged and identifies itself | PASS — frozen smoke verifies usingRealEngine |
 | D11 | Generate report from the project screen, filter, click a verse, export CSV and print to PDF in the installed app | Report screen renders at 1366x768, filters scope charts and table together, verse link opens the editor on that verse (switching books), CSV opens in Excel with Tamil intact, print dialog shows only the report | NOT RUN — source and frontend tests pass; no real Tauri window was exercised this session |
+| D12 | Run AI triage against a real provider, then use the slider and thumbs in the installed app | Verdicts arrive with usable reasons and a defensible spread (not all "uncertain", not everything at 99%); slider hides only false positives and the "N hidden" count matches; thumbs persist across a restart; a second run makes no billed calls | NOT RUN — no request has ever been sent to a real provider. Every test and smoke uses an injected callable, a fake transport, or a closed port, so **prompt quality and real verdict distribution are unmeasured**. Protocol behaviour (no key → unavailable; dead endpoint → failed run with uncertain/0 records; sidecar survives) IS verified against a live source sidecar |
+| D13 | AI triage on a project with no API key | Report is fully usable; Run AI triage is disabled with a tooltip explaining why; no triage UI competes for attention | PASS — raw stdio smoke plus component tests; installed window NOT RUN |
 
 ## Project management
 

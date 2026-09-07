@@ -5,6 +5,9 @@
  * collection payload) and engine/report_jobs.py (the job snapshot). Keep in
  * sync manually, like types/finding.ts.
  */
+import type { TriageRecord } from "./finding";
+
+export type { TriageRecord };
 
 export type ReportCategory =
   | "greekRoom" | "translationNotes" | "translationWords" | "alignment" | "aiReview";
@@ -49,6 +52,14 @@ export interface ReportRow {
   note: string;
   /** The tN/tW selection text, or "nothing to select". */
   selection: string;
+  /**
+   * Key into the book's AI-triage store, for rows backed by a persisted
+   * QaFinding. Empty for tN/tW/alignment/AI-review rows, which are workflow
+   * state rather than checker output and are never triaged. The report
+   * itself never reads a verdict — the screen merges triage.results by this
+   * key — so an untriaged project renders exactly as it always did.
+   */
+  triageHash: string;
 }
 
 export type CheckState = "not_run" | "partial" | "complete" | "unavailable";
@@ -135,6 +146,9 @@ export interface ReportBookSummary {
   checks: BookChecks;
   checkResults: CheckResults;
   issues: IssueSummary;
+  /** Wall-clock ms this book's report took to build. 0 for a book that was
+   * never opened (saying "not checked" costs no I/O). */
+  durationMs: number;
 }
 
 export interface QaReport {
@@ -162,6 +176,10 @@ export interface ReportJobSnapshot {
   percent: number;
   currentBook: string | null;
   failedBooks: Array<{ bookId: string; error: string }>;
+  /** Per-book build time, and their sum — the only measurement of report
+   * generation cost that exists. Keyed by book id. */
+  bookDurationsMs: Record<string, number>;
+  totalDurationMs: number;
   error: string | null;
   createdAt: string;
   finishedAt: string | null;
@@ -183,4 +201,71 @@ export interface ReportExportResult {
   path: string;
   rows: number;
   format: "csv" | "tsv";
+}
+
+// --- AI triage (engine/tc_ai_bridge/triage.py + engine/triage_jobs.py) ----
+// An overlay on the report: verdicts are keyed by ReportRow.triageHash and
+// merged client-side, so nothing here is required for the report to render.
+
+/** triage.run when it declined to start — no API key, or nothing to triage. */
+export interface TriageUnavailable {
+  state: "unavailable";
+  message: string;
+  jobId: "";
+  totalBooks: 0;
+}
+
+export interface TriageJobSnapshot {
+  jobId: string;
+  state: ReportJobState;
+  force: boolean;
+  totalBooks: number;
+  completedBooks: number;
+  percent: number;
+  currentBook: string | null;
+  currentChapter: string | null;
+  /** Progress inside the book in flight, so a long single-book run still moves. */
+  currentBookTriaged: number;
+  currentBookSkipped: number;
+  triaged: number;
+  /** Findings not re-sent: already cached, or carrying a user override. */
+  skipped: number;
+  /** Verdicts dropped because the finding's evidence changed. */
+  pruned: number;
+  /** Model requests attempted, and how many produced nothing usable. When
+   * every batch fails the run's state is "failed", not "succeeded". */
+  batches: number;
+  failedBatches: number;
+  failedBooks: Array<{ bookId: string; error: string }>;
+  books: Array<{
+    bookId: string; bookName: string; findings: number; triaged: number;
+    skipped: number; batches: number; failedBatches: number;
+  }>;
+  error: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export type TriageRunResponse = TriageJobSnapshot | TriageUnavailable;
+
+export function isTriageUnavailable(value: TriageRunResponse): value is TriageUnavailable {
+  return (value as TriageUnavailable).state === "unavailable";
+}
+
+export interface TriageResultsResponse {
+  /** triageHash -> verdict, flat across the collection (hashes embed the book). */
+  entries: Record<string, TriageRecord>;
+  books: Array<{ bookId: string; bookName: string; count: number }>;
+  total: number;
+  running: boolean;
+  jobId: string;
+  /** False when no API key is configured — the same question triage.run asks. */
+  available: boolean;
+  unavailableReason: string;
+}
+
+export interface TriageOverrideResponse {
+  bookId: string;
+  hash: string;
+  record: TriageRecord;
 }

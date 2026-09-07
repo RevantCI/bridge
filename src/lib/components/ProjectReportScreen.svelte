@@ -5,11 +5,14 @@
   import ReportDonut from "./ReportDonut.svelte";
   import type {
     QaReport, ReportBookSummary, ReportCategory, ReportJobSnapshot, ReportRow, ReportSeverity,
+    TriageJobSnapshot, TriageRecord,
   } from "../types/report";
+  import type { TriageOverrideVerdict } from "../types/finding";
   import {
     CATEGORY_LABELS, CATEGORY_LONG_LABELS, CATEGORY_ORDER, EMPTY_FILTERS, EXPORT_COLUMNS, SEVERITY_ORDER,
-    bookDisplayName, categoryBreakdown, chaptersForBook, checkOutcomes, exportFileName, exportRows,
-    familyProgress, filterRows, fixedByBreakdown, fixedByLabel, isFiltered, resultBreakdown, statusLabel,
+    TRIAGE_VERDICT_LABELS, applyTriage, bookDisplayName, categoryBreakdown, chaptersForBook, checkOutcomes,
+    effectiveVerdict, exportFileName, exportRows, familyProgress, filterRows, fixedByBreakdown, fixedByLabel,
+    hiddenByTriage, isFiltered, resultBreakdown, statusLabel, triageFor, triagedCount,
     type ReportFilters,
   } from "../utils/reportStats";
 
@@ -33,6 +36,25 @@
   export let onGenerate: () => void;
   export let onCancel: () => void = () => {};
   export let onNavigate: (book: string, chapter: string, verse: string) => void = () => {};
+
+  /**
+   * AI triage overlay. Optional and online-only: with no verdicts and no API
+   * key this component renders exactly as it did before triage existed, which
+   * is the local-first requirement — nothing offline may depend on it.
+   */
+  export let triage: Record<string, TriageRecord> = {};
+  export let triageJob: TriageJobSnapshot | null = null;
+  export let triageAvailable = false;
+  export let triageUnavailableReason = "";
+  export let triageError = "";
+  /** 0 (or null) = off; otherwise hide false positives at or above this confidence. */
+  export let triageThreshold: number | null = 90;
+  export let onRunTriage: () => void = () => {};
+  export let onCancelTriage: () => void = () => {};
+  export let onTriageThreshold: (value: number | null) => void = () => {};
+  export let onTriageOverride: (
+    book: string, hash: string, verdict: TriageOverrideVerdict | "",
+  ) => void = () => {};
 
   // Same finding-source legend as the rest of the app (index.css): tN red,
   // tW blue, Greek Room green, alignment amber; AI review takes violet.
@@ -63,11 +85,22 @@
   let exportMessage = "";
   let exportError = "";
   let exportMenu: HTMLDetailsElement | null = null;
+  /** Click-to-reveal: shows the rows the slider is hiding, without moving it. */
+  let revealTriaged = false;
 
   $: generating = job !== null && !TERMINAL.has(job.state);
+  $: triaging = triageJob !== null && !TERMINAL.has(triageJob.state);
   $: rows = report?.rows ?? [];
   $: books = report?.books ?? [];
-  $: filtered = filterRows(rows, filters);
+  // Filters first, then the triage overlay, so "N hidden by AI triage"
+  // always counts within what the reviewer's filters already selected.
+  $: matched = filterRows(rows, filters);
+  // Computed whether or not they are currently revealed, so the count in the
+  // disclosure stays truthful while the rows themselves are on screen.
+  $: hiddenRows = hiddenByTriage(matched, triage, triageThreshold);
+  $: hiddenRowIds = new Set(hiddenRows.map((row) => row.id));
+  $: filtered = revealTriaged ? matched : applyTriage(matched, triage, triageThreshold);
+  $: triagedRows = triagedCount(matched, triage);
   $: shown = printing ? filtered : filtered.slice(0, visibleCount);
   $: scopedBooks = filters.book ? books.filter((book) => book.bookId === filters.book) : books;
   $: categories = categoryBreakdown(filtered);
@@ -88,6 +121,8 @@
   $: filters, (visibleCount = PAGE);
   $: countLabel = `Showing ${shown.length} of ${filtered.length} ${filtered.length === 1 ? "issue" : "issues"}`
     + (isFiltered(filters) ? ` (filtered from ${rows.length})` : "");
+  // A new threshold, like a new filter, starts the table from the top.
+  $: triageThreshold, (visibleCount = PAGE);
 
   function selectBook(bookId: string): void {
     filters = { ...filters, book: filters.book === bookId ? "" : bookId, chapter: "" };
@@ -120,7 +155,7 @@
       const path = await bridge.pickSavePath(exportFileName(projectName, format));
       if (!path) return;
       exporting = true;
-      const result = await bridge.reportExport(path, format, exportRows(filtered), EXPORT_COLUMNS);
+      const result = await bridge.reportExport(path, format, exportRows(filtered, triage), EXPORT_COLUMNS);
       exportMessage = `Wrote ${result.rows} row${result.rows === 1 ? "" : "s"} to ${result.path}`;
     } catch (e) {
       exportError = e instanceof Error ? e.message : String(e);
@@ -152,6 +187,41 @@
   function severityChip(severity: ReportSeverity): string {
     return severity;
   }
+
+  // --- AI triage -------------------------------------------------------
+
+  const TRIAGE_OFF = 49; // the slider position below its 50 floor
+
+  function setThreshold(event: Event): void {
+    const raw = Number((event.target as HTMLInputElement).value);
+    onTriageThreshold(raw <= TRIAGE_OFF ? null : raw);
+    revealTriaged = false;
+  }
+
+  /** Thumbs toggle: clicking the verdict a row already has clears it. */
+  function override(row: ReportRow, verdict: TriageOverrideVerdict): void {
+    const record = triageFor(row, triage);
+    if (!record) return;
+    const next = record.userOverride?.verdict === verdict ? "" : verdict;
+    onTriageOverride(row.book, row.triageHash, next);
+  }
+
+  function triageLabel(record: TriageRecord): string {
+    const verdict = effectiveVerdict(record);
+    if (record.userOverride) {
+      return `${TRIAGE_VERDICT_LABELS[verdict]} · your call`;
+    }
+    return `${TRIAGE_VERDICT_LABELS[verdict]} · ${record.confidence}%`;
+  }
+
+  $: triageProgressLabel = triageJob
+    ? `Triaging… ${triageJob.completedBooks}/${triageJob.totalBooks} books`
+      + (triageJob.currentBook ? ` · ${triageJob.currentBook.toUpperCase()}` : "")
+      + (triageJob.currentBookTriaged ? ` · ${triageJob.currentBookTriaged} findings` : "")
+    : "";
+  $: triageButtonTitle = triageAvailable
+    ? "Ask the configured AI model how likely each Greek Room finding is to be a false positive"
+    : (triageUnavailableReason || "AI triage needs an API key. Add one in Settings.");
 </script>
 
 <svelte:window on:beforeprint={() => (printing = true)} on:afterprint={() => (printing = false)} />
@@ -179,6 +249,25 @@
         </div>
       {:else if report}
         <button class="small-button" on:click={onGenerate}>Regenerate</button>
+      {/if}
+      {#if report && triaging && triageJob}
+        <div class="generating" role="status">
+          <div class="spin" />
+          <span class="gen-label">{triageProgressLabel}</span>
+          <div class="track"><div class="fill" style="width:{triageJob.percent}%" /></div>
+          <button
+            class="small-button"
+            on:click={onCancelTriage}
+            disabled={triageJob.state === "cancelling"}
+          >{triageJob.state === "cancelling" ? "Cancelling…" : "Cancel"}</button>
+        </div>
+      {:else if report}
+        <button
+          class="small-button"
+          on:click={onRunTriage}
+          disabled={!triageAvailable}
+          title={triageButtonTitle}
+        >Run AI triage</button>
       {/if}
       {#if report}
         <details class="export" bind:this={exportMenu}>
@@ -336,6 +425,52 @@
             {/if}
           </section>
 
+          {#if triageError}
+            <p class="banner error no-print">AI triage: {triageError}</p>
+          {/if}
+
+          {#if triagedRows > 0}
+            <section class="triage-bar no-print" aria-label="AI triage">
+              <label class="triage-slider">
+                <span class="triage-label">
+                  Hide findings rated
+                  <strong>{triageThreshold === null ? "—" : `≥ ${triageThreshold}%`}</strong>
+                  likely false positive
+                </span>
+                <input
+                  type="range"
+                  min={TRIAGE_OFF}
+                  max="100"
+                  step="1"
+                  value={triageThreshold ?? TRIAGE_OFF}
+                  on:input={setThreshold}
+                  aria-label="Hide findings rated at least this likely to be a false positive"
+                  aria-valuetext={triageThreshold === null ? "Off — showing everything" : `${triageThreshold} percent`}
+                />
+                <span class="triage-ends"><span>Off</span><span>100%</span></span>
+              </label>
+              <p class="triage-note">
+                {#if triageThreshold === null}
+                  Showing every finding. {triagedRows} of {matched.length} have an AI triage score.
+                {:else if hiddenRows.length > 0}
+                  <strong>{hiddenRows.length}</strong>
+                  {hiddenRows.length === 1 ? "finding" : "findings"}
+                  {revealTriaged ? "shown despite AI triage." : "hidden by AI triage."}
+                  <button class="link-button" on:click={() => (revealTriaged = !revealTriaged)}>
+                    {revealTriaged ? "Hide them again" : "Show them"}
+                  </button>
+                {:else}
+                  Nothing is hidden at this level. {triagedRows} of {matched.length} findings have an AI triage score.
+                {/if}
+              </p>
+              <p class="triage-caveat">
+                Scores rank findings by how suspicious the model found them. They are
+                not calibrated probabilities — only <em>uncertain</em> and
+                <em>likely real</em> findings are ever kept visible.
+              </p>
+            </section>
+          {/if}
+
           <section class="tiles" aria-label="Summary">
             <div class="tile"><span class="tile-label">Checks run</span><span class="tile-value">{checkTotals.run}</span><small>verses and checks</small></div>
             <div class="tile good"><span class="tile-label">Passed</span><span class="tile-value">{checkTotals.passed}</span></div>
@@ -412,7 +547,11 @@
                   </thead>
                   <tbody>
                     {#each shown as row (row.id)}
-                      <tr class:unresolved={row.resolution === "unresolved"}>
+                      {@const record = triageFor(row, triage)}
+                      <tr
+                        class:unresolved={row.resolution === "unresolved"}
+                        class:triage-hidden={revealTriaged && hiddenRowIds.has(row.id)}
+                      >
                         <td>
                           <span class="cat" style="--chip:{CATEGORY_COLORS[row.category]}"><i />{CATEGORY_LABELS[row.category]}</span>
                           <small class="engine">{row.engine}</small>
@@ -431,6 +570,34 @@
                             {#if row.selection}<span>selected: {row.selection}</span>{/if}
                             {#if row.note}<span>note: {row.note}</span>{/if}
                           </span>
+                          {#if record}
+                            <span
+                              class="triage-tag verdict-{effectiveVerdict(record)}"
+                              class:overridden={Boolean(record.userOverride)}
+                              title={record.reason}
+                            >
+                              <span class="triage-verdict">{triageLabel(record)}</span>
+                              {#if record.reason}<span class="triage-reason">{record.reason}</span>{/if}
+                              <span class="thumbs no-print">
+                                <button
+                                  class="thumb"
+                                  class:on={record.userOverride?.verdict === "true_positive"}
+                                  title="Mark as a real problem — always shown, never re-sent to the model"
+                                  aria-label="Mark {row.reference} as a real problem"
+                                  aria-pressed={record.userOverride?.verdict === "true_positive"}
+                                  on:click={() => override(row, "true_positive")}
+                                >&#128077;</button>
+                                <button
+                                  class="thumb"
+                                  class:on={record.userOverride?.verdict === "false_positive"}
+                                  title="Mark as a false positive — hidden by the slider, never re-sent to the model"
+                                  aria-label="Mark {row.reference} as a false positive"
+                                  aria-pressed={record.userOverride?.verdict === "false_positive"}
+                                  on:click={() => override(row, "false_positive")}
+                                >&#128078;</button>
+                              </span>
+                            </span>
+                          {/if}
                         </td>
                         <td class="proposal">
                           {#if row.aiProposal}
@@ -542,6 +709,36 @@
   .filters label { display: flex; flex-direction: column; gap: 3px; font-size: 9px; font-weight: 700; color: var(--text-2); }
   .filters select { height: 28px; border: 1px solid var(--border-strong); border-radius: 6px; font-size: 11px; padding: 0 6px; background: var(--surface); color: var(--text); min-width: 96px; }
   .filters input { height: 28px; border: 1px solid var(--border-strong); border-radius: 6px; font-size: 11px; padding: 0 10px; background: var(--surface); color: var(--text); flex: 1; min-width: 160px; align-self: end; }
+
+  /* AI triage overlay. Violet throughout, matching the AI-review category
+     colour used by the charts and chips, so "this came from a model" reads
+     the same everywhere on the page. */
+  .triage-bar { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-left: 3px solid var(--ai); border-radius: 10px; background: var(--surface-2); margin-bottom: 14px; }
+  .triage-slider { display: grid; grid-template-columns: auto minmax(140px, 260px); grid-template-areas: "label slider" "label ends"; align-items: center; gap: 2px 12px; }
+  .triage-label { grid-area: label; font-size: 11px; color: var(--text-2); }
+  .triage-label strong { color: var(--text); }
+  .triage-slider input { grid-area: slider; width: 100%; accent-color: var(--ai); }
+  .triage-ends { grid-area: ends; display: flex; justify-content: space-between; font-size: 9px; color: var(--text-2); }
+  .triage-note { margin: 0; font-size: 11px; color: var(--text-2); }
+  .triage-note strong { color: var(--text); }
+  .triage-caveat { margin: 0; font-size: 10px; color: var(--text-2); opacity: 0.85; }
+  .link-button { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
+
+  /* Per-row verdict. The label carries the verdict in words as well as the
+     colour, so it survives both printing and colour-vision differences. */
+  .triage-tag { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 4px; font-size: 10px; color: var(--text-2); }
+  .triage-verdict { font-weight: 700; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border-strong); }
+  .verdict-false_positive .triage-verdict { color: var(--ai); border-color: var(--ai); }
+  .verdict-true_positive .triage-verdict { color: var(--danger); border-color: var(--danger); }
+  .verdict-uncertain .triage-verdict { color: var(--text-2); }
+  .triage-tag.overridden .triage-verdict { box-shadow: inset 0 0 0 1px currentColor; }
+  .triage-reason { font-style: italic; flex: 1; min-width: 0; }
+  .thumbs { display: inline-flex; gap: 2px; }
+  .thumb { border: 1px solid transparent; background: none; border-radius: 6px; cursor: pointer; font-size: 11px; line-height: 1; padding: 2px 4px; opacity: 0.45; }
+  .thumb:hover { opacity: 1; background: var(--surface-2); }
+  .thumb.on { opacity: 1; border-color: var(--ai); background: var(--surface-2); }
+  /* A row shown only because the reviewer asked to see what was hidden. */
+  tr.triage-hidden { opacity: 0.6; background: repeating-linear-gradient(135deg, transparent, transparent 6px, var(--surface-2) 6px, var(--surface-2) 12px); }
 
   /* Tiles */
   .tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }

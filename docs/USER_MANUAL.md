@@ -284,6 +284,67 @@ A modal (not a separate screen), opened via the **Settings** button:
 Choose **Aligned export** or **Non-aligned export** — see [§5](#5-import-and-export-formats)
 above for what each includes.
 
+### 6.9 AI triage — hiding likely false positives
+
+Greek Room checks are cautious on purpose. They flag anything *objectively
+suspicious*, which means a long report will contain findings that are
+perfectly fine: punctuation that is correct for your language, a repeated
+word that is real grammar, a name that inflects. AI triage is an optional
+way to push those down out of your way.
+
+**It needs internet and an API key.** Everything else in Bridge works
+offline; this one feature does not. Without a key the **Run AI triage**
+button is disabled and tells you so, and the report works exactly as it
+otherwise would.
+
+**How to use it.** Open the QA report and click **Run AI triage**. Bridge
+sends each finding — with its check type, the verse and the verses either
+side, and the aligned original-language words — to the model you configured
+in Settings, and stores what comes back. You can keep working while it
+runs, and cancel at any time; whatever it has already scored is kept.
+
+Each scored finding then shows a label like *Likely false positive · 92%*
+with a one-line reason, and the slider above the table appears:
+
+> **Hide findings rated ≥ 90% likely false positive**
+
+Drag it left to hide more, right to hide fewer, or all the way to **Off** to
+see everything. Bridge always tells you how many it is hiding — *"3 findings
+hidden by AI triage"* — with a **Show them** link, so nothing ever
+disappears silently.
+
+**What the percentage means.** It is the model's confidence in its own
+judgement, and it is a **ranking signal, not a calibrated probability**. A
+finding at 95% is not "95% certain to be wrong"; it means the model was more
+sure about it than one at 70%. Treat the slider as "how much noise am I
+willing to tolerate", not as a statistical guarantee.
+
+**What it will never hide.** Only findings the model judged to be false
+positives are ever hidden. Anything it marked *uncertain* or *likely real*
+stays on screen no matter where you put the slider — including anything it
+failed to score at all, because of a network problem or a response it could
+not read. Hiding a genuine translation error is a far worse outcome than
+leaving a false positive visible, so the default (90%) is deliberately
+cautious.
+
+**Correcting it.** Every scored finding has 👍 and 👎 buttons. 👍 means "this
+is a real problem" and keeps it visible whatever the model said; 👎 means
+"this one really is noise". Your judgement always wins over the model's, it
+is remembered, and that finding is never sent to the model again — so
+correcting it also stops it costing you anything. Click the same button
+again to undo.
+
+**When scores go away.** A verdict belongs to a finding *as it was when it
+was scored*. If you edit the verse so the finding's evidence changes, the
+old verdict is discarded rather than carried over, and the finding comes
+back unscored until you run triage again. Re-running triage costs nothing
+for findings that have not changed.
+
+**Cost.** Every run sends findings to your AI provider and is billed by
+them. Bridge batches them and never re-sends a finding it has already
+scored, but a first run over a whole Bible is not free. The running total is
+in Settings.
+
 ---
 
 ## Adding screenshots

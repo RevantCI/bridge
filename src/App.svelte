@@ -14,7 +14,11 @@
   import SemanticMappingValidation from "./lib/components/SemanticMappingValidation.svelte";
   import ProjectReportScreen from "./lib/components/ProjectReportScreen.svelte";
   import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, ProjectReport, QaFinding } from "./lib/types/finding";
-  import type { QaReport, ReportJobSnapshot } from "./lib/types/report";
+  import type {
+    QaReport, ReportJobSnapshot, TriageJobSnapshot, TriageRecord,
+  } from "./lib/types/report";
+  import { isTriageUnavailable } from "./lib/types/report";
+  import type { TriageOverrideVerdict } from "./lib/types/finding";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
@@ -56,6 +60,17 @@
   let qaReportError = "";
   let qaReportPollTimer: ReturnType<typeof setTimeout> | undefined;
   let qaReportPollGeneration = 0;
+  // AI triage overlay on that report. Optional and online-only: with no
+  // verdicts and no API key the report screen renders exactly as it did
+  // before triage existed.
+  let triageEntries: Record<string, TriageRecord> = {};
+  let triageJob: TriageJobSnapshot | null = null;
+  let triageAvailable = false;
+  let triageUnavailableReason = "";
+  let triageError = "";
+  let triageThreshold: number | null = 90;
+  let triagePollTimer: ReturnType<typeof setTimeout> | undefined;
+  let triagePollGeneration = 0;
   let engineNotice = "";
   let engineNoticeTimer: ReturnType<typeof setTimeout> | undefined;
   let settingsInitialPane: "ai" | "quality" | "connections" | "resources" | "security" = "ai";
@@ -256,6 +271,7 @@
         try {
           const settings = await bridge.getSettings();
           reviewerMode.set(settings.reviewerMode);
+          triageThreshold = settings.triageHideThreshold > 0 ? settings.triageHideThreshold : null;
         } catch (error) {
           console.error("Could not load reviewer mode", error);
         }
@@ -364,6 +380,9 @@
     showingAlignmentReview = false;
     showingReport = true;
     if (!qaReport && !qaReportJob) void generateReport();
+    // Verdicts live on disk, so a previous session's triage is already
+    // available the moment the screen opens — no run required.
+    void loadTriageResults();
   }
 
   async function generateReport(): Promise<void> {
@@ -419,6 +438,110 @@
       qaReportJob = await bridge.reportCancel(qaReportJob.jobId);
     } catch (error) {
       qaReportError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  // -- AI triage overlay -------------------------------------------------
+  //
+  // Verdicts are persisted per book by the engine, so they are always read
+  // from disk (triage.results) rather than from the job — they survive a
+  // restart, and a cancelled run keeps whatever it already paid for. The
+  // report itself never depends on any of this having happened.
+
+  /**
+   * Reads verdicts off disk. With no `book` this replaces the whole map;
+   * with one it merges just that book's verdicts in, which is what the
+   * mid-run refresh wants — re-reading all 66 books every second to watch
+   * one of them change would be pointless file I/O.
+   */
+  async function loadTriageResults(book = ""): Promise<void> {
+    try {
+      const results = await bridge.triageResults(book);
+      triageEntries = book ? { ...triageEntries, ...results.entries } : results.entries;
+      triageAvailable = results.available;
+      triageUnavailableReason = results.unavailableReason;
+    } catch (error) {
+      // A failure here must never break the report: the page simply shows
+      // no verdicts and the run button stays disabled.
+      triageError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  async function runTriage(): Promise<void> {
+    triageError = "";
+    stopTriagePolling();
+    const generation = triagePollGeneration;
+    try {
+      const started = await bridge.triageRun();
+      if (generation !== triagePollGeneration) return;
+      if (isTriageUnavailable(started)) {
+        triageError = started.message;
+        triageAvailable = false;
+        triageUnavailableReason = started.message;
+        return;
+      }
+      triageJob = started;
+      await pollTriage(started.jobId, generation);
+    } catch (error) {
+      if (generation !== triagePollGeneration) return;
+      triageError = error instanceof Error ? error.message : String(error);
+      triageJob = null;
+    }
+  }
+
+  async function pollTriage(jobId: string, generation: number): Promise<void> {
+    while (generation === triagePollGeneration) {
+      const snapshot = await bridge.triageStatus(jobId);
+      if (generation !== triagePollGeneration) return;
+      triageJob = snapshot;
+      if (REPORT_TERMINAL.has(snapshot.state)) {
+        // Even a cancelled or partly-failed run leaves verdicts on disk, so
+        // this full read is always worth doing.
+        await loadTriageResults();
+        if (snapshot.error) triageError = snapshot.error;
+        return;
+      }
+      // Refresh mid-run so verdicts appear as they are bought, not only at
+      // the end — a whole-Bible run is long and silent otherwise. Scoped to
+      // the book in flight: nothing else can have changed.
+      if (snapshot.currentBook) await loadTriageResults(snapshot.currentBook);
+      await new Promise<void>((resolve) => { triagePollTimer = setTimeout(resolve, 1000); });
+    }
+  }
+
+  function stopTriagePolling(): void {
+    triagePollGeneration += 1;
+    if (triagePollTimer) clearTimeout(triagePollTimer);
+    triagePollTimer = undefined;
+  }
+
+  async function cancelTriage(): Promise<void> {
+    if (!triageJob) return;
+    try {
+      triageJob = await bridge.triageCancel(triageJob.jobId);
+    } catch (error) {
+      triageError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  async function setTriageThreshold(value: number | null): Promise<void> {
+    triageThreshold = value;
+    try {
+      await bridge.setSettings({ triageHideThreshold: value ?? 0 });
+    } catch {
+      // A settings write failure must not fight the reviewer's slider: the
+      // value stands for this session and simply is not remembered.
+    }
+  }
+
+  async function overrideTriage(
+    book: string, hash: string, verdict: TriageOverrideVerdict | "",
+  ): Promise<void> {
+    try {
+      const result = await bridge.triageOverride(book, hash, verdict);
+      triageEntries = { ...triageEntries, [hash]: result.record };
+    } catch (error) {
+      triageError = error instanceof Error ? error.message : String(error);
     }
   }
 
@@ -883,6 +1006,16 @@
       onGenerate={generateReport}
       onCancel={cancelReport}
       onNavigate={navigateToReportRow}
+      triage={triageEntries}
+      {triageJob}
+      {triageAvailable}
+      {triageUnavailableReason}
+      {triageError}
+      {triageThreshold}
+      onRunTriage={runTriage}
+      onCancelTriage={cancelTriage}
+      onTriageThreshold={setTriageThreshold}
+      onTriageOverride={overrideTriage}
     />
   {:else if screen === "review"}
     {#key $project?.path}

@@ -12,7 +12,9 @@ import type {
   ReportResult,
   ReportRow,
   ReportSeverity,
+  TriageRecord,
 } from "../types/report";
+import type { TriageVerdict } from "../types/finding";
 
 export const CATEGORY_ORDER: ReportCategory[] = [
   "translationNotes", "translationWords", "alignment", "greekRoom", "aiReview",
@@ -61,6 +63,72 @@ export function isFiltered(filters: ReportFilters): boolean {
     || filters.fixedBy !== "" || filters.result !== "" || filters.severity !== ""
     || filters.search.trim() !== "";
 }
+
+// --- AI triage overlay ---------------------------------------------------
+//
+// Deliberately NOT part of ReportFilters: triage hiding is a separate
+// control with its own "N hidden" disclosure, and folding it into
+// isFiltered() would make "Clear filters" silently unhide findings the
+// reviewer chose to hide — and make the filtered-row count ambiguous about
+// which of the two mechanisms removed a row.
+
+/** Verdict after a reviewer's thumbs up/down, which always wins. */
+export function effectiveVerdict(record: TriageRecord): TriageVerdict {
+  return record.userOverride?.verdict ?? record.verdict;
+}
+
+export function triageFor(row: ReportRow, entries: Record<string, TriageRecord>): TriageRecord | null {
+  return (row.triageHash && entries[row.triageHash]) || null;
+}
+
+/**
+ * Whether the slider hides this row.
+ *
+ * Only a false_positive verdict at or above the threshold hides anything:
+ * `uncertain` and `true_positive` are always shown, because hiding a real
+ * translation error is a far worse failure than leaving a false positive on
+ * screen. A reviewer's own override is respected in both directions — a
+ * thumbs-down hides a row the model called uncertain only if it also clears
+ * the threshold, and a thumbs-up always reveals it.
+ */
+export function isHiddenByTriage(
+  row: ReportRow, entries: Record<string, TriageRecord>, threshold: number | null,
+): boolean {
+  if (threshold === null || threshold <= 0) return false;
+  const record = triageFor(row, entries);
+  if (!record) return false;
+  if (effectiveVerdict(record) !== "false_positive") return false;
+  // A human thumbs-down is a definite judgement, not a scored guess, so it
+  // hides regardless of whatever confidence the model had attached.
+  if (record.userOverride?.verdict === "false_positive") return true;
+  return record.confidence >= threshold;
+}
+
+/** Rows the slider is currently hiding, for the "N hidden" disclosure. */
+export function hiddenByTriage(
+  rows: ReportRow[], entries: Record<string, TriageRecord>, threshold: number | null,
+): ReportRow[] {
+  return rows.filter((row) => isHiddenByTriage(row, entries, threshold));
+}
+
+export function applyTriage(
+  rows: ReportRow[], entries: Record<string, TriageRecord>, threshold: number | null,
+): ReportRow[] {
+  return rows.filter((row) => !isHiddenByTriage(row, entries, threshold));
+}
+
+/** How many of these rows carry a triage verdict at all. */
+export function triagedCount(rows: ReportRow[], entries: Record<string, TriageRecord>): number {
+  let count = 0;
+  for (const row of rows) if (triageFor(row, entries)) count += 1;
+  return count;
+}
+
+export const TRIAGE_VERDICT_LABELS: Record<TriageVerdict, string> = {
+  false_positive: "Likely false positive",
+  true_positive: "Likely real",
+  uncertain: "Uncertain",
+};
 
 function matchesFixedBy(row: ReportRow, value: FixedByFilter): boolean {
   if (!value) return true;
@@ -303,6 +371,9 @@ export const EXPORT_COLUMNS: ReportExportColumn[] = [
   { key: "selection", label: "Selection" },
   { key: "note", label: "Reviewer note" },
   { key: "decidedAt", label: "Decided at" },
+  { key: "triageVerdict", label: "AI triage" },
+  { key: "triageConfidence", label: "AI triage confidence" },
+  { key: "triageReason", label: "AI triage reason" },
 ];
 
 export function exportFileName(projectName: string, format: "csv" | "tsv"): string {
@@ -312,6 +383,31 @@ export function exportFileName(projectName: string, format: "csv" | "tsv"): stri
 }
 
 /** Category rows the export/table label with the same short names the charts use. */
-export function exportRows(rows: ReportRow[]): ReportRow[] {
-  return rows.map((row) => ({ ...row, category: CATEGORY_LABELS[row.category] as ReportCategory }));
+/**
+ * Rows shaped for export: the category becomes its display label, and any
+ * triage verdict is flattened onto the row so the CSV records what the
+ * reviewer was looking at — including, importantly, the fact that a row was
+ * scored at all. Rows the slider is hiding are already gone by this point;
+ * the export writes exactly what the table shows.
+ */
+/** A ReportRow flattened for CSV/TSV: display labels, plus any triage verdict. */
+export interface ExportRow extends ReportRow {
+  triageVerdict: string;
+  triageConfidence: string;
+  triageReason: string;
+}
+
+export function exportRows(
+  rows: ReportRow[], entries: Record<string, TriageRecord> = {},
+): ExportRow[] {
+  return rows.map((row) => {
+    const record = triageFor(row, entries);
+    return {
+      ...row,
+      category: CATEGORY_LABELS[row.category] as ReportCategory,
+      triageVerdict: record ? TRIAGE_VERDICT_LABELS[effectiveVerdict(record)] : "",
+      triageConfidence: record ? String(record.confidence) : "",
+      triageReason: record?.reason ?? "",
+    };
+  });
 }

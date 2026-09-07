@@ -2230,6 +2230,49 @@ class TranslationCoreProject:
             return {}
         return {str(v): [f for f in findings if isinstance(f, dict)] for v, findings in verses.items() if isinstance(findings, list)}
 
+    # -- AI triage verdicts ---------------------------------------------------
+    #
+    # One file per book, not per chapter: the store is read whole (the report
+    # screen merges every verdict in the collection at once), and on Windows
+    # the first open of any file costs ~20-25ms regardless of its size, so
+    # 66 files beat 1,189 by an order of magnitude for that read. Records are
+    # keyed by tc_ai_bridge.triage.triage_hash, which hashes the finding's
+    # evidence -- a finding whose evidence changed loses its cached verdict
+    # rather than carrying a stale one forward. Purely additive: nothing in
+    # the offline check or report flow reads this.
+
+    def triage_path(self) -> Path:
+        return self.companion_dir() / 'triage' / f'{self.book_id}.json'
+
+    def load_triage_records(self) -> dict[str, Any]:
+        p = self.triage_path()
+        if not p.exists():
+            return {}
+        try:
+            data = _read_json(p)
+        except Exception:
+            return {}
+        entries = data.get('entries') if isinstance(data, dict) else None
+        if not isinstance(entries, dict):
+            return {}
+        return {str(k): v for k, v in entries.items() if isinstance(v, dict)}
+
+    def save_triage_records(self, entries: dict[str, Any]) -> Path:
+        p = self.triage_path()
+        _write_json_atomic(p, {
+            'schemaVersion': 1, 'bookId': self.book_id,
+            'updatedAt': self._timestamp()[0],
+            'entries': {str(k): v for k, v in entries.items() if isinstance(v, dict)},
+        })
+        return p
+
+    def clear_triage_records(self) -> bool:
+        p = self.triage_path()
+        if not p.exists():
+            return False
+        p.unlink()
+        return True
+
     # -- per-book progress rollup --------------------------------------------
     #
     # Incrementally-updated summary of human-review and AI-check progress,
@@ -2278,6 +2321,27 @@ def read_progress_rollup(project_root: str | Path) -> dict[str, Any] | None:
     except Exception:
         return None
     return data if isinstance(data, dict) else None
+
+
+def read_triage_records(project_root: str | Path, book_id: str) -> dict[str, Any] | None:
+    """Peek at a sibling book's triage verdicts without constructing a full
+    TranslationCoreProject — same reason as read_progress_rollup above: a
+    lazy sibling has no usable manifest/alignmentData yet, and triage.results
+    must still be able to report that it simply has no verdicts."""
+    p = (Path(project_root).resolve() / '.apps' / 'translationCoreAI'
+         / 'triage' / f'{str(book_id).lower()}.json')
+    if not p.is_file():
+        return None
+    try:
+        data = _read_json(p)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    entries = data.get('entries')
+    if not isinstance(entries, dict):
+        return None
+    return {str(k): v for k, v in entries.items() if isinstance(v, dict)}
 
 
 class TranslationCoreRoot:

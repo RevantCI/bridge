@@ -69,6 +69,10 @@ class _ReportJob:
         self.completed = 0
         self.failed_books: list[dict[str, str]] = []
         self.report: Optional[dict[str, Any]] = None
+        # bookId -> wall-clock ms for that book's build. There is no other
+        # measurement of report generation anywhere in the project, so this
+        # is the only baseline any future optimisation can be argued against.
+        self.book_durations: dict[str, float] = {}
         self.error: Optional[str] = None
         self.created_at = _now()
         self.finished_at: Optional[str] = None
@@ -87,6 +91,8 @@ class _ReportJob:
                 "percent": max(0, min(100, percent)),
                 "currentBook": self.current_book,
                 "failedBooks": copy.deepcopy(self.failed_books),
+                "bookDurationsMs": dict(self.book_durations),
+                "totalDurationMs": round(sum(self.book_durations.values()), 1),
                 "error": self.error,
                 "createdAt": self.created_at,
                 "finishedAt": self.finished_at,
@@ -171,6 +177,8 @@ class ReportJobManager:
             if report is not None:
                 reports.append(report)
             with job.lock:
+                if isinstance(report, dict) and report.get("durationMs") is not None:
+                    job.book_durations[book.book_id] = float(report["durationMs"])
                 job.completed += 1
         try:
             payload = assemble(reports)

@@ -217,6 +217,100 @@ pub async fn report_export(
         .await
 }
 
+/// Optional, online-only AI triage of Greek Room findings
+/// (engine/tc_ai_bridge/triage.py). A background run polled by status;
+/// verdicts are persisted per book as they are produced, so results are
+/// fetched from disk with triage_results rather than from the job.
+#[tauri::command]
+pub async fn triage_run(
+    sidecar: State<'_, EngineSidecar>,
+    book: Option<String>,
+    force: Option<bool>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "triage.run",
+            serde_json::json!({
+                "book": book.unwrap_or_default(),
+                "force": force.unwrap_or(false),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn triage_status(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "triage.status",
+            serde_json::json!({ "jobId": job_id.unwrap_or_default() }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn triage_cancel(
+    sidecar: State<'_, EngineSidecar>,
+    job_id: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "triage.cancel",
+            serde_json::json!({ "jobId": job_id.unwrap_or_default() }),
+        )
+        .await
+}
+
+/// Records a reviewer's thumbs up/down on one triage verdict. An empty
+/// verdict clears the override and hands the finding back to the model.
+#[tauri::command]
+pub async fn triage_override(
+    sidecar: State<'_, EngineSidecar>,
+    book: String,
+    hash: String,
+    verdict: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "triage.override",
+            serde_json::json!({
+                "book": book,
+                "hash": hash,
+                "verdict": verdict.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn triage_clear(
+    sidecar: State<'_, EngineSidecar>,
+    book: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "triage.clear",
+            serde_json::json!({ "book": book.unwrap_or_default() }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn triage_results(
+    sidecar: State<'_, EngineSidecar>,
+    book: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "triage.results",
+            serde_json::json!({ "book": book.unwrap_or_default() }),
+        )
+        .await
+}
+
 #[tauri::command]
 pub async fn project_inspect_import(
     sidecar: State<'_, EngineSidecar>,
