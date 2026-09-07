@@ -15,6 +15,9 @@
   export let onBookChange: (path: string) => void;
   export let exportEnabled: boolean;
   export let bookSwitching = false;
+  // Editor screen only: runs an AI review across the open chapter.
+  export let onAIChapterReview: () => void = () => {};
+  export let aiChapterReviewBusy = false;
 
   let gotoValue = "";
 
@@ -91,6 +94,12 @@
         on:keydown={(e) => e.key === "Enter" && jump()}
       />
     </div>
+    <button
+      class="btn ai-chapter-btn"
+      on:click={onAIChapterReview}
+      disabled={aiChapterReviewBusy}
+      title="Run an evidence-grounded AI review across every verse in this chapter"
+    >{aiChapterReviewBusy ? "AI review…" : "🤖 AI chapter review"}</button>
   {/if}
 
   <div class="grow" />
@@ -140,6 +149,7 @@
   .sync-status span { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--border-strong); color: var(--surface); font-size: var(--fs-3xs); }
   .sync-status span.connected { background: var(--success); }
   .sync-status span.error { background: var(--danger); }
+  .ai-chapter-btn { flex-shrink: 0; }
   .btn { font-size: var(--fs-sm); font-weight: 600; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; flex-shrink: 0; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.primary:disabled { background: #B9C6E0; border-color: #B9C6E0; color: #fff; cursor: not-allowed; }

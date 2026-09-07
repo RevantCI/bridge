@@ -9,7 +9,7 @@
   import {
     selectedVerse, selectedFindings, findingsByVerse, currentChapter,
     checkStatusByVerse, checkingProgress, verseKey,
-    aiCheckReviewsByVerse, nativeChecksByVerse, project, reviewerMode, allowManualOverride,
+    aiCheckReviewsByVerse, nativeChecksByVerse, project, reviewerMode,
   } from "../stores";
   import {
     editingChapter, editingVerse, editText, editSaving, editError, editErrorKey,
@@ -101,8 +101,19 @@
   let aiFailedResults: Array<{ chapter: string; verse: string; error: string | null }> = [];
   let translationHelpsReview: TranslationHelpsReview;
 
+  export let onAIBusyChange: (busy: boolean) => void = () => {};
+  export function startChapterAIReview(): void {
+    void startAIReview("chapter");
+  }
+
   $: currentReviewReference = `${$project?.path ?? ""}::${$selectedVerse ? verseKey($currentChapter, $selectedVerse) : ""}`;
   $: aiJobBusy = isAIReviewJobActive(aiJob);
+  // The chapter-scope run is a navigation-level action, so its button now
+  // lives in the top bar -- but the job machinery (polling, result
+  // hydration, the Translation-helps refresh) stays here with the per-verse
+  // state it feeds. App reaches it through these two, rather than the whole
+  // orchestration being lifted into a store it does not otherwise need.
+  $: onAIBusyChange(aiJobBusy);
   $: visibleAIJob = aiJob && $selectedVerse && aiJobAppliesToReference(
     aiJob, $project?.path ?? "", $currentChapter, $selectedVerse,
   ) ? aiJob : null;
@@ -398,6 +409,27 @@
       </div>
     </div>
 
+    <div class="verse-actions">
+      <button
+        class="align-btn"
+        on:click={openAlignment}
+        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
+        title={$checkingProgress.running ? "Wait for background checking to finish before aligning" : "Review word alignment"}
+      >⇄ Align words</button>
+      <button
+        class="edit-btn"
+        on:click={startEdit}
+        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
+        title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
+      >✎ Edit verse</button>
+      <button
+        class="ai-explain-btn"
+        on:click={() => startAIReview("verse")}
+        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey) || aiJobBusy}
+        title="Run an evidence-grounded AI review for this verse in the background"
+      >🤖 AI review</button>
+    </div>
+
     <div class="panel-pinned">
       {#if $recheckingKey === verseKey($currentChapter, $selectedVerse)}
         <div class="operation-status checking"><span class="spin" /> Verse saved. Re-checking local and Greek Room QA…</div>
@@ -411,20 +443,15 @@
         <div class="operation-status checking">✎ Editing this verse in the left panel — save or cancel there.</div>
       {/if}
 
+      <!-- The "Automatic AI review" panel is gone: "This verse" is the AI
+           review button in the action row above, and "Chapter" is now in the
+           top bar. Only the whole-book run is left here, pending its move to
+           the project details page. The job status below stays regardless of
+           where a run is started from -- it is the only place a running
+           review can be watched, cancelled or retried. -->
       <div class="section ai-review-controls">
-        <div class="section-title">
-          Automatic AI review
-          {#if $allowManualOverride}<span class="mode-pill">Manual override</span>{/if}
-        </div>
-        <p class="ai-review-help">
-          {$allowManualOverride
-            ? "Safe, evidence-grounded selections are applied automatically; uncertain checks remain for review. You can edit any selection."
-            : "Safe, evidence-grounded selections are applied automatically; uncertain checks remain for review."}
-        </p>
         <div class="ai-scope-actions">
-          <button on:click={() => startAIReview("verse")} disabled={$checkingProgress.running || aiJobBusy}>This verse</button>
-          <button on:click={() => startAIReview("chapter")} disabled={$checkingProgress.running || aiJobBusy}>Chapter</button>
-          <button on:click={() => startAIReview("book")} disabled={$checkingProgress.running || aiJobBusy}>Whole book</button>
+          <button on:click={() => startAIReview("book")} disabled={$checkingProgress.running || aiJobBusy}>🤖 AI review: whole book</button>
         </div>
         {#if visibleAIJob}
           <div class="ai-job-status" class:failed={visibleAIJob.state === "failed"}>
@@ -681,26 +708,6 @@
 
     </div>
 
-    <div class="footer-actions">
-      <button
-        class="align-btn"
-        on:click={openAlignment}
-        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
-        title={$checkingProgress.running ? "Wait for background checking to finish before aligning" : "Review word alignment"}
-      >⇄ Align words</button>
-      <button
-        class="edit-btn"
-        on:click={startEdit}
-        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
-        title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
-      >✎ Edit verse</button>
-      <button
-        class="ai-explain-btn"
-        on:click={() => startAIReview("verse")}
-        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey) || aiJobBusy}
-        title="Run an evidence-grounded AI review for this verse in the background"
-      >🤖 AI review</button>
-    </div>
   {:else}
     <div class="empty-panel">Select a verse to review its findings.</div>
   {/if}
@@ -785,7 +792,7 @@
   .edit-inline { background: var(--accent-bg); color: var(--accent); }
   .none { font-size: var(--fs-xs); color: var(--text-3); }
   .decision-row button:disabled { opacity: .55; cursor: not-allowed; }
-  .footer-actions { padding: 12px 16px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .verse-actions { padding: 12px 16px; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; flex-shrink: 0; }
   .edit-btn { width: 100%; padding: 8px; font-size: var(--fs-sm); font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
   .align-btn, .ai-explain-btn { width: 100%; padding: 8px; font-size: var(--fs-sm); font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
   .edit-btn:disabled, .align-btn:disabled, .ai-explain-btn:disabled { opacity: .55; cursor: not-allowed; }
@@ -796,8 +803,6 @@
   .ai-error { font-size: var(--fs-sm); color: var(--danger); line-height: 1.5; margin: 0; }
   .ai-suggestion { font-size: var(--fs-xs); color: var(--accent); margin: -4px 0 8px; }
   .ai-review-controls { border-color: var(--accent); }
-  .mode-pill { margin-left: auto; text-transform: capitalize; font-size: var(--fs-3xs); padding: 2px 7px; border-radius: 999px; color: var(--accent); background: var(--accent-bg); }
-  .ai-review-help { font-size: var(--fs-2xs); line-height: 1.45; color: var(--text-2); margin: 0 0 8px; }
   .ai-scope-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
   .ai-scope-actions button, .ai-job-actions button { padding: 6px; font-size: var(--fs-2xs); font-weight: 700; border-radius: 6px; border: 1px solid var(--border-strong); color: var(--accent); background: var(--surface); cursor: pointer; }
   .ai-scope-actions button:disabled, .ai-job-actions button:disabled { opacity: .55; cursor: not-allowed; }

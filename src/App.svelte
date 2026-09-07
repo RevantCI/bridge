@@ -925,6 +925,12 @@
     },
     { complete: 0, partial: 0, untouched: 0, invalid: 0 },
   );
+
+  // The top bar's AI chapter review button drives ReviewPanel, which owns the
+  // job state; ReviewPanel is only mounted on the editor screen, so both are
+  // undefined/false elsewhere and the button is hidden there anyway.
+  let reviewPanel: ReviewPanel | undefined;
+  let aiReviewBusy = false;
 </script>
 
 <div class="frame print-expand">
@@ -942,6 +948,8 @@
     onBookChange={switchBook}
     exportEnabled={$project !== null}
     bookSwitching={Boolean(openingBook)}
+    onAIChapterReview={() => reviewPanel?.startChapterAIReview()}
+    aiChapterReviewBusy={aiReviewBusy}
   />
 
   {#if openingBook}
@@ -1055,7 +1063,7 @@
         </div>
         <VerseList onSelect={selectVerse} />
       </div>
-      <ReviewPanel />
+      <ReviewPanel bind:this={reviewPanel} onAIBusyChange={(busy) => (aiReviewBusy = busy)} />
     </div>
 
     <div class="statusbar">
