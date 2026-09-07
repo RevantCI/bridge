@@ -408,7 +408,11 @@
     color: var(--success); font-size: var(--fs-sm); box-shadow: 0 4px 14px rgba(15, 23, 42, .18);
   }
   .context-notice.error { background: var(--danger-bg, #fef2f2); color: var(--danger, #b91c1c); }
-  .verse.editing-row { cursor: default; background: var(--surface); }
+  /* The row being edited is still .active, which paints its own border --
+     nested inside the textarea's it read as a double outline. The
+     textarea is the only box while editing. Equal specificity to
+     .verse.active and declared after it, so this wins. */
+  .verse.editing-row { cursor: default; background: var(--surface); border-color: transparent; }
   .vedit { flex: 1; min-width: 0; cursor: default; }
   .vedit-row { display: flex; align-items: flex-start; gap: 8px; }
   .vedit textarea {
