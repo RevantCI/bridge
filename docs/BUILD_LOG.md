@@ -4307,8 +4307,8 @@ verdicts it never reached.
 
 ```text
 triage focused Python (module + RPC)    100 passed
-full Python + Greek Room                833 passed (run before the RPC layer landed)
-frontend Vitest                         262 passed / 22 files
+full Python + Greek Room                866 passed (765 before this work)
+frontend Vitest                         262 passed / 22 files (192 before)
 npm run check                             0 errors / 0 warnings
 npm run build                           passed; existing >500 kB warning
 cargo test                                8 passed (6 before, +2 triage timeout class)
