@@ -1,4 +1,4 @@
-# Build log: Bridge v0.9.2
+# Build log: Bridge v0.9.3
 
 Updated: 2026-09-07
 
