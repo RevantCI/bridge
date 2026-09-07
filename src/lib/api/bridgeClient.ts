@@ -68,6 +68,7 @@ import type {
   TriageRunResponse,
 } from "../types/report";
 import type { TriageOverrideVerdict } from "../types/finding";
+import type { ExportRow } from "../utils/reportStats";
 
 /**
  * Thin wrapper around Tauri's invoke() calling the real commands defined
@@ -224,8 +225,12 @@ export const bridge = {
     return call("report_cancel", { jobId });
   },
 
+  /** `rows` are the export-shaped rows from reportStats.exportRows, not raw
+   * ReportRows: the category is a display label and any triage verdict is
+   * flattened on. The engine writes exactly the columns it is given. */
   reportExport(
-    outputPath: string, format: "csv" | "tsv", rows: ReportRow[], columns: ReportExportColumn[],
+    outputPath: string, format: "csv" | "tsv", rows: ExportRow[],
+    columns: ReportExportColumn[],
   ): Promise<ReportExportResult> {
     return call("report_export", { outputPath, format, rows, columns });
   },

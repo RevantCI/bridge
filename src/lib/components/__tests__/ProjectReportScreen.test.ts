@@ -13,7 +13,7 @@ vi.mock("../../api/bridgeClient", () => ({
 
 import ProjectReportScreen from "../ProjectReportScreen.svelte";
 import { EXPORT_COLUMNS } from "../../utils/reportStats";
-import type { ReportJobSnapshot } from "../../types/report";
+import type { ReportJobSnapshot, TriageJobSnapshot, TriageRecord } from "../../types/report";
 import { reportRow, sampleReport } from "./reportFixtures";
 
 function mount(props: Partial<{
@@ -23,6 +23,16 @@ function mount(props: Partial<{
   onGenerate: () => void;
   onCancel: () => void;
   onNavigate: (book: string, chapter: string, verse: string) => void;
+  triage: Record<string, TriageRecord>;
+  triageJob: TriageJobSnapshot | null;
+  triageAvailable: boolean;
+  triageUnavailableReason: string;
+  triageError: string;
+  triageThreshold: number | null;
+  onRunTriage: () => void;
+  onCancelTriage: () => void;
+  onTriageThreshold: (value: number | null) => void;
+  onTriageOverride: (book: string, hash: string, verdict: string) => void;
 }> = {}) {
   return render(ProjectReportScreen, {
     props: {
@@ -191,5 +201,155 @@ describe("ProjectReportScreen", () => {
     expect(tableRows()).toHaveLength(200);
     await fireEvent.click(screen.getByRole("button", { name: "Show all 250" }));
     expect(tableRows()).toHaveLength(250);
+  });
+});
+
+describe("ProjectReportScreen — AI triage overlay", () => {
+  function triageRecord(overrides: Partial<TriageRecord> = {}): TriageRecord {
+    return {
+      findingId: "f1", chapter: "1", verse: "1", checkType: "wildebeest.script.mixed",
+      family: "mechanical", verdict: "false_positive", confidence: 96,
+      reason: "Tamil uses this punctuation normally.",
+      model: "gpt-5.6", timestamp: "2026-09-07T00:00:00Z", userOverride: null,
+      ...overrides,
+    };
+  }
+
+  /** sampleRows[0] is the Greek Room row; give it the only verdict. */
+  const oneVerdict = (overrides: Partial<TriageRecord> = {}) => ({
+    "hash-rut:a": triageRecord(overrides),
+  });
+
+  it("renders exactly as before when no triage has ever run", () => {
+    mount();
+    expect(screen.queryByLabelText(/Hide findings rated/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/hidden by AI triage/)).not.toBeInTheDocument();
+    expect(tableRows()).toHaveLength(4);
+  });
+
+  it("disables the run button and explains why when there is no API key", () => {
+    mount({ triageAvailable: false, triageUnavailableReason: "No OpenAI-compatible API key is configured." });
+    const button = screen.getByRole("button", { name: "Run AI triage" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "No OpenAI-compatible API key is configured.");
+  });
+
+  it("runs triage when the button is enabled", async () => {
+    const onRunTriage = vi.fn();
+    mount({ triageAvailable: true, onRunTriage });
+    await fireEvent.click(screen.getByRole("button", { name: "Run AI triage" }));
+    expect(onRunTriage).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows progress with a cancel action while triage runs", async () => {
+    const onCancelTriage = vi.fn();
+    const triageJob: TriageJobSnapshot = {
+      jobId: "t1", state: "running", force: false, totalBooks: 66, completedBooks: 3, percent: 5,
+      currentBook: "exo", currentChapter: "4", currentBookTriaged: 12, currentBookSkipped: 2,
+      triaged: 40, skipped: 5, pruned: 0, failedBatches: 0, failedBooks: [], books: [],
+      error: null, createdAt: "", finishedAt: null,
+    };
+    mount({ triageJob, onCancelTriage });
+    expect(screen.getByText(/Triaging… 3\/66 books · EXO · 12 findings/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelTriage).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides a confident false positive and says how many it hid", () => {
+    mount({ triage: oneVerdict(), triageThreshold: 90 });
+    expect(tableRows()).toHaveLength(3);
+    const bar = within(screen.getByLabelText("AI triage"));
+    expect(bar.getByText(/hidden by AI triage/)).toHaveTextContent("1 finding hidden by AI triage.");
+    // The hidden row is the Greek Room one that carried the verdict.
+    expect(screen.queryByText("Mixed script")).not.toBeInTheDocument();
+  });
+
+  it("keeps everything visible with the slider off", () => {
+    mount({ triage: oneVerdict(), triageThreshold: null });
+    expect(tableRows()).toHaveLength(4);
+    expect(screen.getByText(/Showing every finding/)).toBeInTheDocument();
+  });
+
+  it.each(["uncertain", "true_positive"] as const)(
+    "never hides a %s finding, however confident the model was",
+    (verdict) => {
+      mount({ triage: oneVerdict({ verdict, confidence: 100 }), triageThreshold: 50 });
+      expect(tableRows()).toHaveLength(4);
+    },
+  );
+
+  it("reveals hidden rows on request without moving the slider", async () => {
+    mount({ triage: oneVerdict(), triageThreshold: 90 });
+    expect(tableRows()).toHaveLength(3);
+    await fireEvent.click(screen.getByRole("button", { name: "Show them" }));
+    expect(tableRows()).toHaveLength(4);
+    // The count stays truthful while they are on screen.
+    expect(screen.getByText(/shown despite AI triage/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Hide them again" }));
+    expect(tableRows()).toHaveLength(3);
+  });
+
+  it("moves the threshold through the slider, and treats its floor as off", async () => {
+    const onTriageThreshold = vi.fn();
+    mount({ triage: oneVerdict(), triageThreshold: 90, onTriageThreshold });
+    const slider = screen.getByLabelText(/Hide findings rated at least/);
+    await fireEvent.input(slider, { target: { value: "75" } });
+    expect(onTriageThreshold).toHaveBeenLastCalledWith(75);
+    await fireEvent.input(slider, { target: { value: "49" } });
+    expect(onTriageThreshold).toHaveBeenLastCalledWith(null);
+  });
+
+  it("shows the verdict and the model's reason on a triaged row", () => {
+    mount({ triage: oneVerdict({ confidence: 72 }), triageThreshold: 90 });
+    expect(screen.getByText("Likely false positive · 72%")).toBeInTheDocument();
+    expect(screen.getByText("Tamil uses this punctuation normally.")).toBeInTheDocument();
+  });
+
+  it("sends a thumbs up, and toggles it off when clicked again", async () => {
+    const onTriageOverride = vi.fn();
+    mount({ triage: oneVerdict({ confidence: 60 }), triageThreshold: 90, onTriageOverride });
+    await fireEvent.click(screen.getByRole("button", { name: /Mark RUT 1:1 as a real problem/ }));
+    expect(onTriageOverride).toHaveBeenCalledWith("rut", "hash-rut:a", "true_positive");
+
+  });
+
+  it("clears an override by clicking the thumb it already carries", async () => {
+    const onTriageOverride = vi.fn();
+    mount({
+      triage: oneVerdict({ confidence: 60, userOverride: { verdict: "true_positive", timestamp: "t" } }),
+      triageThreshold: 90,
+      onTriageOverride,
+    });
+    await fireEvent.click(screen.getByRole("button", { name: /Mark RUT 1:1 as a real problem/ }));
+    expect(onTriageOverride).toHaveBeenCalledWith("rut", "hash-rut:a", "");
+  });
+
+  it("labels an overridden verdict as the reviewer's own call", () => {
+    mount({
+      triage: oneVerdict({ userOverride: { verdict: "true_positive", timestamp: "t" } }),
+      triageThreshold: 90,
+    });
+    expect(screen.getByText("Likely real · your call")).toBeInTheDocument();
+    // And the override wins: the row is no longer hidden.
+    expect(tableRows()).toHaveLength(4);
+  });
+
+  it("carries the verdict into an export", async () => {
+    pickSavePath.mockResolvedValue("C:/out.csv");
+    reportExport.mockResolvedValue({ written: true, path: "C:/out.csv", rows: 3, format: "csv" });
+    mount({ triage: oneVerdict(), triageThreshold: null });
+    openExportMenu();
+    await fireEvent.click(screen.getByRole("button", { name: "CSV" }));
+    await waitFor(() => expect(reportExport).toHaveBeenCalled());
+    const rows = reportExport.mock.calls[0][2];
+    const triaged = rows.find((r: Record<string, string>) => r.triageVerdict);
+    expect(triaged.triageVerdict).toBe("Likely false positive");
+    expect(triaged.triageConfidence).toBe("96");
+  });
+
+  it("surfaces a triage failure without breaking the report", () => {
+    mount({ triageError: "Network error contacting OpenAI" });
+    expect(screen.getByText(/AI triage: Network error contacting OpenAI/)).toBeInTheDocument();
+    expect(tableRows()).toHaveLength(4);
   });
 });
