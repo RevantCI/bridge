@@ -17,6 +17,10 @@
   let openNotes: { kind: VerseNoteKind; notes: VerseNote[]; reference: string } | null = null;
   let contextMenu: { finding: QaFinding; x: number; y: number } | null = null;
   let contextBusy = false;
+  // Which underlined finding Left/Right last landed on, scoped to one verse
+  // key so switching verses starts at that verse's first finding again.
+  let activeFindingVerseKey = "";
+  let activeFindingIndex = 0;
   let contextNotice = "";
   let contextNoticeError = false;
 
@@ -29,9 +33,23 @@
       title: contextMenu.finding.suggested_replacement === null
         ? "No proposed fix is available for this finding." : undefined,
     },
-    { id: "decide:accepted", label: "Accept finding", disabled: contextBusy, separatorBefore: true },
-    { id: "decide:rejected", label: "Reject finding", disabled: contextBusy },
-    { id: "decide:needs_discussion", label: "Needs discussion", disabled: contextBusy },
+    // Hints, not renames: these three write engine FindingStatus values, which
+    // the review panel already labels "Accepted"/"Ignored". The QA review
+    // queue's REVIEWER_ACTIONS are a different model over a different data
+    // source and its "Accept translation as correct" means the opposite of
+    // "Accept finding" here, so each item spells out which way it points.
+    {
+      id: "decide:accepted", label: "Accept finding", disabled: contextBusy, separatorBefore: true,
+      title: "This finding is a real issue in the translation.",
+    },
+    {
+      id: "decide:rejected", label: "Reject finding", disabled: contextBusy,
+      title: "Bridge should not have raised this — a false positive.",
+    },
+    {
+      id: "decide:needs_discussion", label: "Needs discussion", disabled: contextBusy,
+      title: "Defer this for the team to decide.",
+    },
   ] : [];
 
   const markerLabel = (kind: VerseNoteKind): string => (kind === "footnote" ? "f" : "x");
@@ -52,6 +70,72 @@
     event.stopPropagation();
     onSelect(verse);
     contextMenu = { finding, x: event.clientX, y: event.clientY };
+  }
+
+  /**
+   * Finding ids that actually carry an underline in this verse, in reading
+   * order — same filter and sort buildSegments/findingNumbers use, so the
+   * keyboard walks the marks a reviewer can see, in the order their
+   * superscript numbers run.
+   */
+  function markedFindingIds(findings: QaFinding[], textLength: number): string[] {
+    return findings
+      .filter((f) => f.start_offset !== null && f.end_offset !== null && f.end_offset <= textLength)
+      .sort((a, b) => (a.start_offset! - b.start_offset!) || a.id.localeCompare(b.id))
+      .map((f) => f.id);
+  }
+
+  // Reactive rather than a plain function so the each-block {@const} that calls
+  // it re-evaluates when the active finding moves: Svelte invalidates on the
+  // reference to activeIndexFor, not on variables read inside a function body.
+  $: activeIndexFor = (verseKeyValue: string, count: number): number =>
+    verseKeyValue === activeFindingVerseKey && activeFindingIndex < count ? activeFindingIndex : 0;
+
+  /**
+   * Keyboard route to the same menu the right-click opens — without it,
+   * "Apply proposed fix" would be reachable by pointer only, since the review
+   * panel has no apply-fix control.
+   *
+   * The verse row stays the single tab stop, the way QaFindingList's listbox
+   * does it: making every underlined span focusable would add one tab stop per
+   * finding inside the verse text, so tabbing through a checked chapter would
+   * stop on hundreds of words. Left/Right move the active finding within the
+   * row instead, and Shift+F10 (or the Menu key) opens the menu anchored under
+   * that finding's underline.
+   */
+  function onVerseKeydown(
+    event: KeyboardEvent,
+    verse: string,
+    key: string,
+    findingIds: string[],
+    findings: QaFinding[],
+  ): void {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(verse);
+      return;
+    }
+    if (findingIds.length === 0) return;
+    const index = activeIndexFor(key, findingIds.length);
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      onSelect(verse);
+      activeFindingVerseKey = key;
+      activeFindingIndex =
+        (index + (event.key === "ArrowRight" ? 1 : -1) + findingIds.length) % findingIds.length;
+      return;
+    }
+    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+    event.preventDefault();
+    const finding = findings.find((item) => item.id === findingIds[index]);
+    if (!finding) return;
+    onSelect(verse);
+    activeFindingVerseKey = key;
+    activeFindingIndex = index;
+    const row = event.currentTarget as HTMLElement;
+    const anchor = row.querySelector<HTMLElement>(`[data-finding-ids~="${findingIds[index]}"]`) ?? row;
+    const rect = anchor.getBoundingClientRect();
+    contextMenu = { finding, x: rect.left, y: rect.bottom };
   }
 
   async function onContextAction(event: CustomEvent<{ id: string }>): Promise<void> {
@@ -154,7 +238,10 @@
     {@const openCount = findings.filter((f) => f.status === "open").length}
     {@const highlightFindings = findings.filter((f) => f.status !== "ignored" && f.status !== "accepted")}
     {@const parsed = parseVerseNotes($verseTexts[key] ?? "")}
-    {@const segments = buildSegments(parsed.clean, remapFindings(highlightFindings, parsed), $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [])}
+    {@const remapped = remapFindings(highlightFindings, parsed)}
+    {@const segments = buildSegments(parsed.clean, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [])}
+    {@const menuFindingIds = markedFindingIds(remapped, parsed.clean.length)}
+    {@const activeFindingId = menuFindingIds[activeIndexFor(key, menuFindingIds.length)]}
     {@const isEditingThis = $editingChapter === $currentChapter && $editingVerse === v}
     <div
       class="verse"
@@ -165,8 +252,10 @@
       class:check-failed={checkStatus === "failed" || checkStatus === "cancelled"}
       role="button"
       tabindex="0"
+      aria-haspopup={menuFindingIds.length ? "menu" : undefined}
+      aria-keyshortcuts={menuFindingIds.length ? "Shift+F10" : undefined}
       on:click={() => onSelect(v)}
-      on:keydown={(e) => (e.key === "Enter" || e.key === " ") && onSelect(v)}
+      on:keydown={(e) => onVerseKeydown(e, v, key, menuFindingIds, findings)}
     >
       <div class="vnum">
         {v}{#if checkStatus === "succeeded" && openCount === 0}&nbsp;✓{:else if checkStatus === "failed" || checkStatus === "cancelled"}&nbsp;⚠{/if}
@@ -197,8 +286,10 @@
                 aria-label={`Show ${markerTitle(piece.note.kind).toLowerCase()} at this point in verse ${key}`}
               >{markerLabel(piece.note.kind)}</button>{:else if piece.seg.className}<mark
                 class={piece.seg.className}
+                class:active-finding={$selectedVerse === v && activeFindingId !== undefined
+                  && piece.seg.findingIds.includes(activeFindingId)}
+                data-finding-ids={piece.seg.findingIds.join(" ")}
                 title={piece.seg.title}
-                aria-haspopup={piece.seg.findingIds.some((id) => findings.some((finding) => finding.id === id)) ? "menu" : undefined}
                 on:contextmenu={(event) => openFindingMenu(event, piece.seg.findingIds, findings, v)}
               >{piece.seg.text}</mark>{#if piece.seg.numbers.length}<sup class="finding-num">{piece.seg.numbers.join(",")}</sup>{/if}{:else}{piece.seg.text}{/if}
           {/each}
@@ -250,6 +341,9 @@
   .verse.check-failed .vnum { color: var(--danger, #ef4444); }
   .vtext { font-size: 16px; line-height: 1.85; color: var(--text); }
   .finding-num { font-size: 10px; font-weight: 700; color: var(--accent); margin-left: 1px; }
+  /* Where Shift+F10 would open the menu. A visible ring, not colour alone:
+     the underline classes already carry the finding's source colour. */
+  mark.active-finding { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
   /* Sits inline where the note was, like a printed Bible's callout. A plain
      letter, not an icon font: an offline PyInstaller build can't reach a CDN
      and icon-only controls render as empty boxes there. */

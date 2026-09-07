@@ -1,10 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/svelte";
 
 import EvidenceInspector from "../EvidenceInspector.svelte";
 import QaFindingDetail from "../QaFindingDetail.svelte";
 import QaFindingList from "../QaFindingList.svelte";
 import ReviewStatusBadge from "../ReviewStatusBadge.svelte";
+import VerseList from "../VerseList.svelte";
+import {
+  aiCheckReviewsByVerse, alignmentStatusByVerse, chapterVerseNums, checkStatusByVerse,
+  currentChapter, findingsByVerse, nativeChecksByVerse, selectedVerse, verseKey, verseTexts,
+} from "../../stores";
+import type { QaFinding } from "../../types/finding";
 import { LONG_TAMIL, detail, manyFindings, staleConfirmed, summary } from "./fixtures";
 
 /**
@@ -70,6 +76,37 @@ describe("accessibility", () => {
     expect(screen.getByRole("table")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Dimension" })).toBeInTheDocument();
     expect(screen.getByRole("rowheader", { name: "QUANTITY" })).toBeInTheDocument();
+  });
+
+  it("reaches apply-fix in the verse editor without a pointer", async () => {
+    // The review panel has no apply-fix control, so the finding context menu is
+    // the only route to it. Right-click alone would make it pointer-only.
+    const spanned: QaFinding = {
+      id: "f1", project_id: "p1", book: "php", chapter: 1, verse: 6,
+      start_offset: 0, end_offset: 5, original_text: "alpha",
+      engine: "greek_room", check_type: "spelling", category: "spelling",
+      severity: "low", confidence: 0.5, suggested_replacement: "omega",
+      explanation: "Possible spelling issue", evidence: [], engine_version: "1",
+      resource_versions: {}, status: "open", human_comment: null,
+      created_at: "2026-09-06T00:00:00Z", resolved_at: null,
+    };
+    currentChapter.set("1");
+    chapterVerseNums.set({ "1": ["6"] });
+    verseTexts.set({ [verseKey("1", "6")]: "alpha beta" });
+    findingsByVerse.set({ [verseKey("1", "6")]: [spanned] });
+    checkStatusByVerse.set({});
+    alignmentStatusByVerse.set({});
+    nativeChecksByVerse.set({});
+    aiCheckReviewsByVerse.set({});
+    selectedVerse.set("6");
+
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    const row = document.querySelector('[data-verse-key="1:6"]') as HTMLElement;
+    expect(row).toHaveAttribute("aria-keyshortcuts", "Shift+F10");
+    await fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: "Apply proposed fix" })).toBeEnabled();
+    // Focus lands inside the menu, so the action is operable from there.
+    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Apply proposed fix" }));
   });
 
   it("uses a heading hierarchy the reviewer can navigate by", () => {

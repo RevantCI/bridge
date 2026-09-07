@@ -62,6 +62,11 @@ function seed(text: string, findings: QaFinding[] = []): void {
   selectedVerse.set(null);
 }
 
+/** The one verse row seed() renders, addressed the way the component keys it. */
+function verseRow(): HTMLElement {
+  return document.querySelector('[data-verse-key="1:6"]') as HTMLElement;
+}
+
 const FOOTNOTE_MARKER = /Show footnote at this point in verse 1:6/;
 const XREF_MARKER = /Show cross reference at this point in verse 1:6/;
 
@@ -191,5 +196,60 @@ describe("VerseList footnote handling", () => {
     render(VerseList, { props: { onSelect: vi.fn() } });
     await fireEvent.contextMenu(document.querySelector("mark") as HTMLElement);
     expect(screen.getByRole("menuitem", { name: "Apply proposed fix" })).toBeEnabled();
+  });
+
+  it("opens the same finding menu from the keyboard, with no pointer involved", async () => {
+    seed("alpha beta", [finding({
+      start_offset: 0, end_offset: 5, original_text: "alpha", suggested_replacement: "omega",
+    })]);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    const row = verseRow();
+    expect(row).toHaveAttribute("aria-keyshortcuts", "Shift+F10");
+    await fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Apply proposed fix" })).toBeEnabled();
+  });
+
+  it("also opens it with the dedicated Menu key", async () => {
+    seed("alpha beta", [finding({ start_offset: 0, end_offset: 5, original_text: "alpha" })]);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.keyDown(verseRow(), { key: "ContextMenu" });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("walks between a verse's findings with the arrow keys before opening the menu", async () => {
+    seed("alpha beta", [
+      finding({ id: "f1", start_offset: 0, end_offset: 5, original_text: "alpha",
+        explanation: "First finding" }),
+      finding({ id: "f2", start_offset: 6, end_offset: 10, original_text: "beta",
+        explanation: "Second finding" }),
+    ]);
+    selectedVerse.set("6");
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    const row = verseRow();
+
+    // Starts on the first underline in reading order.
+    expect(document.querySelector("mark.active-finding")?.textContent).toBe("alpha");
+    await fireEvent.keyDown(row, { key: "ArrowRight" });
+    expect(document.querySelector("mark.active-finding")?.textContent).toBe("beta");
+
+    await fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu", { name: /Actions for Second finding/i })).toBeInTheDocument();
+  });
+
+  it("leaves a verse with no underlined finding out of the menu shortcut", async () => {
+    seed("alpha beta", [finding({ start_offset: null, end_offset: null })]);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    const row = verseRow();
+    expect(row).not.toHaveAttribute("aria-keyshortcuts");
+    await fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("advertises the popup on the focusable row rather than the plain mark", () => {
+    seed("alpha beta", [finding({ start_offset: 0, end_offset: 5, original_text: "alpha" })]);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(verseRow()).toHaveAttribute("aria-haspopup", "menu");
+    expect(document.querySelector("mark")).not.toHaveAttribute("aria-haspopup");
   });
 });
