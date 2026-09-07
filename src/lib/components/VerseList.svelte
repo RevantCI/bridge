@@ -9,7 +9,7 @@
   import type { QaFinding } from "../types/finding";
   import {
     applySuggestedFindingFix, editingChapter, editingVerse, editText, editSaving,
-    editError, saveVerseEdit, cancelVerseEdit,
+    editError, saveVerseEdit, cancelVerseEdit, startVerseEdit,
   } from "../verseEditor";
 
   export let onSelect: (verse: string) => void;
@@ -226,6 +226,30 @@
     if (key && scrollContainer && key !== lastScrolledKey) void scrollSelectedToTop(key);
   }
 
+  /**
+   * Selecting by clicking a row must not scroll. The row is already on screen
+   * -- the reader just pointed at it -- so pulling it to the top moves the
+   * text out from under the cursor. Marking the key as already-scrolled is
+   * what suppresses it, rather than dropping the reactive scroll: navigation
+   * that does not come from a click (Go to, desktop verse sync, a click
+   * through from the report) still has to bring the verse into view, and none
+   * of those routes come through here.
+   */
+  function selectFromList(verse: string): void {
+    lastScrolledKey = verseKey($currentChapter, verse);
+    onSelect(verse);
+  }
+
+  /** Double-click is a second route to Edit verse, for readers who never look
+   *  at the review panel's button. startVerseEdit carries its own guards --
+   *  it returns false while a check, save or recheck is in flight -- so there
+   *  is nothing to re-check here. */
+  function beginEditFromList(verse: string): void {
+    if ($editingChapter === $currentChapter && $editingVerse === verse) return;
+    selectFromList(verse);
+    startVerseEdit($currentChapter, verse);
+  }
+
   // Grows the edit textarea to fit its full content (1, 2, or more lines)
   // with no scrollbar, plus one blank line of buffer at the bottom — rather
   // than a fixed rows="2" that scrolls for longer verses and wastes space
@@ -270,14 +294,15 @@
       tabindex="0"
       aria-haspopup={menuFindingIds.length ? "menu" : undefined}
       aria-keyshortcuts={menuFindingIds.length ? "Shift+F10" : undefined}
-      on:click={() => onSelect(v)}
+      on:click={() => selectFromList(v)}
+      on:dblclick={() => beginEditFromList(v)}
       on:keydown={(e) => onVerseKeydown(e, v, key, menuFindingIds, findings)}
     >
       <div class="vnum">
         {v}{#if checkStatus === "succeeded" && openCount === 0}&nbsp;✓{:else if checkStatus === "failed" || checkStatus === "cancelled"}&nbsp;⚠{/if}
       </div>
       {#if isEditingThis}
-        <div class="vedit" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
+        <div class="vedit" on:click|stopPropagation on:dblclick|stopPropagation on:keydown|stopPropagation role="presentation">
           <div class="vedit-row">
             <textarea use:autosize bind:value={$editText} disabled={$editSaving} />
             <div class="edit-actions">
@@ -296,6 +321,7 @@
           {#each withNoteMarkers(segments, parsed.notes) as piece}
             {#if piece.kind === "note"}<button
                 class="note-btn {piece.note.kind}"
+                on:dblclick|stopPropagation
                 on:click|stopPropagation={() =>
                   (openNotes = { kind: piece.note.kind, notes: [piece.note], reference: key })}
                 title={`${markerTitle(piece.note.kind)}${piece.note.reference ? ` ${piece.note.reference}` : ""}`}
@@ -382,14 +408,18 @@
     color: var(--success); font-size: var(--fs-sm); box-shadow: 0 4px 14px rgba(15, 23, 42, .18);
   }
   .context-notice.error { background: var(--danger-bg, #fef2f2); color: var(--danger, #b91c1c); }
-  .verse.editing-row { cursor: default; background: var(--surface); border-color: var(--accent); }
+  .verse.editing-row { cursor: default; background: var(--surface); }
   .vedit { flex: 1; min-width: 0; cursor: default; }
   .vedit-row { display: flex; align-items: flex-start; gap: 8px; }
   .vedit textarea {
     flex: 1; min-width: 0; box-sizing: border-box; font-size: var(--fs-xl); line-height: 1.7; color: var(--text);
-    font-family: inherit; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px;
+    font-family: inherit; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 8px;
     resize: none; overflow-y: hidden;
   }
+  /* Neutral, not accent: the blue box read as a validation state. The focus
+     ring is replaced rather than simply removed -- a bare `outline: none`
+     would leave keyboard users with no indication of where they are. */
+  .vedit textarea:focus { outline: none; border-color: var(--text-3); }
   .vedit textarea:disabled { opacity: .6; }
   .edit-error { color: var(--danger); font-size: var(--fs-xs); margin: 6px 0 0; line-height: 1.4; }
   .edit-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
