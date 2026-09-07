@@ -73,7 +73,7 @@ with `python scripts/smoke_sidecars.py engine/dist/bridge-engine.exe`.
 
 `src-tauri/` has both: `cargo check`/`cargo build` for compile success, and a
 handful of real `#[test]` unit tests (`passage_semantic_wire::tests`,
-`sidecar::tests` — 6 as of the project QA report, 2026-09-04) run with `cargo test`. Run both, not
+`sidecar::tests` — 10 as of 2026-09-07) run with `cargo test`. Run both, not
 just the compile check.
 
 ## Architecture
@@ -205,6 +205,15 @@ normalize on first open (this is why a 66-book import is ~5s, not minutes).
     the exact string; several vendored/wrapper functions pass these
     through as an identity fallback rather than crashing. Don't assume
     every `verse` parameter is a bare integer string.
+13. A **running `bridge-engine.exe` blocks the next Rust build**:
+    `tauri-build` copies each `externalBin` into `target/`, and Windows
+    refuses to overwrite a running executable, so it panics with a bare
+    `PermissionDenied: Access is denied.` that names nothing. `RunEvent::Exit`
+    now stops the sidecar by closing its stdin (`run_stdio_loop` ends on EOF),
+    with a `taskkill /T` backstop — a *tree* kill, because terminating the
+    PyInstaller bootloader alone leaves the real Python child holding the
+    file. A sidecar busy inside a long request when the app dies abruptly can
+    still orphan; `Stop-Process -Name bridge-engine -Force` clears it.
 
 ## Working in this repo
 

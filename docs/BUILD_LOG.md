@@ -4632,3 +4632,94 @@ npm run build                  passed; existing >500 kB warning
 ```
 
 Still not run: the installed desktop app. Nothing under `engine/` was touched.
+
+---
+
+## The sidecar was never stopped when the app exited (2026-09-07)
+
+Reported as `npm run tauri dev` failing to build. The message points nowhere
+near the cause:
+
+```text
+error: failed to run custom build command for `translationcore-ai-bridge`
+  cargo:rerun-if-changed=binaries\bridge-engine-x86_64-pc-windows-msvc.exe
+  thread 'main' panicked at tauri-build-2.6.3/src/lib.rs:80:30:
+  called `Result::unwrap()` on an `Err` value:
+      Os { code: 5, kind: PermissionDenied, message: "Access is denied." }
+```
+
+`tauri-build` copies each `externalBin` into `target/`, and Windows refuses to
+overwrite a running executable. Two orphaned `bridge-engine.exe` processes were
+holding `target\debug\bridge-engine.exe` open — one the PyInstaller bootloader,
+the other the Python child it spawns. The parent app was already gone. Freshly
+built sidecars (14:24) plus a locked destination copy (12:00) meant every
+subsequent build failed until the processes were killed.
+
+Nothing in `src-tauri/src/` ever stopped the sidecar. There was no `.kill()`
+anywhere, no window-event handler, and `main.rs` went straight from
+`.invoke_handler(...)` to `.run(tauri::generate_context!())`. `CommandChild`
+just sat in app state and was dropped with the process.
+
+### Closing stdin, not killing
+
+`EngineSidecar::shutdown` is called from a new `RunEvent::Exit` arm. It is
+synchronous and runs on the main thread — there is no async runtime left to
+await on at that point, so it uses `Mutex::blocking_lock`.
+
+The mechanism is **closing stdin**, not killing. `run_stdio_loop` iterates
+`for line in sys.stdin` (`transport/stdio_transport.py:41`), so EOF ends the
+loop and Python returns from `main` on its own — which also lets the
+PyInstaller bootloader delete its `_MEI…` temp directory. A forced kill leaks
+one of those per run. There is no explicit close in the plugin API: dropping
+`CommandChild` drops the `stdin_writer` it owns (`tauri-plugin-shell-2.3.5`,
+`src/process/mod.rs:65-68`), and that is what closes the pipe.
+
+The forced kill after a 1.5s grace period is a backstop, not the plan. The
+engine only reaches the read loop *between* requests, so a sidecar inside a
+long `handle_request` — the isolated USFM checker allows itself 120s — would
+otherwise outlive the window the user just closed.
+
+**The backstop has to kill the tree.** `CommandChild::kill()` calls
+`SharedChild::kill()` → `TerminateProcess` on the PyInstaller bootloader alone,
+leaving the real Python child running and still holding the handle on
+`bridge-engine.exe`. That is exactly the orphan pair this bug produced, so
+using `kill()` would have reproduced the failure rather than fixed it. Hence
+`taskkill /PID <pid> /T /F`, spawned with `CREATE_NO_WINDOW` so a release build
+(`windows_subsystem = "windows"`, no console) does not flash one up as it dies.
+Its return value is meaningful: a non-zero status is the *expected* result of a
+clean exit, because the pid is already gone, and that is what distinguishes
+"exited on stdin close" from "forced after the grace period" in the log.
+
+An exit while `shutting_down` is set now logs at `info` rather than `error`, so
+a normal close stops filing a fault in the diagnostics panel.
+
+### Verified against the running app, not just compiled
+
+```text
+cargo test                     10 passed (8 before, +2 kill_process_tree)
+window close (CloseMainWindow) app 26484 -> bootloader 21920 -> python 22396
+                               all gone; log: "Sidecar stopped on app exit
+                               (pid 21920, exited on stdin close)"
+hard kill of the app process   no bridge-engine remains
+```
+
+The hard-kill result was a surprise worth recording: killing the app closes its
+pipe handles, which gives the sidecar the same EOF, so even an abrupt death
+usually cleans up. That narrows what can actually orphan a sidecar to **a
+sidecar that is not reading stdin** — i.e. one busy inside a long request when
+the app dies without reaching `RunEvent::Exit`. That is the one case the exit
+hook cannot cover, and the likely origin of the pair found today. Matrix row
+M44 records it; a preflight in `scripts/dev_desktop.mjs` (which already runs
+before cargo builds, via `beforeDevCommand`) would close it, and was not done
+here.
+
+The two `kill_process_tree` tests spawn `cmd /c ping -n 30 127.0.0.1` rather
+than `timeout` — `timeout.exe` aborts immediately when stdin is redirected, so
+the first version of the test killed a process that had already exited and
+failed on its own assertion.
+
+### Unrelated to the frontend work
+
+Nothing in this touches the Svelte tree; the same session's context-menu
+changes compiled and tested clean throughout. Worth stating because the report
+arrived as "error on running the app" immediately after a frontend change.
