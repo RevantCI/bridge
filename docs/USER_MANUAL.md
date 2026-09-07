@@ -3,7 +3,7 @@
 For translators and checkers using Bridge day to day. If you're setting up
 or building the app, see [`DEVELOPER_SETUP.md`](DEVELOPER_SETUP.md) instead.
 
-*Written from the app's current state (`v0.9.0`, 2026-09-07).*
+*Written from the app's current state (`v0.9.1`, 2026-09-07).*
 
 > **Screenshots:** not included yet — see [Adding screenshots](#adding-screenshots)
 > at the bottom for exactly which screen/file to capture and where to drop
