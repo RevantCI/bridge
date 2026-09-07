@@ -80,15 +80,19 @@ describe("accessibility", () => {
 });
 
 describe("small viewport", () => {
-  it("keeps the decision controls out of the scrolling region", () => {
+  it("keeps decision controls after evidence in the one scrolling region", () => {
     const { container } = render(QaFindingDetail, { props: { detail: staleConfirmed() } });
-    // The actions live in a footer that is a sibling of the scrolling evidence
-    // area, not inside it, so they cannot be pushed below the fold by long
-    // evidence.
-    const actions = container.querySelector("footer.actions");
-    const evidence = container.querySelector(".evidence");
+    // Evidence, decision, and correction share one document-flow scroller.
+    // This prevents a large sticky form from covering evidence on short
+    // windows while keeping every action keyboard reachable.
+    const scroller = container.querySelector("[data-qa-detail-scroll]");
+    const actions = container.querySelector("[data-qa-decision]");
+    const evidence = container.querySelector("[data-qa-evidence]");
     expect(actions).not.toBeNull();
-    expect(evidence?.contains(actions as Node)).toBe(false);
+    expect(scroller?.contains(evidence as Node)).toBe(true);
+    expect(scroller?.contains(actions as Node)).toBe(true);
+    const documentOrder = evidence?.compareDocumentPosition(actions as Node) ?? 0;
+    expect(documentOrder & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("button", { name: "Confirm translation issue" })).toBeInTheDocument();
   });
 

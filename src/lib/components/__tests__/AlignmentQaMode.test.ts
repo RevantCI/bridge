@@ -3,10 +3,11 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/sve
 
 const {
   queue, getFinding, decide, eligibility, correctionContext, correctionList, correctionHistory,
-  settings, scopeStatus, startJob, jobStatus, cancelJob,
+  correctionApply, settings, scopeStatus, startJob, jobStatus, cancelJob,
 } = vi.hoisted(() => ({
   queue: vi.fn(), getFinding: vi.fn(), decide: vi.fn(), eligibility: vi.fn(),
   correctionContext: vi.fn(), correctionList: vi.fn(), correctionHistory: vi.fn(), settings: vi.fn(),
+  correctionApply: vi.fn(),
   scopeStatus: vi.fn(), startJob: vi.fn(), jobStatus: vi.fn(), cancelJob: vi.fn(),
 }));
 
@@ -20,6 +21,7 @@ vi.mock("../../api/bridgeClient", () => ({
     correctionGetReviewContext: correctionContext,
     correctionListForFinding: correctionList,
     correctionGetProposalHistory: correctionHistory,
+    correctionApplyProposal: correctionApply,
     getSettings: settings,
     analysisJobGetScopeStatus: scopeStatus,
     analysisJobStart: startJob,
@@ -91,6 +93,11 @@ describe("AlignmentQaMode analysis states", () => {
     correctionList.mockResolvedValue({ findingId: "qa-finding-0001", proposals: [] });
     correctionHistory.mockResolvedValue({ proposalId: "", events: [] });
     settings.mockResolvedValue({ hasApiKey: false, reviewerName: "Reviewer" });
+    eligibility.mockResolvedValue({
+      findingId: "qa-finding-0001", eligible: true, reasons: [{ code: "ELIGIBLE", detail: "Eligible" }],
+      findingRevision: 2, currentTargetContentHash: "target", displayedReferences: ["PHP 1:6"],
+      engineVersion: "1", existingProposalIds: [],
+    });
   });
 
   it.each([
@@ -124,6 +131,45 @@ describe("AlignmentQaMode analysis states", () => {
       canonicalReferences: ["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"],
     })));
     expect(await screen.findByText(/Review scope: Current analysis range/i)).toBeInTheDocument();
+  });
+
+  it("opens row actions and keeps Apply proposed fix disabled without a proposal", async () => {
+    scopeStatus.mockResolvedValue(scope("CURRENT"));
+    queue.mockResolvedValue({ findings: [summary()], nextCursor: "", totalCount: 1, order: "CANONICAL" });
+    getFinding.mockResolvedValue(detail());
+    render(AlignmentQaMode, { props: { chapter: "1", verse: "3" } });
+    const row = (await screen.findByText("Possible omission")).closest('[role="option"]') as HTMLElement;
+    await fireEvent.contextMenu(row, { clientX: 30, clientY: 40 });
+    expect(await screen.findByRole("menuitem", { name: "Apply proposed fix" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Needs discussion" })).toBeEnabled();
+  });
+
+  it("applies a reviewed active proposal through the guarded correction writer", async () => {
+    scopeStatus.mockResolvedValue(scope("CURRENT"));
+    queue.mockResolvedValue({ findings: [summary()], nextCursor: "", totalCount: 1, order: "CANONICAL" });
+    getFinding.mockRejectedValue(new Error("detail not needed by the context action"));
+    const proposal = {
+      id: "proposal-1", lifecycleStatus: "ACTIVE", reviewStatus: "HUMAN_APPROVED",
+      verificationStatus: "NOT_RUN", revision: 4,
+    };
+    correctionList.mockResolvedValue({
+      findingId: "qa-finding-0001", proposals: [proposal], applications: [], correctionWritesBlocked: false,
+    });
+    correctionApply.mockResolvedValue({ applicationId: "application-1", applicationState: "COMPLETED" });
+    render(AlignmentQaMode, { props: { chapter: "1", verse: "3" } });
+    const row = (await screen.findByText("Possible omission")).closest('[role="option"]') as HTMLElement;
+    await fireEvent.contextMenu(row);
+    const apply = await screen.findByRole("menuitem", { name: "Apply proposed fix" });
+    await waitFor(() => expect(apply).toBeEnabled());
+    await fireEvent.click(apply);
+    await waitFor(() => expect(correctionApply).toHaveBeenCalledWith(expect.objectContaining({
+      proposalId: "proposal-1",
+      expectedProposalRevision: 4,
+      findingId: "qa-finding-0001",
+      expectedFindingRevision: 2,
+      actor: { actorType: "HUMAN", actorId: "Reviewer" },
+    })));
+    expect(await screen.findByText(/Fix applied. Semantic verification is pending/i)).toBeInTheDocument();
   });
 
   it("refreshes the queue to a newly selected range instead of retaining the previous range", async () => {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
+  import { applyCorrectionProposal, newCorrectionApplicationId } from "../correctionApplication";
   import type {
     AffectedTargetSpan,
     CorrectionEligibility,
@@ -390,24 +391,18 @@
     return affectedState === "RUNNING" ? labels[job.currentStage] ?? "Preparing affected analysis…" : affectedState;
   }
 
-  function newApplicationId(): string {
-    return globalThis.crypto?.randomUUID?.()
-      ?? `correction-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  }
-
   async function applyCorrection(): Promise<void> {
     if (!selectedProposal || !mayApply) return;
     busy = true;
     error = "";
-    const applicationId = application?.applicationId || newApplicationId();
+    const applicationId = application?.applicationId || newCorrectionApplicationId();
     try {
-      application = await bridge.correctionApplyProposal({
-        proposalId: selectedProposal.id,
-        expectedProposalRevision: selectedProposal.revision,
+      application = await applyCorrectionProposal({
         findingId,
-        expectedFindingRevision: eligibility?.findingRevision || findingRevision,
+        findingRevision: eligibility?.findingRevision || findingRevision,
+        proposal: selectedProposal,
+        actorId: settings?.reviewerName || "human",
         applicationId,
-        actor: { actorType: "HUMAN", actorId: settings?.reviewerName || "human" },
       });
       confirmationOpen = false;
       if (application.applicationState === "COMPLETED") {
@@ -919,7 +914,7 @@
   .proposal-picker { display: flex; align-items: center; flex-wrap: wrap; gap: .3rem; padding: .5rem .75rem; border-bottom: 1px solid #e5e7eb; font-size: .72rem; }
   .proposal-picker button { font: inherit; border: 1px solid #cbd5e1; background: #fff; border-radius: 999px; padding: .15rem .45rem; }
   .proposal-picker button[aria-pressed="true"] { border-width: 2px; border-color: #2563eb; }
-  .review-scroll { padding: .65rem .75rem; display: flex; flex-direction: column; gap: .6rem; overflow-y: auto; max-height: 24rem; min-height: 7rem; }
+  .review-scroll { padding: .65rem .75rem; display: flex; flex-direction: column; gap: .6rem; min-height: 7rem; }
   .block { border: 1px solid #e5e7eb; border-radius: 5px; padding: .55rem .65rem; background: #fff; }
   .block p:last-child { margin-bottom: 0; }
   .reference { color: #4b5563; font-weight: 600; font-size: .78rem; margin-bottom: .2rem; }
@@ -943,8 +938,8 @@
   .history-provenance { display: block; color: #4b5563; font-size: .69rem; }
   .history p { margin: .15rem 0 .4rem; }
   .muted { color: #6b7280; }
-  .review-actions { position: sticky; z-index: 3; isolation: isolate; bottom: 0; padding: .65rem .75rem; border-top: 1px solid #dbeafe; background: #f8faff; pointer-events: auto; }
-  .review-actions textarea, .review-actions button { position: relative; z-index: 1; pointer-events: auto; }
+  .review-actions { position: static; padding: .65rem .75rem; border-top: 1px solid #dbeafe; background: #f8faff; pointer-events: auto; }
+  .review-actions textarea, .review-actions button { pointer-events: auto; }
   label, legend { font-size: .76rem; color: #374151; }
   textarea, select, input[type="range"] { width: 100%; box-sizing: border-box; font: inherit; margin: .18rem 0 .45rem; }
   textarea, select { border: 1px solid #cbd5e1; border-radius: 4px; padding: .35rem .45rem; resize: vertical; }
@@ -957,7 +952,7 @@
   button:disabled { opacity: .5; cursor: not-allowed; }
   button:focus-visible, textarea:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
   .create { margin: .75rem; align-self: flex-start; }
-  .draft-form { margin-top: .6rem; max-height: 22rem; overflow-y: auto; padding-right: .25rem; }
+  .draft-form { margin-top: .6rem; padding-right: .25rem; }
   .unavailable ul { margin-bottom: 0; padding-left: 1.2rem; }
   .boundary { margin-top: .35rem; }
   .affected-analysis { margin-top: .55rem; padding-top: .55rem; border-top: 1px solid #dbeafe; }
@@ -967,7 +962,6 @@
   .confirmation-text { border: 1px solid #e2e8f0; border-radius: 4px; padding: .5rem; }
   .apply-warning { margin-top: .75rem; padding: .55rem; border-left: 4px solid #d97706; background: #fffbeb; font-size: .78rem; }
   @media (max-width: 900px) {
-    .review-scroll { max-height: 19rem; }
     dl { grid-template-columns: 1fr; gap: .1rem; }
     dd { margin-bottom: .35rem; }
   }

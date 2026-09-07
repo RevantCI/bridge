@@ -1,11 +1,18 @@
 <script lang="ts">
   import QaFindingDetail from "./QaFindingDetail.svelte";
   import QaFindingList from "./QaFindingList.svelte";
+  import FindingContextMenu from "./FindingContextMenu.svelte";
   import AnalysisControls from "./AnalysisControls.svelte";
+  import {
+    applyCorrectionProposal,
+    getApplicableCorrection,
+    type ApplicableCorrection,
+  } from "../correctionApplication";
   import type {
     AnalysisJobSnapshot, AnalysisScopeState, AnalysisScopeStatus,
   } from "../types/analysisJob";
   import type { QaDisposition, ReviewQueueOrder, ReviewerDecision } from "../types/qaReview";
+  import { REVIEWER_ACTIONS } from "../utils/reviewLabels";
   import {
     addReviewerNote,
     decideFinding,
@@ -67,6 +74,30 @@
   let flashTone: "ok" | "warn" = "ok";
   let analysisState: AnalysisScopeState = "NOT_ANALYZED";
   let scopeReady = false;
+  let contextMenu: { findingId: string; x: number; y: number } | null = null;
+  let contextCorrection: ApplicableCorrection | null = null;
+  let contextLoadError = "";
+  let contextLoading = false;
+  let contextBusy = false;
+  let contextRequest = 0;
+
+  $: contextActions = [
+    {
+      id: "apply",
+      label: "Apply proposed fix",
+      disabled: contextLoading || contextBusy || !contextCorrection?.proposal
+        || Boolean(contextCorrection.disabledReason),
+      title: contextLoading ? "Checking for a reviewed proposed fixâ€¦"
+        : contextLoadError || contextCorrection?.disabledReason || undefined,
+    },
+    ...REVIEWER_ACTIONS.map((action, index) => ({
+      id: `decide:${action.disposition}`,
+      label: action.label,
+      disabled: contextBusy,
+      title: action.hint,
+      separatorBefore: index === 0,
+    })),
+  ];
 
   async function applyFilters(): Promise<void> {
     if (!scopeReady) return;
@@ -165,6 +196,82 @@
     await loadQueue();
     await selectFinding(null);
     announce("Analysis complete. The QA review queue has been refreshed.");
+  }
+
+  async function openFindingMenu(
+    event: CustomEvent<{ id: string; x: number; y: number }>,
+  ): Promise<void> {
+    const request = ++contextRequest;
+    contextMenu = { findingId: event.detail.id, x: event.detail.x, y: event.detail.y };
+    contextCorrection = null;
+    contextLoadError = "";
+    contextLoading = true;
+    void selectFinding(event.detail.id);
+    try {
+      const resolved = await getApplicableCorrection(event.detail.id);
+      if (request === contextRequest && contextMenu?.findingId === event.detail.id) {
+        contextCorrection = resolved;
+      }
+    } catch (error) {
+      if (request === contextRequest && contextMenu?.findingId === event.detail.id) {
+        contextLoadError = String(error);
+      }
+    } finally {
+      if (request === contextRequest) contextLoading = false;
+    }
+  }
+
+  function closeFindingMenu(): void {
+    contextRequest += 1;
+    contextMenu = null;
+    contextCorrection = null;
+    contextLoadError = "";
+    contextLoading = false;
+  }
+
+  async function onContextAction(event: CustomEvent<{ id: string }>): Promise<void> {
+    if (!contextMenu || contextBusy) return;
+    const findingId = contextMenu.findingId;
+    if (event.detail.id === "apply") {
+      if (!contextCorrection?.proposal || contextCorrection.disabledReason) return;
+      contextBusy = true;
+      try {
+        const application = await applyCorrectionProposal({
+          findingId,
+          findingRevision: contextCorrection.eligibility.findingRevision,
+          proposal: contextCorrection.proposal,
+          actorId: contextCorrection.actorId,
+        });
+        closeFindingMenu();
+        if (application.applicationState === "COMPLETED") {
+          announce("Fix applied. Semantic verification is pending.");
+          await loadQueue();
+          if ($reviewQueue.some((finding) => finding.id === findingId)) {
+            await selectFinding(findingId);
+          }
+        } else {
+          announce(`Correction application: ${application.applicationState}`, "warn");
+        }
+      } catch (error) {
+        announce(String(error), "warn");
+      } finally {
+        contextBusy = false;
+      }
+      return;
+    }
+
+    if (event.detail.id.startsWith("decide:")) {
+      const disposition = event.detail.id.slice("decide:".length) as ReviewerDecision;
+      contextBusy = true;
+      const result = await decideFinding(findingId, disposition);
+      contextBusy = false;
+      if (result.ok) {
+        announce("Decision recorded.");
+        closeFindingMenu();
+      } else {
+        announce(result.message, "warn");
+      }
+    }
   }
 
   async function correctionReanalyzed(): Promise<void> {
@@ -281,6 +388,7 @@
         hasMore={$hasMoreFindings}
         total={$reviewTotal}
         on:select={(event) => selectFinding(event.detail.id)}
+        on:contextmenu={openFindingMenu}
         on:loadMore={() => loadMoreFindings()}
       />
     </div>
@@ -299,6 +407,17 @@
       />
     </div>
   </div>
+
+  {#if contextMenu}
+    <FindingContextMenu
+      x={contextMenu.x}
+      y={contextMenu.y}
+      findingLabel="Actions for selected finding"
+      actions={contextActions}
+      on:action={onContextAction}
+      on:close={closeFindingMenu}
+    />
+  {/if}
 </div>
 
 <style>

@@ -39,6 +39,8 @@ vi.mock("../../api/bridgeClient", () => ({
 }));
 
 import CorrectionReviewPanel from "../CorrectionReviewPanel.svelte";
+// @ts-expect-error Vite's test-only raw loader is not part of the app tsconfig.
+import correctionReviewPanelSource from "../CorrectionReviewPanel.svelte?raw";
 
 const targetText = "வசனம் மூன்று என்று கூறுகிறது";
 const affectedText = "மூன்று";
@@ -442,9 +444,16 @@ describe("CorrectionReviewPanel", () => {
       const { container } = render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
       await screen.findAllByText("எல்லாரும்");
       const panel = container.querySelector("[data-correction-panel]")!;
-      expect(panel.querySelector("[data-correction-scroll]")).toBeTruthy();
-      expect(panel.querySelector("[data-correction-actions]")).toBeTruthy();
+      const reviewFlow = panel.querySelector("[data-correction-scroll]")!;
+      const actions = panel.querySelector("[data-correction-actions]")!;
+      expect(reviewFlow).toBeTruthy();
+      expect(actions).toBeTruthy();
       expect(panel.querySelector("[data-correction-scroll] [data-correction-actions]")).toBeNull();
+      const reviewCss = correctionReviewPanelSource.match(/\.review-scroll\s*{([^}]*)}/)?.[1] ?? "";
+      const actionCss = correctionReviewPanelSource.match(/\.review-actions\s*{([^}]*)}/)?.[1] ?? "";
+      expect(reviewCss).not.toMatch(/overflow-y:\s*auto|max-height:/);
+      expect(actionCss).toMatch(/position:\s*static/);
+      expect(actionCss).not.toMatch(/position:\s*(sticky|fixed)/);
       expect(screen.getByRole("button", { name: "Edit proposal" })).toBeVisible();
     },
   );

@@ -97,4 +97,20 @@ describe("QaFindingList", () => {
     render(QaFindingList, { props: { findings: manyFindings(50), total: 812 } });
     expect(screen.getByText(/Showing 50 of 812 possible issues/)).toBeInTheDocument();
   });
+
+  it("requests a finding context menu from right-click and Shift+F10", async () => {
+    const finding = summary();
+    const { component } = render(QaFindingList, {
+      props: { findings: [finding], selectedId: finding.id, total: 1 },
+    });
+    const opened = vi.fn();
+    component.$on("contextmenu", (event) => opened(event.detail));
+
+    await fireEvent.contextMenu(screen.getByRole("option"), { clientX: 40, clientY: 55 });
+    expect(opened).toHaveBeenLastCalledWith({ id: finding.id, x: 40, y: 55 });
+
+    await fireEvent.keyDown(screen.getByRole("listbox"), { key: "F10", shiftKey: true });
+    expect(opened).toHaveBeenCalledTimes(2);
+    expect(opened.mock.calls[1][0].id).toBe(finding.id);
+  });
 });

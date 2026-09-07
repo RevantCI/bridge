@@ -4,16 +4,85 @@
   import { buildSegments } from "../utils/highlight";
   import { parseVerseNotes, withNoteMarkers, type ParsedVerse, type VerseNote, type VerseNoteKind } from "../utils/usfmNotes";
   import VerseNotesPopup from "./VerseNotesPopup.svelte";
+  import FindingContextMenu from "./FindingContextMenu.svelte";
+  import { decideLocalFinding } from "../findingActions";
   import type { QaFinding } from "../types/finding";
-  import { editingChapter, editingVerse, editText, editSaving, editError, saveVerseEdit, cancelVerseEdit } from "../verseEditor";
+  import {
+    applySuggestedFindingFix, editingChapter, editingVerse, editText, editSaving,
+    editError, saveVerseEdit, cancelVerseEdit,
+  } from "../verseEditor";
 
   export let onSelect: (verse: string) => void;
 
   let openNotes: { kind: VerseNoteKind; notes: VerseNote[]; reference: string } | null = null;
+  let contextMenu: { finding: QaFinding; x: number; y: number } | null = null;
+  let contextBusy = false;
+  let contextNotice = "";
+  let contextNoticeError = false;
+
+  $: contextActions = contextMenu ? [
+    {
+      id: "apply",
+      label: "Apply proposed fix",
+      disabled: contextBusy || contextMenu.finding.suggested_replacement === null
+        || contextMenu.finding.start_offset === null || contextMenu.finding.end_offset === null,
+      title: contextMenu.finding.suggested_replacement === null
+        ? "No proposed fix is available for this finding." : undefined,
+    },
+    { id: "decide:accepted", label: "Accept finding", disabled: contextBusy, separatorBefore: true },
+    { id: "decide:rejected", label: "Reject finding", disabled: contextBusy },
+    { id: "decide:needs_discussion", label: "Needs discussion", disabled: contextBusy },
+  ] : [];
 
   const markerLabel = (kind: VerseNoteKind): string => (kind === "footnote" ? "f" : "x");
   const markerTitle = (kind: VerseNoteKind): string =>
     kind === "footnote" ? "Footnote" : "Cross reference";
+
+  function openFindingMenu(
+    event: MouseEvent,
+    findingIds: string[],
+    findings: QaFinding[],
+    verse: string,
+  ): void {
+    const finding = findingIds
+      .map((id) => findings.find((item) => item.id === id))
+      .find((item): item is QaFinding => Boolean(item));
+    if (!finding) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect(verse);
+    contextMenu = { finding, x: event.clientX, y: event.clientY };
+  }
+
+  async function onContextAction(event: CustomEvent<{ id: string }>): Promise<void> {
+    if (!contextMenu || contextBusy) return;
+    const finding = contextMenu.finding;
+    contextBusy = true;
+    contextNotice = "";
+    try {
+      if (event.detail.id === "apply") {
+        const result = await applySuggestedFindingFix(finding);
+        contextNotice = result.message;
+        contextNoticeError = !result.ok;
+        if (result.ok) contextMenu = null;
+      } else if (event.detail.id.startsWith("decide:")) {
+        await decideLocalFinding(
+          String(finding.chapter),
+          String(finding.verse),
+          finding.id,
+          event.detail.id.slice("decide:".length) as "accepted" | "rejected" | "needs_discussion",
+        );
+        contextNotice = "Decision recorded.";
+        contextNoticeError = false;
+        contextMenu = null;
+      }
+    } catch (error) {
+      contextNotice = error instanceof Error ? error.message : String(error);
+      contextNoticeError = true;
+    } finally {
+      contextBusy = false;
+    }
+  }
 
   /**
    * QaFinding offsets index the RAW verse string — bridge_service's
@@ -129,6 +198,8 @@
               >{markerLabel(piece.note.kind)}</button>{:else if piece.seg.className}<mark
                 class={piece.seg.className}
                 title={piece.seg.title}
+                aria-haspopup={piece.seg.findingIds.some((id) => findings.some((finding) => finding.id === id)) ? "menu" : undefined}
+                on:contextmenu={(event) => openFindingMenu(event, piece.seg.findingIds, findings, v)}
               >{piece.seg.text}</mark>{#if piece.seg.numbers.length}<sup class="finding-num">{piece.seg.numbers.join(",")}</sup>{/if}{:else}{piece.seg.text}{/if}
           {/each}
         </div>
@@ -143,6 +214,21 @@
     <p class="empty">No verses loaded for this chapter yet.</p>
   {/if}
 </div>
+
+{#if contextNotice}
+  <p class="context-notice" class:error={contextNoticeError} role="status">{contextNotice}</p>
+{/if}
+
+{#if contextMenu}
+  <FindingContextMenu
+    x={contextMenu.x}
+    y={contextMenu.y}
+    findingLabel="Actions for {contextMenu.finding.explanation}"
+    actions={contextActions}
+    on:action={onContextAction}
+    on:close={() => (contextMenu = null)}
+  />
+{/if}
 
 {#if openNotes}
   <VerseNotesPopup
@@ -180,6 +266,12 @@
   .alignment-state.partial { color: var(--warning); }
   .alignment-state.invalid { color: var(--danger); font-weight: 800; }
   .empty { color: var(--text-3); font-size: 13px; }
+  .context-notice {
+    position: fixed; left: 50%; bottom: 34px; z-index: 9000; transform: translateX(-50%);
+    margin: 0; padding: 7px 11px; border-radius: 6px; background: var(--success-bg);
+    color: var(--success); font-size: 12px; box-shadow: 0 4px 14px rgba(15, 23, 42, .18);
+  }
+  .context-notice.error { background: var(--danger-bg, #fef2f2); color: var(--danger, #b91c1c); }
   .verse.editing-row { cursor: default; background: var(--surface); border-color: var(--accent); }
   .vedit { flex: 1; min-width: 0; cursor: default; }
   .vedit-row { display: flex; align-items: flex-start; gap: 8px; }

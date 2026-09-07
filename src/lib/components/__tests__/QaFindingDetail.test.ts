@@ -1,8 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/svelte";
+import userEvent from "@testing-library/user-event";
 
 import QaFindingDetail from "../QaFindingDetail.svelte";
-import { detail, grammaticallyRequiredAddition, quantityContradiction, staleConfirmed } from "./fixtures";
+// @ts-expect-error Vite's test-only raw loader is not part of the app tsconfig.
+import qaFindingDetailSource from "../QaFindingDetail.svelte?raw";
+import {
+  LONG_TAMIL,
+  detail,
+  grammaticallyRequiredAddition,
+  quantityContradiction,
+  resourceConflict,
+  staleConfirmed,
+} from "./fixtures";
 
 describe("QaFindingDetail", () => {
   it("offers exactly the four reviewer conclusions", () => {
@@ -127,5 +137,67 @@ describe("QaFindingDetail", () => {
   it("surfaces a load error instead of rendering an empty pane", () => {
     render(QaFindingDetail, { props: { detail: null, error: "engine unavailable" } });
     expect(screen.getByRole("alert")).toHaveTextContent("engine unavailable");
+  });
+
+  it.each([
+    [1920, 760],
+    [1366, 768],
+    [1366, 500],
+    [1550, 350],
+    [820, 768],
+  ])("keeps evidence, decision, and correction in one normal-flow scroller at %ix%i", (width, height) => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+    const evidence = quantityContradiction();
+    const resources = resourceConflict();
+    const history = staleConfirmed();
+    const longDetail = {
+      ...evidence,
+      source: evidence.source.map((source) => ({ ...source, rawSurface: LONG_TAMIL.repeat(8) })),
+      resources: resources.resources.map((resource) => ({
+        ...resource,
+        content: `${String(resource.content)} ${LONG_TAMIL}`.repeat(12),
+      })),
+      conflictingEvidence: resources.conflictingEvidence,
+      history: history.history,
+    };
+    const { container } = render(QaFindingDetail, { props: { detail: longDetail } });
+
+    const scroller = container.querySelector<HTMLElement>("[data-qa-detail-scroll]")!;
+    const evidenceFlow = container.querySelector<HTMLElement>("[data-qa-evidence]")!;
+    const decision = container.querySelector<HTMLElement>("[data-qa-decision]")!;
+    const correction = container.querySelector<HTMLElement>("[data-qa-correction]")!;
+    expect(scroller).toBeInTheDocument();
+    expect(evidenceFlow.compareDocumentPosition(decision) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(decision.compareDocumentPosition(correction) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    for (const heading of [
+      "Source", "Location Stage 6B", "Meaning Stage 7", "Coverage and support Stage 8",
+      "Resources", "What this means", "History", "Your decision",
+    ]) {
+      expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+    }
+    expect(screen.getByText(LONG_TAMIL.repeat(8))).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm translation issue" })).toBeInTheDocument();
+    expect(correction).toBeInTheDocument();
+  });
+
+  it("keeps the complete decision form non-sticky with one vertical scroll owner", () => {
+    const detailCss = qaFindingDetailSource.match(/\.detail\s*{([^}]*)}/)?.[1] ?? "";
+    const decisionCss = qaFindingDetailSource.match(/\.actions\s*{([^}]*)}/)?.[1] ?? "";
+    expect(detailCss).toMatch(/overflow-y:\s*auto/);
+    expect(detailCss).toMatch(/overflow-x:\s*hidden/);
+    expect(decisionCss).toMatch(/position:\s*static/);
+    expect(decisionCss).not.toMatch(/position:\s*(sticky|fixed)/);
+  });
+
+  it("keeps keyboard focus moving through normal-flow decision actions", async () => {
+    const user = userEvent.setup();
+    render(QaFindingDetail, { props: { detail: detail() } });
+    const first = screen.getByRole("button", { name: "Confirm translation issue" });
+    first.focus();
+    expect(first).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Accept translation as correct" })).toHaveFocus();
   });
 });
