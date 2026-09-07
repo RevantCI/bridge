@@ -19,6 +19,18 @@
   --success:#16A34A; --success-bg:#EAF7EE;
   --warning:#D97706; --warning-bg:#FEF3E1;
   --danger:#DC2626; --danger-bg:#FCEBEB;
+
+  /* Type scale. Every font-size in the app resolves to one of these, so the
+     app's minimum readable size is --fs-3xs and nothing renders smaller.
+     Retune the ramp here rather than editing component styles: the steps are
+     1px apart through the dense UI range, where most of the chrome lives, and
+     widen only at display sizes. Sizes are absolute px on purpose -- the app
+     is a fixed desktop window, not a document that inherits a browser's
+     reader-set root size. .occ in AlignmentModal stays in `em` deliberately:
+     it is a relative accent on whatever text it sits inside. */
+  --fs-3xs:12px; --fs-2xs:13px; --fs-xs:14px; --fs-sm:15px;
+  --fs-md:16px;  --fs-lg:17px;  --fs-xl:18px; --fs-2xl:20px;
+  --fs-3xl:23px; --fs-4xl:25px; --fs-5xl:27px;
 }
 
 body { margin: 0; font-family: -apple-system, "Inter", Segoe UI, Helvetica, Arial, sans-serif; }

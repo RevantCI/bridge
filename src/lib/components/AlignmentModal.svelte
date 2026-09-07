@@ -430,22 +430,22 @@
   .overlay { position: fixed; inset: 0; z-index: 50; background: rgba(15, 20, 26, .58); display: grid; place-items: center; padding: 24px; }
   .modal { width: min(1040px, 100%); max-height: calc(100vh - 48px); overflow: auto; background: var(--surface); border-radius: 16px; box-shadow: 0 24px 80px rgba(0,0,0,.24); padding: 20px; color: var(--text); }
   header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
-  .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; font-weight: 800; }
-  h2 { margin: 4px 0 0; font-size: 18px; }
+  .eyebrow { color: var(--accent); font-size: var(--fs-2xs); letter-spacing: .12em; font-weight: 800; }
+  h2 { margin: 4px 0 0; font-size: var(--fs-2xl); }
   button, select { font: inherit; }
   button { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 7px; padding: 7px 10px; cursor: pointer; }
   button:hover:not(:disabled) { border-color: var(--accent); }
   button:disabled { opacity: .5; cursor: not-allowed; }
-  .close { border: 0; font-size: 24px; padding: 0 5px; color: var(--text-2); }
+  .close { border: 0; font-size: var(--fs-5xl); padding: 0 5px; color: var(--text-2); }
   .loading { padding: 36px; display: flex; gap: 10px; justify-content: center; color: var(--text-2); }
   .spin { width: 12px; height: 12px; border: 2px solid var(--accent-bg); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .summary { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--text-2); padding: 12px 0; }
+  .summary { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: var(--fs-xs); color: var(--text-2); padding: 12px 0; }
   .status { border-radius: 999px; padding: 3px 8px; background: var(--surface-2); font-weight: 700; }
   .status.complete, .completed { color: var(--success); background: #EAF7EF; }
   .status.partial { color: var(--warning); background: var(--warning-bg); }
   .status.invalid, .danger { color: var(--danger); }
-  .source-warning, .issues, .notice, .error, .alignment-flag { border-radius: 9px; padding: 10px 12px; margin-bottom: 12px; font-size: 12px; line-height: 1.45; }
+  .source-warning, .issues, .notice, .error, .alignment-flag { border-radius: 9px; padding: 10px 12px; margin-bottom: 12px; font-size: var(--fs-sm); line-height: 1.45; }
   .source-warning { display: flex; flex-direction: column; gap: 3px; background: var(--warning-bg); color: var(--warning); }
   .alignment-flag { background: var(--warning-bg); color: var(--warning); font-weight: 600; }
   .issues { background: #FFF5F5; color: var(--danger); }
@@ -459,11 +459,11 @@
     min-height: 36px; justify-content: flex-end; padding: 4px; border-radius: 8px;
   }
   .target-cell.drop-hover { background: var(--accent-bg); outline: 2px dashed var(--accent); }
-  .target-cell .placeholder { color: var(--text-3); font-size: 16px; line-height: 1; padding-bottom: 6px; }
-  .panel-title { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; font-weight: 700; margin-bottom: 10px; }
+  .target-cell .placeholder { color: var(--text-3); font-size: var(--fs-xl); line-height: 1; padding-bottom: 6px; }
+  .panel-title { display: flex; justify-content: space-between; gap: 10px; font-size: var(--fs-sm); font-weight: 700; margin-bottom: 10px; }
   .panel-title small { color: var(--text-3); font-weight: 400; }
   .token { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-width: 62px; }
-  .token small { font-size: 9px; color: var(--text-3); max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+  .token small { font-size: var(--fs-3xs); color: var(--text-3); max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
   .occ { margin-left: 3px; font-size: 0.8em; font-weight: 400; color: var(--text-3); }
   .column .token.source { width: 100%; background: #F6F1FF; cursor: pointer; }
   .token.target { touch-action: none; user-select: none; }
@@ -478,11 +478,11 @@
     border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 6px 5px 10px;
     background: #EFF7FF; color: var(--text); cursor: default; font: inherit;
   }
-  .aligned-card .word { font-size: 12px; }
+  .aligned-card .word { font-size: var(--fs-sm); }
   .unalign-x {
     border: 0; background: none; padding: 0; width: 16px; height: 16px; line-height: 1;
     display: inline-flex; align-items: center; justify-content: center; border-radius: 50%;
-    color: var(--text-2); font-size: 13px; cursor: pointer; flex-shrink: 0;
+    color: var(--text-2); font-size: var(--fs-md); cursor: pointer; flex-shrink: 0;
   }
   .unalign-x:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
   .word-bank { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
@@ -490,14 +490,14 @@
   .bank-tokens.drop-hover { background: var(--accent-bg); outline: 2px dashed var(--accent); }
   .drag-ghost {
     position: fixed; z-index: 999; transform: translate(-50%, -130%); pointer-events: none;
-    background: var(--accent); color: white; font-size: 12px; font-weight: 700;
+    background: var(--accent); color: white; font-size: var(--fs-sm); font-weight: 700;
     border-radius: 7px; padding: 6px 10px; box-shadow: 0 8px 20px rgba(0,0,0,.28);
   }
-  .empty { color: var(--text-3); font-size: 11px; margin: 6px; }
+  .empty { color: var(--text-3); font-size: var(--fs-xs); margin: 6px; }
   footer { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
   .history-controls, .completion { display: flex; align-items: center; gap: 7px; }
   select { border: 1px solid var(--border-strong); border-radius: 7px; padding: 7px; max-width: 235px; color: var(--text); background: var(--surface); }
-  .completed { font-size: 11px; font-weight: 700; padding: 5px 8px; border-radius: 999px; }
+  .completed { font-size: var(--fs-xs); font-weight: 700; padding: 5px 8px; border-radius: 999px; }
   @media (max-width: 780px) {
     .modal { padding: 14px; }
     footer { align-items: stretch; }

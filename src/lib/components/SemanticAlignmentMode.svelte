@@ -235,7 +235,7 @@
 
 <style>
   .semantic { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.8rem; overflow-y: auto; min-height: 0; }
-  .state { padding: 1.2rem; color: #6b7280; font-size: 0.85rem; }
+  .state { padding: 1.2rem; color: #6b7280; font-size: var(--fs-lg); }
 
   .columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 0.75rem; }
 
@@ -243,18 +243,18 @@
 
   h4 {
     margin: 0 0 0.5rem;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: #374151;
   }
 
-  h5 { margin: 0.7rem 0 0.3rem; font-size: 0.75rem; color: #4b5563; }
+  h5 { margin: 0.7rem 0 0.3rem; font-size: var(--fs-sm); color: #4b5563; }
   .stage { font-weight: 400; text-transform: none; color: #9ca3af; letter-spacing: 0; }
 
   /* Greek, Hebrew and Tamil all need room to breathe and must wrap rather
      than clip, whatever the pane width. */
-  .scripture { font-size: 1.05rem; line-height: 1.8; overflow-wrap: anywhere; margin: 0 0 0.5rem; }
+  .scripture { font-size: var(--fs-2xl); line-height: 1.8; overflow-wrap: anywhere; margin: 0 0 0.5rem; }
   .source-text { color: #1f2937; }
   .target-text { color: #1f2937; }
 
@@ -263,20 +263,20 @@
     grid-template-columns: minmax(6rem, max-content) 1fr;
     gap: 0.2rem 0.7rem;
     margin: 0;
-    font-size: 0.8rem;
+    font-size: var(--fs-md);
   }
 
   dt { color: #6b7280; }
   dd { margin: 0; color: #111827; overflow-wrap: anywhere; }
-  .mono { font-family: ui-monospace, monospace; font-size: 0.72rem; }
-  .muted { color: #6b7280; font-size: 0.82rem; }
+  .mono { font-family: ui-monospace, monospace; font-size: var(--fs-xs); }
+  .muted { color: #6b7280; font-size: var(--fs-md); }
 
   .realization { display: flex; flex-direction: column; gap: 0.25rem; align-items: flex-start; }
-  .help { margin: 0; font-size: 0.76rem; color: #4b5563; }
+  .help { margin: 0; font-size: var(--fs-sm); color: #4b5563; }
 
   .properties { list-style: none; margin: 0.5rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
   .properties li { border-left: 3px solid #d1d5db; padding-left: 0.5rem; }
-  .property-name { display: block; font-size: 0.78rem; font-weight: 600; }
+  .property-name { display: block; font-size: var(--fs-sm); font-weight: 600; }
 
   .assessment-grid {
     display: grid;
@@ -285,14 +285,14 @@
   }
 
   .assessment-cell { display: flex; flex-direction: column; gap: 0.25rem; align-items: flex-start; }
-  .cell-label { font-size: 0.72rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.03em; }
-  .cell-note { font-size: 0.75rem; color: #4b5563; }
+  .cell-label { font-size: var(--fs-xs); color: #6b7280; text-transform: uppercase; letter-spacing: 0.03em; }
+  .cell-note { font-size: var(--fs-sm); color: #4b5563; }
 
   .separate-note {
     margin: 0.6rem 0 0;
     padding-top: 0.5rem;
     border-top: 1px dashed #e5e7eb;
-    font-size: 0.76rem;
+    font-size: var(--fs-sm);
     color: #4b5563;
   }
 </style>

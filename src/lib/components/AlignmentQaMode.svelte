@@ -428,7 +428,7 @@
     padding: 0.35rem 0.6rem;
     border-bottom: 1px solid #e5e7eb;
     color: #4b5563;
-    font-size: 0.75rem;
+    font-size: var(--fs-sm);
     flex: none;
   }
 
@@ -446,12 +446,12 @@
   }
 
   .filter-row { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
-  .filter-label { font-size: 0.7rem; color: #6b7280; min-width: 5.5rem; }
+  .filter-label { font-size: var(--fs-2xs); color: #6b7280; min-width: 5.5rem; }
   .chips { display: flex; flex-wrap: wrap; gap: 0.25rem; }
 
   .chip {
     font: inherit;
-    font-size: 0.72rem;
+    font-size: var(--fs-xs);
     padding: 0.15rem 0.5rem;
     border: 1px solid #d1d5db;
     border-radius: 999px;
@@ -476,7 +476,7 @@
   .flash {
     margin: 0;
     padding: 0.3rem 0.6rem;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     background: #ecfdf5;
     color: #065f46;
     border-bottom: 1px solid #d1fae5;
@@ -484,7 +484,7 @@
   }
 
   .flash.warn { background: #fef2f2; color: #991b1b; border-bottom-color: #fecaca; }
-  .empty-state { margin: 0; padding: 0.4rem 0.6rem; font-size: 0.76rem; background: #f9fafb; color: #4b5563; border-bottom: 1px solid #e5e7eb; }
+  .empty-state { margin: 0; padding: 0.4rem 0.6rem; font-size: var(--fs-sm); background: #f9fafb; color: #4b5563; border-bottom: 1px solid #e5e7eb; }
 
   .panes {
     display: grid;

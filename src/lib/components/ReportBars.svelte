@@ -70,17 +70,17 @@
 
 <style>
   .bars { margin: 0; min-width: 0; }
-  figcaption { font-size: 11px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  figcaption { font-size: var(--fs-xs); font-weight: 700; color: var(--text); margin-bottom: 8px; }
   .rows { display: flex; flex-direction: column; gap: 7px; }
   .row { display: grid; grid-template-columns: 92px 1fr 34px; align-items: center; gap: 8px; }
-  .label { display: flex; flex-direction: column; min-width: 0; font-size: 10px; color: var(--text-2); font-weight: 600; }
+  .label { display: flex; flex-direction: column; min-width: 0; font-size: var(--fs-2xs); color: var(--text-2); font-weight: 600; }
   .label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .label small { font-size: 9px; font-weight: 500; color: var(--text-3); }
+  .label small { font-size: var(--fs-3xs); font-weight: 500; color: var(--text-3); }
   .track { display: flex; height: 14px; background: var(--surface-2); border-radius: 4px; overflow: hidden; min-width: 0; }
   .segment { height: 100%; flex-shrink: 0; box-sizing: border-box; border-right: 2px solid var(--surface); }
   .segment:last-child { border-right: 0; border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
-  .total { font-size: 10px; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
-  .legend { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10px; color: var(--text-2); }
+  .total { font-size: var(--fs-2xs); font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+  .legend { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--fs-2xs); color: var(--text-2); }
   .legend li { display: inline-flex; align-items: center; gap: 5px; }
   .legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
 </style>

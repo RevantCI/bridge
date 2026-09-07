@@ -208,7 +208,7 @@
 
 <style>
   .passage { display: flex; flex-direction: column; min-height: 0; height: 100%; }
-  .state { padding: 1.2rem; color: #6b7280; font-size: 0.85rem; }
+  .state { padding: 1.2rem; color: #6b7280; font-size: var(--fs-lg); }
   .state.error { color: #9b1c1c; }
 
   .filters {
@@ -224,7 +224,7 @@
 
   .chip {
     font: inherit;
-    font-size: 0.72rem;
+    font-size: var(--fs-xs);
     padding: 0.15rem 0.5rem;
     border: 1px solid #d1d5db;
     border-radius: 999px;
@@ -249,7 +249,7 @@
   .notice {
     margin: 0;
     padding: 0.4rem 0.6rem;
-    font-size: 0.76rem;
+    font-size: var(--fs-sm);
     background: #fffbeb;
     color: #78350f;
     border-bottom: 1px solid #fde68a;

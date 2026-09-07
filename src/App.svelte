@@ -1096,7 +1096,7 @@
 
 <style>
   .frame { width: 100vw; height: 100vh; background: var(--bg); display: flex; flex-direction: column; position: relative; overflow: hidden; }
-  .progress-row { height: 32px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: 11px; color: var(--text-2); flex-shrink: 0; }
+  .progress-row { height: 32px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: var(--fs-xs); color: var(--text-2); flex-shrink: 0; }
   .checking-row { display: grid; grid-template-columns: 12px minmax(220px, 320px) minmax(120px, 1fr) 84px; }
   .progress-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent-bg); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex-shrink: 0; }
@@ -1105,23 +1105,23 @@
   .fill { height: 100%; background: var(--accent); transition: width 0.3s; }
   .indeterminate { width: 35%; animation: slide 1.1s ease-in-out infinite; }
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
-  .progress-action { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer; }
+  .progress-action { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-2); border-radius: 5px; padding: 2px 8px; font-size: var(--fs-xs); cursor: pointer; }
   .cancel-action { width: 84px; }
   .progress-action:disabled { opacity: 0.55; cursor: wait; }
   .check-notice { color: var(--danger); height: auto; min-height: 32px; max-height: 96px; align-items: flex-start; padding-top: 7px; padding-bottom: 7px; }
   .check-message { flex: 1; min-width: 0; max-height: 78px; overflow: auto; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
   .body { flex: 1; display: flex; overflow: hidden; }
   .editor-col { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .editor-toolbar { height: 34px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: 11px; color: var(--text-2); flex-shrink: 0; }
-  .whole-book-btn { font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+  .editor-toolbar { height: 34px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: var(--fs-xs); color: var(--text-2); flex-shrink: 0; }
+  .whole-book-btn { font-size: var(--fs-xs); font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
   .whole-book-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .grow { flex: 1; }
-  .statusbar { height: 28px; background: var(--surface); border-top: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 16px; font-size: 11px; color: var(--text-2); flex-shrink: 0; }
+  .statusbar { height: 28px; background: var(--surface); border-top: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 16px; font-size: var(--fs-xs); color: var(--text-2); flex-shrink: 0; }
   .engine-notice { color: var(--warning); font-weight: 600; }
-  .diagnostics-btn { position: relative; font-size: 10px; font-weight: 650; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-2); cursor: pointer; display: flex; align-items: center; gap: 5px; }
+  .diagnostics-btn { position: relative; font-size: var(--fs-2xs); font-weight: 650; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-2); cursor: pointer; display: flex; align-items: center; gap: 5px; }
   .diagnostics-btn:hover { background: var(--surface); }
   .error-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--danger); }
-  .global-drop { position: absolute; inset: 12px; z-index: 100; display: grid; place-items: center; border: 3px dashed var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--accent-bg) 92%, transparent); color: var(--accent); font-size: 17px; font-weight: 750; pointer-events: none; }
-  .drop-error { position: absolute; z-index: 101; left: 50%; bottom: 42px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; border: 1px solid var(--danger); border-radius: 8px; background: var(--surface); color: var(--danger); padding: 9px 12px; font-size: 11px; box-shadow: 0 8px 24px rgba(0,0,0,.14); }
-  .drop-error button { border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: 11px; }
+  .global-drop { position: absolute; inset: 12px; z-index: 100; display: grid; place-items: center; border: 3px dashed var(--accent); border-radius: 14px; background: color-mix(in srgb, var(--accent-bg) 92%, transparent); color: var(--accent); font-size: var(--fs-2xl); font-weight: 750; pointer-events: none; }
+  .drop-error { position: absolute; z-index: 101; left: 50%; bottom: 42px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; border: 1px solid var(--danger); border-radius: 8px; background: var(--surface); color: var(--danger); padding: 9px 12px; font-size: var(--fs-xs); box-shadow: 0 8px 24px rgba(0,0,0,.14); }
+  .drop-error button { border: 0; background: transparent; color: var(--accent); cursor: pointer; font-size: var(--fs-xs); }
 </style>

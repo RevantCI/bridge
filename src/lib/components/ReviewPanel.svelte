@@ -714,10 +714,10 @@
   .panel { width: 400px; flex-shrink: 0; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); }
   .panel-header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
   .panel-pinned { flex-shrink: 0; padding: 14px 16px; border-bottom: 1px solid var(--border); overflow-y: auto; max-height: 60vh; }
-  .ref { font-size: 13px; font-weight: 700; color: var(--text); }
-  .sub { font-size: 11px; color: var(--text-2); margin-top: 2px; }
+  .ref { font-size: var(--fs-md); font-weight: 700; color: var(--text); }
+  .sub { font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; }
   .panel-scroll { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .operation-status { display: flex; align-items: center; gap: 7px; border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; font-size: 11px; line-height: 1.4; }
+  .operation-status { display: flex; align-items: center; gap: 7px; border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; font-size: var(--fs-xs); line-height: 1.4; }
   .operation-status.checking { color: var(--accent); background: var(--accent-bg); }
   .operation-status.saved { color: var(--success); background: var(--success-bg); }
   .operation-status.failed { color: var(--danger); background: var(--danger-bg); }
@@ -725,27 +725,27 @@
   .tab-content { flex: 1; overflow-y: auto; padding: 14px 16px; }
   .tabs button {
     flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px;
-    padding: 8px 6px; font-size: 10.5px; font-weight: 700; color: var(--text-2);
+    padding: 8px 6px; font-size: var(--fs-2xs); font-weight: 700; color: var(--text-2);
     background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
     cursor: pointer;
   }
   .tabs button:hover:not(.active) { color: var(--text); }
   .tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
   .tab-count {
-    font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+    font-size: var(--fs-3xs); font-weight: 700; padding: 1px 6px; border-radius: 999px;
     background: var(--accent-bg); color: var(--accent);
   }
   .tabs button.active .tab-count { background: var(--accent); color: white; }
   .tab-live { width: 6px; height: 6px; border-radius: 50%; background: var(--gr); flex-shrink: 0; }
   .tab-panel:empty { display: none; }
   .section { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
-  .section-title { font-size: 11px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .section-title { font-size: var(--fs-xs); font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
   .ignored-summary { cursor: pointer; user-select: none; margin-bottom: 0; list-style: none; }
   .ignored-summary::-webkit-details-marker { display: none; }
-  .ignored-summary::before { content: "▸"; font-size: 9px; color: var(--text-3); transition: transform 0.15s ease; }
+  .ignored-summary::before { content: "▸"; font-size: var(--fs-3xs); color: var(--text-3); transition: transform 0.15s ease; }
   .ignored-section[open] .ignored-summary, .accepted-section[open] .ignored-summary { margin-bottom: 8px; }
   .ignored-section[open] .ignored-summary::before, .accepted-section[open] .ignored-summary::before { transform: rotate(90deg); }
-  .live { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; color: var(--gr); }
+  .live { display: flex; align-items: center; gap: 5px; font-size: var(--fs-2xs); font-weight: 700; color: var(--gr); }
   .spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--gr-bg); border-top-color: var(--gr); animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .finding { border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 10px; }
@@ -759,57 +759,57 @@
   .finding.source-m-align { border-left-color: var(--align); }
   .finding.source-m-gr { border-left-color: var(--gr); }
   .verdict { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 6px; }
-  .badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 5px; flex-shrink: 0; }
+  .badge { font-size: var(--fs-2xs); font-weight: 700; padding: 3px 8px; border-radius: 5px; flex-shrink: 0; }
   .badge-wrong { background: var(--danger-bg); color: var(--danger); }
   .badge-review { background: var(--warning-bg); color: var(--warning); }
   .badge-decided { background: var(--success-bg); color: var(--success); text-transform: capitalize; }
-  .check-id { font-size: 11px; color: var(--text-3); min-width: 0; overflow-wrap: anywhere; }
-  .engine-badge { font-size: 9px; font-weight: 700; text-transform: capitalize; color: var(--accent); background: var(--accent-bg); padding: 2px 7px; border-radius: 999px; flex-shrink: 0; }
+  .check-id { font-size: var(--fs-xs); color: var(--text-3); min-width: 0; overflow-wrap: anywhere; }
+  .engine-badge { font-size: var(--fs-3xs); font-weight: 700; text-transform: capitalize; color: var(--accent); background: var(--accent-bg); padding: 2px 7px; border-radius: 999px; flex-shrink: 0; }
   .finding-num-badge {
     display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
-    font-size: 9px; font-weight: 800; color: white; background: var(--accent); border-radius: 50%;
+    font-size: var(--fs-3xs); font-weight: 800; color: white; background: var(--accent); border-radius: 50%;
     flex-shrink: 0;
   }
-  .save-state { margin-left: auto; font-size: 10px; color: var(--text-3); white-space: nowrap; }
+  .save-state { margin-left: auto; font-size: var(--fs-2xs); color: var(--text-3); white-space: nowrap; }
   .save-state.saved { color: var(--success); }
   .save-state.failed { color: var(--danger); }
-  .explain { font-size: 12px; color: var(--text-2); line-height: 1.6; margin: 0 0 8px; }
-  .evidence { font-size: 11px; color: var(--text-2); padding-left: 16px; margin: 0 0 8px; }
+  .explain { font-size: var(--fs-sm); color: var(--text-2); line-height: 1.6; margin: 0 0 8px; }
+  .evidence { font-size: var(--fs-xs); color: var(--text-2); padding-left: 16px; margin: 0 0 8px; }
   .decision-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
   .decision-row.two-up { grid-template-columns: 1fr 1fr; }
   .decision-row.one-up { grid-template-columns: 1fr; }
-  .decision-row button { padding: 7px; font-size: 11px; font-weight: 700; border-radius: 6px; border: none; cursor: pointer; }
+  .decision-row button { padding: 7px; font-size: var(--fs-xs); font-weight: 700; border-radius: 6px; border: none; cursor: pointer; }
   .accept { background: var(--success); color: #fff; }
   .ignore { background: #F5EBFC; color: #9333EA; }
   .undo-ignore, .undo-accept { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border-strong); }
   .edit-inline { background: var(--accent-bg); color: var(--accent); }
-  .none { font-size: 11px; color: var(--text-3); }
+  .none { font-size: var(--fs-xs); color: var(--text-3); }
   .decision-row button:disabled { opacity: .55; cursor: not-allowed; }
   .footer-actions { padding: 12px 16px; border-top: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-  .edit-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
-  .align-btn, .ai-explain-btn { width: 100%; padding: 8px; font-size: 12px; font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+  .edit-btn { width: 100%; padding: 8px; font-size: var(--fs-sm); font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
+  .align-btn, .ai-explain-btn { width: 100%; padding: 8px; font-size: var(--fs-sm); font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
   .edit-btn:disabled, .align-btn:disabled, .ai-explain-btn:disabled { opacity: .55; cursor: not-allowed; }
-  .empty-panel { padding: 24px 16px; font-size: 12px; color: var(--text-3); }
+  .empty-panel { padding: 24px 16px; font-size: var(--fs-sm); color: var(--text-3); }
   .ai-explain-section { border-color: var(--accent); }
-  .ai-cost { margin-left: auto; font-size: 10px; font-weight: 400; color: var(--text-3); }
-  .ai-summary { font-size: 12px; color: var(--text); line-height: 1.5; margin: 0 0 10px; }
-  .ai-error { font-size: 12px; color: var(--danger); line-height: 1.5; margin: 0; }
-  .ai-suggestion { font-size: 11px; color: var(--accent); margin: -4px 0 8px; }
+  .ai-cost { margin-left: auto; font-size: var(--fs-2xs); font-weight: 400; color: var(--text-3); }
+  .ai-summary { font-size: var(--fs-sm); color: var(--text); line-height: 1.5; margin: 0 0 10px; }
+  .ai-error { font-size: var(--fs-sm); color: var(--danger); line-height: 1.5; margin: 0; }
+  .ai-suggestion { font-size: var(--fs-xs); color: var(--accent); margin: -4px 0 8px; }
   .ai-review-controls { border-color: var(--accent); }
-  .mode-pill { margin-left: auto; text-transform: capitalize; font-size: 9px; padding: 2px 7px; border-radius: 999px; color: var(--accent); background: var(--accent-bg); }
-  .ai-review-help { font-size: 10px; line-height: 1.45; color: var(--text-2); margin: 0 0 8px; }
+  .mode-pill { margin-left: auto; text-transform: capitalize; font-size: var(--fs-3xs); padding: 2px 7px; border-radius: 999px; color: var(--accent); background: var(--accent-bg); }
+  .ai-review-help { font-size: var(--fs-2xs); line-height: 1.45; color: var(--text-2); margin: 0 0 8px; }
   .ai-scope-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
-  .ai-scope-actions button, .ai-job-actions button { padding: 6px; font-size: 10px; font-weight: 700; border-radius: 6px; border: 1px solid var(--border-strong); color: var(--accent); background: var(--surface); cursor: pointer; }
+  .ai-scope-actions button, .ai-job-actions button { padding: 6px; font-size: var(--fs-2xs); font-weight: 700; border-radius: 6px; border: 1px solid var(--border-strong); color: var(--accent); background: var(--surface); cursor: pointer; }
   .ai-scope-actions button:disabled, .ai-job-actions button:disabled { opacity: .55; cursor: not-allowed; }
   .ai-job-status { margin-top: 9px; padding: 8px; border-radius: 7px; color: var(--accent); background: var(--accent-bg); }
   .ai-job-status.failed { color: var(--danger); background: var(--danger-bg); }
-  .ai-job-status > div:first-child { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; }
+  .ai-job-status > div:first-child { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-2xs); }
   .ai-job-status progress { width: 100%; height: 6px; margin: 5px 0; accent-color: var(--accent); }
-  .ai-job-status small { display: block; font-size: 9px; color: var(--text-3); }
+  .ai-job-status small { display: block; font-size: var(--fs-3xs); color: var(--text-3); }
   .ai-selection-tally { margin-top: 3px; color: inherit; }
   .ai-selection-tally b { color: inherit; }
-  .ai-failure-list { margin-top: 7px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
+  .ai-failure-list { margin-top: 7px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); font-size: var(--fs-3xs); line-height: 1.4; overflow-wrap: anywhere; }
   .ai-job-actions { margin-top: 6px; }
-  .ai-job-background { margin-top: 9px; padding: 8px; border-radius: 7px; font-size: 9px; line-height: 1.4; color: var(--text-2); background: var(--surface-2); }
-  .ai-control-error { margin: 8px 0 0; font-size: 10px; line-height: 1.4; color: var(--danger); overflow-wrap: anywhere; }
+  .ai-job-background { margin-top: 9px; padding: 8px; border-radius: 7px; font-size: var(--fs-3xs); line-height: 1.4; color: var(--text-2); background: var(--surface-2); }
+  .ai-control-error { margin: 8px 0 0; font-size: var(--fs-2xs); line-height: 1.4; color: var(--danger); overflow-wrap: anywhere; }
 </style>

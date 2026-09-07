@@ -60,7 +60,7 @@
       {/each}
       <text class="hero" x="50%" y="50%" text-anchor="middle" dominant-baseline="central">{total}</text>
       {#if centerLabel}
-        <text class="hero-label" x="50%" y={SIZE / 2 + 17} text-anchor="middle">{centerLabel}</text>
+        <text class="hero-label" x="50%" y={SIZE / 2 + 20} text-anchor="middle">{centerLabel}</text>
       {/if}
     </svg>
     <ul class="legend">
@@ -78,14 +78,14 @@
 
 <style>
   .donut { margin: 0; min-width: 0; }
-  figcaption { font-size: 11px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  figcaption { font-size: var(--fs-xs); font-weight: 700; color: var(--text); margin-bottom: 8px; }
   .body { display: flex; align-items: center; gap: 14px; }
   svg { flex-shrink: 0; }
   .track { stroke: var(--surface-2); }
-  .hero { font-size: 22px; font-weight: 650; fill: var(--text); }
-  .hero-label { font-size: 8px; fill: var(--text-3); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  .hero { font-size: var(--fs-4xl); font-weight: 650; fill: var(--text); }
+  .hero-label { font-size: var(--fs-3xs); fill: var(--text-3); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
   .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
-  .legend li { display: grid; grid-template-columns: 8px 1fr auto auto; align-items: center; gap: 7px; font-size: 10px; color: var(--text-2); }
+  .legend li { display: grid; grid-template-columns: 8px 1fr auto auto; align-items: center; gap: 7px; font-size: var(--fs-2xs); color: var(--text-2); }
   .legend li.zero { opacity: .55; }
   .legend i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
   .legend .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

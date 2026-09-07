@@ -63,18 +63,18 @@
 <style>
   .modal-overlay { position: absolute; inset: 0; background: rgba(15, 20, 26, 0.45); display: flex; align-items: center; justify-content: center; z-index: 30; }
   .modal { width: 460px; background: var(--surface); border-radius: 14px; padding: 22px; }
-  h2 { font-size: 15px; margin: 0 0 6px; color: var(--text); }
-  .sub { font-size: 12px; color: var(--text-2); margin: 0 0 18px; }
-  .review-warning { font-size: 11px; line-height: 1.5; color: var(--warning); background: var(--warning-bg); border-radius: 8px; padding: 9px 11px; margin: -6px 0 14px; }
+  h2 { font-size: var(--fs-xl); margin: 0 0 6px; color: var(--text); }
+  .sub { font-size: var(--fs-sm); color: var(--text-2); margin: 0 0 18px; }
+  .review-warning { font-size: var(--fs-xs); line-height: 1.5; color: var(--warning); background: var(--warning-bg); border-radius: 8px; padding: 9px 11px; margin: -6px 0 14px; }
   .export-opt { width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: var(--surface); cursor: pointer; display: block; }
   .export-opt:hover { border-color: var(--accent); }
   .export-opt:disabled { opacity: 0.6; cursor: not-allowed; }
-  .t { font-size: 13px; font-weight: 700; color: var(--text); }
-  .d { font-size: 11px; color: var(--text-2); margin-top: 2px; line-height: 1.5; }
-  .status { font-size: 11px; margin: 8px 0 0; }
+  .t { font-size: var(--fs-md); font-weight: 700; color: var(--text); }
+  .d { font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; line-height: 1.5; }
+  .status { font-size: var(--fs-xs); margin: 8px 0 0; }
   .status.success { color: var(--success); }
   .status.error { color: var(--danger); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  .btn { font-size: 12px; font-weight: 600; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+  .btn { font-size: var(--fs-sm); font-weight: 600; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
   .btn.ghost { background: transparent; }
 </style>

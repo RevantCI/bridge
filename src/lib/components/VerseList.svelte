@@ -348,15 +348,15 @@
 
 <style>
   .editor-scroll { flex: 1; overflow-y: auto; padding: 22px 32px; background: var(--surface); }
-  .chapter-label { font-size: 11px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 14px; }
+  .chapter-label { font-size: var(--fs-xs); font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 14px; }
   .verse { display: flex; gap: 10px; padding: 9px 10px; border-radius: 7px; margin-bottom: 2px; cursor: pointer; border: 1px solid transparent; }
   .verse:hover { background: var(--surface-2); }
   .verse.active { background: var(--accent-bg); border-color: #C7D9FB; }
-  .vnum { font-size: 11px; font-weight: 700; color: var(--text-3); width: 26px; flex-shrink: 0; padding-top: 2px; }
+  .vnum { font-size: var(--fs-xs); font-weight: 700; color: var(--text-3); width: 26px; flex-shrink: 0; padding-top: 2px; }
   .verse.approved .vnum { color: var(--success); }
   .verse.check-failed .vnum { color: var(--danger, #ef4444); }
-  .vtext { font-size: 16px; line-height: 1.85; color: var(--text); }
-  .finding-num { font-size: 10px; font-weight: 700; color: var(--accent); margin-left: 1px; }
+  .vtext { font-size: var(--fs-xl); line-height: 1.85; color: var(--text); }
+  .finding-num { font-size: var(--fs-2xs); font-weight: 700; color: var(--accent); margin-left: 1px; }
   /* Where Shift+F10 would open the menu. A visible ring, not colour alone:
      the underline classes already carry the finding's source colour. */
   mark.active-finding { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 2px; }
@@ -364,37 +364,37 @@
      letter, not an icon font: an offline PyInstaller build can't reach a CDN
      and icon-only controls render as empty boxes there. */
   .note-btn {
-    font: inherit; font-size: 10px; font-weight: 800; font-style: italic; line-height: 1;
+    font: inherit; font-size: var(--fs-2xs); font-weight: 800; font-style: italic; line-height: 1;
     vertical-align: super; margin: 0 1px; padding: 1px 3px; cursor: pointer;
     border: 1px solid var(--border-strong); border-radius: 3px;
     background: var(--surface-2); color: var(--text-2);
   }
   .note-btn:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
   .note-btn.xref { color: var(--accent); }
-  .alignment-state { margin-left: auto; flex-shrink: 0; padding-top: 3px; font-size: 11px; color: var(--text-3); }
+  .alignment-state { margin-left: auto; flex-shrink: 0; padding-top: 3px; font-size: var(--fs-xs); color: var(--text-3); }
   .alignment-state.complete { color: var(--success); }
   .alignment-state.partial { color: var(--warning); }
   .alignment-state.invalid { color: var(--danger); font-weight: 800; }
-  .empty { color: var(--text-3); font-size: 13px; }
+  .empty { color: var(--text-3); font-size: var(--fs-md); }
   .context-notice {
     position: fixed; left: 50%; bottom: 34px; z-index: 9000; transform: translateX(-50%);
     margin: 0; padding: 7px 11px; border-radius: 6px; background: var(--success-bg);
-    color: var(--success); font-size: 12px; box-shadow: 0 4px 14px rgba(15, 23, 42, .18);
+    color: var(--success); font-size: var(--fs-sm); box-shadow: 0 4px 14px rgba(15, 23, 42, .18);
   }
   .context-notice.error { background: var(--danger-bg, #fef2f2); color: var(--danger, #b91c1c); }
   .verse.editing-row { cursor: default; background: var(--surface); border-color: var(--accent); }
   .vedit { flex: 1; min-width: 0; cursor: default; }
   .vedit-row { display: flex; align-items: flex-start; gap: 8px; }
   .vedit textarea {
-    flex: 1; min-width: 0; box-sizing: border-box; font-size: 16px; line-height: 1.7; color: var(--text);
+    flex: 1; min-width: 0; box-sizing: border-box; font-size: var(--fs-xl); line-height: 1.7; color: var(--text);
     font-family: inherit; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px;
     resize: none; overflow-y: hidden;
   }
   .vedit textarea:disabled { opacity: .6; }
-  .edit-error { color: var(--danger); font-size: 11px; margin: 6px 0 0; line-height: 1.4; }
+  .edit-error { color: var(--danger); font-size: var(--fs-xs); margin: 6px 0 0; line-height: 1.4; }
   .edit-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
   .icon-btn {
-    width: 32px; height: 32px; padding: 0; font-size: 15px; font-weight: 800; border-radius: 7px;
+    width: 32px; height: 32px; padding: 0; font-size: var(--fs-xl); font-weight: 800; border-radius: 7px;
     border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
   }
   .icon-btn.save { background: var(--accent); color: white; }

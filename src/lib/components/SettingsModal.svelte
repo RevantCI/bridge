@@ -248,43 +248,43 @@
 <style>
   .modal-overlay { position: absolute; inset: 0; background: rgba(15, 20, 26, 0.45); display: flex; align-items: center; justify-content: center; z-index: 30; }
   .settings-modal { width: 640px; height: 480px; background: var(--surface); border-radius: 14px; display: flex; overflow: hidden; position: relative; }
-  .close-btn { position: absolute; top: 10px; right: 10px; z-index: 2; width: 28px; height: 28px; border-radius: 6px; border: none; background: transparent; color: var(--text-2); font-size: 14px; cursor: pointer; }
+  .close-btn { position: absolute; top: 10px; right: 10px; z-index: 2; width: 28px; height: 28px; border-radius: 6px; border: none; background: transparent; color: var(--text-2); font-size: var(--fs-lg); cursor: pointer; }
   .close-btn:hover { background: var(--surface-2); }
   .settings-nav { width: 170px; background: var(--surface-2); border-right: 1px solid var(--border); padding: 14px 8px; flex-shrink: 0; }
-  .nav-title { font-size: 12px; font-weight: 700; color: var(--text); padding: 6px 10px 12px; }
-  .nav-item { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px; font-size: 12px; font-weight: 600; color: var(--text-2); background: transparent; border: none; cursor: pointer; margin-bottom: 2px; }
+  .nav-title { font-size: var(--fs-sm); font-weight: 700; color: var(--text); padding: 6px 10px 12px; }
+  .nav-item { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); background: transparent; border: none; cursor: pointer; margin-bottom: 2px; }
   .nav-item:hover { background: var(--surface); }
   .nav-item.active { background: var(--accent-bg); color: var(--accent); }
   .settings-body { flex: 1; padding: 20px 24px; overflow-y: auto; }
-  h3 { font-size: 14px; margin: 0 0 4px; color: var(--text); }
-  .desc { font-size: 11px; color: var(--text-2); margin: 0 0 16px; }
-  .muted { font-size: 12px; color: var(--text-3); }
+  h3 { font-size: var(--fs-lg); margin: 0 0 4px; color: var(--text); }
+  .desc { font-size: var(--fs-xs); color: var(--text-2); margin: 0 0 16px; }
+  .muted { font-size: var(--fs-sm); color: var(--text-3); }
   .field { margin-bottom: 14px; }
-  .field > label, .field-label { display: block; font-size: 11px; font-weight: 700; color: var(--text-2); margin-bottom: 5px; }
-  .field input, .field select { width: 100%; height: 34px; border: 1px solid var(--border); border-radius: 6px; padding: 0 10px; font-size: 12px; color: var(--text); background: var(--surface-2); box-sizing: border-box; }
-  .hint { font-size: 10px; color: var(--text-3); margin-top: 4px; }
+  .field > label, .field-label { display: block; font-size: var(--fs-xs); font-weight: 700; color: var(--text-2); margin-bottom: 5px; }
+  .field input, .field select { width: 100%; height: 34px; border: 1px solid var(--border); border-radius: 6px; padding: 0 10px; font-size: var(--fs-sm); color: var(--text); background: var(--surface-2); box-sizing: border-box; }
+  .hint { font-size: var(--fs-2xs); color: var(--text-3); margin-top: 4px; }
   .mode-option { display: flex; align-items: flex-start; gap: 9px; border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; margin-bottom: 7px; cursor: pointer; background: var(--surface-2); }
   .mode-option.selected { border-color: var(--accent); background: var(--accent-bg); }
   .mode-option input { width: auto; height: auto; margin: 2px 0 0; }
-  .mode-option span { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text); }
+  .mode-option span { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); color: var(--text); }
   .mode-option small { color: var(--text-2); line-height: 1.35; }
   .save-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
-  .btn { font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+  .btn { font-size: var(--fs-sm); font-weight: 600; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-  .save-msg { font-size: 11px; color: var(--success); }
-  .kv { display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-bottom: 1px dashed var(--border); }
+  .save-msg { font-size: var(--fs-xs); color: var(--success); }
+  .kv { display: flex; justify-content: space-between; font-size: var(--fs-sm); padding: 6px 0; border-bottom: 1px dashed var(--border); }
   .kv .on { color: var(--success); font-weight: 700; }
-  .resource-note { font-size: 10px; line-height: 1.45; color: var(--text-3); margin-top: 10px; overflow-wrap: anywhere; }
-  .resource-warning { font-size: 11px; line-height: 1.4; color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger); border-radius: 6px; padding: 8px; margin-bottom: 10px; }
-  .connection-warning { font-size: 11px; line-height: 1.4; color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger); border-radius: 6px; padding: 8px; margin-bottom: 10px; }
+  .resource-note { font-size: var(--fs-2xs); line-height: 1.45; color: var(--text-3); margin-top: 10px; overflow-wrap: anywhere; }
+  .resource-warning { font-size: var(--fs-xs); line-height: 1.4; color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger); border-radius: 6px; padding: 8px; margin-bottom: 10px; }
+  .connection-warning { font-size: var(--fs-xs); line-height: 1.4; color: var(--danger); background: var(--danger-bg); border: 1px solid var(--danger); border-radius: 6px; padding: 8px; margin-bottom: 10px; }
   .connection-option { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 9px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; cursor: pointer; background: var(--surface-2); }
   .connection-option.selected { border-color: var(--accent); background: var(--accent-bg); }
   .connection-option input { width: auto; height: auto; margin: 2px 0 0; }
-  .connection-option span { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }
+  .connection-option span { display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-xs); }
   .connection-option small { color: var(--text-2); line-height: 1.35; }
   .connection-option i { width: 9px; height: 9px; border-radius: 50%; margin-top: 3px; background: var(--border-strong); }
   .connection-option i.connected { background: var(--success); }
   .connection-option i.error { background: var(--danger); }
-  .connection-detail { min-height: 26px; padding: 5px 8px 8px 31px; color: var(--text-3); font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
+  .connection-detail { min-height: 26px; padding: 5px 8px 8px 31px; color: var(--text-3); font-size: var(--fs-2xs); line-height: 1.35; overflow-wrap: anywhere; }
 </style>

@@ -139,13 +139,13 @@
     flex-wrap: wrap;
   }
 
-  h2 { margin: 0; font-size: 0.9rem; }
+  h2 { margin: 0; font-size: var(--fs-lg); }
 
   .tablist { display: flex; gap: 0.2rem; flex: 1 1 auto; }
 
   .tab {
     font: inherit;
-    font-size: 0.8rem;
+    font-size: var(--fs-md);
     padding: 0.25rem 0.7rem;
     border: 1px solid transparent;
     border-radius: 4px 4px 0 0;
@@ -168,7 +168,7 @@
 
   .close {
     font: inherit;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
     padding: 0.25rem 0.6rem;
     border: 1px solid #d1d5db;
     border-radius: 4px;
@@ -180,5 +180,5 @@
 
   .body { flex: 1 1 auto; min-height: 0; display: flex; }
   .panel { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
-  .placeholder { padding: 1.25rem; color: #6b7280; font-size: 0.85rem; max-width: 44rem; }
+  .placeholder { padding: 1.25rem; color: #6b7280; font-size: var(--fs-lg); max-width: 44rem; }
 </style>

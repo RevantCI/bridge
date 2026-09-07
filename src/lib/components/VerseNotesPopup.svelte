@@ -80,19 +80,19 @@
     display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px;
     border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 12px;
   }
-  .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; font-weight: 800; flex: 0 0 100%; }
-  .headword { font-size: 20px; font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
-  .ref { font-size: 12px; color: var(--text-3); font-weight: 700; padding-top: 6px; }
+  .eyebrow { color: var(--accent); font-size: var(--fs-2xs); letter-spacing: .12em; font-weight: 800; flex: 0 0 100%; }
+  .headword { font-size: var(--fs-3xl); font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .ref { font-size: var(--fs-sm); color: var(--text-3); font-weight: 700; padding-top: 6px; }
   button { font: inherit; }
-  .close { border: 0; background: none; font-size: 22px; padding: 0 4px; color: var(--text-2); cursor: pointer; }
+  .close { border: 0; background: none; font-size: var(--fs-4xl); padding: 0 4px; color: var(--text-2); cursor: pointer; }
   .close:hover { color: var(--text); }
   .notes { display: flex; flex-direction: column; gap: 12px; }
   .note { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
   .note + .note { background: var(--surface-2); }
   .note-head { display: flex; gap: 8px; align-items: baseline; margin-bottom: 6px; }
-  .note-ref { font-size: 11px; font-weight: 800; color: var(--accent); }
-  .note-index { font-size: 10px; color: var(--text-3); margin-left: auto; }
-  .lead { font-size: 14px; font-weight: 700; line-height: 1.6; margin-bottom: 6px; overflow-wrap: anywhere; }
-  .body { font-size: 13px; line-height: 1.7; margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
-  .empty { color: var(--text-3); font-size: 12px; margin: 0; }
+  .note-ref { font-size: var(--fs-xs); font-weight: 800; color: var(--accent); }
+  .note-index { font-size: var(--fs-2xs); color: var(--text-3); margin-left: auto; }
+  .lead { font-size: var(--fs-lg); font-weight: 700; line-height: 1.6; margin-bottom: 6px; overflow-wrap: anywhere; }
+  .body { font-size: var(--fs-md); line-height: 1.7; margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+  .empty { color: var(--text-3); font-size: var(--fs-sm); margin: 0; }
 </style>

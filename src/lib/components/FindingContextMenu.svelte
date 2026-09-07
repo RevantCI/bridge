@@ -140,7 +140,7 @@
     background: transparent;
     color: inherit;
     font: inherit;
-    font-size: 0.8rem;
+    font-size: var(--fs-md);
     text-align: left;
     cursor: pointer;
   }

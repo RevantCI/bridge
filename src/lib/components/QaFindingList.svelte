@@ -213,7 +213,7 @@
 
   .list-summary {
     padding: 0.4rem 0.6rem;
-    font-size: 0.75rem;
+    font-size: var(--fs-sm);
     color: #4b5563;
     border-bottom: 1px solid #e5e7eb;
     flex: none;
@@ -256,14 +256,14 @@
     display: flex;
     justify-content: space-between;
     gap: 0.5rem;
-    font-size: 0.7rem;
+    font-size: var(--fs-2xs);
     color: #6b7280;
   }
 
   .reference { font-weight: 600; color: #111827; }
 
   .row-kind {
-    font-size: 0.82rem;
+    font-size: var(--fs-md);
     color: #111827;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -274,7 +274,7 @@
 
   .empty, .loading-more {
     padding: 1rem 0.6rem;
-    font-size: 0.8rem;
+    font-size: var(--fs-md);
     color: #6b7280;
   }
 </style>

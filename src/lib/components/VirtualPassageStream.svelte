@@ -134,13 +134,13 @@
     width: 100%;
     box-sizing: border-box;
     font: inherit;
-    font-size: 0.8rem;
+    font-size: var(--fs-md);
     padding: 0.3rem 0.5rem;
     border: 1px solid #d1d5db;
     border-radius: 4px;
   }
 
-  .count { margin: 0; padding: 0 0.6rem 0.3rem; font-size: 0.72rem; color: #6b7280; flex: none; }
+  .count { margin: 0; padding: 0 0.6rem 0.3rem; font-size: var(--fs-xs); color: #6b7280; flex: none; }
 
   .viewport { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 
@@ -161,7 +161,7 @@
     border: none;
     background: none;
     font: inherit;
-    font-size: 0.8rem;
+    font-size: var(--fs-md);
     text-align: left;
     cursor: pointer;
   }
@@ -184,15 +184,15 @@
   .verse.open .preview { display: none; }
 
   .marks { flex: none; display: flex; gap: 0.25rem; color: #6b7280; }
-  .mark { font-size: 0.75rem; }
+  .mark { font-size: var(--fs-sm); }
   .mark.focus { color: #2563eb; }
 
   .verse-body { padding: 0 0.6rem 0.6rem 1.6rem; }
-  .scripture { margin: 0 0 0.4rem; font-size: 1rem; line-height: 1.8; overflow-wrap: anywhere; }
-  .connector { margin: 0; font-size: 0.78rem; color: #1d4ed8; }
+  .scripture { margin: 0 0 0.4rem; font-size: var(--fs-xl); line-height: 1.8; overflow-wrap: anywhere; }
+  .connector { margin: 0; font-size: var(--fs-sm); color: #1d4ed8; }
   .muted { color: #6b7280; }
-  .small { font-size: 0.75rem; }
-  .empty { padding: 1rem 0.6rem; font-size: 0.8rem; color: #6b7280; }
+  .small { font-size: var(--fs-sm); }
+  .empty { padding: 1rem 0.6rem; font-size: var(--fs-md); color: #6b7280; }
 
   .visually-hidden {
     position: absolute;

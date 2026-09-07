@@ -194,7 +194,7 @@
     overflow-x: hidden;
   }
 
-  .state { padding: 1.2rem; color: #6b7280; font-size: 0.85rem; }
+  .state { padding: 1.2rem; color: #6b7280; font-size: var(--fs-lg); }
   .state.error { color: #9b1c1c; }
 
   .head { padding: 0.75rem 0.9rem; border-bottom: 1px solid #e5e7eb; flex: none; }
@@ -207,12 +207,12 @@
     flex-wrap: wrap;
   }
 
-  h3 { margin: 0; font-size: 1rem; }
-  h4 { margin: 0 0 0.4rem; font-size: 0.78rem; text-transform: uppercase; color: #374151; }
+  h3 { margin: 0; font-size: var(--fs-xl); }
+  h4 { margin: 0 0 0.4rem; font-size: var(--fs-sm); text-transform: uppercase; color: #374151; }
 
   .nav { display: flex; gap: 0.3rem; }
   .nav button {
-    font-size: 0.75rem;
+    font-size: var(--fs-sm);
     padding: 0.2rem 0.5rem;
     border: 1px solid #d1d5db;
     border-radius: 4px;
@@ -220,10 +220,10 @@
     cursor: pointer;
   }
 
-  .reference { margin: 0.2rem 0; font-size: 0.8rem; color: #4b5563; font-weight: 600; }
+  .reference { margin: 0.2rem 0; font-size: var(--fs-md); color: #4b5563; font-weight: 600; }
   .badges { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.4rem 0; }
-  .explanation { margin: 0.4rem 0 0.2rem; font-size: 0.86rem; line-height: 1.5; }
-  .caveat { margin: 0; font-size: 0.75rem; color: #6b7280; font-style: italic; }
+  .explanation { margin: 0.4rem 0 0.2rem; font-size: var(--fs-lg); line-height: 1.5; }
+  .caveat { margin: 0; font-size: var(--fs-sm); color: #6b7280; font-style: italic; }
 
   .evidence { padding: 0.75rem 0.9rem; flex: 0 0 auto; min-width: 0; display: flex; flex-direction: column; gap: .9rem; }
 
@@ -242,14 +242,14 @@
     flex: none;
   }
 
-  .note-label { display: block; font-size: 0.78rem; margin-bottom: 0.2rem; }
+  .note-label { display: block; font-size: var(--fs-sm); margin-bottom: 0.2rem; }
   .muted { color: #6b7280; font-weight: 400; }
 
   textarea {
     width: 100%;
     box-sizing: border-box;
     font: inherit;
-    font-size: 0.82rem;
+    font-size: var(--fs-md);
     padding: 0.35rem 0.5rem;
     border: 1px solid #d1d5db;
     border-radius: 4px;
@@ -261,14 +261,14 @@
     align-items: flex-start;
     gap: 0.4rem;
     margin: 0.4rem 0;
-    font-size: 0.78rem;
+    font-size: var(--fs-sm);
   }
 
   .buttons { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
 
   .decision, .secondary {
     font: inherit;
-    font-size: 0.8rem;
+    font-size: var(--fs-md);
     padding: 0.35rem 0.7rem;
     border-radius: 4px;
     border: 1px solid #2563eb;
@@ -284,5 +284,5 @@
     outline-offset: 1px;
   }
 
-  .decided { margin: 0.5rem 0 0; font-size: 0.76rem; color: #4b5563; }
+  .decided { margin: 0.5rem 0 0; font-size: var(--fs-sm); color: #4b5563; }
 </style>

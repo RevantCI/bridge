@@ -345,27 +345,27 @@
 <style>
   .analysis { flex: none; border-bottom: 1px solid #dbeafe; background: #f8fbff; }
   .controls { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; padding: 0.45rem 0.6rem; }
-  strong { font-size: 0.78rem; color: #1e3a8a; }
-  label { display: flex; align-items: center; gap: 0.25rem; font-size: 0.7rem; color: #4b5563; }
+  strong { font-size: var(--fs-sm); color: #1e3a8a; }
+  label { display: flex; align-items: center; gap: 0.25rem; font-size: var(--fs-2xs); color: #4b5563; }
   select, input, button { font: inherit; }
   select, input { border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; padding: 0.22rem 0.35rem; }
   input { width: 2.4rem; }
   .range { display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
-  .state { font-size: 0.7rem; padding: 0.2rem 0.45rem; border-radius: 999px; background: #e5e7eb; color: #374151; }
+  .state { font-size: var(--fs-2xs); padding: 0.2rem 0.45rem; border-radius: 999px; background: #e5e7eb; color: #374151; }
   .state[data-state="CURRENT"] { background: #dcfce7; color: #166534; }
   .state[data-state="STALE"], .state[data-state="SEARCH_INCOMPLETE"] { background: #fef3c7; color: #92400e; }
   .state[data-state="FAILED"] { background: #fee2e2; color: #991b1b; }
-  .range-label { font-size: 0.7rem; color: #475569; }
+  .range-label { font-size: var(--fs-2xs); color: #475569; }
   button { padding: 0.25rem 0.55rem; border-radius: 4px; cursor: pointer; }
   button:disabled { cursor: default; opacity: 0.55; }
   .run { border: 1px solid #2563eb; background: #2563eb; color: #fff; }
   .cancel { border: 1px solid #d1d5db; background: #fff; color: #374151; }
   button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
-  .progress { padding: 0 0.6rem 0.4rem; font-size: 0.7rem; color: #374151; }
+  .progress { padding: 0 0.6rem 0.4rem; font-size: var(--fs-2xs); color: #374151; }
   ol { display: flex; flex-wrap: wrap; gap: 0.65rem; list-style: none; padding: 0.3rem 0 0; margin: 0; }
   li[data-status="RUNNING"] { color: #1d4ed8; font-weight: 600; }
   li[data-status="FAILED"] { color: #b91c1c; }
-  .warning, .error { margin: 0; padding: 0.3rem 0.6rem; font-size: 0.72rem; }
+  .warning, .error { margin: 0; padding: 0.3rem 0.6rem; font-size: var(--fs-xs); }
   .warning { background: #fffbeb; color: #92400e; }
   .error { background: #fef2f2; color: #991b1b; }
 </style>

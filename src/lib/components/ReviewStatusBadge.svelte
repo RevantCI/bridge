@@ -39,7 +39,7 @@
     padding: 0.1em 0.5em;
     border-radius: 999px;
     border: 1px solid currentColor;
-    font-size: 0.75rem;
+    font-size: var(--fs-sm);
     line-height: 1.5;
     white-space: nowrap;
     max-width: 100%;

@@ -85,21 +85,21 @@
     display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px;
     border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 12px;
   }
-  .eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .12em; font-weight: 800; flex: 0 0 100%; }
-  .headword { font-size: 20px; font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .eyebrow { color: var(--accent); font-size: var(--fs-2xs); letter-spacing: .12em; font-weight: 800; flex: 0 0 100%; }
+  .headword { font-size: var(--fs-3xl); font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
   button { font: inherit; }
-  .close { border: 0; background: none; font-size: 22px; padding: 0 4px; color: var(--text-2); cursor: pointer; }
+  .close { border: 0; background: none; font-size: var(--fs-4xl); padding: 0 4px; color: var(--text-2); cursor: pointer; }
   .close:hover { color: var(--text); }
   .loading { display: flex; gap: 10px; align-items: center; color: var(--text-2); padding: 16px 0; }
   .spin { width: 12px; height: 12px; border: 2px solid var(--accent-bg); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .error { background: #FFF0F0; color: var(--danger); border-radius: 9px; padding: 10px 12px; font-size: 12px; }
+  .error { background: #FFF0F0; color: var(--danger); border-radius: 9px; padding: 10px 12px; font-size: var(--fs-sm); }
   .segments { display: flex; flex-direction: column; gap: 12px; }
   .segment { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
   .segment + .segment { background: var(--surface-2); }
-  .lemma { font-size: 18px; font-weight: 700; margin-bottom: 8px; overflow-wrap: anywhere; }
-  dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; margin: 0; font-size: 12px; }
+  .lemma { font-size: var(--fs-2xl); font-weight: 700; margin-bottom: 8px; overflow-wrap: anywhere; }
+  dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; margin: 0; font-size: var(--fs-sm); }
   dt { color: var(--text-3); font-weight: 700; white-space: nowrap; }
   dd { margin: 0; color: var(--text); line-height: 1.5; min-width: 0; overflow-wrap: anywhere; }
-  .unresolved { color: var(--text-3); font-size: 12px; margin: 4px 0 0; }
+  .unresolved { color: var(--text-3); font-size: var(--fs-sm); margin: 4px 0 0; }
 </style>
