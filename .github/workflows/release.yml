@@ -156,8 +156,13 @@ jobs:
             # A plain tag push has no release behind it. Draft one and attach
             # to that -- going public stays a human decision, never a side
             # effect of pushing a tag.
+            #
+            # Pre-release is taken from the tag's own shape rather than
+            # hardcoded: a semver pre-release identifier is the part after the
+            # hyphen, so v1.2.0-beta.3 is flagged and v1.2.0 ships stable.
+            $maturity = if ($env:TAG -match "-") { "--prerelease" } else { "--latest" }
             gh release create $env:TAG --repo ${{ github.repository }} `
-              --draft --prerelease --title "Bridge $env:TAG" --generate-notes
+              --draft $maturity --title "Bridge $env:TAG" --generate-notes
             if ($LASTEXITCODE -ne 0) { throw "Could not draft a release for $env:TAG" }
           }
           gh release upload $env:TAG "${{ steps.installer.outputs.path }}" `
