@@ -349,7 +349,7 @@
   .rank { color: var(--text-3); font-size: var(--fs-3xs); }
   .tool { color: var(--text-2); font-size: var(--fs-3xs); }
   .status { margin-left: auto; border-radius: 999px; padding: 3px 7px; font-size: var(--fs-3xs); font-weight: 700; color: var(--warning); background: var(--warning-bg); }
-  .status[data-status="HUMAN_CONFIRMED"], .status[data-status="HUMAN_CORRECTED"] { color: var(--gr); background: var(--gr-bg); }
+  .status[data-status="HUMAN_CONFIRMED"], .status[data-status="HUMAN_CORRECTED"] { color: var(--pass); background: var(--pass-bg); }
   .status[data-status="HUMAN_REJECTED"] { color: var(--danger); background: var(--danger-bg); }
   .mapping-grid { display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1.4fr); gap: 8px; margin-top: 10px; align-items: center; }
   .evidence-block { border: 1px solid var(--border); border-radius: 7px; padding: 8px; min-height: 50px; }
@@ -367,7 +367,7 @@
   .explanation { margin: 8px 0; }
   .warning, .audit { border-radius: 6px; padding: 7px 8px; font-size: var(--fs-3xs); line-height: 1.4; margin: 7px 0; }
   .warning { color: var(--warning); background: var(--warning-bg); }
-  .audit { color: var(--gr); background: var(--gr-bg); }
+  .audit { color: var(--pass); background: var(--pass-bg); }
   .note { margin-top: 8px; }
   .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
   .actions button.primary { color: #fff; background: var(--accent); border-color: var(--accent); }

@@ -56,8 +56,8 @@
     book: string, hash: string, verdict: TriageOverrideVerdict | "",
   ) => void = () => {};
 
-  // Same finding-source legend as the rest of the app (index.css): tN red,
-  // tW blue, Greek Room green, alignment amber; AI review takes violet.
+  // Same finding-source legend as the rest of the app (index.css): Greek
+  // Room red, tN green, tW teal, alignment amber; AI review takes violet.
   // Validated in this order for colour-vision separation with the legend
   // and direct labels as the mandatory secondary encoding.
   const CATEGORY_COLORS: Record<ReportCategory, string> = {

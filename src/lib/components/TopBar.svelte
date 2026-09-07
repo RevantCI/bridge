@@ -120,7 +120,7 @@
 <style>
   .topbar { height: 52px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 14px; flex-shrink: 0; }
   .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-md); color: var(--text); white-space: nowrap; }
-  .mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--gr)); flex-shrink: 0; }
+  .mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--pass)); flex-shrink: 0; }
   .divider { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
   .breadcrumb { display: flex; align-items: center; gap: 4px; min-width: 0; flex-shrink: 1; overflow: hidden; }
   .crumb { border: 0; background: transparent; color: var(--text-2); font-size: var(--fs-sm); font-weight: 600; padding: 4px 6px; border-radius: 6px; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

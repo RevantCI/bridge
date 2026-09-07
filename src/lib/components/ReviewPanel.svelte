@@ -767,7 +767,7 @@
     background: var(--accent-bg); color: var(--accent);
   }
   .tabs button.active .tab-count { background: var(--accent); color: white; }
-  .tab-live { width: 6px; height: 6px; border-radius: 50%; background: var(--gr); flex-shrink: 0; }
+  .tab-live { width: 6px; height: 6px; border-radius: 50%; background: var(--pass); flex-shrink: 0; }
   .tab-panel:empty { display: none; }
   .section { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
   .section-title { font-size: var(--fs-xs); font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -776,14 +776,14 @@
   .ignored-summary::before { content: "▸"; font-size: var(--fs-3xs); color: var(--text-3); transition: transform 0.15s ease; }
   .ignored-section[open] .ignored-summary, .accepted-section[open] .ignored-summary { margin-bottom: 8px; }
   .ignored-section[open] .ignored-summary::before, .accepted-section[open] .ignored-summary::before { transform: rotate(90deg); }
-  .live { display: flex; align-items: center; gap: 5px; font-size: var(--fs-2xs); font-weight: 700; color: var(--gr); }
-  .spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--gr-bg); border-top-color: var(--gr); animation: spin 0.8s linear infinite; }
+  .live { display: flex; align-items: center; gap: 5px; font-size: var(--fs-2xs); font-weight: 700; color: var(--pass); }
+  .spin { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--pass-bg); border-top-color: var(--pass); animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .finding { border-top: 1px dashed var(--border); padding-top: 10px; margin-top: 10px; }
   .finding:first-child { border-top: none; padding-top: 0; margin-top: 0; }
   /* Same four-colour source legend as the verse-text underlines (index.css
-     mark.m-*), so a red underline in the verse and its tN entry here read as
-     one thing. Class names come from highlight.ts's categoryClass(). */
+     mark.m-*), so a green underline in the verse and its tN entry here read
+     as one thing. Class names come from highlight.ts's categoryClass(). */
   .finding[class*="source-m-"] { border-left: 3px solid transparent; padding-left: 8px; }
   .finding.source-m-tn { border-left-color: var(--tn); }
   .finding.source-m-tw { border-left-color: var(--tw); }

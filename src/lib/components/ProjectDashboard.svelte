@@ -284,17 +284,17 @@
   .error-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--surface-2); color: var(--danger); border-radius: 8px; padding: 14px; font-size: var(--fs-xs); }
   .report-area { box-sizing: border-box; padding: 20px 32px; max-width: 820px; }
   .gate { border-radius: 8px; padding: 10px 14px; font-size: var(--fs-xs); font-weight: 600; background: var(--danger-bg); color: var(--danger); margin-bottom: 12px; }
-  .gate.ready { background: var(--gr-bg); color: var(--gr); }
+  .gate.ready { background: var(--pass-bg); color: var(--pass); }
   .coverage-bar { display: flex; width: 100%; height: 10px; border-radius: 5px; overflow: hidden; background: var(--surface-2); }
   .coverage-seg { height: 100%; }
-  .coverage-seg.pass { background: var(--gr); }
+  .coverage-seg.pass { background: var(--pass); }
   .coverage-seg.issue { background: var(--danger); }
   .coverage-seg.review { background: var(--warning); }
   .coverage-seg.not-checked { background: var(--border-strong); }
   .coverage-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 8px 0 14px; font-size: var(--fs-2xs); color: var(--text-2); }
   .legend-item { display: inline-flex; align-items: center; gap: 5px; }
   .legend-item i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-  .legend-item i.pass { background: var(--gr); }
+  .legend-item i.pass { background: var(--pass); }
   .legend-item i.issue { background: var(--danger); }
   .legend-item i.review { background: var(--warning); }
   .legend-item i.not-checked { background: var(--border-strong); }
@@ -316,7 +316,7 @@
   .pill.invalid { background: var(--surface-2); color: var(--text-2); }
   .pill.engine { background: var(--accent-bg); color: var(--accent); text-transform: capitalize; }
   /* Same finding-source legend as the verse underlines and the review panel
-     (index.css mark.m-*): tN red, tW blue, Greek Room green. */
+     (index.css mark.m-*): Greek Room red, tN green, tW teal. */
   .pill.tn { background: var(--tn-bg); color: var(--tn); }
   .pill.tw { background: var(--tw-bg); color: var(--tw); }
   .expand-toggle {
@@ -353,7 +353,7 @@
   .bar-label { color: var(--text-2); font-size: var(--fs-3xs); width: 175px; flex-shrink: 0; }
   .track { width: 100%; height: 6px; background: #EEF0F3; border-radius: 4px; overflow: hidden; }
   .fill { height: 100%; background: var(--accent); }
-  .fill.checked { background: var(--gr); }
+  .fill.checked { background: var(--pass); }
   .small-button { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); padding: 6px 10px; cursor: pointer; font-size: var(--fs-2xs); flex-shrink: 0; }
   .small-button.primary { border-color: var(--accent); color: var(--accent); }
   .validation-button { border: 1px solid var(--accent); border-radius: 7px; background: var(--accent-bg); color: var(--accent); padding: 8px 11px; cursor: pointer; font-size: var(--fs-2xs); font-weight: 700; flex-shrink: 0; }
