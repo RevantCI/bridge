@@ -94,8 +94,9 @@
     meaningByToken = { ...meaningByToken };
   }
 
-  function label(token: AlignmentToken): string {
-    return token.occurrences > 1 ? `${token.word} ${token.occurrence}/${token.occurrences}` : token.word;
+  /** "(1/2)" for a repeated word; the caller checks occurrences > 1 before rendering it. */
+  function occurrence(token: AlignmentToken): string {
+    return `(${token.occurrence}/${token.occurrences})`;
   }
 
   function sourceTitle(token: AlignmentToken): string {
@@ -321,7 +322,7 @@
                 disabled={busy}
                 title={sourceTitle(src)}
               >
-                <span>{label(src)}</span>
+                <span>{src.word}{#if src.occurrences > 1}<span class="occ">{occurrence(src)}</span>{/if}</span>
                 {#if src.lemma}<small>{src.lemma}</small>{/if}
               </button>
               <div
@@ -337,7 +338,7 @@
               >
                 {#each alignedTargetsFor(src.id) as item (item.id)}
                   <div class="token target aligned-card" title={`Aligned to ${src.word}`}>
-                    <span class="word">{label(item)}</span>
+                    <span class="word">{item.word}{#if item.occurrences > 1}<span class="occ">{occurrence(item)}</span>{/if}</span>
                     <button
                       type="button"
                       class="unalign-x"
@@ -375,7 +376,7 @@
           >
             {#each context.bottomTokens as item (item.id)}
               {#if targetGroup(item.id)}
-                <span class="token target already-aligned" title={`Already aligned`}>{label(item)}</span>
+                <span class="token target already-aligned" title={`Already aligned`}><span class="word">{item.word}{#if item.occurrences > 1}<span class="occ">{occurrence(item)}</span>{/if}</span></span>
               {:else}
                 <button
                   type="button"
@@ -384,7 +385,7 @@
                   on:pointerdown={(event) => startPointerTrack(event, item.id)}
                   on:click|stopPropagation={() => handleWordClick(item.id)}
                   disabled={busy}
-                >{label(item)}</button>
+                ><span class="word">{item.word}{#if item.occurrences > 1}<span class="occ">{occurrence(item)}</span>{/if}</span></button>
               {/if}
             {:else}
               <p class="empty">This verse has no target words.</p>
@@ -463,6 +464,7 @@
   .panel-title small { color: var(--text-3); font-weight: 400; }
   .token { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-width: 62px; }
   .token small { font-size: 9px; color: var(--text-3); max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+  .occ { margin-left: 3px; font-size: 0.8em; font-weight: 400; color: var(--text-3); }
   .column .token.source { width: 100%; background: #F6F1FF; cursor: pointer; }
   .token.target { touch-action: none; user-select: none; }
   .token.target.unaligned { background: #EFF7FF; border-color: var(--border-strong); color: var(--text); }
