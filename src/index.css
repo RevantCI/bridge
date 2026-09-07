@@ -108,7 +108,7 @@
   --font-greek: "Gentium Plus", "Noto Serif", serif;
 }
 
-body { margin: 0; font-family: -apple-system, "Inter", Segoe UI, Helvetica, Arial, sans-serif; }
+body { margin: 0; font-family: var(--font-ui); }
 
 mark { background: transparent; padding: 0 1px; border-bottom: 2px solid; border-radius: 0; }
 mark.m-tn { border-color: var(--tn); }
