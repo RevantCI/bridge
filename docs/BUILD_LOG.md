@@ -4392,3 +4392,173 @@ which needs a `build-sidecars.ps1` run.
    adds one more file per book of the same class. The fix belongs in
    `_tree_fingerprint`, not in each feature that writes state.
 
+
+---
+
+## Issue #38 — finding context menu, and closing its keyboard gap (2026-09-07)
+
+Most of issue #38 landed earlier the same day in two commits by Benz, merged
+in #41:
+
+| Commit | Scope |
+| --- | --- |
+| `831f35c` `feat(editor): add contextual finding actions` | `FindingContextMenu.svelte` (new), `VerseList.svelte` wiring, `findingActions.ts` (new), `applySuggestedFindingFix` in `verseEditor.ts` |
+| `dec34d5` `feat(qa): add contextual review and correction actions` | `QaFindingList.svelte` dispatches `contextmenu`; `AlignmentQaMode.svelte` handles it via `applyCorrectionProposal`/`decideFinding`; `correctionApplication.ts` (new) |
+
+This session verified those against the issue's scope list, closed the one
+criterion that was genuinely unmet, and documented the feature — it had
+shipped with no mention anywhere in `docs/` (a `grep` for "context menu" and
+"right-click" across `docs/` and `*.md` returned nothing).
+
+### What was already true, verified against the code
+
+- **Trigger.** `VerseList.svelte` binds `on:contextmenu` on the
+  `<mark class={piece.seg.className}>` span; `QaFindingList.svelte` binds it on
+  `.row` and dispatches `{ id, x, y }` upward.
+- **Menu contents.** `AlignmentQaMode.svelte:93` builds its decision items from
+  `REVIEWER_ACTIONS` (`src/lib/utils/reviewLabels.ts:241`), the same export the
+  review panel uses. No second vocabulary on that side.
+- **Disabled, not hidden.** Both call sites emit the `apply` item
+  unconditionally with `disabled` plus an explanatory `title`.
+- **Same code path as the panel.** `decideLocalFinding`
+  (`src/lib/findingActions.ts`) is shared with `ReviewPanel.svelte:68`; the QA
+  side reuses `applyCorrectionProposal`/`decideFinding`. Decisions stay keyed by
+  stable finding id.
+- **Escape / outside click / clamping.** All in `FindingContextMenu.svelte`
+  (`onKeydown`, `onOutsidePointer`, `positionInsideViewport`, `EDGE_GAP = 8`),
+  with roving arrow-key focus and focus restore on Escape.
+
+### The gap: keyboard parity in the editor
+
+The QA side satisfied it — `QaFindingList.svelte` handles `ContextMenu` and
+`Shift+F10` on both the listbox viewport (`:87-99`) and each row, and
+advertises `aria-keyshortcuts="Shift+F10"`.
+
+The editor did not, and the panel route the issue offers as the alternative
+does not exist there: a `grep` for `applySuggestedFindingFix` across `src/`
+returns only `verseEditor.ts`, `VerseList.svelte` and a test —
+`ReviewPanel.svelte` has no apply-fix control at all (its open-finding actions
+are **Accept and edit** and **Ignore**). The `<mark>` carried
+`aria-haspopup="menu"` but had no `tabindex`, no `role` and no keydown handler.
+So "Apply proposed fix" was right-click-only — the exact failure mode the issue
+calls out.
+
+### What was built (`889e355`)
+
+Approach 1 from the issue's two options — a key binding on the finding —
+rather than adding a panel control, because it also gives the keyboard the
+*other* three menu actions, not just apply, and it forces the
+`aria-haspopup`-on-a-non-interactive-element defect to be resolved rather than
+left standing.
+
+The shape mirrors `QaFindingList` deliberately: **the verse row stays the
+single tab stop.** Making each `<mark>` focusable would add one tab stop per
+finding, so tabbing through a checked chapter would stop on hundreds of words
+inside a `role="button"` element. Instead, on the verse row:
+
+- Left/Right walk that verse's underlined findings; the active one gets a
+  visible ring (`mark.active-finding`), not colour alone — the underline
+  classes already carry the finding's source colour.
+- `ContextMenu` / `Shift+F10` open the same menu, anchored from the active
+  `<mark>`'s `getBoundingClientRect()` (falling back to the row's), exactly as
+  `QaFindingList.svelte:88-99` does.
+- `aria-haspopup="menu"` and `aria-keyshortcuts="Shift+F10"` move onto the row,
+  which is a real `role="button"` tab stop, and come off the `<mark>`.
+
+`markedFindingIds()` reproduces the same filter and sort `buildSegments` and
+`findingNumbers` use (`start_offset`/`end_offset` non-null, `end_offset <=
+text.length`, ordered by offset then id), so the keyboard walks the marks in
+the order their superscript numbers run. It runs over the *remapped* findings
+(footnotes lifted out) for ordering, but the menu is opened against the raw
+`findings` entry, because `applySuggestedFindingFix` indexes
+`verseTexts[key]` — the raw string.
+
+**One non-obvious Svelte thing.** `activeIndexFor` had to become a reactive
+assignment (`$: activeIndexFor = (key, count) => ...`) rather than a plain
+function. The `{@const activeFindingId = ...}` inside the `{#each}` calls it,
+and Svelte invalidates on the *reference* to `activeIndexFor`, not on variables
+read inside a function body — as a plain function, arrow-key presses updated
+`activeFindingIndex` and nothing re-rendered. The first version of the arrow
+test failed exactly this way (`expected 'alpha' to be 'beta'`).
+
+`setup.ts` now stubs `Element.prototype.scrollTo`. jsdom implements no
+scrolling at all, so the method is simply absent; the new tests select a verse,
+which makes `VerseList.scrollSelectedToTop` call it and reject out of band.
+Vitest reported two unhandled errors alongside passing tests until this was
+added.
+
+### Does an applied fix actually clear its underline?
+
+Yes, but by an indirect route worth writing down, because `edit_verse`
+(`engine/bridge_service.py:3308`) deliberately does not invalidate the
+USFM/names caches — a finding whose text was just corrected can still be
+produced by the post-save recheck.
+
+Traced end to end:
+
+1. `applySuggestedFindingFix` calls `setPendingAcceptFinding(finding.id)`, then
+   `saveVerseEdit`.
+2. `saveVerseEdit` writes the text, runs `bridge.runVerseChecks(["local",
+   "greekroom"])`, and replaces `findingsByVerse[key]` with the result. If the
+   stale cache re-emits the finding it comes back with the **same** id — the id
+   is a sha1 of `chapter:verse:engine:check_type:disambiguator`
+   (`_stable_finding_id`), and a byte-identical cached issue produces a
+   byte-identical disambiguator — and with status re-applied from
+   `qa_decisions_for_verse` (`bridge_service.py:3085`), which is still `open` at
+   this point.
+3. `saveVerseEdit` then calls the hook `ReviewPanel` registered via
+   `setVerseEditSavedHook`, which calls `decide(acceptFindingId, "accepted")`.
+4. `decideLocalFinding` persists and flips the store entry to `accepted`, and
+   `VerseList`'s `highlightFindings` filter drops `accepted` — the underline
+   clears.
+
+So the underline can flash back for one round trip before clearing, and the
+clearing depends on `ReviewPanel` being mounted (`App.svelte:1056-1058` — it
+always is, as a sibling of `VerseList`) and on `$selectedVerse` still matching
+when the hook fires. `VerseList.openFindingMenu` calls `onSelect(verse)` before
+opening, so it matches — **unless the reviewer navigates to another verse
+during the save**, in which case the accept is skipped silently and a stale
+underline survives until the project is reopened. Narrow, real, and not fixed
+here: it is a wart in the `edit_verse` cache limitation, not in the context
+menu. Matrix row M40 covers verifying it in the installed app.
+
+### Vocabulary: two opposite senses of "accept"
+
+`VerseList` writes engine `FindingStatus` values (`accepted` / `rejected` /
+`needs_discussion`); the QA queue writes `QaDisposition`
+(`CONFIRMED_TRANSLATION_ERROR` / `ACCEPTABLE_TRANSLATION` / ...). Two models
+over two data sources, so this is not the "second vocabulary" the issue warns
+against — but the *labels a reviewer reads* do collide: **Accept finding**
+(editor: "this is a real problem") reads as the opposite of **Accept
+translation as correct** (queue: "there is no problem here").
+
+Not renamed. The editor's `accepted` already surfaces as **Accept and edit**
+and an **Accepted (n)** section in `ReviewPanel`, and renaming only the menu
+item would break the panel's internal consistency to fix a cross-view one.
+Instead each of the three decision items gained a `title` hint saying which way
+it points, reusing the queue's own wording where the meaning matches
+("Defer this for the team to decide."). `FindingContextMenu` already renders
+`title`. The manual calls the collision out explicitly, and matrix row M41
+covers it. A true reconciliation is a bigger, separate call.
+
+Two smaller observations, left alone: `rejected` and `needs_discussion` have no
+distinct rendering in `ReviewPanel` — a finding in either state falls into
+`grOpenFindings` and shows a generic `badge-decided` badge with the raw status
+string; and `USER_MANUAL.md` section 6.4's "Decide: Accept, Reject, Ignore, or
+Edit verse" already did not match the panel's actual buttons before this
+session.
+
+### Verification
+
+```text
+frontend Vitest                285 passed / 24 files (279 before, +6)
+npm run check                    0 errors / 0 warnings
+```
+
+Nothing under `engine/` was touched, so `pytest` was not re-run.
+
+**NOT run, and not claimed:** the installed desktop app. Vitest uses jsdom,
+which does not lay out or paint, so `positionInsideViewport` near a real window
+edge, the active-finding ring, focus restore on Escape, and the apply →
+re-check → underline-clears sequence have never been seen rendered. Matrix rows
+M37-M41 exist for exactly that.

@@ -325,7 +325,39 @@ failure than leaving a false positive on screen.
 
 ---
 
-## 6. Where the deeper docs live
+## 6. Finding context menu — one component, two surfaces
+
+`src/lib/components/FindingContextMenu.svelte` is presentation only: it takes
+`x`/`y`, a `findingLabel` and an `actions` array, and dispatches `action` and
+`close`. It owns Escape/Tab/outside-click dismissal, roving arrow-key focus,
+focus restore, and viewport clamping (`positionInsideViewport`, `EDGE_GAP = 8`).
+Two very different surfaces mount it, and **neither owns it** — put dismissal
+or positioning behaviour in the component, and only the action list in a caller:
+
+| Caller | Findings from | Decisions written as |
+|---|---|---|
+| `VerseList.svelte` (verse editor) | `findingsByVerse` store — engine `QaFinding`s | `FindingStatus` via `decideLocalFinding`, shared with `ReviewPanel.svelte` |
+| `AlignmentQaMode.svelte` (QA review queue) | `QaFindingList.svelte` rows, which dispatch `contextmenu` upward | `QaDisposition` via `decideFinding`, labels from `REVIEWER_ACTIONS` |
+
+Three rules a new contributor will otherwise get wrong:
+
+1. **The menu is never the only route to an action** — that is an
+   accessibility defect, and it is what issue #38 was reopened for. Both
+   surfaces must respond to `ContextMenu` and `Shift+F10` and advertise
+   `aria-keyshortcuts`.
+2. **One tab stop per list, not per finding.** `QaFindingList`'s listbox
+   viewport and `VerseList`'s verse row are each a single tab stop, with arrow
+   keys moving the active item inside them. Making every row or every
+   `<mark>` focusable would put hundreds of tab stops in a checked chapter.
+3. **The two surfaces do not share a decision vocabulary, on purpose** — and
+   "accept" means opposite things in them (`Accept finding` = "this is a real
+   problem"; `Accept translation as correct` = "there is no problem"). Every
+   item carries a `title` hint saying which way it points. Don't unify the two
+   models to make the labels match.
+
+---
+
+## 7. Where the deeper docs live
 
 | Doc | Covers |
 |---|---|

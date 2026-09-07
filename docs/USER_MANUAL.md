@@ -219,6 +219,56 @@ Click a verse or a highlighted finding to open the review panel:
 - Your decisions are remembered — accepting something, re-running checks
   later, or reopening the project another day all keep the same decision.
 
+#### Finding shortcuts — right-click, or Shift+F10
+
+Everything below is a shortcut to the decisions you can already make in the
+panel. Nothing is written to your project files without you choosing it, and
+every action goes through the same code the panel uses, so a decision made
+here survives a re-check exactly as one made there does.
+
+**In the verse text.** Right-click a highlighted word to get a small menu for
+the finding underneath it:
+
+- **Apply proposed fix** — replaces exactly the highlighted span with the
+  correction the check proposed, then saves and re-checks the verse in one
+  step. It is greyed out, with the reason on hover, when the check offered no
+  correction, or when the verse text has moved on since the finding was
+  raised. It is never hidden, so the menu does not jump around between
+  findings.
+- **Accept finding** — this is a real issue in the translation.
+- **Reject finding** — Bridge should not have raised this; a false positive.
+- **Needs discussion** — defer it for the team.
+
+**From the keyboard, no mouse needed.** Tab moves between *verses*, not
+between highlighted words — a checked chapter would otherwise be hundreds of
+tab stops. On a verse:
+
+| Key | What it does |
+| --- | --- |
+| Tab / Shift+Tab | Move to the next / previous verse |
+| Enter or Space | Select the verse (opens it in the review panel) |
+| Right / Left arrow | Move between that verse's highlighted findings — the active one gets a ring around it |
+| **Shift+F10**, or the **Menu** key | Open the menu above for the ringed finding |
+| Up / Down arrow, Home / End | Move through the menu once it is open |
+| Escape | Close the menu and put the cursor back on the verse |
+
+Clicking anywhere outside the menu also closes it, and the menu keeps itself
+inside the window when you open it near an edge.
+
+**In the review queue** (Alignment QA review). Right-click a row, or press
+**Shift+F10** / the **Menu** key with the list focused, for the same kind of
+menu against the selected finding: **Apply proposed fix** plus the four
+review decisions — *Confirm translation issue*, *Accept translation as
+correct*, *False positive*, *Needs discussion*.
+
+> **One word, two meanings — watch this.** In the verse text, *Accept
+> finding* means "this finding is right, the translation has a problem". In
+> the review queue, *Accept translation as correct* means the opposite —
+> "the translation is fine, there is no problem here". The two views work on
+> different data with different decision models. Each menu item spells out
+> what it means when you hover it; read the hint rather than the verb if you
+> move between the two views.
+
 ### 6.5 Manual word alignment
 
 Open the alignment editor for a verse to:
