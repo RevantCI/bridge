@@ -2007,6 +2007,15 @@ cargo check                              passed
 git diff --check                         passed; line-ending notices only
 ```
 
+**Acceptance-claim correction (see §37.7).** The Stage 9B.3b and 9B.3c
+installed acceptances below used a controlled **pre-seeded** finding whose
+`targetContentHashes` already matched the Stage 9B reader contract. They
+validated the application transaction, exact Scripture mutation, invalidation,
+affected re-analysis, cross-verse provenance and persistence/recovery -- but
+they did not, and could not, prove that a finding naturally emitted by
+production Stage 8 reaches Stage 9B. Do not describe them as fully production
+end-to-end.
+
 Installed acceptance must use a fresh disposable import that Bridge copies to
 its managed runtime project directory. Complete an explicit Apply, confirm
 Word Alignment is invalid and verification PENDING, run affected re-analysis,
@@ -2296,6 +2305,9 @@ false-positive source in the language Bridge is primarily used for.**
 - Installed desktop acceptance of the verify -> Mark corrected flow has **not**
   been performed; the repository test suite does not claim it. See the
   procedure below.
+- Naturally emitted **meaning-failure** findings are still blocked from
+  correction by `RESOURCE_CONFLICT_REQUIRES_REVIEW` -- an independent Stage
+  9B.0 defect found during the §37.7 gate and deliberately not fixed there.
 - The cross-verse graphical visualization is deliberately not started.
 - The uncalibrated-confidence caveat from every prior stage applies to
   `confidence` on the verification record too.
@@ -2327,7 +2339,9 @@ control. Verify state on disk with
 ## Next boundary: post-9B.4 v1 stabilization, on explicit approval only
 
 The cross-verse graphical visualization and the wider v1 UI pass are **not**
-authorized. Do not begin them without explicit approval.
+authorized. Do not begin them without explicit approval. The Stage 8 -> 9B
+target-hash blocker fix in §37.7 came before this boundary; do not seed the
+Stage 9B.4 A/B/C acceptance fixtures until that gate is reviewed.
 
 ## Stage 9B.3c installed-acceptance responsive fix (Beta 15)
 
@@ -2356,6 +2370,137 @@ release executable, and NSIS installer report `0.8.0-beta.15`. The exact
 installer is `src-tauri/target/release/bundle/nsis/Bridge_0.8.0-beta.15_x64-setup.exe`.
 The responsive installed-acceptance workflow can resume; Stage 9B.4 remains
 unauthorized.
+
+
+# 37.7 Stage 8 → Stage 9B Target-Hash Contract Repair (blocker fix)
+
+Found while preparing Stage 9B.4 installed acceptance, on baseline `34a8565`
+(application version **0.9.2**, semantic schema **v14**, verification policy
+`correction-verification-policy-v2`). No schema migration, no version bump, no
+new feature.
+
+## The blocker
+
+Stage 8 wrote the **Stage 6A target-inventory range fingerprint** into
+`qaFinding.targetContentHashes`. Stage 9B correction eligibility reads that
+field as exact **per-verse** hashes and compares it with
+`runtime.text_hash(current_verse_text)`. A SHA-256 over the canonical JSON of
+the whole analyzed range can never equal a SHA-256 over one raw verse string,
+so **every finding the production pipeline actually emitted failed eligibility
+with `TARGET_TEXT_CHANGED`, on Scripture that had never been edited.**
+
+The write side was fixed. Eligibility was **not** taught to compare range
+fingerprints: that would make an edit to a neighbouring verse
+indistinguishable from an edit to the verse a correction rewrites.
+
+## The invariant now
+
+```text
+qaFinding.targetContentHashes[i]
+    == canonical_text_hash(current authoritative text at target_references[i])
+
+target_references = the displayed references of the finding's target semantic
+                    units, deduplicated, order preserved; falling back to the
+                    finding's displayedReferences only when it has no target
+                    units at all (an omission has no separate target
+                    realization).
+```
+
+Authoritative Scripture is `<project>/<book>/<chapter>.json`. Preserved
+imported USFM is never hashed. `engine/tc_ai_bridge/qa_target_hash.py` holds
+the hash **and** the reference resolution, and both Stage 8 and Stage 9B import
+them, so the two sides cannot drift.
+
+Canonical PHP cross-verse case — source semantics `PHP 1:3`, target
+realization `PHP 1:6`, analysis range `PHP 1:3–1:6`:
+
+```text
+displayedReferences   ["PHP 1:3", "PHP 1:6"]      both sides, as before
+targetContentHashes   [hash(current PHP 1:6)]     the target side only
+```
+
+No same-verse source provenance is manufactured.
+
+## Separation of concerns, pinned by tests
+
+```text
+edit the exact target verse   -> TARGET_TEXT_CHANGED + FINDING_STALE
+edit a neighbouring verse     -> no TARGET_TEXT_CHANGED; FINDING_STALE only
+```
+
+Correction-target CAS and semantic-analysis freshness are separate mechanisms;
+neither impersonates the other.
+
+## Findings written before this fix
+
+Old range hashes are not reinterpreted and there is no heuristic hash-type
+detection: such a finding blocks with `TARGET_TEXT_CHANGED` and **requires
+re-analysis** before it can be corrected. Finding ids are stable and
+`save_qa_finding` preserves the human decision, so re-analysis repairs the hash
+without costing the reviewer their decision.
+
+`QA_ENGINE_VERSION` was deliberately **not** bumped to force that re-analysis:
+doing so makes the very first Stage 8 re-run against an unchanged target
+inventory die with `FoundationConflict` on a duplicate `coverage_accounts`
+row, because the coverage-account fingerprint hashes the *policy* version and
+not the engine version. Verified, then reverted. Recorded in BUILD_LOG as a
+separate open defect.
+
+## Correction to the Stage 9B.3b / 9B.3c acceptance claim
+
+Those installed acceptances used a **controlled pre-seeded finding** whose
+`targetContentHashes` already conformed to the Stage 9B reader contract
+(`tests/test_correction_stage9b3b.py::_fixture` writes the row directly). They
+genuinely validated the correction application transaction, exact Scripture
+mutation, invalidation, affected re-analysis, cross-verse provenance and
+persistence/recovery.
+
+They did **not** prove that a finding naturally emitted by production Stage 8
+could enter Stage 9B — it could not have. Do not describe the earlier
+acceptance as fully production end-to-end.
+
+## A second, independent production blocker (found, not fixed)
+
+Every naturally emitted **meaning-failure** finding is blocked by
+`RESOURCE_CONFLICT_REQUIRES_REVIEW`: Stage 7 files the very evidence that a
+meaning failed into `conflictingEvidenceIds`, and Stage 9B.0 blocks on that
+field for *resource* conflicts. Coverage findings (POSSIBLE_OMISSION,
+POSSIBLE_ADDITION) are unaffected and reach `ELIGIBLE` cleanly. Unrelated to
+the hash contract; **not** fixed here; needs its own approved scope. Details in
+BUILD_LOG.
+
+## Verification on 2026-09-07
+
+```text
+Stage 8 -> 9B production integration      9 passed  (new file, run alone)
+Stage 8 + 9B.0/9B.1/9B.3a/9B.3b/9B.3c/9B.4
+  + 9A review + PHP walkthrough + new   292 passed
+full Python + Greek Room                NOT COMPLETED -- the run was stopped
+                                        part-way at the operator's request and
+                                        must be re-run before this gate is
+                                        treated as closed
+frontend Vitest / npm check / npm build NOT RUN -- no frontend file touched
+cargo test / cargo check                NOT RUN -- no Rust file touched
+git diff --check                        clean; line-ending notices only
+```
+
+An earlier combined run of the focused set reported one failure,
+`test_stale_proposal_cannot_be_edited_as_current`, and a second run reported
+`test_all_stage9b1_operations_leave_scripture_and_alignment_byte_identical`.
+Both are the pre-existing `correction_proposal_history(...)[-1]` ordering flake
+documented in BUILD_LOG, reproduced with these changes reverted to `HEAD`, and
+both passed on the clean 292-test run above.
+
+Frontend and Rust gates were not re-run: no frontend, Rust or wire-shape file
+was touched. `targetContentHashes` is still `string[]`, still positionally
+ordered; only which references it is taken over changed.
+
+## Next boundary
+
+Do **not** seed the Stage 9B.4 A/B/C acceptance fixtures until this gate is
+reviewed. The cross-verse graphical visualization, the Stage 7 Tamil
+normalization defect, and the meaning-failure eligibility blocker above all
+remain unauthorized/unscheduled.
 
 ---
 

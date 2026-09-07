@@ -48,6 +48,7 @@ from .passage_semantic_repository import (
     FoundationRepository,
     FoundationValidationError,
 )
+from .qa_target_hash import canonical_text_hash
 from .unicode_coordinates import grapheme_boundaries
 from .usfm_passages import PassageWindow, TargetSegment, UsfmPassageIndex
 from . import versification
@@ -89,7 +90,10 @@ def _now() -> str:
 
 
 def _sha256_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+    # One implementation, shared with Stage 8 persistence and Stage 9B
+    # eligibility, so the same target verse string cannot hash differently
+    # depending on which side of the contract looked at it.
+    return canonical_text_hash(value)
 
 
 def _json_hash(value: Any) -> str:

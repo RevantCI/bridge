@@ -26,6 +26,7 @@ from .passage_semantic_models import (
     ReviewStatus,
 )
 from .passage_semantic_repository import FoundationValidationError
+from .qa_target_hash import finding_target_references
 
 
 ELIGIBILITY_ENGINE_VERSION = "bridge-correction-eligibility-v1"
@@ -429,10 +430,39 @@ class CorrectionEligibilityService:
                 ))
         return reasons
 
+    def _resolve_target_unit(self, unit_id: str) -> dict[str, Any] | None:
+        try:
+            return self.repository.semantic_unit(unit_id)
+        except (FoundationValidationError, AttributeError):
+            return None
+
+    def target_references(
+        self, finding: dict[str, Any], displayed: tuple[str, ...] = (),
+    ) -> tuple[str, ...]:
+        """The target Scripture references this finding's hashes cover.
+
+        Stage 8 writes one hash per entry of this list, in this order; the
+        contract lives in qa_target_hash so both sides cannot drift.
+        """
+        return finding_target_references(
+            finding.get("targetSemanticUnitIds") or (),
+            displayed or tuple(str(x) for x in finding.get("displayedReferences") or ()),
+            self._resolve_target_unit,
+        )
+
     def _check_current_text(
         self, finding: dict[str, Any], displayed: tuple[str, ...],
     ) -> tuple[str, list[EligibilityReason]]:
-        """Re-read Scripture and confirm the finding still describes it."""
+        """Re-read Scripture and confirm the finding still describes it.
+
+        The content-addressed comparison runs over the finding's *target*
+        references only. For a cross-verse finding -- source semantics at
+        PHP 1:3 realized at PHP 1:6 -- `displayedReferences` carries both, and
+        hashing the source side too would report an edit to a neighbouring
+        verse as an edit to the correction target. Whether a neighbouring edit
+        leaves the finding usable is the semantic currentness machinery's
+        question, not this one's.
+        """
         reasons: list[EligibilityReason] = []
         try:
             texts = self.current_text_snapshot()
@@ -442,15 +472,21 @@ class CorrectionEligibilityService:
                 f"Current Scripture could not be read: {exc}",
                 "QA_FINDING", str(finding.get("id") or ""),
             )]
+        target_references = self.target_references(finding, displayed)
         stored_hashes = [str(x) for x in finding.get("targetContentHashes") or ()]
         current_hashes: list[str] = []
-        for index, reference in enumerate(displayed):
-            if reference not in texts:
-                reasons.append(EligibilityReason(
-                    CorrectionEligibilityCode.TARGET_REFERENCE_MISSING,
-                    f"{reference} is no longer present in current Scripture.",
-                    "TARGET_REFERENCE", reference,
-                ))
+        missing: set[str] = set()
+        for reference in (*displayed, *target_references):
+            if reference in texts or reference in missing:
+                continue
+            missing.add(reference)
+            reasons.append(EligibilityReason(
+                CorrectionEligibilityCode.TARGET_REFERENCE_MISSING,
+                f"{reference} is no longer present in current Scripture.",
+                "TARGET_REFERENCE", reference,
+            ))
+        for index, reference in enumerate(target_references):
+            if reference in missing:
                 continue
             actual = self.runtime.text_hash(texts[reference])
             current_hashes.append(actual)

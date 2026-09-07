@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from collections import Counter
 from contextlib import contextmanager
-import hashlib
 import json
 import time
 from typing import Any, Iterator
@@ -35,8 +34,23 @@ from .passage_semantic_models import (
     SourceCoverage,
     TargetSupport,
 )
+from .qa_target_hash import (
+    canonical_text_hash,
+    finding_target_references,
+    target_content_hashes,
+)
 
 
+# Deliberately NOT bumped when targetContentHashes was corrected to per-verse
+# hashes (see qa_target_hash).  Bumping it would change the QA run fingerprint
+# and force a Stage 8 re-run for every existing project -- but the engine
+# version is *not* part of `_build_target_support_account`'s account
+# fingerprint (the policy version is), so on an unchanged target inventory that
+# re-run re-INSERTs a byte-identical coverage_accounts row and dies with
+# FoundationConflict before it can repair anything.  Verified, not assumed.
+# Trading a wrong-hash bug for a crash is not an upgrade; findings persisted by
+# the broken writer are instead repaired the next time the run fingerprint
+# legitimately misses cache.  See docs/BUILD_LOG.md.
 QA_ENGINE_VERSION = "bridge-qa-audit-v1"
 QA_POLICY_VERSION = "qa-policy-v1"
 QA_CONFIDENCE_POLICY_VERSION = "qa-confidence-v1"
@@ -55,7 +69,7 @@ _NON_AUDIT_ELIGIBILITY = {"AGGREGATE_ONLY", "EXCLUDED", "REVIEW_ONLY"}
 
 
 def _sha(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return canonical_text_hash(value)
 
 
 def _json_hash(value: Any) -> str:
@@ -348,6 +362,7 @@ class QaAuditEngine:
 
         source_units = {unit["id"]: unit for unit in source["units"]}
         target_units = {unit["id"]: unit for unit in target["units"]}
+        current_text = self._current_target_text()
         relationships_by_id = {item["id"]: item for item in location["relationships"]}
         assessments_by_relationship = {
             item["semanticLocationRelationshipId"]: item for item in meaning["assessments"]
@@ -413,6 +428,7 @@ class QaAuditEngine:
                             resource_evidence_ids=tuple((owner_unit or {}).get("evidenceIds", [])),
                             supporting_evidence_ids=(), conflicting_evidence_ids=(),
                             source=source, target=target, fingerprint=fingerprint, policy_binding=policy_binding,
+                            target_units=target_units, current_text=current_text,
                         )
                         self.repository.save_qa_finding(self._finding_to_dataclass(finding))
                         findings.append(finding)
@@ -455,6 +471,7 @@ class QaAuditEngine:
                         resource_evidence_ids=(), supporting_evidence_ids=tuple(assessment.get("supportingEvidenceIds", [])),
                         conflicting_evidence_ids=tuple(assessment.get("conflictingEvidenceIds", [])),
                         source=source, target=target, fingerprint=fingerprint, policy_binding=policy_binding,
+                        target_units=target_units, current_text=current_text,
                     )
                     self.repository.save_qa_finding(self._finding_to_dataclass(finding))
                     findings.append(finding)
@@ -483,6 +500,7 @@ class QaAuditEngine:
                             explanation=reason, confidence=0.7,
                             resource_evidence_ids=(), supporting_evidence_ids=(), conflicting_evidence_ids=(),
                             source=source, target=target, fingerprint=fingerprint, policy_binding=policy_binding,
+                            target_units=target_units, current_text=current_text,
                         )
                         self.repository.save_qa_finding(self._finding_to_dataclass(finding))
                         findings.append(finding)
@@ -580,6 +598,18 @@ class QaAuditEngine:
             coverage_status=status.value,
         )
 
+    def _current_target_text(self) -> dict[str, str]:
+        """Authoritative current Scripture: <project>/<book>/<chapter>.json.
+
+        The same snapshot Stage 9B eligibility re-reads, and deliberately not
+        the preserved imported USFM.  Imported here rather than at module
+        scope: passage_semantic_runtime constructs this engine, so a top-level
+        import would be a cycle.
+        """
+        from .passage_semantic_runtime import current_target_text
+
+        return current_target_text(self.runtime.project)
+
     @staticmethod
     def _finding_anchors(
         source_unit_ids: tuple[str, ...], target_unit_ids: tuple[str, ...],
@@ -640,9 +670,15 @@ class QaAuditEngine:
         dimension: str = "",
         supporting_evidence_ids: tuple[str, ...], conflicting_evidence_ids: tuple[str, ...],
         source: dict[str, Any], target: dict[str, Any], fingerprint: str, policy_binding: PolicyBinding,
+        target_units: dict[str, Any], current_text: dict[str, str],
     ) -> dict[str, Any]:
         references, target_anchors = self._finding_anchors(
             source_unit_ids, target_unit_ids, source, target,
+        )
+        # Per-target-verse content hashes, never the Stage 6A range fingerprint
+        # carried on `target["targetContentHash"]`.  See qa_target_hash.
+        target_references = finding_target_references(
+            target_unit_ids, references, target_units.get,
         )
         finding_id = self._stable_finding_id(
             kind=kind, direction=direction, source_unit_ids=source_unit_ids,
@@ -667,7 +703,7 @@ class QaAuditEngine:
             "resourceEvidenceIds": list(resource_evidence_ids),
             "supportingEvidenceIds": list(supporting_evidence_ids),
             "conflictingEvidenceIds": list(conflicting_evidence_ids),
-            "targetContentHashes": [str(target.get("targetContentHash") or "")],
+            "targetContentHashes": list(target_content_hashes(target_references, current_text)),
             "sourceResourceHashes": [str(
                 ((source.get("sourceResource") or {}).get("resourceHash"))
                 or ((source.get("sourceResource") or {}).get("hash")) or ""

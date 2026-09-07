@@ -5086,3 +5086,254 @@ this gate. They passed on this working tree earlier the same day — svelte-chec
 
 Installed desktop acceptance of the verify → Mark corrected flow remains NOT
 RUN, and this gate does not change that.
+
+---
+
+# Stage 8 → Stage 9B target-hash contract repair (2026-09-07)
+
+## The defect
+
+Stage 8 persisted the **Stage 6A target-inventory `targetContentHash`** into
+`qaFinding.targetContentHashes`:
+
+```python
+# qa_audit.py, _build_finding, before
+"targetContentHashes": [str(target.get("targetContentHash") or "")],
+```
+
+`target` there is the Stage 6A target inventory, and its `targetContentHash` is
+`FoundationRepository.target_content_hash(...)` — a SHA-256 over the canonical
+JSON object holding **every verse in the analyzed range**.
+
+Stage 9B correction eligibility reads the same field as an exact **per-verse**
+hash and compares it with `runtime.text_hash(current_verse_text)`, which is
+SHA-256 over the raw verse string. A JSON-object fingerprint can never equal a
+raw-verse-text hash, so `_check_current_text` raised `TARGET_TEXT_CHANGED` for
+every naturally emitted finding, on Scripture that had never been edited.
+
+Observed directly on the real pipeline before the fix: a Tamil PHP 1:3–1:6 run
+emitted 12 findings and **all 12** carried the identical hash
+`59a13fd6af7c…`, the range fingerprint — including findings anchored at four
+different verses.
+
+## Why the write side was fixed, not the read side
+
+The two hashes answer different questions and must stay separate:
+
+| | Stage 6A `targetInventory.targetContentHash` | Stage 8 `qaFinding.targetContentHashes` |
+|---|---|---|
+| Scope | the whole analyzed target range | the finding's own target reference(s) |
+| Shape | SHA-256 of canonical JSON of `{ref: text}` | SHA-256 of each raw verse string |
+| Question | is this analysis run still current? | is the wording the reviewer confirmed still on disk? |
+| Reacts to | any edit anywhere in the range | an edit to the correction target only |
+
+Teaching eligibility to compare range fingerprints would have made a
+neighbouring-verse edit indistinguishable from an edit to the verse a
+correction rewrites. Semantic-analysis freshness and exact correction-target
+CAS are separate mechanisms and neither may impersonate the other.
+
+## The contract, stated once
+
+`engine/tc_ai_bridge/qa_target_hash.py` is new and holds the whole contract —
+the hash and the reference resolution — so Stage 8 and Stage 9B cannot drift:
+
+```text
+qaFinding.targetContentHashes[i]
+    == canonical_text_hash(current authoritative text at target_references[i])
+
+target_references = displayed references of the finding's target semantic
+                    units, deduplicated, order preserved
+                    (falling back to the finding's displayedReferences when the
+                    finding has no target units at all — an omission finding
+                    has no separate target realization, so its displayed
+                    references *are* its target references)
+```
+
+Authoritative text is `<project>/<book>/<chapter>.json`, read through
+`current_target_text(project)` — the same snapshot Stage 9B re-reads. Preserved
+imported USFM is never hashed.
+
+`canonical_text_hash` is now the single implementation:
+`PassageSemanticRuntime._sha256_text` (and therefore `runtime.text_hash`,
+`text_revision`, and every `_json_hash`) and `qa_audit._sha` both delegate to
+it. The same target verse string produces bit-identical hashes at Stage 8
+persistence, Stage 9B eligibility, and correction proposal/application
+validation.
+
+Resolution is all-or-nothing: if any target semantic unit cannot be resolved,
+both sides fall back to `displayedReferences` rather than emit a shorter list
+that silently misaligns every later hash. A target reference with no current
+Scripture yields an empty hash rather than being dropped — it can never match,
+so the failure is closed rather than skipped.
+
+## The cross-verse case
+
+For the canonical shape — source semantics at PHP 1:3, target realization at
+PHP 1:6, analysis range PHP 1:3–1:6 — the finding's `displayedReferences` is
+`["PHP 1:3", "PHP 1:6"]` because `_finding_anchors` deliberately carries both
+sides. Only the target side is content-addressed:
+
+```text
+targetContentHashes == [canonical_text_hash(current PHP 1:6 text)]
+```
+
+No source relationship at PHP 1:6 is manufactured to make the references line
+up, and the source unit's own reference stays PHP 1:3.
+
+Eligibility therefore had to stop pairing stored hashes positionally against
+`displayedReferences`. It now resolves the finding's target references through
+the shared helper (`CorrectionEligibilityService.target_references`) and pairs
+against those. `TARGET_REFERENCE_MISSING` still covers every displayed
+reference; only the hash comparison narrowed. Findings with no target semantic
+units — every hand-built Stage 9B fixture, and every real POSSIBLE_OMISSION —
+resolve to exactly what they resolved to before, so the reader contract those
+tests pin is unchanged.
+
+## Edit behaviour, verified
+
+```text
+edit the exact target verse (PHP 1:6)
+  -> TARGET_TEXT_CHANGED  +  FINDING_STALE      (both fire; both independent)
+
+edit a neighbouring verse (PHP 1:3, the source-side reference)
+  -> TARGET_TEXT_CHANGED absent; the stored target hash still equals the
+     current PHP 1:6 hash
+  -> FINDING_STALE only — the currentness machinery decides, as designed
+```
+
+That second row is the separation the repair exists to protect, and it is
+pinned by
+`test_editing_a_neighbouring_verse_leaves_the_correction_target_hash_alone`.
+
+## Findings already persisted by the broken writer
+
+Old range hashes are **not** reinterpreted, and there is no heuristic
+hash-type detection. A finding still carrying a range fingerprint is treated as
+what it literally is — a hash that does not match the verse — and eligibility
+blocks it with `TARGET_TEXT_CHANGED`. It becomes correctable only after
+re-analysis re-emits it. Finding ids are stable (`_stable_finding_id` excludes
+the run fingerprint and every version), and `save_qa_finding` refreshes machine
+fields while preserving `qaDisposition`/`reviewStatus`, so re-analysis repairs
+the hash without costing the reviewer their decision.
+
+### Why `QA_ENGINE_VERSION` was not bumped
+
+Bumping it was the obvious way to force that re-analysis everywhere — the
+engine version is part of the QA run fingerprint, so every cached Stage 8 run
+would miss. It was implemented, tested, and **reverted**, because it does not
+work:
+
+```text
+run 1 with QA_ENGINE_VERSION=v1                       -> MISS, persists
+run 2 with QA_ENGINE_VERSION=v2, same target inventory
+  -> FoundationConflict: UNIQUE constraint failed:
+     coverage_accounts.project_id, passage_id, direction,
+     audit_owner_unit_id, coverage_dimension, semantic_fingerprint
+```
+
+`_build_target_support_account`'s account fingerprint hashes
+`{owner, dimension, policy}` — the **policy** version, not the engine version.
+So an engine-version bump alone changes the run fingerprint (forcing a re-run)
+without changing the coverage-account identity, and the target-support pass
+re-`INSERT`s a byte-identical row into `coverage_accounts` and dies before it
+can repair a single hash. Verified directly, not inferred; a policy-version
+change does *not* reproduce it, precisely because the policy version is inside
+the account fingerprint.
+
+Making that insert idempotent would mean overwriting coverage accounts that
+carry human promotion state — exactly what `FoundationConflict` guards — so it
+is out of scope here and recorded as a **separate open defect**: Stage 8 cannot
+be re-run against an unchanged target inventory under a changed engine, model,
+or calibration version.
+
+Existing broken findings are therefore repaired the next time the QA run
+fingerprint legitimately misses cache — any Scripture edit, source-lock change,
+policy change, or fresh import — and new analyses emit the correct form from
+the start.
+
+## A second, independent production blocker (found, not fixed)
+
+While proving the gate, every naturally emitted **meaning-failure** finding
+(CONTRADICTION, MEANING_SHIFT, POSSIBLE_UNDER/OVERTRANSLATION, the dimension
+kinds) turned out to be blocked by `RESOURCE_CONFLICT_REQUIRES_REVIEW`:
+
+`meaning_analysis._assessment` puts every component whose status is `ALTERED`,
+`CONTRADICTED`, `TARGET_WEAKENS_SPECIFICITY`, `TARGET_ADDS_SPECIFICITY` or
+`PARTIALLY_PRESERVED` into `conflictingEvidenceIds` — i.e. the evidence *that
+the finding is real*. `correction_eligibility._check_resource_conflicts` then
+blocks on any non-empty `conflictingEvidenceIds`, a rule written for
+*resource* conflicts ("the sources disagree about what the target should say").
+The two meanings of "conflicting" are not the same, and a meaning-failure
+finding cannot satisfy eligibility today.
+
+Coverage findings (POSSIBLE_OMISSION, POSSIBLE_ADDITION) carry no conflicting
+evidence and reach `ELIGIBLE` cleanly, which is what the production gate below
+demonstrates end to end. This blocker is unrelated to the hash contract, is
+**not** fixed here, and needs its own approved scope.
+
+
+## A pre-existing test flake found while running this gate (not fixed)
+
+Two Stage 9B.1 tests assert on the *last* correction-proposal event:
+
+```python
+correction_proposal_history(id)[-1]["eventType"] == "STALE"       # 9b1:528
+correction_proposal_history(machine["id"])[-1]["eventType"] == "SUPERSEDED"  # 9b1:721
+```
+
+`correction_proposal_history` orders by `created_at, id`. Event ids are
+`uuid.uuid4()` and `created_at` is `datetime.now(timezone.utc).isoformat()`.
+On this Windows workstation that clock is coarse: **200,000 consecutive calls
+produced only 91 distinct ISO timestamps** (~1.8 ms granularity). Two events
+written milliseconds apart therefore share a `created_at` regularly, and the
+tiebreak falls to a random UUID.
+
+Measured on the correction-proposal scenario, 60 fresh runs each:
+
+```text
+with this change     60 runs -> 2 timestamp collisions, 2 wrong history[-1]
+clean HEAD (34a8565) 60 runs -> 1 timestamp collision,  1 wrong history[-1]
+```
+
+The two are the same population; the failure rate is roughly 2-3% per run and
+rises when the machine is loaded (both observed failures happened while another
+pytest process was running). This is **not** a regression from the target-hash
+change, which touches neither `correction_proposal_events` nor its ordering:
+the flake reproduces with those files reverted to `HEAD`.
+
+Not fixed here: the ordering has no monotonic tiebreak column, and inventing
+one is a repository change outside this gate's scope. Worth scheduling — a
+non-deterministic gate is worth less than the tests in it.
+
+## Correction to the earlier Stage 9B.3b / 9B.3c acceptance claim
+
+The 9B.3b and 9B.3c installed acceptance used a **controlled pre-seeded
+finding**: `tests/test_correction_stage9b3b.py::_fixture` calls
+`repo.create_qa_finding(...)` and then `UPDATE qa_findings SET payload_json=?`
+with `"targetContentHashes": [_hash(before)]` — hashes that already conformed
+to the Stage 9B reader contract.
+
+What that acceptance genuinely validated stands: the correction application
+transaction, exact Scripture mutation, invalidation, affected re-analysis,
+cross-verse provenance, and persistence/recovery.
+
+What it did **not** establish, and must not be described as having
+established: that a finding **naturally emitted by production Stage 8** can
+enter Stage 9B at all. It could not have — the writer defect above made that
+impossible for every such finding. The gap was found while preparing Stage
+9B.4 installed acceptance. Earlier acceptance is not "fully production
+end-to-end"; it was production end-to-end **downstream of a seeded finding**.
+
+## Files changed
+
+```text
+engine/tc_ai_bridge/qa_target_hash.py             new — the contract, one place
+engine/tc_ai_bridge/qa_audit.py                   writer: per-target-ref hashes
+engine/tc_ai_bridge/correction_eligibility.py     reader: pair against target refs
+engine/tc_ai_bridge/passage_semantic_runtime.py   _sha256_text delegates
+engine/tests/test_qa_target_hash_contract_stage8_9b.py   new — production path
+```
+
+Schema unchanged (**v14**). Version unchanged (**0.9.2**). No frontend, Rust or
+wire-shape change: `targetContentHashes` is still `string[]` and still
+positionally ordered; only which references it is taken over changed.
