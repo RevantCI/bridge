@@ -2,6 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Bundled script faces, served from public/fonts/ -- see that directory's
+   README.md for provenance and licences, and scripts/vendor-fonts.py for how
+   they were produced. Everything here is OFL 1.1 and ships inside the app;
+   nothing is fetched at runtime, so `font-display: swap` only ever avoids an
+   invisible-text flash on a cold first paint, never a network stall.
+   Declaring all thirteen families is free on a Tamil-only project: the
+   webview reads a file off disk only when a glyph actually lands on it. */
+@font-face { font-family: "Noto Serif Tamil"; src: url("/fonts/NotoSerifTamil-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Tamil"; src: url("/fonts/NotoSerifTamil-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Devanagari"; src: url("/fonts/NotoSerifDevanagari-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Devanagari"; src: url("/fonts/NotoSerifDevanagari-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Bengali"; src: url("/fonts/NotoSerifBengali-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Bengali"; src: url("/fonts/NotoSerifBengali-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Telugu"; src: url("/fonts/NotoSerifTelugu-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Telugu"; src: url("/fonts/NotoSerifTelugu-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Kannada"; src: url("/fonts/NotoSerifKannada-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Kannada"; src: url("/fonts/NotoSerifKannada-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Malayalam"; src: url("/fonts/NotoSerifMalayalam-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Malayalam"; src: url("/fonts/NotoSerifMalayalam-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Gujarati"; src: url("/fonts/NotoSerifGujarati-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Gujarati"; src: url("/fonts/NotoSerifGujarati-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Gurmukhi"; src: url("/fonts/NotoSerifGurmukhi-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Gurmukhi"; src: url("/fonts/NotoSerifGurmukhi-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Oriya"; src: url("/fonts/NotoSerifOriya-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Serif Oriya"; src: url("/fonts/NotoSerifOriya-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Nastaliq Urdu"; src: url("/fonts/NotoNastaliqUrdu-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Noto Nastaliq Urdu"; src: url("/fonts/NotoNastaliqUrdu-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+/* Ezra SIL has no bold cut upstream and Bridge never bolds source Scripture,
+   so there is one weight; a bold context gets the browser's synthetic bold
+   rather than a wrong face. */
+@font-face { font-family: "Ezra SIL"; src: url("/fonts/EzraSIL-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Gentium Plus"; src: url("/fonts/GentiumPlus-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "Gentium Plus"; src: url("/fonts/GentiumPlus-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+
 :root {
   --bg:#F3F4F6; --surface:#FFFFFF; --surface-2:#FAFBFC;
   --border:#E2E5EA; --border-strong:#CBD1DB;
@@ -38,6 +72,40 @@
   --fs-3xs:12px; --fs-2xs:13px; --fs-xs:14px; --fs-sm:15px;
   --fs-md:16px;  --fs-lg:17px;  --fs-xl:18px; --fs-2xl:20px;
   --fs-3xl:23px; --fs-4xl:25px; --fs-5xl:27px;
+
+  /* Font stacks. Target-script faces are appended to --font-ui rather than
+     applied per-component: CSS resolves fallback per glyph by coverage, so
+     Latin chrome hits Inter and stops, a Tamil glyph passes over Inter to
+     Vijaya, a Devanagari glyph passes over both to Noto Serif Devanagari.
+     Mixed-script strings (a finding message quoting target text) therefore
+     render correctly in a single text node with no language plumbing, and
+     adding a gateway language needs no code change here so long as its
+     script is already in the chain.
+     Vijaya and Nirmala UI ship with Windows and are named, never bundled --
+     Microsoft grants no redistribution right. The Noto faces are bundled
+     under OFL 1.1 and exist as the floor on macOS/Linux and stripped
+     Windows installs. */
+  --font-indic:
+    "Vijaya", "Nirmala UI",
+    "Noto Serif Tamil", "Noto Serif Devanagari", "Noto Serif Bengali",
+    "Noto Serif Telugu", "Noto Serif Kannada", "Noto Serif Malayalam",
+    "Noto Serif Gujarati", "Noto Serif Gurmukhi", "Noto Serif Oriya",
+    "Noto Nastaliq Urdu";
+
+  --font-ui: -apple-system, "Inter", Segoe UI, Helvetica, Arial, var(--font-indic), sans-serif;
+
+  /* Scripture panes use this directly so line-height can be tuned for Indic
+     ascender/descender depth without touching the UI chrome's rhythm. */
+  --font-target: var(--font-indic), var(--font-ui);
+
+  /* Source scripts. Ezra SIL is preferred over SBL Hebrew because SBL's
+     licence requires individual registration, which does not survive
+     redistribution in an installer; Ezra is OFL and positions UHB's
+     cantillation marks correctly. There is no "Noto Serif Greek" family --
+     Greek lives in Noto Serif's greek-ext subset -- so Gentium Plus is the
+     bundled polytonic face and plain Noto Serif is the named fallback. */
+  --font-hebrew: "Ezra SIL", "SBL Hebrew", serif;
+  --font-greek: "Gentium Plus", "Noto Serif", serif;
 }
 
 body { margin: 0; font-family: -apple-system, "Inter", Segoe UI, Helvetica, Arial, sans-serif; }
