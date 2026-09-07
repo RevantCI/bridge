@@ -478,6 +478,48 @@ def test_a_raising_client_degrades_the_batch_instead_of_ending_the_run(fixture_p
     assert all(r["verdict"] == "uncertain" for r in project.load_triage_records().values())
 
 
+def test_a_network_failure_says_so_rather_than_blaming_the_parser(fixture_project):
+    """The reason is shown to the reviewer. Telling someone the response
+    'could not be parsed' when the endpoint was unreachable sends them
+    debugging the wrong thing."""
+    project = TranslationCoreProject(fixture_project)
+    _plant_findings(project, {"1": [_finding(id="f1")]})
+
+    def boom(instructions, input_text):
+        raise RuntimeError("Network error contacting OpenAI: connection refused")
+
+    summary = _run(project, boom)
+
+    reason = next(iter(project.load_triage_records().values()))["reason"]
+    assert "could not be reached" in reason
+    assert "connection refused" in reason
+    assert "parse" not in reason.lower()
+    assert "could not be reached" in summary["lastError"]
+
+
+def test_an_unparseable_response_still_blames_the_parser(fixture_project):
+    project = TranslationCoreProject(fixture_project)
+    _plant_findings(project, {"1": [_finding(id="f1")]})
+
+    summary = _run(project, lambda instructions, text: "not json at all")
+
+    reason = next(iter(project.load_triage_records().values()))["reason"]
+    assert "could not be parsed" in reason
+    assert summary["batches"] == 1
+    assert summary["failedBatches"] == 1
+
+
+def test_a_finding_nobody_judged_can_never_be_hidden(fixture_project):
+    """uncertain at confidence 0 is the one shape the report's slider can
+    never filter out, whatever the reviewer sets it to."""
+    project = TranslationCoreProject(fixture_project)
+    _plant_findings(project, {"1": [_finding(id="f1")]})
+    _run(project, lambda instructions, text: "")
+    for record in project.load_triage_records().values():
+        assert record["verdict"] == "uncertain"
+        assert record["confidence"] == 0
+
+
 def test_a_finding_missing_from_the_response_is_marked_uncertain_not_dropped(fixture_project):
     project = TranslationCoreProject(fixture_project)
     _plant_findings(project, {"1": [_finding(id="f1"), _finding(id="f2", explanation="second")]})

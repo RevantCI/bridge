@@ -88,7 +88,9 @@ class _TriageJob:
         self.triaged = 0
         self.skipped = 0
         self.pruned = 0
+        self.batches = 0
         self.failed_batches = 0
+        self.last_error = ""
         self.failed_books: list[dict[str, str]] = []
         self.summaries: list[dict[str, Any]] = []
         self.error: Optional[str] = None
@@ -117,6 +119,7 @@ class _TriageJob:
                 "triaged": self.triaged,
                 "skipped": self.skipped,
                 "pruned": self.pruned,
+                "batches": self.batches,
                 "failedBatches": self.failed_batches,
                 "failedBooks": copy.deepcopy(self.failed_books),
                 "books": copy.deepcopy(self.summaries),
@@ -202,19 +205,38 @@ class TriageJobManager:
                 job.triaged += int(summary.get("triaged", 0) or 0)
                 job.skipped += int(summary.get("skipped", 0) or 0)
                 job.pruned += int(summary.get("pruned", 0) or 0)
+                job.batches += int(summary.get("batches", 0) or 0)
                 job.failed_batches += int(summary.get("failedBatches", 0) or 0)
+                if summary.get("lastError"):
+                    job.last_error = str(summary["lastError"])
                 job.completed_books += 1
 
         with job.lock:
+            # A batch that failed is not a book that failed: its findings were
+            # still recorded, as uncertain. But a run where every batch failed
+            # -- an unreachable endpoint, a rejected key -- must not report
+            # "succeeded" with nothing for the UI to show, so it is surfaced
+            # either as an error message or, when nothing at all got through,
+            # as an outright failure.
+            all_batches_failed = job.batches > 0 and job.failed_batches >= job.batches
+            problems: list[str] = []
+            if job.failed_books:
+                problems.append(f"{len(job.failed_books)} book(s) could not be triaged.")
+            if job.failed_batches:
+                plural = "es" if job.failed_batches != 1 else ""
+                problems.append(
+                    f"{job.failed_batches} batch{plural} produced no usable result; "
+                    f"those findings were left uncertain."
+                    + (f" Last error: {job.last_error}" if job.last_error else "")
+                )
+
             if job.cancel_event.is_set():
                 job.state = "cancelled"
-            elif job.failed_books and not job.summaries:
+            elif (job.failed_books and not job.summaries) or all_batches_failed:
                 job.state = "failed"
-                job.error = f"{len(job.failed_books)} book(s) could not be triaged."
             else:
                 job.state = "succeeded"
-                if job.failed_books:
-                    job.error = f"{len(job.failed_books)} book(s) could not be triaged."
+            job.error = " ".join(problems) or None
             job.current_book = None
             job.current_chapter = None
             job.finished_at = _now()

@@ -259,6 +259,48 @@ def test_status_for_an_unknown_job_is_a_clean_error(fixture_project):
     assert response["error"]["code"] == "triage_not_found"
 
 
+def test_a_run_whose_every_batch_failed_reports_failure_not_success(fixture_project, monkeypatch):
+    """An unreachable endpoint or a rejected key must not look like a
+    finished run: the reviewer would think every finding had been judged."""
+    _plant(fixture_project, [_finding()])
+    engine = _open(fixture_project, StubClient(), monkeypatch)
+
+    class Dead(StubClient):
+        def triage_batch(self, instructions, input_text):
+            raise RuntimeError("Network error contacting OpenAI: connection refused")
+
+    monkeypatch.setattr(engine, "_ai_client", lambda: Dead())
+    snapshot = _run(engine)
+
+    assert snapshot["state"] == "failed"
+    assert snapshot["failedBatches"] == 1
+    assert "no usable result" in snapshot["error"]
+    assert "connection refused" in snapshot["error"]
+    # The findings are still recorded, as uncertain, so a retry is cheap and
+    # the report shows them rather than silently dropping them.
+    records = call(engine, "triage.results")["result"]["entries"]
+    assert [r["verdict"] for r in records.values()] == ["uncertain"]
+
+
+def test_a_partly_failed_run_succeeds_but_still_reports_the_failure(fixture_project, monkeypatch):
+    _plant(fixture_project, [_finding(id="f1"), _finding(id="f2", check_type="usfm.marker")])
+    engine = _open(fixture_project, StubClient(), monkeypatch)
+
+    class Flaky(StubClient):
+        def triage_batch(self, instructions, input_text):
+            if "structural checker" in instructions.lower():
+                raise RuntimeError("boom")
+            return StubClient.triage_batch(self, instructions, input_text)
+
+    monkeypatch.setattr(engine, "_ai_client", lambda: Flaky())
+    snapshot = _run(engine)
+
+    assert snapshot["state"] == "succeeded"
+    assert snapshot["failedBatches"] == 1
+    assert snapshot["batches"] == 2
+    assert "1 batch produced no usable result" in snapshot["error"]
+
+
 # -- overrides ------------------------------------------------------------
 
 

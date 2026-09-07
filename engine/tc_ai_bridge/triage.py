@@ -444,11 +444,19 @@ def make_record(item: TriageItem, result: dict[str, Any], model: str) -> dict[st
     }
 
 
-def unreadable_record(item: TriageItem, model: str) -> dict[str, Any]:
+def unreadable_record(item: TriageItem, model: str, reason: str = "") -> dict[str, Any]:
+    """A finding the model did not usefully answer for.
+
+    Always `uncertain` at confidence 0, so it can never be hidden by the
+    report's slider — a finding nobody judged must stay visible. The reason
+    is shown to the reviewer, so it has to name the actual cause: telling
+    someone the response "could not be parsed" when the endpoint was
+    unreachable sends them debugging the wrong thing.
+    """
     return make_record(
         item,
         {"verdict": "uncertain", "confidence": 0,
-         "reason": "The model's response for this batch could not be parsed."},
+         "reason": reason or "The model's response for this batch could not be parsed."},
         model,
     )
 
@@ -519,19 +527,25 @@ def run_book_triage(
         pending.append(item)
 
     completed = 0
+    batches = 0
     failed_batches = 0
+    last_error = ""
     if progress:
         progress(completed, skipped, "")
 
     for batch in build_batches(pending):
         if cancel is not None and cancel.is_set():
             break
+        batches += 1
         chapter = batch[0].chapter
         family = batch[0].family
         instructions = instructions_for(family)
+        failure = ""
         try:
             raw = call_model(instructions, build_batch_input(project, batch))
             results = parse_triage_response(raw)
+            if results is None:
+                failure = "The model's response for this batch could not be parsed."
         except Exception as exc:  # noqa: BLE001 - one batch must not end the run
             log.warning(
                 "Triage batch failed (%s %s, family %s): %s",
@@ -539,6 +553,7 @@ def run_book_triage(
             )
             results = None
             raw = ""
+            failure = f"The model could not be reached: {exc}"
         if on_usage is not None:
             try:
                 on_usage()
@@ -547,11 +562,12 @@ def run_book_triage(
 
         if results is None:
             failed_batches += 1
+            last_error = failure
             log.warning(
-                "Triage response for %s %s (family %s) was unparseable; raw response: %r",
-                project.book_id, chapter, family, str(raw)[:2000],
+                "Triage batch for %s %s (family %s) produced no usable result (%s); raw response: %r",
+                project.book_id, chapter, family, failure, str(raw)[:2000],
             )
-            new_records = {item.hash: unreadable_record(item, model) for item in batch}
+            new_records = {item.hash: unreadable_record(item, model, failure) for item in batch}
         else:
             by_id = {r["finding_id"]: r for r in results}
             new_records = {}
@@ -597,6 +613,8 @@ def run_book_triage(
         "triaged": completed,
         "skipped": skipped,
         "pruned": pruned,
+        "batches": batches,
         "failedBatches": failed_batches,
+        "lastError": last_error,
         "cancelled": cancelled,
     }
