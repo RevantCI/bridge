@@ -232,9 +232,15 @@ export interface TriageJobSnapshot {
   skipped: number;
   /** Verdicts dropped because the finding's evidence changed. */
   pruned: number;
+  /** Model requests attempted, and how many produced nothing usable. When
+   * every batch fails the run's state is "failed", not "succeeded". */
+  batches: number;
   failedBatches: number;
   failedBooks: Array<{ bookId: string; error: string }>;
-  books: Array<{ bookId: string; bookName: string; findings: number; triaged: number; skipped: number }>;
+  books: Array<{
+    bookId: string; bookName: string; findings: number; triaged: number;
+    skipped: number; batches: number; failedBatches: number;
+  }>;
   error: string | null;
   createdAt: string;
   finishedAt: string | null;

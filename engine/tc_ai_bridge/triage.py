@@ -45,7 +45,7 @@ from typing import Any, Callable, Iterable, Optional
 
 from .original_language_resources import source_tokens_for_verse
 from .tc_project import TranslationCoreProject
-from .triage_prompts import DEFAULT_FAMILY, FAMILIES, family_for, instructions_for
+from .triage_prompts import family_for, instructions_for
 
 log = logging.getLogger(__name__)
 

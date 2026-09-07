@@ -448,10 +448,16 @@
   // restart, and a cancelled run keeps whatever it already paid for. The
   // report itself never depends on any of this having happened.
 
-  async function loadTriageResults(): Promise<void> {
+  /**
+   * Reads verdicts off disk. With no `book` this replaces the whole map;
+   * with one it merges just that book's verdicts in, which is what the
+   * mid-run refresh wants — re-reading all 66 books every second to watch
+   * one of them change would be pointless file I/O.
+   */
+  async function loadTriageResults(book = ""): Promise<void> {
     try {
-      const results = await bridge.triageResults();
-      triageEntries = results.entries;
+      const results = await bridge.triageResults(book);
+      triageEntries = book ? { ...triageEntries, ...results.entries } : results.entries;
       triageAvailable = results.available;
       triageUnavailableReason = results.unavailableReason;
     } catch (error) {
@@ -489,14 +495,16 @@
       if (generation !== triagePollGeneration) return;
       triageJob = snapshot;
       if (REPORT_TERMINAL.has(snapshot.state)) {
-        // Even a cancelled or partly-failed run leaves verdicts on disk.
+        // Even a cancelled or partly-failed run leaves verdicts on disk, so
+        // this full read is always worth doing.
         await loadTriageResults();
         if (snapshot.error) triageError = snapshot.error;
         return;
       }
       // Refresh mid-run so verdicts appear as they are bought, not only at
-      // the end — a whole-Bible run is long and silent otherwise.
-      await loadTriageResults();
+      // the end — a whole-Bible run is long and silent otherwise. Scoped to
+      // the book in flight: nothing else can have changed.
+      if (snapshot.currentBook) await loadTriageResults(snapshot.currentBook);
       await new Promise<void>((resolve) => { triagePollTimer = setTimeout(resolve, 1000); });
     }
   }

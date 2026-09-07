@@ -127,7 +127,7 @@ def test_triage_run_reports_unavailable_when_no_book_has_findings(fixture_projec
 
 
 def test_run_persists_verdicts_that_triage_results_returns(fixture_project, monkeypatch):
-    project = _plant(fixture_project, [_finding()])
+    _plant(fixture_project, [_finding()])
     client = StubClient()
     engine = _open(fixture_project, client, monkeypatch)
 

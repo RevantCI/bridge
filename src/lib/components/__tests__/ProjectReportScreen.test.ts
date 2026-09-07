@@ -246,7 +246,7 @@ describe("ProjectReportScreen — AI triage overlay", () => {
     const triageJob: TriageJobSnapshot = {
       jobId: "t1", state: "running", force: false, totalBooks: 66, completedBooks: 3, percent: 5,
       currentBook: "exo", currentChapter: "4", currentBookTriaged: 12, currentBookSkipped: 2,
-      triaged: 40, skipped: 5, pruned: 0, failedBatches: 0, failedBooks: [], books: [],
+      triaged: 40, skipped: 5, pruned: 0, batches: 4, failedBatches: 0, failedBooks: [], books: [],
       error: null, createdAt: "", finishedAt: null,
     };
     mount({ triageJob, onCancelTriage });

@@ -58,6 +58,7 @@ reasons — this table is the fast way to see both.
 | *(Passage-semantic Stages 4-8)* | Source/target semantic inventories, passage-aware location, meaning preservation, bidirectional QA | ✅ Done (2026-09-01 / 2026-09-02). Deterministic throughout — none of these stages uses a language model. Note the numbering collision: these are semantic **Stages**, a different axis from the Greek Room **Phases** above. Production caveat: `SemanticEmbeddingProvider.available` is `False` in the shipped app, so location runs there use lexical/structural evidence only; `scripts/seed_review_fixture.py` seeds a project with a fixture provider for exercising the review UI. |
 | *(Stage 9A)* | Human QA review, evidence inspection, disposition workflow | ✅ Done, including Stage 9A.4 orchestration (2026-09-03). A 2026-09-04 follow-up kept a running analysis job visible while the reviewer navigates (it was previously dropped), and fixed the Logos VBScript shim going silent on any COM error, and bounded the Bridge navigation publish retry. Alignment Review is a top-level Word/Semantic/Passage/QA surface; `qaReview.*`, `semanticReview.*` and `reviewHistory.*` record decisions with optimistic concurrency. **Run analysis** now executes Stages 5–8 as a persisted background job for passage/chapter/book/range and refreshes the queue. Findings are classified only — no correction generation or application, which remains Stage 9B. Normal runtime visibly reports limited retrieval until a production multilingual embedding provider is configured. |
 | *(Project QA report)* | — | ✅ Done (2026-09-04). **Generate report** on the project screen builds a whole-collection QA report in a background sidecar job (`report.generate/status/get/cancel/export`, `tc_ai_bridge/qa_report.py`, `report_jobs.py`): every book's Greek Room / tN / tW / alignment / AI-review progress, and every issue as a filterable row (category, book, chapter, verse, issue, AI proposal, fixed by human/machine, pass/fail) with charts and CSV / TSV / print-to-PDF export. Needed one piece of new persistence: a succeeded check job now snapshots its findings to `.apps/translationCoreAI/checkFindings/<book>/<chapter>.json` (the rollup only ever kept ids). Installed-app acceptance still NOT RUN. |
+| *(AI triage)* | — | ✅ Done (2026-09-07). Optional, **online-only** false-positive scoring layered on that report — see §5. Backend, protocol and report-screen UI; live model behaviour and installed-app acceptance NOT RUN. |
 
 ### Beta 15 developer handoff — 2026-08-31
 
@@ -244,7 +245,87 @@ Bridge never generates fake/empty check entries to fill the gap.
 
 ---
 
-## 5. Where the deeper docs live
+## 5. AI triage — optional false-positive scoring
+
+Greek Room checks are deliberately noisy: they say "this is objectively
+suspicious," and a lot of what is suspicious is fine. AI triage is an
+**optional, online-only overlay** that asks the configured model how likely
+each already-persisted finding is to be a false positive, so the report
+screen can hide the noisiest ones behind a slider.
+
+It is an overlay in the strict sense: no check, report, decision or export
+path reads a verdict, a finding is never rewritten, and with no API key and
+no verdicts the report renders exactly as it did before triage existed.
+That is the local-first requirement — nothing offline may depend on it.
+
+**Modules.** `tc_ai_bridge/triage.py` (hashing, batching, context, parsing,
+the per-book run), `tc_ai_bridge/triage_prompts.py` (four prompt families,
+kept separate so wording can be tuned without touching logic), and
+`triage_jobs.py` (a `ReportJobManager`-shaped background job in its own
+lock domain).
+
+**RPCs.** `triage.run` (`book?`, `force?`), `triage.status`,
+`triage.cancel`, `triage.override` (`book`, `hash`, `verdict` — empty
+clears), `triage.clear`, `triage.results`. `triage.results` is in
+`report.get`'s 180 s timeout class; everything else stays interactive at
+30 s so a long run can always be cancelled.
+
+**Stored shape** — `.apps/translationCoreAI/triage/<book>.json`:
+
+```json
+{"schemaVersion": 1, "bookId": "rut", "updatedAt": "...",
+ "entries": {"<hash20>": {
+    "findingId": "...", "chapter": "1", "verse": "3-4",
+    "checkType": "wildebeest.script.mixed", "family": "mechanical",
+    "verdict": "false_positive|true_positive|uncertain",
+    "confidence": 0, "reason": "...", "model": "...", "timestamp": "...",
+    "userOverride": null }}}
+```
+
+Four design points worth knowing before changing any of it:
+
+1. **One file per book, not per chapter, and not SQLite.** Measured on the
+   real 66-book collections: the first open of any file on Windows costs
+   ~20–27 ms regardless of size, so file *count* dominates — 66 files read
+   in ~2 s where 1,189 would take ~25–30 s. Bridge's existing
+   `bridge-semantic.sqlite3` is per book too, so joining it would not have
+   made a collection read one query; it would only have inherited the
+   passage-semantic runtime's recovery states, migrations and per-open
+   integrity check.
+2. **Records are keyed by a hash of the finding's *evidence*** — NFC- and
+   whitespace-normalised `original_text`, `suggested_replacement`,
+   `explanation` and evidence pairs, plus book/chapter/verse/check type.
+   Deliberately **not** `_stable_finding_id`, which must stay stable across
+   an edit so a human decision survives. A verdict about evidence that
+   changed is worthless, so it is discarded rather than carried forward.
+   Offsets are excluded so text shifting inside a verse does not orphan
+   every verdict in it. `qa_report` stamps this hash on Greek Room rows as
+   `triageHash`, and the report screen merges verdicts by dict lookup.
+3. **Nothing is ever re-bought.** A run over unchanged findings makes zero
+   model calls. A `userOverride` is skipped even under `force` — overriding
+   is also how a reviewer stops paying for a finding they have judged.
+4. **Failure is always survivable.** An unparseable response or a network
+   error degrades that batch to `uncertain` at confidence 0 — the one shape
+   the slider can never hide — and logs the raw text. The reason names the
+   actual cause. A run whose every batch failed reports `failed`, not
+   `succeeded`.
+
+**Concurrency.** `triage.override` (dispatcher thread) and the run worker
+both load-merge-save the same book file under one `BridgeEngine._triage_lock`,
+and the worker re-reads immediately before merging each batch, so an
+override recorded mid-run survives. This is the same lost-update class that
+`.bridge/progress.json` still has between its two writers — see the known
+gaps in `BUILD_LOG.md`.
+
+**The slider** lives in `AppSettings.triage_hide_threshold` (default 90,
+`0` = off, otherwise clamped to 50–100). Only a `false_positive` verdict at
+or above the threshold hides anything; `uncertain` and `true_positive` are
+always shown, because hiding a real translation error is a far worse
+failure than leaving a false positive on screen.
+
+---
+
+## 6. Where the deeper docs live
 
 | Doc | Covers |
 |---|---|
