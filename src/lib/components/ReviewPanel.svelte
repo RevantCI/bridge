@@ -618,12 +618,20 @@
         <div class="tab-panel" role="tabpanel">
           <!-- All three scopes together, so the choice is one row and the
                progress/errors for whichever ran sit directly under it.
-               Chapter and Book only wait on a background check and a running
-               job; Verse additionally waits on the verse-edit lifecycle,
-               because it is the scope an open editor would conflict with. -->
+               Narrowest scope first, so the cheapest and most common run is
+               the leftmost. Verse waits on the verse-edit lifecycle as well
+               as a background check and a running job, because it is the
+               scope an open editor would conflict with; Chapter and Book
+               wait only on the latter two. -->
           <div class="ai-run-row">
             <span class="ai-run-label">🤖 AI review:</span>
             <div class="ai-run-buttons">
+              <button
+                class="ai-scope-btn"
+                on:click={() => startAIReview("verse")}
+                disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey) || aiJobBusy}
+                title="Run an evidence-grounded AI review for this verse in the background"
+              >Verse</button>
               <button
                 class="ai-scope-btn"
                 on:click={() => startAIReview("chapter")}
@@ -636,12 +644,6 @@
                 disabled={$checkingProgress.running || aiJobBusy}
                 title="Run an evidence-grounded AI review across every verse in this book"
               >Book</button>
-              <button
-                class="ai-scope-btn"
-                on:click={() => startAIReview("verse")}
-                disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey) || aiJobBusy}
-                title="Run an evidence-grounded AI review for this verse in the background"
-              >Verse</button>
             </div>
           </div>
         {#if visibleAIJob || aiJobBusy || visibleAIExplainError}
