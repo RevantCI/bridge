@@ -72,7 +72,7 @@
   }
 </script>
 
-<div class="detail">
+<div class="detail" data-qa-detail-scroll>
   {#if loading}
     <p class="state" role="status">Loading evidence…</p>
   {:else if error}
@@ -119,16 +119,11 @@
       </p>
     </header>
 
-    <div class="evidence">
+    <div class="evidence" data-qa-evidence>
       <EvidenceInspector {detail} />
-      <CorrectionReviewPanel
-        findingId={finding.id}
-        findingRevision={finding.revision}
-        on:reanalyzed={(event) => dispatch("reanalyzed", event.detail)}
-      />
     </div>
 
-    <footer class="actions">
+    <section class="actions" data-qa-decision aria-labelledby="decide-heading">
       <h4 id="decide-heading">Your decision</h4>
 
       <label class="note-label" for="reviewer-note">
@@ -176,7 +171,15 @@
           adds another entry to the history.
         </p>
       {/if}
-    </footer>
+    </section>
+
+    <div class="correction-flow" data-qa-correction>
+      <CorrectionReviewPanel
+        findingId={finding.id}
+        findingRevision={finding.revision}
+        on:reanalyzed={(event) => dispatch("reanalyzed", event.detail)}
+      />
+    </div>
   {/if}
 </div>
 
@@ -185,8 +188,10 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
     height: 100%;
     overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .state { padding: 1.2rem; color: #6b7280; font-size: 0.85rem; }
@@ -220,16 +225,20 @@
   .explanation { margin: 0.4rem 0 0.2rem; font-size: 0.86rem; line-height: 1.5; }
   .caveat { margin: 0; font-size: 0.75rem; color: #6b7280; font-style: italic; }
 
-  .evidence { padding: 0.75rem 0.9rem; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: .9rem; }
+  .evidence { padding: 0.75rem 0.9rem; flex: 0 0 auto; min-width: 0; display: flex; flex-direction: column; gap: .9rem; }
 
-  /* The decision controls must never sit below the fold on a small laptop:
-     the pane scrolls, and these stay pinned to its bottom edge. */
   .actions {
-    position: sticky;
-    bottom: 0;
+    position: static;
     padding: 0.7rem 0.9rem;
     border-top: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
     background: #f9fafb;
+    flex: none;
+  }
+
+  .correction-flow {
+    padding: 0.75rem 0.9rem 1rem;
+    min-width: 0;
     flex: none;
   }
 
