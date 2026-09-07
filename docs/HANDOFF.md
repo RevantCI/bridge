@@ -1945,6 +1945,78 @@ Use a disposable project for confirmation, exact mutation, alignment state,
 restart persistence and concurrent-edit rejection. Do not begin affected
 analysis until this checkpoint is reviewed and explicitly approved.
 
+# 37.5 Stage 9B.3c — Affected Re-analysis After Human Apply
+
+Stage 9B.3c is implemented on baseline `4e5a94a` without a schema migration;
+the semantic foundation remains at **v13**. It adds no automatic analysis to
+`correction.applyProposal`. A reviewer must explicitly select **Re-analyze
+affected passage** after a correction application is COMPLETED while semantic
+verification is PENDING.
+
+`CorrectionAffectedScopeResolver` reconstructs the minimum safe structural
+scope from the durable application, proposal, original finding and source
+semantic units. The frontend supplies only the application ID and actor. The
+backend retains source and target provenance independently, normalizes display
+references through the existing project versification, expands through
+preserved structural markers, and always rebuilds analysis text from the
+managed project's current editable chapter JSON. For the regression fixture,
+source `PHP 1:3` and edited target `PHP 1:6` resolve to `PHP 1:3–1:6`; no
+same-verse source relationship is manufactured.
+
+`CorrectionAffectedAnalysisService` seals that range into the existing
+Stage 9A.4 `AnalysisJobManager`. There is still one Stage 5–8 pipeline: the
+source inventory can be reused when its fingerprint is current, while target
+inventory, location, meaning and QA are content-addressed against corrected
+target hashes. The application-to-job association is CAS-appended to existing
+v13 result metadata with source refs, target refs, structural range, target
+revision/hash and analysis fingerprint. Running/completed equivalent jobs are
+idempotently rediscovered; failure, cancellation and incomplete search require
+an explicit Retry. Existing job recovery and cancellation semantics apply.
+
+The Correction panel displays three independent states: correction
+application, semantic verification and affected analysis. It restores the
+associated job after restart, uses truthful stage-level progress, refreshes the
+current scoped QA data on completion, and does not replace the reviewer's
+manually selected QA range. Where relationship evidence exists it shows source
+and target references, grouped cardinality and movement properties. Null-side
+relationships remain semantic endpoints (`NOT_LOCATED`, grammatical/context
+support, and related states), never automatically an omission or addition.
+
+Successful, failed, cancelled and incomplete re-analysis all leave the
+application COMPLETED, verification PENDING, the original finding STALE with
+CONFIRMED_TRANSLATION_ERROR, and Word Alignment invalid/reviewable. Historical
+tokens, semantic units, relationships, assessments and findings are retained.
+No Stage 9B.3c operation writes Scripture or sets CORRECTED.
+
+```text
+Stage 9B.3c focused Python                9 passed
+Stage 9B.3b focused Python               13 passed
+full Python + Greek Room                765 passed
+frontend Vitest                         192 passed / 19 files
+npm run check                            0 errors / 0 warnings
+npm run build                            passed; existing >500 kB warning
+cargo test                                7 passed
+cargo check                              passed
+git diff --check                         passed; line-ending notices only
+```
+
+Installed acceptance must use a fresh disposable import that Bridge copies to
+its managed runtime project directory. Complete an explicit Apply, confirm
+Word Alignment is invalid and verification PENDING, run affected re-analysis,
+observe Stage 6A/6B/7/8, confirm the PHP 1:3 → 1:6 provenance and scope, then
+restart and verify the application/job/history persist. Installed acceptance
+has not been claimed by the repository test suite. On the current development
+workstation, the fresh source fixture is
+`C:\Users\Benz\Bridge-Test-Projects\stage9b3c-affected`; import it into Bridge
+before testing so the managed copy, not this source directory, is exercised.
+
+## Next boundary: Stage 9B.4 only, after Stage 9B.3c acceptance
+
+Stage 9B.4 may define positive semantic verification (`PASSED`, `FAILED`, or
+`UNCERTAIN`) and explicit human acknowledgement. Until separately approved,
+do not infer verification from finding disappearance, mark the finding
+CORRECTED, change export behavior, or automatically approve Word Alignment.
+
 ---
 
 # 38. Export Architecture (Planned, Post-Stage-9)
@@ -2040,7 +2112,7 @@ Stage 7 — DOES THE LOCATED TARGET EXPRESSION PRESERVE IT? ✅ done
 Stage 8 — IS ANY SOURCE MEANING MISSING?
           IS ANY TARGET MEANING UNSUPPORTED?              ✅ done
         ↓
-Stage 9 — HUMAN REVIEW AND CORRECTION                     ◐ 9A–9B.2 done
+Stage 9 — HUMAN REVIEW AND CORRECTION                     ◐ 9A–9B.3c done; 9B.4 pending
 ```
 
 Do not collapse these stages.

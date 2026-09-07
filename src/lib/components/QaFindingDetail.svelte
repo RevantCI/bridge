@@ -5,6 +5,7 @@
   import CorrectionReviewPanel from "./CorrectionReviewPanel.svelte";
   import ReviewStatusBadge from "./ReviewStatusBadge.svelte";
   import type { QaFindingDetail, ReviewerDecision } from "../types/qaReview";
+  import type { CorrectionAffectedAnalysisResult } from "../types/correctionReview";
   import {
     REVIEWER_ACTIONS,
     SEVERITY_IS_PRIORITY_ONLY,
@@ -20,8 +21,8 @@
    * The finding detail pane: what Bridge found, why, and the four
    * conclusions a reviewer may reach.
    *
-   * Stage 9B.2 adds proposal review below the existing evidence. It still has
-   * deliberately no path that applies a proposal to Scripture.
+   * Correction review remains a separately guarded workflow below the
+   * evidence; this component only forwards its affected-analysis refresh.
    */
   export let detail: QaFindingDetail | null = null;
   export let loading = false;
@@ -33,6 +34,7 @@
     note: { note: string };
     next: void;
     previous: void;
+    reanalyzed: { result: CorrectionAffectedAnalysisResult };
   }>();
 
   let note = "";
@@ -119,7 +121,11 @@
 
     <div class="evidence">
       <EvidenceInspector {detail} />
-      <CorrectionReviewPanel findingId={finding.id} findingRevision={finding.revision} />
+      <CorrectionReviewPanel
+        findingId={finding.id}
+        findingRevision={finding.revision}
+        on:reanalyzed={(event) => dispatch("reanalyzed", event.detail)}
+      />
     </div>
 
     <footer class="actions">

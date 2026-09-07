@@ -1570,6 +1570,82 @@ class FoundationRepository:
             ).fetchone()
         return None if row is None else self._application_payload(row)
 
+    def applications_for_finding(self, finding_id: str) -> list[dict[str, Any]]:
+        """Return durable application history newest first for UI recovery."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE finding_id=? "
+                "ORDER BY created_at DESC,application_id DESC", (finding_id,),
+            ).fetchall()
+        return [self._application_payload(row) for row in rows]
+
+    def record_affected_analysis_association(
+        self, application_id: str, *, expected_state_revision: int,
+        association: dict[str, Any],
+    ) -> dict[str, Any]:
+        """CAS-append an analysis association without changing application state.
+
+        Stage 9B.3c deliberately keeps a completed application COMPLETED and
+        semantic verification PENDING. The job itself owns mutable technical
+        progress; this ledger stores the immutable link needed after restart.
+        """
+        job_id = str(association.get("analysisJobId") or "").strip()
+        if not job_id:
+            raise FoundationValidationError("Affected analysis association requires a job id")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE application_id=?",
+                (application_id,),
+            ).fetchone()
+            if row is None:
+                raise FoundationValidationError(f"Unknown correction application: {application_id}")
+            if row["application_state"] != CorrectionApplicationState.COMPLETED.value:
+                raise FoundationConflict("Affected analysis requires a COMPLETED correction application")
+            if int(row["state_revision"]) != expected_state_revision:
+                raise FoundationConflict("Correction application state revision conflict")
+            job = conn.execute(
+                "SELECT project_id,payload_json FROM analysis_jobs WHERE id=?", (job_id,),
+            ).fetchone()
+            if job is None or job["project_id"] != row["project_id"]:
+                raise FoundationValidationError("Affected analysis job belongs to another project")
+            job_payload = json.loads(job["payload_json"])
+            requested = job_payload.get("requestedScope") or {}
+            if str(requested.get("correctionApplicationId") or "") != application_id:
+                raise FoundationValidationError("Analysis job is not linked to this correction application")
+            result = json.loads(row["result_metadata_json"])
+            attempts = list(result.get("affectedAnalysisAttempts") or ())
+            if not any(str(item.get("analysisJobId") or "") == job_id for item in attempts):
+                attempts.append(dict(association))
+            result.update({
+                "affectedAnalysisStarted": True,
+                "affectedAnalysisJobId": job_id,
+                "affectedAnalysisAttempts": attempts,
+            })
+            now = self._now()
+            payload = self._application_payload(row)
+            payload.update({
+                "stateRevision": expected_state_revision + 1,
+                "updatedAt": now,
+                "resultMetadata": result,
+            })
+            changed = conn.execute(
+                "UPDATE correction_application_intents SET state_revision=state_revision+1,"
+                "updated_at=?,result_metadata_json=?,payload_json=? "
+                "WHERE application_id=? AND application_state='COMPLETED' AND state_revision=?",
+                (now, json.dumps(result, ensure_ascii=False),
+                 json.dumps(payload, ensure_ascii=False), application_id,
+                 expected_state_revision),
+            ).rowcount
+            if changed != 1:
+                raise FoundationConflict("Correction application state revision conflict")
+            updated = conn.execute(
+                "SELECT * FROM correction_application_intents WHERE application_id=?",
+                (application_id,),
+            ).fetchone()
+            conn.commit()
+        return self._application_payload(updated)
+
     find_by_proposal_revision = find_application_by_proposal_revision
 
     def list_incomplete_applications(self, project_id: str) -> list[dict[str, Any]]:

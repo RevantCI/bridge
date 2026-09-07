@@ -1359,6 +1359,10 @@ class PassageSemanticRuntime:
         return {
             "findingId": finding_id,
             "proposals": self.repository.correction_proposals_for_finding(finding_id),
+            "applications": self.repository.applications_for_finding(finding_id),
+            "correctionWritesBlocked": bool(
+                self.application_recovery.get("correctionWritesBlocked")
+            ),
         }
 
     def correction_create_proposal(

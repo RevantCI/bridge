@@ -1658,6 +1658,25 @@ pub async fn correction_get_application_status(
 }
 
 #[tauri::command]
+pub async fn correction_reanalyze_affected(
+    sidecar: State<'_, EngineSidecar>,
+    application_id: String,
+    requested_by: String,
+    retry: Option<bool>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.reanalyzeAffected",
+            serde_json::json!({
+                "applicationId": application_id,
+                "requestedBy": requested_by,
+                "retry": retry.unwrap_or(false),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn semantic_review_decide_location(
     sidecar: State<'_, EngineSidecar>,
     relationship_id: String,

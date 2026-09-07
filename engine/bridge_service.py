@@ -71,6 +71,7 @@ from tc_ai_bridge.correction_wording import (
     CorrectionWordingService,
 )
 from tc_ai_bridge.correction_application import CorrectionApplicationService
+from tc_ai_bridge.correction_affected_analysis import CorrectionAffectedAnalysisService
 from tc_ai_bridge.knowledge_base import KnowledgeBaseError
 from tc_ai_bridge.paratext_connector import ParatextConnectorClient, ParatextConnectorError
 from tc_ai_bridge.logos_connector import LogosConnectorClient, LogosConnectorError
@@ -371,6 +372,7 @@ class Methods:
     CORRECTION_GET_PROPOSAL_HISTORY = "correction.getProposalHistory"
     CORRECTION_APPLY_PROPOSAL = "correction.applyProposal"
     CORRECTION_GET_APPLICATION_STATUS = "correction.getApplicationStatus"
+    CORRECTION_REANALYZE_AFFECTED = "correction.reanalyzeAffected"
     SEMANTIC_REVIEW_DECIDE_LOCATION = "semanticReview.decideLocation"
     SEMANTIC_REVIEW_DECIDE_MEANING = "semanticReview.decideMeaning"
     REVIEW_HISTORY_GET_ENTITY_HISTORY = "reviewHistory.getEntityHistory"
@@ -467,6 +469,7 @@ class BridgeEngine:
         self._ai_review_jobs = AIReviewJobManager()
         self._analysis_jobs = AnalysisJobManager()
         self._correction_application_service: CorrectionApplicationService | None = None
+        self._correction_affected_analysis_service: CorrectionAffectedAnalysisService | None = None
         self._project_sweep = ProjectSweepManager()
         self._report_jobs = ReportJobManager()
         # AppSettings() with no path defaults to a real, persistent location
@@ -543,6 +546,7 @@ class BridgeEngine:
         self.project = candidate
         self.passage_semantic_runtime = None
         self._correction_application_service = None
+        self._correction_affected_analysis_service = None
         # Filesystem recovery must precede semantic initialization. Otherwise
         # the semantic runtime could fingerprint a partially written chapter
         # that the translationCore journal then rolls back.
@@ -579,6 +583,9 @@ class BridgeEngine:
             self.passage_semantic_runtime = runtime
             self._correction_application_service = CorrectionApplicationService(runtime, self.edit_verse)
             self._analysis_jobs.bind_runtime(runtime)
+            self._correction_affected_analysis_service = CorrectionAffectedAnalysisService(
+                runtime, self._analysis_jobs,
+            )
             self._passage_semantic_status = {
                 "state": "READY", **runtime.status(),
                 "translationCoreRecovery": tc_recovery,
@@ -2198,6 +2205,16 @@ class BridgeEngine:
             raise ProjectError("Correction application service is unavailable")
         return self._correction_application_service.get_status(application_id)
 
+    def correction_reanalyze_affected(
+        self, application_id: str, requested_by: str, retry: bool = False,
+    ) -> dict[str, Any]:
+        self._require_passage_semantic_runtime()
+        if self._correction_affected_analysis_service is None:
+            raise ProjectError("Correction affected analysis service is unavailable")
+        return self._correction_affected_analysis_service.start(
+            application_id, requested_by=requested_by, retry=retry,
+        )
+
     def qa_review_add_note(
         self, entity_type: str, entity_id: str, note: str,
     ) -> dict[str, Any]:
@@ -2226,6 +2243,10 @@ class BridgeEngine:
     def analysis_job_start(
         self, requested_scope: dict[str, Any], expected_analysis_fingerprint: str = "",
     ) -> dict[str, Any]:
+        if requested_scope.get("_backendCorrectionScope") or requested_scope.get("correctionApplicationId"):
+            raise AnalysisJobConflict(
+                "Correction affected scopes must be resolved by correction.reanalyzeAffected"
+            )
         if not expected_analysis_fingerprint:
             raise AnalysisJobConflict(
                 "Resolve the selected scope status before starting analysis"
@@ -3939,6 +3960,12 @@ class BridgeEngine:
             if m == Methods.CORRECTION_GET_APPLICATION_STATUS:
                 return EngineResponse.ok(request.id, result=self.correction_get_application_status(
                     str(p.get("applicationId") or ""),
+                ))
+            if m == Methods.CORRECTION_REANALYZE_AFFECTED:
+                return EngineResponse.ok(request.id, result=self.correction_reanalyze_affected(
+                    str(p.get("applicationId") or ""),
+                    str(p.get("requestedBy") or self.settings.reviewer_name or "human"),
+                    bool(p.get("retry") or False),
                 ))
             if m == Methods.SEMANTIC_REVIEW_DECIDE_LOCATION:
                 return EngineResponse.ok(request.id, result=self.semantic_review_decide_location(

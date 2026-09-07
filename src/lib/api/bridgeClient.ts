@@ -49,6 +49,7 @@ import type {
 } from "../types/analysisJob";
 import type {
   CorrectionEligibility,
+  CorrectionAffectedAnalysisResult,
   CorrectionApplicationIntent,
   CorrectionIntent,
   CorrectionProposal,
@@ -758,7 +759,12 @@ export const bridge = {
 
   correctionListForFinding(
     findingId: string,
-  ): Promise<{ findingId: string; proposals: CorrectionProposal[] }> {
+  ): Promise<{
+    findingId: string;
+    proposals: CorrectionProposal[];
+    applications: CorrectionApplicationIntent[];
+    correctionWritesBlocked: boolean;
+  }> {
     return call("correction_list_for_finding", { findingId });
   },
 
@@ -816,6 +822,14 @@ export const bridge = {
 
   correctionGetApplicationStatus(applicationId: string): Promise<CorrectionApplicationIntent> {
     return call("correction_get_application_status", { applicationId });
+  },
+
+  correctionReanalyzeAffected(options: {
+    applicationId: string;
+    requestedBy: string;
+    retry?: boolean;
+  }): Promise<CorrectionAffectedAnalysisResult> {
+    return call("correction_reanalyze_affected", options);
   },
 
   /**

@@ -276,9 +276,15 @@ class AnalysisJobManager:
             chapter, verse = _reference_parts(displayed[0])
             end_chapter, end_verse = _reference_parts(displayed[-1])
         elif kind == "AFFECTED":
-            chapter, verse, end_chapter, end_verse = cls._resolve_affected(
-                runtime, requested, chapter, verse, end_chapter, end_verse,
-            )
+            if requested.get("_backendCorrectionScope"):
+                if not str(requested.get("correctionApplicationId") or "").strip():
+                    raise AnalysisJobError("Correction affected scope requires an application id")
+                if not all((chapter, verse, end_chapter, end_verse)):
+                    raise AnalysisJobError("Correction affected scope requires a resolved range")
+            else:
+                chapter, verse, end_chapter, end_verse = cls._resolve_affected(
+                    runtime, requested, chapter, verse, end_chapter, end_verse,
+                )
         elif not all((chapter, verse, end_chapter, end_verse)):
             raise AnalysisJobError("Selected range requires start and end references")
 
@@ -440,6 +446,35 @@ class AnalysisJobManager:
             name=f"bridge-analysis-{payload['jobId'][:8]}", daemon=True,
         ).start()
         return control.snapshot()
+
+    def start_correction_affected(
+        self, runtime: Any, *, application_id: str,
+        start_chapter: str, start_verse: str, end_chapter: str, end_verse: str,
+        resolved_source_references: list[str], resolved_target_references: list[str],
+        requested_by: str,
+    ) -> dict[str, Any]:
+        """Start the normal pipeline for a backend-resolved correction scope.
+
+        The private marker is accepted only through this in-process method. The
+        public Bridge ``analysisJob.start`` boundary rejects it, so a client
+        cannot manufacture a correction scope or collapse source provenance to
+        the edited target verse.
+        """
+        requested = {
+            "kind": "AFFECTED",
+            "startChapter": str(start_chapter), "startVerse": str(start_verse),
+            "endChapter": str(end_chapter), "endVerse": str(end_verse),
+            "correctionApplicationId": str(application_id),
+            "resolvedSourceReferences": list(resolved_source_references),
+            "resolvedTargetReferences": list(resolved_target_references),
+            "requestedBy": str(requested_by),
+            "_backendCorrectionScope": True,
+        }
+        payload = self.new_job_payload(runtime, requested)
+        return self.start(
+            runtime, requested_scope=requested,
+            expected_analysis_fingerprint=payload["analysisFingerprint"],
+        )
 
     def status(self, job_id: str = "") -> dict[str, Any]:
         with self._lock:

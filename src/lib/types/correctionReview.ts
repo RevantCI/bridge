@@ -1,5 +1,6 @@
 import type { LifecycleStatus, ReviewStatus } from "./qaReview";
 import type { CoverageDimension, PolicyBinding } from "./passageSemanticV1";
+import type { AnalysisJobSnapshot } from "./analysisJob";
 
 export type CorrectionEligibilityCode =
   | "ELIGIBLE"
@@ -105,6 +106,31 @@ export interface CorrectionApplicationIntent {
   failureCode: string;
   recoveryMetadata: Record<string, unknown>;
   resultMetadata: Record<string, unknown>;
+}
+
+export type AffectedAnalysisState =
+  | "NOT_RUN"
+  | "RUNNING"
+  | "COMPLETED"
+  | "FAILED"
+  | "CANCELLED"
+  | "SEARCH_INCOMPLETE";
+
+export interface ResolvedStructuralRange {
+  startReference: string;
+  endReference: string;
+  displayedReferences: string[];
+  canonicalReferences: string[];
+}
+
+export interface CorrectionAffectedAnalysisResult {
+  applicationId: string;
+  analysisJobId: string;
+  resolvedSourceReferences: string[];
+  resolvedTargetReferences: string[];
+  resolvedStructuralRange: ResolvedStructuralRange;
+  jobState: AffectedAnalysisState;
+  job: AnalysisJobSnapshot;
 }
 
 /** Internal strict-writer contract. Clients never supply its text or spans. */

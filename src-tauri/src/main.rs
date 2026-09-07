@@ -133,6 +133,7 @@ fn main() {
             commands::correction_get_proposal_history,
             commands::correction_apply_proposal,
             commands::correction_get_application_status,
+            commands::correction_reanalyze_affected,
             commands::semantic_review_decide_location,
             commands::semantic_review_decide_meaning,
             commands::review_history_get_entity_history,

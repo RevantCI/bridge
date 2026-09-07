@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createEventDispatcher, onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import type {
     AffectedTargetSpan,
@@ -8,7 +9,10 @@
     CorrectionProposal,
     CorrectionProposalEvent,
     CorrectionReviewContext,
+    CorrectionAffectedAnalysisResult,
+    AffectedAnalysisState,
   } from "../types/correctionReview";
+  import type { AnalysisJobSnapshot } from "../types/analysisJob";
   import type { SettingsData } from "../types/finding";
   import type { CoverageDimension } from "../types/passageSemanticV1";
   import {
@@ -21,6 +25,10 @@
   export let findingId: string;
   /** Re-evaluate backend eligibility after the Stage 9A review changes. */
   export let findingRevision = 0;
+
+  const dispatch = createEventDispatcher<{
+    reanalyzed: { result: CorrectionAffectedAnalysisResult };
+  }>();
 
   let eligibility: CorrectionEligibility | null = null;
   let context: CorrectionReviewContext | null = null;
@@ -49,6 +57,11 @@
   let reviewNote = "";
   let confirmationOpen = false;
   let application: CorrectionApplicationIntent | null = null;
+  let correctionWritesBlocked = false;
+  let affectedJob: AnalysisJobSnapshot | null = null;
+  let affectedState: AffectedAnalysisState = "NOT_RUN";
+  let affectedResult: CorrectionAffectedAnalysisResult | null = null;
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
   $: reviewKey = `${findingId}:${findingRevision}`;
   $: if (findingId && reviewKey !== loadedReviewKey) {
@@ -97,6 +110,18 @@
       ? context.findingDisplayedReferences
       : eligibility?.displayedReferences ?? [],
   );
+  $: mayReanalyze = Boolean(
+    application?.applicationState === "COMPLETED"
+      && selectedProposal?.verificationStatus === "PENDING"
+      && !correctionWritesBlocked
+      && affectedState !== "RUNNING"
+      && affectedState !== "COMPLETED",
+  );
+  $: relationshipEvidence = correctionRelationshipEvidence(context);
+
+  onDestroy(() => {
+    if (pollTimer) clearTimeout(pollTimer);
+  });
 
   function message(exc: unknown): string {
     return exc instanceof Error ? exc.message : String(exc);
@@ -173,6 +198,11 @@
       settings = nextSettings;
       proposals = listed.proposals;
       selectedProposalId = chooseLatest(proposals);
+      application = [...(listed.applications ?? [])].find(
+        (item) => item.proposalId === selectedProposalId,
+      ) ?? null;
+      correctionWritesBlocked = Boolean(listed.correctionWritesBlocked);
+      await restoreAffectedJob();
       initializeDraft();
       await loadHistory(selectedProposalId);
     } catch (exc) {
@@ -187,7 +217,177 @@
     proposals = listed.proposals;
     selectedProposalId = proposals.some((item) => item.id === preferredId)
       ? preferredId : chooseLatest(proposals);
+    application = [...(listed.applications ?? [])].find(
+      (item) => item.proposalId === selectedProposalId,
+    ) ?? application;
+    correctionWritesBlocked = Boolean(listed.correctionWritesBlocked);
+    await restoreAffectedJob();
     await loadHistory(selectedProposalId);
+  }
+
+  function correctionRelationshipEvidence(value: CorrectionReviewContext | null): {
+    cardinality: string; targetReferences: string[]; realization: string; properties: string[];
+  } | null {
+    const location = value?.location?.[0];
+    if (!location) return null;
+    const sourceUnits = uniqueReferences(location.sourceSemanticUnitIds);
+    const targetTokens = uniqueReferences(location.targetTokenInstanceIds);
+    if (!sourceUnits.length && !targetTokens.length && !location.realization) return null;
+    const sourceTokenCount = (value?.sourceEvidence ?? [])
+      .filter((item) => sourceUnits.includes(String(item.id ?? "")))
+      .reduce((count, item) => count + uniqueReferences(item.tokenInstanceIds).length, 0);
+    const sourceCount = sourceTokenCount || sourceUnits.length;
+    const targetCount = targetTokens.length;
+    const side = (count: number, many: string) => count === 0 ? "null" : count === 1 ? "1" : many;
+    return {
+      cardinality: `${side(sourceCount, "many")} → ${side(targetCount, "many")}`,
+      targetReferences: uniqueReferences(location.displayedReferences),
+      realization: String(location.realization ?? "UNCERTAIN"),
+      properties: uniqueReferences(location.properties),
+    };
+  }
+
+  function analysisState(job: AnalysisJobSnapshot | null): AffectedAnalysisState {
+    if (!job) return "NOT_RUN";
+    if (job.overallStatus === "QUEUED" || job.overallStatus === "RUNNING") return "RUNNING";
+    if (job.overallStatus === "COMPLETED_WITH_WARNINGS" && job.searchIncomplete) {
+      return "SEARCH_INCOMPLETE";
+    }
+    if (job.overallStatus === "COMPLETED" || job.overallStatus === "COMPLETED_WITH_WARNINGS") {
+      return "COMPLETED";
+    }
+    return job.overallStatus;
+  }
+
+  function latestAffectedJobId(value: CorrectionApplicationIntent | null): string {
+    const metadata = value?.resultMetadata as {
+      affectedAnalysisJobId?: unknown;
+      affectedAnalysisAttempts?: Array<{ analysisJobId?: unknown }>;
+    } | undefined;
+    const attempts = metadata?.affectedAnalysisAttempts ?? [];
+    return String(attempts.at(-1)?.analysisJobId ?? metadata?.affectedAnalysisJobId ?? "");
+  }
+
+  async function restoreAffectedJob(): Promise<void> {
+    const jobId = latestAffectedJobId(application);
+    if (!jobId) {
+      affectedJob = null;
+      affectedState = "NOT_RUN";
+      return;
+    }
+    try {
+      affectedJob = await bridge.analysisJobStatus(jobId);
+      affectedState = analysisState(affectedJob);
+      const metadata = application?.resultMetadata as {
+        affectedAnalysisAttempts?: Array<Record<string, unknown>>;
+      } | undefined;
+      const attempt = metadata?.affectedAnalysisAttempts?.at(-1) ?? {};
+      const requested = affectedJob.requestedScope as unknown as Record<string, unknown>;
+      affectedResult = {
+        applicationId: application?.applicationId ?? "",
+        analysisJobId: affectedJob.jobId,
+        resolvedSourceReferences: uniqueReferences(
+          attempt.resolvedSourceReferences ?? requested.resolvedSourceReferences,
+        ),
+        resolvedTargetReferences: uniqueReferences(
+          attempt.resolvedTargetReferences ?? requested.resolvedTargetReferences,
+        ),
+        resolvedStructuralRange: (attempt.resolvedStructuralRange as CorrectionAffectedAnalysisResult["resolvedStructuralRange"] | undefined) ?? {
+          startReference: affectedJob.displayedReferences[0] ?? "",
+          endReference: affectedJob.displayedReferences.at(-1) ?? "",
+          displayedReferences: affectedJob.displayedReferences,
+          canonicalReferences: affectedJob.canonicalReferences,
+        },
+        jobState: affectedState,
+        job: affectedJob,
+      };
+      if (affectedState === "RUNNING") schedulePoll();
+    } catch (exc) {
+      error = message(exc);
+    }
+  }
+
+  function schedulePoll(): void {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = setTimeout(() => void pollAffected(), 400);
+  }
+
+  async function pollAffected(): Promise<void> {
+    if (!affectedJob) return;
+    try {
+      affectedJob = await bridge.analysisJobStatus(affectedJob.jobId);
+      affectedState = analysisState(affectedJob);
+      if (affectedState === "RUNNING") {
+        schedulePoll();
+        return;
+      }
+      if (affectedState === "COMPLETED" || affectedState === "SEARCH_INCOMPLETE") {
+        notice = affectedState === "COMPLETED"
+          ? "Affected passage re-analysis complete. Current semantic evidence has been refreshed. Correction verification is still pending."
+          : "Affected analysis finished with incomplete semantic search. Correction verification is still pending.";
+        if (affectedResult) dispatch("reanalyzed", { result: { ...affectedResult, job: affectedJob, jobState: affectedState } });
+        const [nextEligibility, nextContext] = await Promise.all([
+          bridge.correctionGetEligibility(findingId),
+          bridge.correctionGetReviewContext(findingId),
+        ]);
+        eligibility = nextEligibility;
+        context = nextContext;
+      } else if (affectedState === "FAILED") {
+        error = "Affected passage analysis failed. Scripture remains applied and correction verification remains pending.";
+      } else if (affectedState === "CANCELLED") {
+        notice = "Affected passage analysis was cancelled. Correction verification remains pending.";
+      }
+    } catch (exc) {
+      error = message(exc);
+    }
+  }
+
+  async function reanalyzeAffected(retry = false): Promise<void> {
+    if (!application || !mayReanalyze) return;
+    busy = true;
+    error = "";
+    try {
+      affectedResult = await bridge.correctionReanalyzeAffected({
+        applicationId: application.applicationId,
+        requestedBy: settings?.reviewerName || "human",
+        retry,
+      });
+      affectedJob = affectedResult.job;
+      affectedState = affectedResult.jobState;
+      application = await bridge.correctionGetApplicationStatus(application.applicationId);
+      notice = affectedState === "RUNNING" ? "Preparing affected analysis…" : notice;
+      if (affectedState === "RUNNING") schedulePoll();
+    } catch (exc) {
+      error = message(exc);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function cancelAffected(): Promise<void> {
+    if (!affectedJob || affectedState !== "RUNNING") return;
+    busy = true;
+    try {
+      affectedJob = await bridge.analysisJobCancel(affectedJob.jobId);
+      affectedState = analysisState(affectedJob);
+      if (affectedState === "RUNNING") schedulePoll();
+    } catch (exc) {
+      error = message(exc);
+    } finally {
+      busy = false;
+    }
+  }
+
+  function stageLabel(job: AnalysisJobSnapshot | null): string {
+    if (!job) return "Not run";
+    const labels: Record<string, string> = {
+      SOURCE_INVENTORY: "Preparing affected analysis…",
+      TARGET_INVENTORY: "Building target semantic inventory…",
+      LOCATION: "Locating source meaning…",
+      MEANING: "Evaluating meaning…",
+      QA: "Running QA audit…",
+    };
+    return affectedState === "RUNNING" ? labels[job.currentStage] ?? "Preparing affected analysis…" : affectedState;
   }
 
   function newApplicationId(): string {
@@ -504,6 +704,17 @@
           <h5 id="correction-location">Target location</h5>
           <p>{selectedSpan?.displayedReference} · [{selectedSpan?.startCodePoint}, {selectedSpan?.endCodePoint})</p>
           <p class="muted">Exact Unicode code-point coordinates; no fuzzy relocation.</p>
+          {#if relationshipEvidence}
+            <dl class="relationship-truth">
+              <dt>Source semantic reference</dt><dd>{sourceSemanticReferences.join(", ") || "Unavailable"}</dd>
+              <dt>Target realization</dt><dd>{relationshipEvidence.targetReferences.join(", ") || selectedSpan?.displayedReference}</dd>
+              <dt>Cardinality</dt><dd>{relationshipEvidence.cardinality}</dd>
+              <dt>Realization</dt><dd>{relationshipEvidence.realization === "NOT_LOCATED" ? "No realization located · NOT_LOCATED" : relationshipEvidence.realization}</dd>
+              {#if relationshipEvidence.properties.length}
+                <dt>Properties</dt><dd>{relationshipEvidence.properties.join(" · ")}</dd>
+              {/if}
+            </dl>
+          {/if}
         </section>
 
         <section class="block" aria-labelledby="correction-resources">
@@ -568,10 +779,36 @@
         {/if}
         {#if selectedProposal && !proposalReviewed && proposalCurrent}
           <p class="boundary">Edit or choose this wording to record human review before application.</p>
-        {:else if application?.applicationState === "COMPLETED"}
+        {:else if application?.applicationState === "COMPLETED" && affectedState === "NOT_RUN"}
           <p class="boundary">Verification PENDING. No affected analysis was started.</p>
+        {:else if application?.applicationState === "COMPLETED"}
+          <p class="boundary">Verification PENDING. Affected analysis never marks a correction verified.</p>
         {:else}
           <p class="boundary">Scripture changes only after the separate confirmation below.</p>
+        {/if}
+
+        {#if application}
+          <div class="affected-analysis" aria-label="Correction follow-up status">
+            <dl>
+              <dt>Correction application</dt><dd>{application.applicationState}</dd>
+              <dt>Semantic verification</dt><dd>{selectedProposal?.verificationStatus ?? "NOT_RUN"}</dd>
+              <dt>Affected analysis</dt><dd>{stageLabel(affectedJob)}</dd>
+            </dl>
+            {#if mayReanalyze}
+              <button
+                type="button"
+                class="apply"
+                disabled={busy}
+                on:click={() => reanalyzeAffected(affectedState !== "NOT_RUN")}
+              >{affectedState === "NOT_RUN" ? "Re-analyze affected passage" : "Retry affected analysis"}</button>
+            {/if}
+            {#if correctionWritesBlocked}
+              <p class="boundary">Affected analysis is unavailable until correction recovery is healthy.</p>
+            {/if}
+            {#if affectedState === "RUNNING"}
+              <button type="button" class="secondary" disabled={busy} on:click={cancelAffected}>Cancel affected analysis</button>
+            {/if}
+          </div>
         {/if}
       </div>
 
@@ -723,6 +960,8 @@
   .draft-form { margin-top: .6rem; max-height: 22rem; overflow-y: auto; padding-right: .25rem; }
   .unavailable ul { margin-bottom: 0; padding-left: 1.2rem; }
   .boundary { margin-top: .35rem; }
+  .affected-analysis { margin-top: .55rem; padding-top: .55rem; border-top: 1px solid #dbeafe; }
+  .affected-analysis dl, .relationship-truth { margin: 0 0 .45rem; }
   .confirm-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(15, 23, 42, .55); display: grid; place-items: center; padding: 1rem; pointer-events: auto; }
   .confirm-dialog { width: min(42rem, 100%); max-height: calc(100vh - 2rem); overflow-y: auto; background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 20px 50px rgba(15,23,42,.35); }
   .confirmation-text { border: 1px solid #e2e8f0; border-radius: 4px; padding: .5rem; }

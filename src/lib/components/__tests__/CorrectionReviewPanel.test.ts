@@ -12,6 +12,10 @@ const api = vi.hoisted(() => ({
   reject: vi.fn(),
   regenerate: vi.fn(),
   apply: vi.fn(),
+  applicationStatus: vi.fn(),
+  reanalyze: vi.fn(),
+  analysisStatus: vi.fn(),
+  analysisCancel: vi.fn(),
   settings: vi.fn(),
 }));
 
@@ -26,6 +30,10 @@ vi.mock("../../api/bridgeClient", () => ({
     correctionRejectProposal: api.reject,
     correctionRegenerateProposal: api.regenerate,
     correctionApplyProposal: api.apply,
+    correctionGetApplicationStatus: api.applicationStatus,
+    correctionReanalyzeAffected: api.reanalyze,
+    analysisJobStatus: api.analysisStatus,
+    analysisJobCancel: api.analysisCancel,
     getSettings: api.settings,
   },
 }));
@@ -126,6 +134,38 @@ const settings = {
   logosNavigation: false, hasApiKey: true, aiUsage: { tokens: 0, estimatedCostUSD: 0 },
 };
 
+const completedApplication = {
+  applicationId: "application-1", proposalId: "proposal-1", findingId: "qa-quantity",
+  projectId: "project-1", expectedProposalRevision: 2, expectedFindingRevision: 2,
+  targetDisplayedReference: "PHP 1:5", canonicalReferences: ["PHP 1:5"],
+  sourceProvenanceReferences: ["PHP 1:3"], expectedTargetRevision: "target-revision-5",
+  expectedTargetContentHash: "target-hash-5", expectedStartCodePoint: affectedStart,
+  expectedEndCodePoint: affectedEnd, expectedOriginalText: affectedText,
+  replacementTextSnapshot: "அனைவரும்", intendedFinalVerseHash: "hash",
+  pendingInvalidationId: "pending-1", translationCoreJournalTransactionId: "journal-1",
+  actor: { actorType: "HUMAN", actorId: "Reviewer" }, createdAt: "now", updatedAt: "now",
+  applicationState: "COMPLETED", stateRevision: 5, completedAt: "now", failureCode: "",
+  recoveryMetadata: {}, resultMetadata: { verificationStatus: "PENDING", affectedAnalysisStarted: false },
+};
+
+function analysisJob(overrides: Record<string, unknown> = {}) {
+  return {
+    jobId: "analysis-1", projectId: "project-1", book: "PHP",
+    requestedScope: { kind: "AFFECTED" }, rangeKey: "PHP 1:3..PHP 1:6",
+    displayedReferences: ["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"],
+    canonicalReferences: ["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"],
+    targetRevision: "current", targetContentHash: "current-hash", targetHashes: {},
+    sourceResourceHash: "source-hash", analysisFingerprint: "analysis-fingerprint",
+    policyVersions: {}, revision: 1, createdAt: "now", startedAt: "now", completedAt: null,
+    currentStage: "TARGET_INVENTORY", overallStatus: "RUNNING",
+    stageStatuses: {}, stageProgress: { completedStages: 1, totalStages: 5 },
+    reusedRunIds: ["source-run"], createdRunIds: [], warnings: [], failures: [],
+    cancellationRequested: false,
+    providerCapability: { semanticRetrieval: "FULL", multilingualEmbeddingProvider: "AVAILABLE", providerId: "test", providerVersion: "1", modelHash: "test", fixtureProvider: false },
+    timings: {}, qaFindingCount: null, searchIncomplete: false, ...overrides,
+  };
+}
+
 function event(type: string, snapshot = proposal, revision = 1) {
   return {
     id: `event-${type}-${revision}`, proposalId: snapshot.id, eventType: type,
@@ -169,6 +209,19 @@ describe("CorrectionReviewPanel", () => {
       actor: { actorType: "HUMAN", actorId: "Reviewer" }, createdAt: "now", updatedAt: "now",
       applicationState: "COMPLETED", stateRevision: 5, completedAt: "now", failureCode: "",
       recoveryMetadata: {}, resultMetadata: { verificationStatus: "PENDING", affectedAnalysisStarted: false },
+    });
+    api.applicationStatus.mockResolvedValue(completedApplication);
+    api.analysisStatus.mockResolvedValue(analysisJob());
+    api.analysisCancel.mockResolvedValue(analysisJob({ overallStatus: "CANCELLED", currentStage: "", completedAt: "now" }));
+    api.reanalyze.mockResolvedValue({
+      applicationId: "application-1", analysisJobId: "analysis-1",
+      resolvedSourceReferences: ["PHP 1:3"], resolvedTargetReferences: ["PHP 1:6"],
+      resolvedStructuralRange: {
+        startReference: "PHP 1:3", endReference: "PHP 1:6",
+        displayedReferences: ["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"],
+        canonicalReferences: ["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"],
+      },
+      jobState: "RUNNING", job: analysisJob(),
     });
   });
 
@@ -412,6 +465,7 @@ describe("CorrectionReviewPanel", () => {
       .mockResolvedValue({ findingId: "qa-quantity", proposals: [{ ...reviewed, lifecycleStatus: "STALE", verificationStatus: "PENDING", revision: 4 }] });
     render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
     expect(screen.queryByRole("button", { name: "Apply correction" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Re-analyze affected passage" })).toBeNull();
     await fireEvent.click(await screen.findByRole("button", { name: "Review application" }));
     const dialog = screen.getByRole("dialog", { name: "Confirm correction application" });
     expect(within(dialog).getByText("CURRENT")).toBeInTheDocument();
@@ -473,4 +527,119 @@ describe("CorrectionReviewPanel", () => {
       expect(api.apply).not.toHaveBeenCalled();
     },
   );
+
+  it("starts the backend-resolved affected analysis only after completed Apply", async () => {
+    const applied = {
+      ...proposal, lifecycleStatus: "STALE", reviewStatus: "HUMAN_APPROVED",
+      verificationStatus: "PENDING", revision: 3,
+    };
+    api.list.mockResolvedValue({
+      findingId: "qa-quantity", proposals: [applied], applications: [completedApplication],
+    });
+    const user = userEvent.setup();
+    render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+    const button = await screen.findByRole("button", { name: "Re-analyze affected passage" });
+    expect(screen.getByText("Correction application").closest("dl")).toHaveTextContent("COMPLETED");
+    expect(screen.getByText("Semantic verification").closest("dl")).toHaveTextContent("PENDING");
+    await user.click(button);
+
+    await waitFor(() => expect(api.reanalyze).toHaveBeenCalledTimes(1));
+    expect(api.reanalyze).toHaveBeenCalledWith({
+      applicationId: "application-1", requestedBy: "Reviewer", retry: false,
+    });
+    expect(screen.getByText("Building target semantic inventory…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel affected analysis" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Re-analyze affected passage" })).toBeNull();
+    expect(screen.queryByText("CORRECTED")).toBeNull();
+  });
+
+  it("emits a QA refresh only after affected analysis completes", async () => {
+    const applied = {
+      ...proposal, lifecycleStatus: "STALE", reviewStatus: "HUMAN_APPROVED",
+      verificationStatus: "PENDING", revision: 3,
+    };
+    api.list.mockResolvedValue({
+      findingId: "qa-quantity", proposals: [applied], applications: [completedApplication],
+    });
+    api.analysisStatus.mockResolvedValue(analysisJob({
+      overallStatus: "COMPLETED", currentStage: "", completedAt: "now",
+    }));
+    const refreshed = vi.fn();
+    const { component } = render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+    component.$on("reanalyzed", (event) => refreshed(event.detail));
+
+    await fireEvent.click(await screen.findByRole("button", { name: "Re-analyze affected passage" }));
+
+    await waitFor(() => expect(refreshed).toHaveBeenCalledTimes(1), { timeout: 2000 });
+    expect(refreshed.mock.calls[0][0].result.jobState).toBe("COMPLETED");
+    expect(screen.getByText(/Current semantic evidence has been refreshed/i)).toBeInTheDocument();
+    expect(screen.getByText("Semantic verification").closest("dl")).toHaveTextContent("PENDING");
+    expect(screen.queryByText("CORRECTED")).toBeNull();
+  });
+
+  it.each([
+    ["FAILED", "Retry affected analysis"],
+    ["CANCELLED", "Retry affected analysis"],
+    ["SEARCH_INCOMPLETE", "Retry affected analysis"],
+    ["COMPLETED", ""],
+  ])("restores affected analysis state %s without changing verification", async (state, action) => {
+    const persistedApplication = {
+      ...completedApplication,
+      resultMetadata: {
+        verificationStatus: "PENDING", affectedAnalysisStarted: true,
+        affectedAnalysisJobId: "analysis-1",
+        affectedAnalysisAttempts: [{ analysisJobId: "analysis-1" }],
+      },
+    };
+    const applied = {
+      ...proposal, lifecycleStatus: "STALE", reviewStatus: "HUMAN_APPROVED",
+      verificationStatus: "PENDING", revision: 3,
+    };
+    const overallStatus = state === "SEARCH_INCOMPLETE" ? "COMPLETED_WITH_WARNINGS" : state;
+    api.analysisStatus.mockResolvedValue(analysisJob({
+      overallStatus, searchIncomplete: state === "SEARCH_INCOMPLETE",
+      currentStage: "", completedAt: "now",
+    }));
+    api.list.mockResolvedValue({
+      findingId: "qa-quantity", proposals: [applied], applications: [persistedApplication],
+    });
+    render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+    expect(await screen.findByText("Semantic verification")).toBeInTheDocument();
+    expect(screen.getByText("Affected analysis").closest("dl")).toHaveTextContent(state);
+    if (action) expect(screen.getByRole("button", { name: action })).toBeInTheDocument();
+    else expect(screen.queryByRole("button", { name: /affected analysis/i })).toBeNull();
+    expect(screen.queryByText("CORRECTED")).toBeNull();
+  });
+
+  it.each([
+    [["s1"], ["t1"], "1 → 1"],
+    [["s1"], ["t1", "t2"], "1 → many"],
+    [["s1", "s2"], ["t1"], "many → 1"],
+    [["s1", "s2"], ["t1", "t2"], "many → many"],
+    [["s1"], [], "1 → null"],
+    [[], ["t1"], "null → 1"],
+  ])("shows grouped relationship cardinality %s to %s", async (sourceIds, targetIds, expected) => {
+    api.list.mockResolvedValue({ findingId: "qa-quantity", proposals: [proposal], applications: [] });
+    api.context.mockResolvedValue({
+      ...reviewContext,
+      sourceSemanticReferences: ["PHP 1:3"],
+      location: [{
+        id: "location-cardinality", sourceSemanticUnitIds: sourceIds,
+        targetTokenInstanceIds: targetIds, displayedReferences: ["PHP 1:6"],
+        realization: targetIds.length ? "LEXICALLY_REALIZED" : "NOT_LOCATED",
+        properties: ["CROSS_VERSE", "REORDERED"],
+      }],
+      sourceEvidence: sourceIds.map((id) => ({ id, rawSurface: id, tokenInstanceIds: [id] })),
+    });
+    render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.getByText("CROSS_VERSE · REORDERED")).toBeInTheDocument();
+    if (expected === "1 → null") {
+      expect(screen.getByText("No realization located · NOT_LOCATED")).toBeInTheDocument();
+      expect(screen.queryByText(/^Omission$/i)).toBeNull();
+    }
+    if (expected === "null → 1") expect(screen.queryByText(/^Addition$/i)).toBeNull();
+  });
 });

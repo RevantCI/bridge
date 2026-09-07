@@ -1,6 +1,6 @@
 # Build log: Bridge v0.8.0-beta.14
 
-Updated: 2026-09-04
+Updated: 2026-09-07
 
 > **Start with [`DEVELOPER_GUIDE.md`](DEVELOPER_GUIDE.md) instead** for an
 > oriented, up-to-date summary of the stack decisions, phase roadmap, and
@@ -4072,3 +4072,69 @@ guard still proves the Stage 9B.1 wording service has no writer. Installed
 acceptance remains required on a disposable project. Stage 9B.3c affected
 analysis, verification verdicts, CORRECTED, export and multi-verse correction
 remain out of scope.
+
+## Stage 9B.3c — affected re-analysis after human Apply (2026-09-07)
+
+Implemented explicit, correction-aware affected re-analysis on baseline
+`4e5a94a` while retaining schema v13. `correction.applyProposal` still stops at
+COMPLETED application, STALE historical finding and PENDING verification; it
+does not start analysis.
+
+The new `CorrectionAffectedScopeResolver` derives source obligation context
+and the edited target from durable repository records. It maps canonical
+references through the existing versification model, expands endpoints via
+the current-text/USFM-structure overlay, and rejects scopes that fail to
+contain both semantic provenance and the edited target. Current managed
+chapter JSON remains authoritative for every target hash and target semantic
+input. In the PHP regression, source `PHP 1:3` and target `PHP 1:6` remain
+separate and resolve to the structural range `PHP 1:3–1:6`.
+
+`CorrectionAffectedAnalysisService` delegates to the existing Stage 9A.4
+`AnalysisJobManager`; no second Stage 5–8 pipeline was introduced. The normal
+analysis fingerprint/cache path reuses the current source inventory and
+rebuilds content-dependent target/location/meaning/QA records. A CAS-protected
+v13 metadata ledger links application and analysis job with actor/time,
+resolved refs/range, target revision/hash and analysis fingerprint. It returns
+an equivalent running or completed job, requires explicit retry after a
+technical failure/cancellation/incomplete search, and rediscovers durable jobs
+after restart. Public `analysisJob.start` rejects manufactured private
+correction scopes.
+
+The correction UI now shows application, verification and affected-analysis
+states independently, provides explicit run/retry/cancel actions, restores
+persisted job state, uses the existing stage-level progress, and refreshes the
+current QA scope after completion. Relationship evidence exposes independent
+source/target refs, grouped cardinality and properties; null endpoints are not
+called omissions or additions. The read-only application inspector reports
+the associated affected job and resolved scope.
+
+Safety tests prove analysis does not rewrite Scripture or re-apply the
+correction, uses the Bridge-managed runtime copy, preserves historical finding
+state and PENDING verification, and keeps Word Alignment independent. Existing
+alignment tests remain the authoritative grouped-cardinality/invariant matrix;
+the Stage 9B.3c frontend covers all six displayed cardinalities plus a
+cross-verse composite case.
+
+The installed-acceptance procedure is documented in `HANDOFF.md` §37.5. A
+fresh disposable source fixture was generated locally at
+`C:\Users\Benz\Bridge-Test-Projects\stage9b3c-affected` (12 current QA
+findings, 28 location relationships, including 12 cross-verse relationships).
+It must be imported so the desktop pass runs against Bridge's managed copy.
+The fixture is not committed, and unit/integration tests do not claim that the
+installed WebView2 acceptance has been performed.
+
+```text
+Stage 9B.3c focused Python                9 passed
+Stage 9B.3b focused Python               13 passed
+full Python + Greek Room                765 passed
+frontend Vitest                         192 passed / 19 files
+npm run check                            0 errors / 0 warnings
+npm run build                            passed; existing >500 kB warning
+cargo test                                7 passed
+cargo check                              passed
+git diff --check                         passed; line-ending notices only
+```
+
+Stage 9B.4 remains forbidden without explicit approval. In particular, Stage
+9B.3c never changes verification from PENDING, never writes CORRECTED, and
+never treats disappearance of a current finding as proof of correction.

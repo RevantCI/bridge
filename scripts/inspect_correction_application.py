@@ -105,14 +105,30 @@ def inspect_database(
             "FROM correction_proposals WHERE id=?",
             (proposal_id,),
         )
-        report["applications"] = [dict(item) for item in connection.execute(
+        applications = [dict(item) for item in connection.execute(
             "SELECT application_id,expected_proposal_revision,application_state,state_revision,"
             "target_displayed_reference,source_provenance_references_json,"
-            "translation_core_journal_transaction_id,created_at,updated_at,completed_at "
+            "translation_core_journal_transaction_id,result_metadata_json,created_at,updated_at,completed_at "
             "FROM correction_application_intents WHERE proposal_id=? "
             "ORDER BY created_at,application_id",
             (proposal_id,),
         )]
+        for application in applications:
+            metadata = json.loads(application.pop("result_metadata_json") or "{}")
+            application["resultMetadata"] = metadata
+            job_id = str(metadata.get("affectedAnalysisJobId") or "")
+            if job_id:
+                job = _row(
+                    connection,
+                    "SELECT overall_status,payload_json FROM analysis_jobs WHERE id=?",
+                    (job_id,),
+                )
+                if job:
+                    payload = json.loads(job.pop("payload_json"))
+                    application["affectedAnalysisJobId"] = job_id
+                    application["affectedAnalysisState"] = job["overall_status"]
+                    application["resolvedAffectedScope"] = payload.get("requestedScope")
+        report["applications"] = applications
     finally:
         connection.close()
     return report

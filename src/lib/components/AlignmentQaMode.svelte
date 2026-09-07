@@ -167,6 +167,13 @@
     announce("Analysis complete. The QA review queue has been refreshed.");
   }
 
+  async function correctionReanalyzed(): Promise<void> {
+    const selected = $selectedFindingId;
+    await loadQueue();
+    if (selected) await selectFinding(selected);
+    announce("Affected passage re-analysis complete. Current QA evidence was refreshed; correction verification remains pending.");
+  }
+
   function scopeLabel(references: string[]): string {
     if (!references.length) return "resolving...";
     if (references.length === 1) return references[0];
@@ -288,6 +295,7 @@
         on:note={onNote}
         on:next={() => stepSelection(1)}
         on:previous={() => stepSelection(-1)}
+        on:reanalyzed={correctionReanalyzed}
       />
     </div>
   </div>
