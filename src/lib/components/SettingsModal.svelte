@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import { manualOverrideMode, navigationStatus, project, reviewerMode } from "../stores";
-  import type { SettingsData } from "../types/finding";
+  import type { NavigationSyncState, SettingsData } from "../types/finding";
 
   export let onClose: () => void;
   export let initialPane: "ai" | "quality" | "connections" | "resources" | "security" = "ai";
@@ -69,13 +69,34 @@
       hasApiKey = result.hasApiKey;
       reviewerMode.set(result.reviewerMode);
       apiKey = "";
-      navigationStatus.set(await bridge.navigationStatus());
-      saveMessage = "Saved.";
+      const status = await bridge.navigationStatus();
+      navigationStatus.set(status);
+      const pending = activePane === "connections" ? unresolvedConnection(status) : "";
+      if (pending) {
+        // "Save & connect" also connects: hold the panel open so that result stays readable.
+        saveMessage = pending;
+        return;
+      }
+      onClose();
     } catch (e) {
       saveMessage = e instanceof Error ? e.message : String(e);
     } finally {
       saving = false;
     }
+  }
+
+  /** Message describing a navigation target the reviewer enabled that has not connected yet. */
+  function unresolvedConnection(status: NavigationSyncState): string {
+    if (status.ownerConflict) return "Saved. Another Bridge window owns desktop navigation.";
+    const targets: Array<[string, boolean, NavigationSyncState["paratext"]]> = [
+      ["Paratext", paratextNavigation, status.paratext],
+      ["Logos", logosNavigation, status.logos],
+    ];
+    for (const [name, enabled, target] of targets) {
+      if (!enabled || target.connected) continue;
+      return target.error ? `Saved. ${name}: ${target.error}` : `Saved. Waiting for ${name}…`;
+    }
+    return "";
   }
 
   async function refreshConnections(): Promise<void> {
