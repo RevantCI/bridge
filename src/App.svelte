@@ -949,7 +949,8 @@
     exportEnabled={$project !== null}
     bookSwitching={Boolean(openingBook)}
     onAIChapterReview={() => reviewPanel?.startChapterAIReview()}
-    aiChapterReviewBusy={aiReviewBusy}
+    onAIBookReview={() => reviewPanel?.startBookAIReview()}
+    aiReviewBusy={aiReviewBusy || $checkingProgress.running}
   />
 
   {#if openingBook}

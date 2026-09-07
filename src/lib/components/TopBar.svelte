@@ -15,9 +15,12 @@
   export let onBookChange: (path: string) => void;
   export let exportEnabled: boolean;
   export let bookSwitching = false;
-  // Editor screen only: runs an AI review across the open chapter.
+  // Editor screen only: AI review runs scoped to the open chapter or the
+  // whole book. Both share one busy flag -- the engine runs one job at a
+  // time, so starting either has to disable both.
   export let onAIChapterReview: () => void = () => {};
-  export let aiChapterReviewBusy = false;
+  export let onAIBookReview: () => void = () => {};
+  export let aiReviewBusy = false;
 
   let gotoValue = "";
 
@@ -94,12 +97,21 @@
         on:keydown={(e) => e.key === "Enter" && jump()}
       />
     </div>
-    <button
-      class="btn ai-chapter-btn"
-      on:click={onAIChapterReview}
-      disabled={aiChapterReviewBusy}
-      title="Run an evidence-grounded AI review across every verse in this chapter"
-    >{aiChapterReviewBusy ? "AI review…" : "🤖 AI chapter review"}</button>
+    <div class="ai-review-group">
+      <span class="ai-review-label">🤖 AI review:</span>
+      <button
+        class="btn ai-scope-btn"
+        on:click={onAIChapterReview}
+        disabled={aiReviewBusy}
+        title="Run an evidence-grounded AI review across every verse in this chapter"
+      >Chapter</button>
+      <button
+        class="btn ai-scope-btn"
+        on:click={onAIBookReview}
+        disabled={aiReviewBusy}
+        title="Run an evidence-grounded AI review across every verse in this book"
+      >Book</button>
+    </div>
   {/if}
 
   <div class="grow" />
@@ -149,7 +161,9 @@
   .sync-status span { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--border-strong); color: var(--surface); font-size: var(--fs-3xs); }
   .sync-status span.connected { background: var(--success); }
   .sync-status span.error { background: var(--danger); }
-  .ai-chapter-btn { flex-shrink: 0; }
+  .ai-review-group { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+  .ai-review-label { font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); white-space: nowrap; }
+  .ai-scope-btn { padding: 6px 10px; white-space: nowrap; }
   .btn { font-size: var(--fs-sm); font-weight: 600; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; flex-shrink: 0; }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.primary:disabled { background: #B9C6E0; border-color: #B9C6E0; color: #fff; cursor: not-allowed; }

@@ -105,6 +105,9 @@
   export function startChapterAIReview(): void {
     void startAIReview("chapter");
   }
+  export function startBookAIReview(): void {
+    void startAIReview("book");
+  }
 
   $: currentReviewReference = `${$project?.path ?? ""}::${$selectedVerse ? verseKey($currentChapter, $selectedVerse) : ""}`;
   $: aiJobBusy = isAIReviewJobActive(aiJob);
@@ -114,6 +117,15 @@
   // state it feeds. App reaches it through these two, rather than the whole
   // orchestration being lifted into a store it does not otherwise need.
   $: onAIBusyChange(aiJobBusy);
+  // Mirrors exactly what .panel-pinned renders. Without it the block shows
+  // as an empty padded strip with a rule under it whenever the verse is
+  // idle, which is most of the time now the AI status has moved to its tab.
+  $: hasPinnedStatus = Boolean($selectedVerse) && (
+    $recheckingKey === verseKey($currentChapter, $selectedVerse ?? "") ||
+    $recheckedKey === verseKey($currentChapter, $selectedVerse ?? "") ||
+    ($editError && $editErrorKey === verseKey($currentChapter, $selectedVerse ?? "") && !$editingChapter) ||
+    ($editingChapter === $currentChapter && $editingVerse === $selectedVerse)
+  );
   $: visibleAIJob = aiJob && $selectedVerse && aiJobAppliesToReference(
     aiJob, $project?.path ?? "", $currentChapter, $selectedVerse,
   ) ? aiJob : null;
@@ -402,34 +414,35 @@
 
 <div class="panel">
   {#if $selectedVerse}
+    <!-- Title and the two per-verse actions share one row where they fit;
+         the row wraps the buttons onto their own line rather than squeezing
+         them when the reference or the finding count runs long. The AI run
+         is not here -- it lives in the AI review tab with its progress and
+         errors, so a run can be started and watched in one place. -->
     <div class="panel-header">
-      <div class="ref">{$currentChapter}:{$selectedVerse} — verse review</div>
-      <div class="sub">
-        {$selectedFindings.filter((f) => f.status === "open").length} open finding(s)
+      <div class="header-title">
+        <div class="ref">Review {($project?.bookId ?? "").toUpperCase()} {$currentChapter}:{$selectedVerse}</div>
+        <div class="sub">
+          {$selectedFindings.filter((f) => f.status === "open").length} open finding(s)
+        </div>
+      </div>
+      <div class="verse-actions">
+        <button
+          class="align-btn"
+          on:click={openAlignment}
+          disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
+          title={$checkingProgress.running ? "Wait for background checking to finish before aligning" : "Review word alignment"}
+        >⇄ Align words</button>
+        <button
+          class="edit-btn"
+          on:click={startEdit}
+          disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
+          title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
+        >✎ Edit verse</button>
       </div>
     </div>
 
-    <div class="verse-actions">
-      <button
-        class="align-btn"
-        on:click={openAlignment}
-        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
-        title={$checkingProgress.running ? "Wait for background checking to finish before aligning" : "Review word alignment"}
-      >⇄ Align words</button>
-      <button
-        class="edit-btn"
-        on:click={startEdit}
-        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
-        title={$checkingProgress.running ? "Wait for background checking to finish before editing" : "Edit this verse"}
-      >✎ Edit verse</button>
-      <button
-        class="ai-explain-btn"
-        on:click={() => startAIReview("verse")}
-        disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey) || aiJobBusy}
-        title="Run an evidence-grounded AI review for this verse in the background"
-      >🤖 AI review</button>
-    </div>
-
+    {#if hasPinnedStatus}
     <div class="panel-pinned">
       {#if $recheckingKey === verseKey($currentChapter, $selectedVerse)}
         <div class="operation-status checking"><span class="spin" /> Verse saved. Re-checking local and Greek Room QA…</div>
@@ -442,56 +455,8 @@
       {#if $editingChapter === $currentChapter && $editingVerse === $selectedVerse}
         <div class="operation-status checking">✎ Editing this verse in the left panel — save or cancel there.</div>
       {/if}
-
-      <!-- The "Automatic AI review" panel is gone: "This verse" is the AI
-           review button in the action row above, and "Chapter" is now in the
-           top bar. The whole-book run stays here by decision: it is the one
-           scope with no natural home elsewhere, and it belongs beside the job
-           status below, which is the only place a running review can be
-           watched, cancelled or retried, wherever it was started from. -->
-      <div class="section ai-review-controls">
-        <div class="ai-scope-actions">
-          <button on:click={() => startAIReview("book")} disabled={$checkingProgress.running || aiJobBusy}>🤖 AI review: whole book</button>
-        </div>
-        {#if visibleAIJob}
-          <div class="ai-job-status" class:failed={visibleAIJob.state === "failed"}>
-            <div><b>{visibleAIJob.state === "succeeded" ? "Complete" : visibleAIJob.currentStage}</b><span>{visibleAIJob.percent}%</span></div>
-            <progress max="100" value={visibleAIJob.percent} />
-            <small>{visibleAIJob.completedVerses}/{visibleAIJob.totalVerses} verses{visibleAIJob.failedVerses ? ` · ${visibleAIJob.failedVerses} failed` : ""}</small>
-            {#if aiSelectionTally.applied + aiSelectionTally.pending > 0}
-              <small class="ai-selection-tally">
-                <b>{aiSelectionTally.applied}</b> {aiSelectionTally.applied === 1 ? "check" : "checks"} selected automatically ·
-                <b>{aiSelectionTally.pending}</b> left for review
-              </small>
-            {/if}
-            {#if visibleAIJob.skippedCurrentVerses > 0}
-              <small>{visibleAIJob.skippedCurrentVerses} already-current verse(s) preserved and skipped.</small>
-            {/if}
-            {#if visibleAIJob.resumeOf}<small>Resumed from the previous unfinished job.</small>{/if}
-            {#if aiFailedResults.length > 0}
-              <div class="ai-failure-list">
-                {#each aiFailedResults.slice(0, 3) as failure}
-                  <div><b>{failure.chapter}:{failure.verse}</b> — {failure.error || "Unknown AI review error"}</div>
-                {/each}
-                {#if aiFailedResults.length > 3}<div>+ {aiFailedResults.length - 3} more failed verse(s)</div>{/if}
-              </div>
-            {/if}
-            <div class="ai-job-actions">
-              {#if ["queued", "running", "cancelling"].includes(visibleAIJob.state)}
-                <button on:click={cancelAIReview} disabled={visibleAIJob.state === "cancelling"}>{visibleAIJob.state === "cancelling" ? "Cancelling…" : "Cancel"}</button>
-              {:else if ["failed", "cancelled"].includes(visibleAIJob.state)}
-                <button on:click={retryAIReview}>Retry</button>
-              {/if}
-            </div>
-          </div>
-        {:else if aiJobBusy}
-          <div class="ai-job-background" role="status">
-            An AI review is continuing in the background for another reference. Return to its starting reference to view progress or cancel it.
-          </div>
-        {/if}
-        {#if visibleAIExplainError}<p class="ai-control-error">{visibleAIExplainError}</p>{/if}
-      </div>
     </div>
+    {/if}
 
     <div class="panel-scroll">
       <div class="tabs" role="tablist" aria-label="Verse report">
@@ -499,7 +464,7 @@
           type="button" role="tab" aria-selected={activeTab === "greekroom"}
           class:active={activeTab === "greekroom"} on:click={() => (activeTab = "greekroom")}
         >
-          Greek Room QA
+          Greek Room
           {#if greekRoomChecking}<span class="tab-live" />{/if}
           {#if greekRoomOpenCount > 0}<span class="tab-count">{greekRoomOpenCount}</span>{/if}
         </button>
@@ -513,7 +478,7 @@
         <button
           type="button" role="tab" aria-selected={activeTab === "ai"}
           class:active={activeTab === "ai"} on:click={() => (activeTab = "ai")}
-        >AI explanation</button>
+        >AI review</button>
       </div>
 
       <div class="tab-content">
@@ -664,6 +629,55 @@
         </div>
       {:else if activeTab === "ai"}
         <div class="tab-panel" role="tabpanel">
+          <div class="ai-run-row">
+            <button
+              class="ai-explain-btn"
+              on:click={() => startAIReview("verse")}
+              disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey) || aiJobBusy}
+              title="Run an evidence-grounded AI review for this verse in the background"
+            >🤖 Run AI review for this verse</button>
+          </div>
+        {#if visibleAIJob || aiJobBusy || visibleAIExplainError}
+        <div class="section ai-review-controls">
+          {#if visibleAIJob}
+            <div class="ai-job-status" class:failed={visibleAIJob.state === "failed"}>
+              <div><b>{visibleAIJob.state === "succeeded" ? "Complete" : visibleAIJob.currentStage}</b><span>{visibleAIJob.percent}%</span></div>
+              <progress max="100" value={visibleAIJob.percent} />
+              <small>{visibleAIJob.completedVerses}/{visibleAIJob.totalVerses} verses{visibleAIJob.failedVerses ? ` · ${visibleAIJob.failedVerses} failed` : ""}</small>
+              {#if aiSelectionTally.applied + aiSelectionTally.pending > 0}
+                <small class="ai-selection-tally">
+                  <b>{aiSelectionTally.applied}</b> {aiSelectionTally.applied === 1 ? "check" : "checks"} selected automatically ·
+                  <b>{aiSelectionTally.pending}</b> left for review
+                </small>
+              {/if}
+              {#if visibleAIJob.skippedCurrentVerses > 0}
+                <small>{visibleAIJob.skippedCurrentVerses} already-current verse(s) preserved and skipped.</small>
+              {/if}
+              {#if visibleAIJob.resumeOf}<small>Resumed from the previous unfinished job.</small>{/if}
+              {#if aiFailedResults.length > 0}
+                <div class="ai-failure-list">
+                  {#each aiFailedResults.slice(0, 3) as failure}
+                    <div><b>{failure.chapter}:{failure.verse}</b> — {failure.error || "Unknown AI review error"}</div>
+                  {/each}
+                  {#if aiFailedResults.length > 3}<div>+ {aiFailedResults.length - 3} more failed verse(s)</div>{/if}
+                </div>
+              {/if}
+              <div class="ai-job-actions">
+                {#if ["queued", "running", "cancelling"].includes(visibleAIJob.state)}
+                  <button on:click={cancelAIReview} disabled={visibleAIJob.state === "cancelling"}>{visibleAIJob.state === "cancelling" ? "Cancelling…" : "Cancel"}</button>
+                {:else if ["failed", "cancelled"].includes(visibleAIJob.state)}
+                  <button on:click={retryAIReview}>Retry</button>
+                {/if}
+              </div>
+            </div>
+          {:else if aiJobBusy}
+            <div class="ai-job-background" role="status">
+              An AI review is continuing in the background for another reference. Return to its starting reference to view progress or cancel it.
+            </div>
+          {/if}
+          {#if visibleAIExplainError}<p class="ai-control-error">{visibleAIExplainError}</p>{/if}
+        </div>
+        {/if}
           {#if visibleAIExplainError}
             <div class="section ai-explain-section">
               <div class="section-title">AI explanation</div>
@@ -719,7 +733,8 @@
 
 <style>
   .panel { width: 400px; flex-shrink: 0; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); }
-  .panel-header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .panel-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .header-title { flex: 1 1 auto; min-width: 0; }
   .panel-pinned { flex-shrink: 0; padding: 14px 16px; border-bottom: 1px solid var(--border); overflow-y: auto; max-height: 60vh; }
   .ref { font-size: var(--fs-md); font-weight: 700; color: var(--text); }
   .sub { font-size: var(--fs-xs); color: var(--text-2); margin-top: 2px; }
@@ -792,9 +807,11 @@
   .edit-inline { background: var(--accent-bg); color: var(--accent); }
   .none { font-size: var(--fs-xs); color: var(--text-3); }
   .decision-row button:disabled { opacity: .55; cursor: not-allowed; }
-  .verse-actions { padding: 12px 16px; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; flex-shrink: 0; }
-  .edit-btn { width: 100%; padding: 8px; font-size: var(--fs-sm); font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; }
-  .align-btn, .ai-explain-btn { width: 100%; padding: 8px; font-size: var(--fs-sm); font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+  .verse-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }
+  .edit-btn { padding: 8px 10px; font-size: var(--fs-xs); font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; white-space: nowrap; }
+  .align-btn { padding: 8px 10px; font-size: var(--fs-xs); font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; white-space: nowrap; }
+  .ai-run-row { margin-bottom: 12px; }
+  .ai-explain-btn { width: 100%; padding: 9px; font-size: var(--fs-sm); font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; white-space: nowrap; }
   .edit-btn:disabled, .align-btn:disabled, .ai-explain-btn:disabled { opacity: .55; cursor: not-allowed; }
   .empty-panel { padding: 24px 16px; font-size: var(--fs-sm); color: var(--text-3); }
   .ai-explain-section { border-color: var(--accent); }
@@ -803,9 +820,8 @@
   .ai-error { font-size: var(--fs-sm); color: var(--danger); line-height: 1.5; margin: 0; }
   .ai-suggestion { font-size: var(--fs-xs); color: var(--accent); margin: -4px 0 8px; }
   .ai-review-controls { border-color: var(--accent); }
-  .ai-scope-actions { display: grid; grid-template-columns: 1fr; gap: 5px; }
-  .ai-scope-actions button, .ai-job-actions button { padding: 6px; font-size: var(--fs-2xs); font-weight: 700; border-radius: 6px; border: 1px solid var(--border-strong); color: var(--accent); background: var(--surface); cursor: pointer; }
-  .ai-scope-actions button:disabled, .ai-job-actions button:disabled { opacity: .55; cursor: not-allowed; }
+  .ai-job-actions button { padding: 6px; font-size: var(--fs-2xs); font-weight: 700; border-radius: 6px; border: 1px solid var(--border-strong); color: var(--accent); background: var(--surface); cursor: pointer; }
+  .ai-job-actions button:disabled { opacity: .55; cursor: not-allowed; }
   .ai-job-status { margin-top: 9px; padding: 8px; border-radius: 7px; color: var(--accent); background: var(--accent-bg); }
   .ai-job-status.failed { color: var(--danger); background: var(--danger-bg); }
   .ai-job-status > div:first-child { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-2xs); }
