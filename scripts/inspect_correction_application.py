@@ -74,6 +74,75 @@ def _row(connection: sqlite3.Connection, sql: str, values: tuple[Any, ...]) -> d
     return None if result is None else dict(result)
 
 
+def _verification_report(
+    connection: sqlite3.Connection, application_id: str,
+) -> dict[str, Any]:
+    """Stage 9B.4 verification and CORRECTED acknowledgement, read-only.
+
+    The table only exists from schema v14, and this tool must still report on a
+    v13 database rather than crash, so a missing table is reported as such.
+    """
+    try:
+        rows = [dict(item) for item in connection.execute(
+            "SELECT id,result,lifecycle_status,analysis_job_id,target_content_hash,"
+            "verifier_fingerprint,reason_codes_json,confidence,acknowledged_at,"
+            "acknowledged_by,revision,created_at,payload_json "
+            "FROM correction_verifications WHERE application_id=? "
+            "ORDER BY created_at,id",
+            (application_id,),
+        )]
+    except sqlite3.OperationalError:
+        return {"verificationTableAvailable": False}
+
+    current = next((item for item in rows if item["lifecycle_status"] == "ACTIVE"), None)
+    acknowledged = next((item for item in rows if item["acknowledged_at"]), None)
+    history = [
+        {
+            "verificationId": item["id"], "result": item["result"],
+            "lifecycleStatus": item["lifecycle_status"],
+            "analysisJobId": item["analysis_job_id"],
+            "acknowledgedAt": item["acknowledged_at"],
+            "acknowledgedBy": item["acknowledged_by"],
+            "createdAt": item["created_at"],
+        }
+        for item in rows
+    ]
+    if current is None:
+        return {
+            "verificationTableAvailable": True,
+            "verificationId": None, "verificationStatus": "PENDING",
+            "verificationCurrent": False, "verificationReasonCodes": [],
+            "verificationAnalysisJobId": None,
+            "correctedAcknowledgement": bool(acknowledged),
+            "correctedBy": None if acknowledged is None else acknowledged["acknowledged_by"],
+            "correctedAt": None if acknowledged is None else acknowledged["acknowledged_at"],
+            "verificationHistory": history,
+        }
+    payload = json.loads(current["payload_json"] or "{}")
+    return {
+        "verificationTableAvailable": True,
+        "verificationId": current["id"],
+        "verificationStatus": current["result"],
+        # Currentness against the live chapter JSON is the engine's call; this
+        # read-only tool reports the record's own lifecycle and the hash it was
+        # computed against so a human can compare them.
+        "verificationCurrent": current["lifecycle_status"] == "ACTIVE",
+        "verificationLifecycleStatus": current["lifecycle_status"],
+        "verificationTargetContentHash": current["target_content_hash"],
+        "verificationFingerprint": current["verifier_fingerprint"],
+        "verificationConfidence": current["confidence"],
+        "verificationReasonCodes": json.loads(current["reason_codes_json"] or "[]"),
+        "verificationAnalysisJobId": current["analysis_job_id"],
+        "verificationSourceReferences": payload.get("sourceReferences"),
+        "verificationTargetReferences": payload.get("targetReferences"),
+        "verificationFailedDimension": payload.get("failedCoverageDimension"),
+        "correctedAcknowledgement": bool(current["acknowledged_at"]),
+        "correctedBy": current["acknowledged_by"],
+        "correctedAt": current["acknowledged_at"],
+        "verificationHistory": history,
+    }
+
+
 def inspect_database(
     project_root: Path, finding_id: str, proposal_id: str,
 ) -> dict[str, Any]:
@@ -116,7 +185,12 @@ def inspect_database(
         for application in applications:
             metadata = json.loads(application.pop("result_metadata_json") or "{}")
             application["resultMetadata"] = metadata
-            job_id = str(metadata.get("affectedAnalysisJobId") or "")
+            attempts = metadata.get("affectedAnalysisAttempts") or []
+            job_id = str(
+                (attempts[-1].get("analysisJobId") if attempts else "")
+                or metadata.get("affectedAnalysisJobId")
+                or ""
+            )
             if job_id:
                 job = _row(
                     connection,
@@ -128,6 +202,9 @@ def inspect_database(
                     application["affectedAnalysisJobId"] = job_id
                     application["affectedAnalysisState"] = job["overall_status"]
                     application["resolvedAffectedScope"] = payload.get("requestedScope")
+            application.update(
+                _verification_report(connection, application["application_id"])
+            )
         report["applications"] = applications
     finally:
         connection.close()

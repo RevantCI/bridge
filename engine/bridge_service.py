@@ -74,6 +74,7 @@ from tc_ai_bridge.correction_wording import (
 )
 from tc_ai_bridge.correction_application import CorrectionApplicationService
 from tc_ai_bridge.correction_affected_analysis import CorrectionAffectedAnalysisService
+from tc_ai_bridge.correction_verification import CorrectionVerificationService
 from tc_ai_bridge.knowledge_base import KnowledgeBaseError
 from tc_ai_bridge.paratext_connector import ParatextConnectorClient, ParatextConnectorError
 from tc_ai_bridge.logos_connector import LogosConnectorClient, LogosConnectorError
@@ -396,6 +397,9 @@ class Methods:
     CORRECTION_APPLY_PROPOSAL = "correction.applyProposal"
     CORRECTION_GET_APPLICATION_STATUS = "correction.getApplicationStatus"
     CORRECTION_REANALYZE_AFFECTED = "correction.reanalyzeAffected"
+    CORRECTION_VERIFY_APPLICATION = "correction.verifyApplication"
+    CORRECTION_GET_VERIFICATION = "correction.getVerification"
+    CORRECTION_ACKNOWLEDGE_CORRECTED = "correction.acknowledgeCorrected"
     SEMANTIC_REVIEW_DECIDE_LOCATION = "semanticReview.decideLocation"
     SEMANTIC_REVIEW_DECIDE_MEANING = "semanticReview.decideMeaning"
     REVIEW_HISTORY_GET_ENTITY_HISTORY = "reviewHistory.getEntityHistory"
@@ -493,6 +497,7 @@ class BridgeEngine:
         self._analysis_jobs = AnalysisJobManager()
         self._correction_application_service: CorrectionApplicationService | None = None
         self._correction_affected_analysis_service: CorrectionAffectedAnalysisService | None = None
+        self._correction_verification_service: CorrectionVerificationService | None = None
         self._project_sweep = ProjectSweepManager()
         self._report_jobs = ReportJobManager()
         self._triage_jobs = TriageJobManager()
@@ -576,6 +581,7 @@ class BridgeEngine:
         self.passage_semantic_runtime = None
         self._correction_application_service = None
         self._correction_affected_analysis_service = None
+        self._correction_verification_service = None
         # Filesystem recovery must precede semantic initialization. Otherwise
         # the semantic runtime could fingerprint a partially written chapter
         # that the translationCore journal then rolls back.
@@ -613,6 +619,9 @@ class BridgeEngine:
             self._correction_application_service = CorrectionApplicationService(runtime, self.edit_verse)
             self._analysis_jobs.bind_runtime(runtime)
             self._correction_affected_analysis_service = CorrectionAffectedAnalysisService(
+                runtime, self._analysis_jobs,
+            )
+            self._correction_verification_service = CorrectionVerificationService(
                 runtime, self._analysis_jobs,
             )
             self._passage_semantic_status = {
@@ -2437,6 +2446,31 @@ class BridgeEngine:
             application_id, requested_by=requested_by, retry=retry,
         )
 
+    def _verification_service(self) -> CorrectionVerificationService:
+        self._require_passage_semantic_runtime()
+        if self._correction_verification_service is None:
+            raise ProjectError("Correction verification service is unavailable")
+        return self._correction_verification_service
+
+    def correction_verify_application(
+        self, application_id: str, requested_by: str,
+    ) -> dict[str, Any]:
+        """Positively verify an applied correction against current evidence.
+
+        Read-only with respect to Scripture. It never sets CORRECTED and never
+        concludes anything from a finding having disappeared.
+        """
+        return self._verification_service().verify(
+            application_id, requested_by=requested_by,
+        )
+
+    def correction_get_verification(self, application_id: str) -> dict[str, Any]:
+        return self._verification_service().get(application_id)
+
+    def correction_acknowledge_corrected(self, **options: Any) -> dict[str, Any]:
+        """The one path to a CORRECTED disposition. Requires explicit human action."""
+        return self._verification_service().acknowledge_corrected(**options)
+
     def qa_review_add_note(
         self, entity_type: str, entity_id: str, note: str,
     ) -> dict[str, Any]:
@@ -4207,6 +4241,27 @@ class BridgeEngine:
                     str(p.get("applicationId") or ""),
                     str(p.get("requestedBy") or self.settings.reviewer_name or "human"),
                     bool(p.get("retry") or False),
+                ))
+            if m == Methods.CORRECTION_VERIFY_APPLICATION:
+                return EngineResponse.ok(request.id, result=self.correction_verify_application(
+                    str(p.get("applicationId") or ""),
+                    str(p.get("requestedBy") or self.settings.reviewer_name or "human"),
+                ))
+            if m == Methods.CORRECTION_GET_VERIFICATION:
+                return EngineResponse.ok(request.id, result=self.correction_get_verification(
+                    str(p.get("applicationId") or ""),
+                ))
+            if m == Methods.CORRECTION_ACKNOWLEDGE_CORRECTED:
+                actor = p.get("actor") or {
+                    "actorType": "HUMAN",
+                    "actorId": str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                }
+                return EngineResponse.ok(request.id, result=self.correction_acknowledge_corrected(
+                    application_id=str(p.get("applicationId") or ""),
+                    verification_id=str(p.get("verificationId") or ""),
+                    expected_verification_revision=int(p.get("expectedVerificationRevision") or 0),
+                    expected_finding_revision=int(p.get("expectedFindingRevision") or 0),
+                    actor=dict(actor), note=str(p.get("note") or ""),
                 ))
             if m == Methods.SEMANTIC_REVIEW_DECIDE_LOCATION:
                 return EngineResponse.ok(request.id, result=self.semantic_review_decide_location(

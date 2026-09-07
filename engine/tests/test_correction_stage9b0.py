@@ -429,7 +429,7 @@ def _v2_proposal(proposal_id: str = "prop-v2", finding_id: str = "qa-1") -> Corr
 
 def test_fresh_database_is_at_current_schema(tmp_path: Path) -> None:
     repo = FoundationRepository(tmp_path / "semantic.sqlite3")
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 13
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 14
 
 
 def test_v10_to_current_migration_preserves_legacy_proposals(tmp_path: Path) -> None:
@@ -467,7 +467,7 @@ def test_v10_to_current_migration_preserves_legacy_proposals(tmp_path: Path) -> 
     conn.close()
 
     upgraded = FoundationRepository(database)
-    assert upgraded.schema_version() == 13
+    assert upgraded.schema_version() == 14
     assert (tmp_path / "backups").is_dir(), "migration must back up before upgrading"
     assert upgraded.recovery_check()["ok"] is True
 
@@ -617,7 +617,7 @@ def test_application_intent_is_separate_from_the_proposal(tmp_path: Path) -> Non
             "PRAGMA table_info(correction_application_intents)")}
     assert {"application_id", "proposal_id", "expected_target_revision",
             "expected_original_text", "application_state", "state_revision"} <= columns
-    assert repo.schema_version() == 13
+    assert repo.schema_version() == 14
 
 
 # --- Dependency graph invariants --------------------------------------------

@@ -17,6 +17,9 @@ const api = vi.hoisted(() => ({
   analysisStatus: vi.fn(),
   analysisCancel: vi.fn(),
   settings: vi.fn(),
+  verify: vi.fn(),
+  getVerification: vi.fn(),
+  acknowledge: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
@@ -35,6 +38,9 @@ vi.mock("../../api/bridgeClient", () => ({
     analysisJobStatus: api.analysisStatus,
     analysisJobCancel: api.analysisCancel,
     getSettings: api.settings,
+    correctionVerifyApplication: api.verify,
+    correctionGetVerification: api.getVerification,
+    correctionAcknowledgeCorrected: api.acknowledge,
   },
 }));
 
@@ -168,6 +174,79 @@ function analysisJob(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function verificationRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    verificationId: "verification-1", projectId: "project-1",
+    applicationId: "application-1", proposalId: "proposal-1", proposalRevision: 2,
+    findingId: "qa-quantity", analysisJobId: "analysis-1",
+    targetRevision: "current", targetContentHash: "current-hash",
+    verifierFingerprint: "fingerprint", result: "PASSED", confidence: 0.9,
+    reasonCodes: ["DIMENSION_PRESERVED", "COVERAGE_COVERED"],
+    lifecycleStatus: "ACTIVE", acknowledgedAt: null, acknowledgedBy: null,
+    revision: 1, createdAt: "now", updatedAt: "now",
+    payload: {
+      sourceSemanticUnitIds: ["source-quantity"],
+      // Cross-verse: the obligation is PHP 1:3, the realization is PHP 1:6.
+      sourceReferences: ["PHP 1:3"], targetReferences: ["PHP 1:6"],
+      failedCoverageDimension: "QUANTITY",
+      observedMeaning: "three", requiredMeaning: "all",
+      obligations: [{
+        sourceSemanticUnitId: "source-quantity", coverageDimension: "QUANTITY",
+        coverageStatus: "COVERED", result: "PASSED",
+        reasonCodes: ["DIMENSION_PRESERVED"], confidence: 0.95,
+        componentStatuses: ["PRESERVED"],
+        directRecheck: {
+          status: "PRESERVED", confidence: 0.95, evidenceKind: "QUANTITY",
+          explanation: "Explicit quantity category agrees.",
+        },
+        relationshipIds: ["relationship-1"], meaningAssessmentIds: ["meaning-1"],
+        targetReferences: ["PHP 1:6"], locationOutcomes: ["LOCATED"],
+        realizations: ["LEXICALLY_REALIZED"], cardinalities: ["1 → many"],
+      }],
+      recurringFindings: [], unresolvedTargetSupportUnitIds: [],
+      providerLimited: false, searchIncomplete: false, analysisWarnings: [],
+      locationRunId: "location-run", meaningRunId: "meaning-run", qaRunId: "qa-run",
+      verifierEngineVersion: "bridge-correction-verification-v1",
+      verifierPolicyVersion: "correction-verification-policy-v1",
+    },
+    ...overrides,
+  };
+}
+
+function verificationState(overrides: Record<string, unknown> = {}) {
+  const record = (overrides.verification as ReturnType<typeof verificationRecord> | null | undefined)
+    ?? verificationRecord();
+  return {
+    applicationId: "application-1", applicationState: "COMPLETED",
+    affectedAnalysisState: "COMPLETED", affectedAnalysisJobId: "analysis-1",
+    verificationStatus: "PASSED", verificationId: "verification-1",
+    verificationCurrent: true, verificationRevision: 1,
+    verificationReasonCodes: ["DIMENSION_PRESERVED", "COVERAGE_COVERED"],
+    reasonExplanations: [
+      { code: "DIMENSION_PRESERVED", detail: "Current evidence shows the required meaning is expressed in the corrected text." },
+      { code: "COVERAGE_COVERED", detail: "The source obligation is now positively covered in the current translation." },
+    ],
+    mayVerify: true, mayAcknowledgeCorrected: true,
+    qaDisposition: "CONFIRMED_TRANSLATION_ERROR", findingId: "qa-quantity",
+    findingRevision: 2, proposalId: "proposal-1",
+    correctedAcknowledgement: null, verification: record,
+    verifierFingerprint: "fingerprint",
+    verifierEngineVersion: "bridge-correction-verification-v1",
+    verifierPolicyVersion: "correction-verification-policy-v1",
+    history: [record],
+    ...overrides,
+  };
+}
+
+function pendingState(codes: string[], detail: string) {
+  return verificationState({
+    verificationStatus: "PENDING", verificationId: "", verificationCurrent: false,
+    verificationRevision: 0, verificationReasonCodes: codes,
+    reasonExplanations: codes.map((code) => ({ code, detail })),
+    mayVerify: false, mayAcknowledgeCorrected: false, verification: null, history: [],
+  });
+}
+
 function event(type: string, snapshot = proposal, revision = 1) {
   return {
     id: `event-${type}-${revision}`, proposalId: snapshot.id, eventType: type,
@@ -213,6 +292,20 @@ describe("CorrectionReviewPanel", () => {
       recoveryMetadata: {}, resultMetadata: { verificationStatus: "PENDING", affectedAnalysisStarted: false },
     });
     api.applicationStatus.mockResolvedValue(completedApplication);
+    api.getVerification.mockResolvedValue(
+      pendingState(["ANALYSIS_NOT_RUN"], "Affected passage analysis has not been run for this correction."),
+    );
+    api.verify.mockResolvedValue(verificationState());
+    api.acknowledge.mockResolvedValue(verificationState({
+      qaDisposition: "CORRECTED", mayAcknowledgeCorrected: false,
+      verification: verificationRecord({
+        acknowledgedAt: "2026-09-07T12:00:00Z", acknowledgedBy: "Reviewer", revision: 2,
+      }),
+      correctedAcknowledgement: {
+        verificationId: "verification-1", acknowledgedBy: "Reviewer",
+        acknowledgedAt: "2026-09-07T12:00:00Z", note: "", current: true,
+      },
+    }));
     api.analysisStatus.mockResolvedValue(analysisJob());
     api.analysisCancel.mockResolvedValue(analysisJob({ overallStatus: "CANCELLED", currentStage: "", completedAt: "now" }));
     api.reanalyze.mockResolvedValue({
@@ -650,5 +743,359 @@ describe("CorrectionReviewPanel", () => {
       expect(screen.queryByText(/^Omission$/i)).toBeNull();
     }
     if (expected === "null → 1") expect(screen.queryByText(/^Addition$/i)).toBeNull();
+  });
+  // --- Stage 9B.4: positive verification and explicit CORRECTED -------------
+
+  describe("correction verification", () => {
+    const appliedProposal = {
+      ...proposal, lifecycleStatus: "STALE", reviewStatus: "HUMAN_APPROVED",
+      verificationStatus: "PENDING", revision: 3,
+    };
+
+    function applied(overrides: Record<string, unknown> = {}) {
+      api.list.mockResolvedValue({
+        findingId: "qa-quantity", proposals: [appliedProposal],
+        applications: [{
+          ...completedApplication,
+          resultMetadata: {
+            verificationStatus: "PENDING", affectedAnalysisStarted: true,
+            affectedAnalysisJobId: "analysis-1",
+            affectedAnalysisAttempts: [{ analysisJobId: "analysis-1" }],
+          },
+        }],
+        ...overrides,
+      });
+      api.analysisStatus.mockResolvedValue(analysisJob({
+        overallStatus: "COMPLETED", currentStage: "", completedAt: "now",
+      }));
+    }
+
+    it("offers no verify control until affected analysis has completed", async () => {
+      api.list.mockResolvedValue({
+        findingId: "qa-quantity", proposals: [appliedProposal],
+        applications: [completedApplication],
+      });
+      api.getVerification.mockResolvedValue(pendingState(
+        ["ANALYSIS_NOT_RUN"],
+        "Affected passage analysis has not been run for this correction.",
+      ));
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      expect(await screen.findByText("Correction verification")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Verify correction/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Mark correction as corrected/ })).toBeNull();
+      expect(screen.getByText(
+        "Affected passage analysis has not been run for this correction.",
+        { exact: false },
+      )).toBeInTheDocument();
+    });
+
+    it("keeps verification PENDING when the analysis failed technically", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(pendingState(
+        ["ANALYSIS_FAILED"],
+        "Affected passage analysis failed technically. That is not a semantic verdict.",
+      ));
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      const status = await screen.findByText("Verification pending");
+      expect(status).toBeInTheDocument();
+      expect(screen.getByText(/not a semantic verdict/i)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Mark correction as corrected/ })).toBeNull();
+    });
+
+    it("renders a PASSED verification with its positive current evidence", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState());
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      expect(await screen.findByText("Semantic verification passed")).toBeInTheDocument();
+      expect(screen.getByText(/current positive evidence/i)).toBeInTheDocument();
+      expect(screen.getByText(
+        "Current evidence shows the required meaning is expressed in the corrected text.",
+        { exact: false },
+      )).toBeInTheDocument();
+    });
+
+    it("does not set CORRECTED just because verification passed", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState());
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      await screen.findByText("Semantic verification passed");
+      const states = document.querySelector("[data-correction-states]");
+      expect(states).toHaveTextContent("CONFIRMED_TRANSLATION_ERROR");
+      expect(states).not.toHaveTextContent("CORRECTED");
+      expect(api.acknowledge).not.toHaveBeenCalled();
+      // The action exists, but it is the human's to take.
+      expect(screen.getByRole("button", { name: "Mark correction as corrected" }))
+        .toBeInTheDocument();
+    });
+
+    it("explains a FAILED verification without undoing Scripture", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState({
+        verificationStatus: "FAILED", mayAcknowledgeCorrected: false,
+        verificationReasonCodes: ["DIMENSION_CONTRADICTED"],
+        reasonExplanations: [{
+          code: "DIMENSION_CONTRADICTED",
+          detail: "Current evidence still contradicts the required meaning.",
+        }],
+        verification: verificationRecord({
+          result: "FAILED", reasonCodes: ["DIMENSION_CONTRADICTED"],
+        }),
+      }));
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      expect(await screen.findByText("Correction verification failed")).toBeInTheDocument();
+      expect(screen.getByText(/still not satisfied/i)).toBeInTheDocument();
+      expect(screen.getByText(/what to do next is your decision/i)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Mark correction as corrected/ })).toBeNull();
+      expect(api.apply).not.toHaveBeenCalled();
+    });
+
+    it("explains an UNCERTAIN verification without calling the translation wrong", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState({
+        verificationStatus: "UNCERTAIN", mayAcknowledgeCorrected: false,
+        verificationReasonCodes: ["LOCATION_AMBIGUOUS", "PROVIDER_LIMITED"],
+        reasonExplanations: [
+          { code: "LOCATION_AMBIGUOUS", detail: "The target realization is ambiguous, so preservation cannot be established." },
+          { code: "PROVIDER_LIMITED", detail: "No production multilingual embedding provider is configured, which limits retrieval-based evidence." },
+        ],
+        verification: verificationRecord({ result: "UNCERTAIN" }),
+      }));
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      expect(await screen.findByText("Correction verification is uncertain")).toBeInTheDocument();
+      expect(screen.getByText(/does not mean the translation is wrong/i)).toBeInTheDocument();
+      expect(screen.getByText(/target realization is ambiguous/i)).toBeInTheDocument();
+      expect(screen.getByText(/multilingual embedding provider/i)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Mark correction as corrected/ })).toBeNull();
+    });
+
+    it("runs backend verification and never derives a verdict itself", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(pendingState(
+        [], "",
+      ));
+      api.getVerification.mockResolvedValue({
+        ...pendingState([], ""), mayVerify: true,
+      });
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      await fireEvent.click(await screen.findByRole("button", { name: "Verify correction" }));
+      await waitFor(() => expect(api.verify).toHaveBeenCalledTimes(1));
+      expect(api.verify).toHaveBeenCalledWith({
+        applicationId: "application-1", requestedBy: "Reviewer",
+      });
+      expect(await screen.findByText("Semantic verification passed")).toBeInTheDocument();
+    });
+
+    it("requires the confirmation dialog before CORRECTED is recorded", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState());
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      await fireEvent.click(
+        await screen.findByRole("button", { name: "Mark correction as corrected" }),
+      );
+      const dialog = screen.getByRole("dialog", {
+        name: "Mark this correction as corrected?",
+      });
+      expect(dialog).toBeInTheDocument();
+      expect(api.acknowledge).not.toHaveBeenCalled();
+      // Everything the reviewer needs to make the call is in the dialog.
+      expect(within(dialog).getByText("Original issue")).toBeInTheDocument();
+      expect(within(dialog).getByText("Correction applied")).toBeInTheDocument();
+      expect(within(dialog).getByText("Verification result")).toBeInTheDocument();
+      expect(within(dialog).getByText("Source semantic reference")).toBeInTheDocument();
+      expect(within(dialog).getByText("Target realization")).toBeInTheDocument();
+      expect(within(dialog).getByText("Affected dimension")).toBeInTheDocument();
+      expect(within(dialog).getByText("Current supporting evidence")).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: "Mark corrected" })).toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: /^Save$/ })).toBeNull();
+    });
+
+    it("cancelling the dialog records nothing", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState());
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      await fireEvent.click(
+        await screen.findByRole("button", { name: "Mark correction as corrected" }),
+      );
+      await fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(api.acknowledge).not.toHaveBeenCalled();
+    });
+
+    it("explicit Mark corrected sets CORRECTED and keeps the history", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState());
+      const corrected = vi.fn();
+      const { component } = render(CorrectionReviewPanel, {
+        props: { findingId: "qa-quantity" },
+      });
+      component.$on("corrected", (event) => corrected(event.detail));
+
+      await fireEvent.click(
+        await screen.findByRole("button", { name: "Mark correction as corrected" }),
+      );
+      await fireEvent.click(screen.getByRole("button", { name: "Mark corrected" }));
+
+      await waitFor(() => expect(api.acknowledge).toHaveBeenCalledTimes(1));
+      expect(api.acknowledge).toHaveBeenCalledWith({
+        applicationId: "application-1", verificationId: "verification-1",
+        expectedVerificationRevision: 1, expectedFindingRevision: 2,
+        actor: { actorType: "HUMAN", actorId: "Reviewer" }, note: "",
+      });
+      await waitFor(() => expect(
+        document.querySelector("[data-corrected-acknowledgement]"),
+      ).toHaveTextContent("Marked corrected by Reviewer"));
+      expect(document.querySelector("[data-correction-states]"))
+        .toHaveTextContent("CORRECTED");
+      expect(corrected).toHaveBeenCalledTimes(1);
+      // The applied correction and its evidence stay on screen.
+      expect(screen.getByText("Correction application").closest("dl"))
+        .toHaveTextContent("COMPLETED");
+    });
+
+    it("a stale verification blocks acknowledgement and says why", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState({
+        verificationCurrent: false, mayAcknowledgeCorrected: false,
+        verificationStatus: "PENDING", mayVerify: true,
+        verificationReasonCodes: ["ANALYSIS_NOT_CURRENT"],
+        reasonExplanations: [{
+          code: "ANALYSIS_NOT_CURRENT",
+          detail: "The affected analysis does not describe the current target text.",
+        }],
+      }));
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      expect(await screen.findByText(/no longer current for the present target text/i))
+        .toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Mark correction as corrected/ })).toBeNull();
+    });
+
+    it("keeps the four states separate and never merges them into one badge", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState());
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      await screen.findByText("Semantic verification passed");
+      const states = document.querySelector("[data-correction-states]") as HTMLElement;
+      expect(within(states).getByText("Correction application")).toBeInTheDocument();
+      expect(within(states).getByText("Affected analysis")).toBeInTheDocument();
+      expect(within(states).getByText("Semantic verification")).toBeInTheDocument();
+      expect(within(states).getByText("Your decision")).toBeInTheDocument();
+      expect(states.querySelector("[data-verification-status]")).toHaveTextContent("PASSED");
+      expect(states.querySelector("[data-qa-disposition]"))
+        .toHaveTextContent("CONFIRMED_TRANSLATION_ERROR");
+    });
+
+    it("keeps cross-verse source and target references distinct", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState());
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      await screen.findByText("Semantic verification passed");
+      const evidence = document.querySelector("[data-verification-evidence]") as HTMLElement;
+      expect(evidence.querySelector("[data-verification-source]")).toHaveTextContent("PHP 1:3");
+      expect(evidence.querySelector("[data-verification-target]")).toHaveTextContent("PHP 1:6");
+      expect(evidence.querySelector("[data-verification-source]"))
+        .not.toHaveTextContent("PHP 1:6");
+    });
+
+    it("shows recurrence as evidence, not as a verdict", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState({
+        verificationStatus: "UNCERTAIN", mayAcknowledgeCorrected: false,
+        verificationReasonCodes: ["RECURRING_FINDING_SAME_DIMENSION"],
+        reasonExplanations: [{
+          code: "RECURRING_FINDING_SAME_DIMENSION",
+          detail: "A current QA finding names the same obligation and semantic dimension.",
+        }],
+        verification: verificationRecord({
+          result: "UNCERTAIN",
+          payload: {
+            ...verificationRecord().payload,
+            recurringFindings: [{
+              findingId: "qa-quantity", kind: "QUANTITY_PROBLEM",
+              sameStableIdentityAsOriginal: true,
+            }],
+          },
+        }),
+      }));
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      expect(await screen.findByText(/Recurrence is evidence, not a verdict/i))
+        .toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Mark correction as corrected/ })).toBeNull();
+    });
+
+    it("word alignment state is not touched by verification or acknowledgement", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState());
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      await fireEvent.click(
+        await screen.findByRole("button", { name: "Mark correction as corrected" }),
+      );
+      await fireEvent.click(screen.getByRole("button", { name: "Mark corrected" }));
+      await waitFor(() => expect(api.acknowledge).toHaveBeenCalledTimes(1));
+      // No alignment or Scripture-changing call exists on this path at all.
+      expect(api.apply).not.toHaveBeenCalled();
+      expect(api.edit).not.toHaveBeenCalled();
+      expect(api.reanalyze).not.toHaveBeenCalled();
+    });
+
+    it("long Tamil evidence stays readable and does not overflow horizontally", async () => {
+      const longTamil = "நான் உங்களை நினைக்கும் போதெல்லாம் என் தேவனை ஸ்தோத்திரிக்கிறேன் ".repeat(12);
+      applied();
+      api.getVerification.mockResolvedValue(verificationState({
+        reasonExplanations: [{ code: "DIMENSION_PRESERVED", detail: longTamil }],
+      }));
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      const reasons = await waitFor(() => {
+        const node = document.querySelector("[data-verification-reasons]") as HTMLElement;
+        expect(node).not.toBeNull();
+        return node;
+      });
+      // The whole long string is rendered, not truncated to an ellipsis.
+      expect(reasons.textContent ?? "").toContain(longTamil.trim());
+      // jsdom does not lay out or paint, so a computed-style check here would
+      // pass vacuously. Assert the wrapping rule exists in the component
+      // instead; a real 1366x768 pass still needs the desktop app.
+      expect(String(correctionReviewPanelSource))
+        .toMatch(/\.verification-reasons li \{[^}]*overflow-wrap: anywhere/);
+    });
+
+    it("the verification actions are reachable by keyboard", async () => {
+      applied();
+      api.getVerification.mockResolvedValue(verificationState());
+      const user = userEvent.setup();
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      const mark = await screen.findByRole("button", { name: "Mark correction as corrected" });
+      mark.focus();
+      expect(mark).toHaveFocus();
+      await user.keyboard("{Enter}");
+      expect(screen.getByRole("dialog", { name: "Mark this correction as corrected?" }))
+        .toBeInTheDocument();
+      expect(api.acknowledge).not.toHaveBeenCalled();
+    });
+
+    it("the panel source contains no client-side verdict computation", () => {
+      // The frontend must never decide PASSED/FAILED/UNCERTAIN. It may render
+      // the backend's status string, but must not derive one.
+      const source = String(correctionReviewPanelSource);
+      expect(source).not.toMatch(/verificationStatus\s*=\s*["'](PASSED|FAILED|UNCERTAIN)["']/);
+      expect(source).toContain("correctionGetVerification");
+      expect(source).toContain("correctionAcknowledgeCorrected");
+    });
   });
 });

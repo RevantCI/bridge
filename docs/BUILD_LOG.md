@@ -4139,6 +4139,211 @@ Stage 9B.4 remains forbidden without explicit approval. In particular, Stage
 9B.3c never changes verification from PENDING, never writes CORRECTED, and
 never treats disappearance of a current finding as proof of correction.
 
+## Stage 9B.4 — positive semantic verification and explicit CORRECTED (2026-09-07)
+
+Implemented on baseline `6631a07` (0.9.1). This closes the Stage 9B pipeline.
+`correction.applyProposal` still stops at COMPLETED, Stage 9B.3c re-analysis
+still leaves verification PENDING, and neither of them can reach CORRECTED.
+What is new is a backend service that decides PASSED/FAILED/UNCERTAIN from
+current post-correction evidence, and a separate explicit human action that is
+the only way a finding becomes CORRECTED.
+
+### The thing this stage exists to prevent
+
+The tempting implementation is "re-run QA; if the finding is gone, the
+correction worked". That is wrong twice over, and both halves are now covered
+by tests. A finding can disappear because the search was incomplete, because
+the target inventory changed shape, or because Stage 8's gate landed on
+`UNCERTAIN` instead of `POSSIBLY_MISSING` — none of which says the required
+meaning is now expressed. And a finding can *recur with the same stable id*
+while the correction is entirely successful, because ids are keyed on kind +
+direction + dimension + source units + target anchors and survive re-runs by
+design (that stability was Stage 9A.1's whole point).
+
+So verification traces the *original failed obligation* — the proposal
+intent's `failedDimension`, `observedMeaning`, `requiredMeaning` and affected
+source semantic unit ids — and asks whether current Stage 6B/7/8 evidence
+positively satisfies it.
+
+### Where the evidence comes from
+
+The affected-analysis job the application is linked to carries the run ids for
+this correction's Stage 6B/7/8 pass in `stageStatuses.{LOCATION,MEANING,QA}`.
+Verification reads those runs and nothing else. That turned out to be free
+staleness protection: `semantic_location_run`, `meaning_analysis_run` and
+`qa_audit_run` all already refuse a non-ACTIVE row, so evidence superseded by
+a later edit cannot be read as current at all — it surfaces as a
+`STALE_EVIDENCE` conflict rather than quietly producing a verdict.
+
+Currentness is additionally hash-exact: the job's recorded
+`targetHashes[reference]` must equal the live hash of the chapter JSON verse.
+That is what makes "the reviewer edited the verse again after verifying" a
+detected condition rather than a silent stale pass.
+
+### A gap in Stage 7 that forced a design decision
+
+Stage 7 scores a source unit only on that unit's own `coverageDimension`. But
+the reviewer picks the failed dimension when authoring the correction, and the
+two need not match — the Stage 9B.2 draft form offers all eleven dimensions
+against whatever unit the finding names. A QUANTITY correction recorded
+against a `LEXICAL_CONTENT` unit therefore has **no quantity component in the
+persisted assessment at all**, and a verifier that only read components would
+return UNCERTAIN for most of the dimension matrix.
+
+Two options: read the aggregate meaning status instead (too coarse — it cannot
+distinguish which dimension survived), or re-apply the existing comparator for
+the specific dimension. Chose the second, with a hard constraint: it must not
+become a second meaning engine. So it is literally
+`DeterministicMeaningComparator.compare(...)` — the same class, same version —
+called with the corrected dimension over the current located source text and
+the current selected candidate's quotes, and it **never overrides** a persisted
+component. Where the two disagree the result is UNCERTAIN with
+`CONFLICTING_CURRENT_ASSESSMENT`. Abstention, not arbitration.
+
+`test_a_dimension_stage_seven_never_scored_is_still_verified` is the case that
+motivated it: components hold only `LEXICAL_CONTENT: PRESERVED`, the
+correction targeted QUANTITY, source `all` versus target `சிலர்`, and
+verification correctly returns FAILED off the recheck alone.
+
+### Why schema v14 rather than v13 metadata
+
+The brief preferred v13 and asked for the invariant if v14 was needed. The
+invariant is:
+
+> At most one verification may exist for a given (application, analysis job,
+> target content hash, verifier fingerprint), and a repeated request must
+> return that same record.
+
+Verification is a button. A reviewer can double-click it while a
+read-modify-write of `correction_application_intents.result_metadata_json` is
+in flight, and an append into a JSON blob duplicates under exactly that
+concurrency. v13 already solved the identical problem for applications with
+`UNIQUE(proposal_id, expected_proposal_revision)`; this is the same shape.
+Two further needs are structural, not cosmetic: acknowledgement takes CAS on a
+`revision` column so "mark corrected" fails closed against a verification that
+went stale between render and click, and superseded verifications must stay
+queryable per application as history.
+
+`_MIGRATION_V14` adds one table and nothing else — no existing row is
+rewritten, so a v13 project upgrades additively. One implementation detail
+worth recording: the primary key column is named `id`, not `verification_id`,
+because `_stale_generic_dependencies` addresses every record table as
+`WHERE id=?`. Naming it otherwise compiled and passed its own tests but would
+have thrown mid-propagation on the first target edit that reached it.
+`CORRECTION_VERIFICATION` is registered in `RECORD_DEPENDENCY_TABLES`, which
+the existing source-scanning invariant test enforces.
+
+### Policy shape
+
+`CorrectionVerificationPolicy` decides per obligation, then aggregates (any
+FAILED wins, else any UNCERTAIN, else PASSED). Run-level caution is applied
+last:
+
+- `SEARCH_INCOMPLETE` downgrades any PASSED. An incomplete search cannot
+  license a positive claim, and the reverse rule — search failure must never
+  become a false absence — is why a coverage-based FAILED also becomes
+  UNCERTAIN under it. A *located deterministic contradiction* is unaffected:
+  search completeness has no bearing on it.
+- `PROVIDER_LIMITED` (the standing "no production multilingual embedding
+  provider" warning) is recorded and lowers confidence, but downgrades a
+  PASSED only when the deciding evidence is non-deterministic. This is the
+  brief's §9 rule made concrete: inspect the warning, do not map it to
+  UNCERTAIN. `test_completed_with_warnings_can_still_pass_on_deterministic_evidence`
+  pins a quantity pass under that exact warning.
+
+Null semantics are preserved on both sides. `1 -> null` with
+`GRAMMATICALLY_REALIZED`/`IMPLICIT`/restructured realization and
+`COVERED_BY_RESTRUCTURING` coverage passes; it fails only when Stage 8
+positively concluded the obligation is uncovered. `null -> 1` checks target
+units *inside the exact corrected span* against their current target-support
+account, and treats `SOURCE_SUPPORTED`/`CONTEXT_SUPPORTED`/
+`GRAMMATICALLY_REQUIRED`/`EXPLICITATION_SUPPORTED` as legitimate.
+
+### A Stage 7 defect surfaced by writing the dimension matrix
+
+Building the POLARITY row failed on a pairing that should obviously pass. The
+cause is in `meaning_analysis._comparison_norm`, which does
+`re.findall(r"[^\W_]+")` over NFD-decomposed text. Indic combining marks are
+not alphanumeric, so a Tamil word is **split at every virama and vowel sign**
+and the marks are discarded: `இல்லை` becomes `இல ல`, two tokens. The
+docstring explicitly claims Tamil vowel signs "remain intact". They do not.
+
+`_category` survives this because it substring-matches, so QUANTITY, TEMPORAL
+and PARTICIPANT still work. The POLARITY branch does not — it tests whole
+tokens with `item in target.split()` — so it cannot see the negative in
+`இல்லை` and returns `CONTRADICTED` against a Greek negative. A false
+contradiction, on this project's primary target language.
+
+Deliberately not fixed here. §39 forbids Stage 9B.4 re-judging Stage 7
+meaning, and a fix changes Stage 7 and Stage 8 verdicts and needs both goldens
+re-baselined. Instead the behavior is pinned by
+`test_tamil_negation_polarity_limit_is_pinned_not_worked_around`, which
+asserts the comparator's current output *and* that verification faithfully
+reports the resulting disagreement as UNCERTAIN rather than papering over it.
+When Stage 7 is fixed, that test fails on purpose. **This should be
+scheduled.**
+
+### UI
+
+`CorrectionReviewPanel` gained a Correction verification section under the
+existing affected-analysis block. The status list now shows four independent
+rows — correction application, affected analysis, semantic verification, your
+decision — and never merges them. Wording is deliberate: FAILED says the
+original obligation is still unsatisfied and that what to do next is the
+reviewer's call; UNCERTAIN says Bridge cannot tell and explicitly does not
+call the translation wrong. Neither auto-undoes Scripture or reopens the
+proposal.
+
+**Mark correction as corrected** appears only for a current PASSED
+verification, behind a confirmation dialog carrying the original issue, the
+applied correction, the verification result, the source semantic reference,
+the target realization, the affected dimension and the current supporting
+evidence, with Mark corrected / Cancel — never a generic Save. A frontend test
+greps the component source to assert it contains no client-side verdict
+computation.
+
+One collision worth noting: adding an `<h5>Semantic verification</h5>` heading
+broke six existing tests that resolve the status row by
+`getByText("Semantic verification").closest("dl")`. Renamed the heading to
+"Correction verification", which also reads better — it names what is being
+verified.
+
+### Safety
+
+Scripture, imported USFM and alignment JSON are hashed before and after the
+whole verify -> acknowledge flow and asserted byte-identical. PHP 1:6 Word
+Alignment remains invalid/reviewable after a PASSED, acknowledged correction —
+that is allowed and tested. CORRECTED does not immunize the finding: a later
+edit makes the verification non-current and reports the acknowledgement as
+`current: false` while retaining the historical CORRECTED event in full.
+
+```text
+Stage 9B.4 focused Python                55 passed
+Stage 9B.3b + 9B.3c focused Python       22 passed
+Stage 9B.0/9B.1/9B.3a + 9A review       222 passed (re-run after the v14 bump)
+full Python + Greek Room                921 passed
+Correction Review frontend               51 passed (33 existing + 18 new)
+Full frontend Vitest                    306 passed / 24 files
+npm run check                             0 errors / 0 warnings
+npm run build                            passed; existing >500 kB chunk warning
+cargo test                               12 passed
+cargo check                              passed
+git diff --check                         passed; line-ending notices only
+```
+
+The v14 bump correctly tripped seven pre-existing assertions that hardcoded
+`== 13` across `test_correction_stage9b0/9b1/9b3a` and `test_qa_review_stage9a`
+-- they pin "the current schema", so they were updated to 14 rather than
+loosened. A dedicated `test_v13_to_v14_migration_is_additive_and_keeps_v13_data_readable`
+was added covering a real v13 database with a finding, an applied proposal and
+append-only proposal history: everything stays readable at its original
+revision, no row is rewritten, the new table starts empty, and a v13 project
+with no verification history reads as PENDING rather than as an error.
+
+Installed desktop acceptance has **not** been performed and is not claimed by
+the suite; the procedure is in `HANDOFF.md` §37.6. The post-9B.4 cross-verse
+visualization and v1 UI pass remain unauthorized.
+
 ## Beta 15 — Stage 9B.3c responsive QA review acceptance fix (2026-09-07)
 
 Installed acceptance showed the full `QaFindingDetail` decision footer
@@ -4778,3 +4983,106 @@ Set to 180s: the table's existing class for expensive local I/O (`report.get`,
 default — a ledger read and a background-job start have nothing to wait for.
 Covered by `sidecar::tests::correction_apply_has_room_for_a_full_semantic_db_backup`;
 `cargo test` 11 passed.
+
+## Stage 9B.4 pre-installed-acceptance gate — 1→null verification semantics (2026-09-07)
+
+Run before Stage 9B.4 was ever committed, and before the 0.9.2 release. It
+asked one question of the shipped policy: can `POSSIBLY_MISSING`, on its own,
+produce a verification FAILED? It could, and that is now fixed.
+
+### Defect 1 — POSSIBLY_MISSING was treated as a positive absence
+
+`correction_verification.py` had a single set:
+
+```python
+_NEGATIVE_COVERAGE = {SourceCoverage.POSSIBLY_MISSING.value, SourceCoverage.MISSING.value}
+```
+
+and the coverage branch returned FAILED with `COVERAGE_STILL_MISSING` whenever
+coverage landed in it and no positive dimension reason had accumulated. So an
+obligation Stage 8 explicitly declined to resolve was reported to the reviewer
+as a positively failed correction. That is the `POSSIBLY_MISSING → MISSING`
+auto-promotion §39 of `HANDOFF.md` forbids outright and §36 reserves for human
+confirmation — reached here silently, by a verification pass, with no human in
+the loop.
+
+It also broke the stage's own governing rule in the opposite direction from the
+one the stage was designed around. Stage 9B.4 was built so a *disappeared*
+finding could not prove success; this let an *unresolved* obligation prove
+failure. Both are the same error: treating an absence of evidence as evidence.
+
+The set is now split three ways, and `NOT_CHECKED` is deliberately in none of
+them — it means Stage 8 made no coverage claim at all and must not veto
+positive dimension evidence, unlike `POSSIBLY_MISSING`/`UNCERTAIN`, which mean
+Stage 8 looked and could not resolve:
+
+```text
+COVERED / COVERED_BY_RESTRUCTURING  -> may support PASSED
+MISSING                             -> may support FAILED  (positive absence)
+POSSIBLY_MISSING / UNCERTAIN        -> always UNCERTAIN    (unresolved)
+NOT_CHECKED                         -> no coverage claim; falls through
+```
+
+The unresolved branch always abstains. It cannot fail, because absence was never
+established; it cannot pass either, because coverage is genuinely open — and
+when positive dimension evidence *does* exist alongside it, that is two current
+assessments disagreeing, which this policy has always resolved as UNCERTAIN.
+Two new reason codes carry the difference to the reviewer rather than reusing
+the failure code: `COVERAGE_POSSIBLY_MISSING` ("a possible omission is not an
+established one") and `COVERAGE_UNRESOLVED`.
+
+### Defect 2 — run-level searchIncomplete could not stop an absence-based FAILED
+
+`aggregate()` consulted `search_incomplete` only on the PASSED path. The
+per-obligation guard that does block absence under an incomplete search reads
+`unusable`, which is built from per-relationship `locationOutcome` values — so a
+job whose *run-level* `searchIncomplete` warning was set, with relationships
+that individually looked clean, still produced FAILED off nothing but absence.
+
+`aggregate()` now downgrades a FAILED to UNCERTAIN when every failing verdict is
+absence-based, meaning its reason codes are a subset of
+`{COVERAGE_STILL_MISSING}`. A located contradiction carries
+`DIMENSION_CONTRADICTED`/`DIMENSION_ALTERED`/`DIMENSION_STILL_WEAKENED` and is
+untouched, because search completeness has no bearing on a contradiction that
+was found — a run mixing the two still fails.
+
+(The pre-existing per-obligation `SEARCH_INCOMPLETE in unusable` checks inside
+the coverage branches are unreachable in practice: the blanket `if unusable:`
+return fires earlier. They are kept as defense in depth, not relied on.)
+
+### Policy version bumped to v2
+
+`VERIFICATION_POLICY_VERSION` moves to `correction-verification-policy-v2`. The
+verifier fingerprint hashes it, so every verification recorded under the buggy
+rule becomes non-current and re-evaluatable instead of carrying a wrong verdict
+forward — which is exactly what that fingerprint was built for. Stage 9B.4 was
+never committed or released, so no shipped record is affected; the bump protects
+records from local acceptance runs.
+
+### The decision rule, stated once
+
+```text
+positive current evidence obligation satisfied      -> PASSED
+positive current evidence obligation unsatisfied    -> FAILED
+unresolved / ambiguous / incomplete / conflicting   -> UNCERTAIN
+```
+
+No frontend or Rust change was needed. `reasonExplanations` is served from
+Python's `REASON_EXPLANATIONS` map and `reasonCodes` is typed `string[]`, so
+both new codes reach the panel with their prose automatically.
+
+### Verification
+
+```text
+Stage 9B.4 focused Python                61 passed  (55 + 6 new)
+Stage 8 + 9B.3b + 9B.3c Python           49 passed
+full Python + Greek Room                927 passed  (921 + 6)
+git diff --check                         clean; line-ending notices only
+```
+
+Frontend and Rust gates were not re-run: no frontend or Rust file was touched by
+this gate. They passed on this working tree earlier the same day — svelte-check
+0/0, 306 Vitest across 24 files, `cargo test` 12 passed.
+
+Installed desktop acceptance of the verify → Mark corrected flow remains NOT
+RUN, and this gate does not change that.

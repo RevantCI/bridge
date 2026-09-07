@@ -50,7 +50,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 13
+DATABASE_SCHEMA_VERSION = 14
 
 # The one authoritative record_type -> table map for the dependency graph.
 #
@@ -79,6 +79,7 @@ RECORD_DEPENDENCY_TABLES: dict[str, str] = {
     "QA_RUN": "qa_audit_runs",
     "SEMANTIC_UNIT": "semantic_units",
     "TOKEN_INSTANCE": "token_instances",
+    "CORRECTION_VERIFICATION": "correction_verifications",
 }
 
 # Upstream-only dependency anchors. They are legitimate `depends_on_type`
@@ -1011,6 +1012,53 @@ FROM target_inventory_units;
 """
 
 
+# Stage 9B.4 needs a *normalized* verification record, not another JSON blob on
+# the application ledger, for one invariant that only the database can enforce:
+#
+#   At most one verification may exist for a given
+#   (application, analysis job, target content hash, verifier fingerprint),
+#   and a repeated request must return that same record.
+#
+# Verification is reached by a button a reviewer can double-click while a
+# read-modify-write of `result_metadata_json` is in flight, so an append into
+# that blob can duplicate under exactly the concurrency the UNIQUE index below
+# rules out -- the same reasoning that gave applications
+# UNIQUE(proposal_id, expected_proposal_revision) in v13. Acknowledgement also
+# needs its own CAS column so "mark corrected" fails closed against a
+# verification that went stale between render and click, and history has to
+# stay queryable per application after the current record is superseded.
+_MIGRATION_V14 = r"""
+CREATE TABLE correction_verifications (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    application_id TEXT NOT NULL REFERENCES correction_application_intents(application_id),
+    proposal_id TEXT NOT NULL REFERENCES correction_proposals(id),
+    proposal_revision INTEGER NOT NULL CHECK(proposal_revision >= 0),
+    finding_id TEXT NOT NULL REFERENCES qa_findings(id),
+    analysis_job_id TEXT NOT NULL,
+    target_revision TEXT NOT NULL,
+    target_content_hash TEXT NOT NULL,
+    verifier_fingerprint TEXT NOT NULL,
+    result TEXT NOT NULL CHECK(result IN ('PASSED','FAILED','UNCERTAIN')),
+    confidence REAL NOT NULL,
+    reason_codes_json TEXT NOT NULL DEFAULT '[]',
+    lifecycle_status TEXT NOT NULL DEFAULT 'ACTIVE'
+        CHECK(lifecycle_status IN ('ACTIVE','INACTIVE','STALE','SUPERSEDED','QUARANTINED')),
+    acknowledged_at TEXT,
+    acknowledged_by TEXT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    UNIQUE(application_id, analysis_job_id, target_content_hash, verifier_fingerprint)
+);
+CREATE INDEX ix_correction_verifications_application
+ON correction_verifications(application_id, created_at, id);
+CREATE INDEX ix_correction_verifications_finding
+ON correction_verifications(finding_id, created_at);
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -1095,6 +1143,10 @@ class FoundationRepository:
             if current < 13:
                 self._backup_before_migration(conn, current, 13)
                 self._apply_migration(conn, 13, _MIGRATION_V13)
+                current = 13
+            if current < 14:
+                self._backup_before_migration(conn, current, 14)
+                self._apply_migration(conn, 14, _MIGRATION_V14)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -1647,6 +1699,209 @@ class FoundationRepository:
         return self._application_payload(updated)
 
     find_by_proposal_revision = find_application_by_proposal_revision
+
+    # -- Stage 9B.4 correction verification records ------------------------
+
+    @staticmethod
+    def _verification_payload(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "verificationId": row["id"], "projectId": row["project_id"],
+            "applicationId": row["application_id"], "proposalId": row["proposal_id"],
+            "proposalRevision": int(row["proposal_revision"]),
+            "findingId": row["finding_id"], "analysisJobId": row["analysis_job_id"],
+            "targetRevision": row["target_revision"],
+            "targetContentHash": row["target_content_hash"],
+            "verifierFingerprint": row["verifier_fingerprint"],
+            "result": row["result"], "confidence": float(row["confidence"]),
+            "reasonCodes": json.loads(row["reason_codes_json"]),
+            "lifecycleStatus": row["lifecycle_status"],
+            "acknowledgedAt": row["acknowledged_at"], "acknowledgedBy": row["acknowledged_by"],
+            "revision": int(row["revision"]), "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"], "payload": json.loads(row["payload_json"]),
+        }
+
+    def save_correction_verification(
+        self, *, verification_id: str, project_id: str, application_id: str,
+        proposal_id: str, proposal_revision: int, finding_id: str, analysis_job_id: str,
+        target_revision: str, target_content_hash: str, verifier_fingerprint: str,
+        result: str, confidence: float, reason_codes: list[str],
+        payload: dict[str, Any], created_at: str,
+    ) -> dict[str, Any]:
+        """Insert a verification and supersede this application's older ones.
+
+        The insert is idempotent on the UNIQUE verification identity: a
+        concurrent duplicate click returns the record that already exists
+        rather than creating a second one. Superseded records are retained --
+        verification history is evidence, not a cache.
+        """
+        if result not in {"PASSED", "FAILED", "UNCERTAIN"}:
+            raise FoundationValidationError(f"Unknown verification result: {result}")
+        now = self._now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT * FROM correction_verifications WHERE application_id=? AND "
+                "analysis_job_id=? AND target_content_hash=? AND verifier_fingerprint=?",
+                (application_id, analysis_job_id, target_content_hash, verifier_fingerprint),
+            ).fetchone()
+            if existing is not None:
+                conn.commit()
+                return self._verification_payload(existing)
+            application = conn.execute(
+                "SELECT project_id,application_state FROM correction_application_intents "
+                "WHERE application_id=?", (application_id,),
+            ).fetchone()
+            if application is None:
+                raise FoundationValidationError(
+                    f"Unknown correction application: {application_id}")
+            if application["project_id"] != project_id:
+                raise FoundationValidationError(
+                    "Correction verification belongs to another project")
+            if application["application_state"] != CorrectionApplicationState.COMPLETED.value:
+                raise FoundationConflict(
+                    "Verification requires a COMPLETED correction application")
+            conn.execute(
+                "UPDATE correction_verifications SET lifecycle_status='SUPERSEDED',"
+                "revision=revision+1,updated_at=? WHERE application_id=? AND lifecycle_status='ACTIVE'",
+                (now, application_id),
+            )
+            conn.execute(
+                "INSERT INTO correction_verifications(id,project_id,application_id,"
+                "proposal_id,proposal_revision,finding_id,analysis_job_id,target_revision,"
+                "target_content_hash,verifier_fingerprint,result,confidence,reason_codes_json,"
+                "lifecycle_status,acknowledged_at,acknowledged_by,revision,created_at,updated_at,"
+                "payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',NULL,NULL,1,?,?,?)",
+                (verification_id, project_id, application_id, proposal_id, int(proposal_revision),
+                 finding_id, analysis_job_id, target_revision, target_content_hash,
+                 verifier_fingerprint, result, float(confidence),
+                 json.dumps(list(reason_codes), ensure_ascii=False),
+                 created_at or now, now, json.dumps(payload, ensure_ascii=False)),
+            )
+            # Verification depends on the proposal it verifies and on the exact
+            # target coordinate whose text it was computed against, so a later
+            # edit or proposal change stales it through the ordinary graph.
+            target_reference = str((payload.get("targetReferences") or [""])[0])
+            book, _, _location = target_reference.rpartition(" ")
+            edges = [("CORRECTION_PROPOSAL", proposal_id)]
+            if book and target_reference:
+                edges.append(("TARGET_REFERENCE", self.target_dependency_id(
+                    project_id, book, target_reference,
+                )))
+            for record_type, record_id in edges:
+                conn.execute(
+                    "INSERT OR IGNORE INTO record_dependencies VALUES(?,?,?,?)",
+                    ("CORRECTION_VERIFICATION", verification_id, record_type, record_id),
+                )
+            # The proposal's independent verificationStatus mirrors the verdict.
+            # It is a status field, never a QA disposition: CORRECTED still
+            # requires a separate, explicit human acknowledgement.
+            row = conn.execute(
+                "SELECT payload_json,revision FROM correction_proposals WHERE id=?",
+                (proposal_id,),
+            ).fetchone()
+            if row is not None:
+                proposal_payload = json.loads(row["payload_json"])
+                proposal_payload.update({
+                    "verificationStatus": result,
+                    "verificationJobIds": list(dict.fromkeys([
+                        *(proposal_payload.get("verificationJobIds") or ()), analysis_job_id,
+                    ])),
+                })
+                conn.execute(
+                    "UPDATE correction_proposals SET verification_status=?,payload_json=? WHERE id=?",
+                    (result, json.dumps(proposal_payload, ensure_ascii=False), proposal_id),
+                )
+            inserted = conn.execute(
+                "SELECT * FROM correction_verifications WHERE id=?",
+                (verification_id,),
+            ).fetchone()
+            conn.commit()
+        return self._verification_payload(inserted)
+
+    def correction_verification(self, verification_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM correction_verifications WHERE id=?",
+                (verification_id,),
+            ).fetchone()
+        if row is None:
+            raise FoundationValidationError(f"Unknown correction verification: {verification_id}")
+        return self._verification_payload(row)
+
+    def current_correction_verification(self, application_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM correction_verifications WHERE application_id=? AND "
+                "lifecycle_status='ACTIVE' ORDER BY created_at DESC,id DESC LIMIT 1",
+                (application_id,),
+            ).fetchone()
+        return None if row is None else self._verification_payload(row)
+
+    def correction_verification_for_inputs(
+        self, *, application_id: str, analysis_job_id: str,
+        target_content_hash: str, verifier_fingerprint: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM correction_verifications WHERE application_id=? AND "
+                "analysis_job_id=? AND target_content_hash=? AND verifier_fingerprint=?",
+                (application_id, analysis_job_id, target_content_hash, verifier_fingerprint),
+            ).fetchone()
+        return None if row is None else self._verification_payload(row)
+
+    def correction_verification_history(self, application_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM correction_verifications WHERE application_id=? "
+                "ORDER BY created_at,id", (application_id,),
+            ).fetchall()
+        return [self._verification_payload(row) for row in rows]
+
+    def acknowledge_correction_verification(
+        self, verification_id: str, *, expected_revision: int, actor_id: str, note: str = "",
+    ) -> dict[str, Any]:
+        """Stamp the explicit human CORRECTED acknowledgement onto a verification.
+
+        Only a current, ACTIVE, PASSED verification may be acknowledged, and the
+        stamp is written under revision CAS so a verification superseded between
+        render and click fails closed instead of silently closing a QA issue.
+        """
+        now = self._now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM correction_verifications WHERE id=?",
+                (verification_id,),
+            ).fetchone()
+            if row is None:
+                raise FoundationValidationError(
+                    f"Unknown correction verification: {verification_id}")
+            if int(row["revision"]) != int(expected_revision):
+                raise FoundationConflict("Correction verification revision conflict")
+            if row["lifecycle_status"] != "ACTIVE":
+                raise FoundationConflict("Only a current verification may be acknowledged")
+            if row["result"] != "PASSED":
+                raise FoundationConflict("Only a PASSED verification may be acknowledged")
+            if row["acknowledged_at"]:
+                conn.commit()
+                return self._verification_payload(row)
+            payload = json.loads(row["payload_json"])
+            payload.update({"acknowledgedBy": actor_id, "acknowledgementNote": note})
+            changed = conn.execute(
+                "UPDATE correction_verifications SET acknowledged_at=?,acknowledged_by=?,"
+                "revision=revision+1,updated_at=?,payload_json=? "
+                "WHERE id=? AND revision=? AND lifecycle_status='ACTIVE'",
+                (now, actor_id, now, json.dumps(payload, ensure_ascii=False),
+                 verification_id, int(expected_revision)),
+            ).rowcount
+            if changed != 1:
+                raise FoundationConflict("Correction verification revision conflict")
+            updated = conn.execute(
+                "SELECT * FROM correction_verifications WHERE id=?",
+                (verification_id,),
+            ).fetchone()
+            conn.commit()
+        return self._verification_payload(updated)
 
     def list_incomplete_applications(self, project_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:

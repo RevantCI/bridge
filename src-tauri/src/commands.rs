@@ -1771,6 +1771,61 @@ pub async fn correction_reanalyze_affected(
 }
 
 #[tauri::command]
+pub async fn correction_verify_application(
+    sidecar: State<'_, EngineSidecar>,
+    application_id: String,
+    requested_by: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.verifyApplication",
+            serde_json::json!({
+                "applicationId": application_id,
+                "requestedBy": requested_by,
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn correction_get_verification(
+    sidecar: State<'_, EngineSidecar>,
+    application_id: String,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.getVerification",
+            serde_json::json!({"applicationId": application_id}),
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn correction_acknowledge_corrected(
+    sidecar: State<'_, EngineSidecar>,
+    application_id: String,
+    verification_id: String,
+    expected_verification_revision: i64,
+    expected_finding_revision: i64,
+    actor: Value,
+    note: Option<String>,
+) -> Result<Value, String> {
+    sidecar
+        .send_request(
+            "correction.acknowledgeCorrected",
+            serde_json::json!({
+                "applicationId": application_id,
+                "verificationId": verification_id,
+                "expectedVerificationRevision": expected_verification_revision,
+                "expectedFindingRevision": expected_finding_revision,
+                "actor": actor,
+                "note": note.unwrap_or_default(),
+            }),
+        )
+        .await
+}
+
+#[tauri::command]
 pub async fn semantic_review_decide_location(
     sidecar: State<'_, EngineSidecar>,
     relationship_id: String,

@@ -50,6 +50,7 @@ import type {
 import type {
   CorrectionEligibility,
   CorrectionAffectedAnalysisResult,
+  CorrectionVerificationState,
   CorrectionApplicationIntent,
   CorrectionIntent,
   CorrectionProposal,
@@ -870,6 +871,30 @@ export const bridge = {
     retry?: boolean;
   }): Promise<CorrectionAffectedAnalysisResult> {
     return call("correction_reanalyze_affected", options);
+  },
+
+  // Stage 9B.4: verification is decided by the backend. The UI renders the
+  // verdict and evidence; it never computes one.
+  correctionVerifyApplication(options: {
+    applicationId: string;
+    requestedBy: string;
+  }): Promise<CorrectionVerificationState> {
+    return call("correction_verify_application", options);
+  },
+
+  correctionGetVerification(applicationId: string): Promise<CorrectionVerificationState> {
+    return call("correction_get_verification", { applicationId });
+  },
+
+  correctionAcknowledgeCorrected(options: {
+    applicationId: string;
+    verificationId: string;
+    expectedVerificationRevision: number;
+    expectedFindingRevision: number;
+    actor: { actorType: "HUMAN"; actorId: string };
+    note?: string;
+  }): Promise<CorrectionVerificationState> {
+    return call("correction_acknowledge_corrected", options);
   },
 
   /**

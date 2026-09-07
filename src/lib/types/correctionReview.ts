@@ -212,6 +212,110 @@ export interface CorrectionProposalEvent {
   proposalSnapshot: CorrectionProposal;
 }
 
+/** Stage 9B.4. Backend-owned; the frontend never derives a verdict. */
+export type CorrectionVerificationResult = "PASSED" | "FAILED" | "UNCERTAIN";
+
+export interface CorrectionVerificationReason {
+  code: string;
+  detail: string;
+}
+
+export interface CorrectionVerificationRecord {
+  verificationId: string;
+  projectId: string;
+  applicationId: string;
+  proposalId: string;
+  proposalRevision: number;
+  findingId: string;
+  analysisJobId: string;
+  targetRevision: string;
+  targetContentHash: string;
+  verifierFingerprint: string;
+  result: CorrectionVerificationResult;
+  confidence: number;
+  reasonCodes: string[];
+  lifecycleStatus: LifecycleStatus;
+  acknowledgedAt: string | null;
+  acknowledgedBy: string | null;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  payload: {
+    sourceSemanticUnitIds: string[];
+    sourceReferences: string[];
+    targetReferences: string[];
+    failedCoverageDimension: CoverageDimension;
+    observedMeaning: string;
+    requiredMeaning: string;
+    obligations: CorrectionVerificationObligation[];
+    recurringFindings: { findingId: string; kind: string; sameStableIdentityAsOriginal: boolean }[];
+    unresolvedTargetSupportUnitIds: string[];
+    providerLimited: boolean;
+    searchIncomplete: boolean;
+    analysisWarnings: { code?: string; message?: string }[];
+    locationRunId: string;
+    meaningRunId: string;
+    qaRunId: string;
+    verifierEngineVersion: string;
+    verifierPolicyVersion: string;
+    acknowledgementNote?: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface CorrectionVerificationObligation {
+  sourceSemanticUnitId: string;
+  coverageDimension: CoverageDimension;
+  coverageStatus: string;
+  result: CorrectionVerificationResult;
+  reasonCodes: string[];
+  confidence: number;
+  componentStatuses: string[];
+  directRecheck: {
+    status: string; confidence: number; evidenceKind: string; explanation: string;
+  } | null;
+  relationshipIds: string[];
+  meaningAssessmentIds: string[];
+  targetReferences: string[];
+  locationOutcomes: string[];
+  realizations: string[];
+  cardinalities: string[];
+}
+
+export interface CorrectionCorrectedAcknowledgement {
+  verificationId: string;
+  acknowledgedBy: string;
+  acknowledgedAt: string;
+  note: string;
+  current: boolean;
+}
+
+/** The one envelope the panel renders. Four states stay separate inside it. */
+export interface CorrectionVerificationState {
+  applicationId: string;
+  applicationState: CorrectionApplicationState;
+  affectedAnalysisState: AffectedAnalysisState;
+  affectedAnalysisJobId: string;
+  verificationStatus: VerificationStatus;
+  verificationId: string;
+  verificationCurrent: boolean;
+  verificationRevision: number;
+  verificationReasonCodes: string[];
+  reasonExplanations: CorrectionVerificationReason[];
+  mayVerify: boolean;
+  mayAcknowledgeCorrected: boolean;
+  qaDisposition: string;
+  findingId: string;
+  findingRevision: number;
+  proposalId: string;
+  correctedAcknowledgement: CorrectionCorrectedAcknowledgement | null;
+  verification: CorrectionVerificationRecord | null;
+  verifierFingerprint: string;
+  verifierEngineVersion: string;
+  verifierPolicyVersion: string;
+  history: CorrectionVerificationRecord[];
+}
+
 export interface CorrectionCurrentTarget {
   displayedReference: string;
   canonicalReferences: string[];

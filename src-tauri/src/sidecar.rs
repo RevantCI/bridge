@@ -560,4 +560,19 @@ mod tests {
         );
         assert_eq!(request_timeout_seconds("correction.reanalyzeAffected"), 30);
     }
+
+    /// Stage 9B.4 verification reads already-persisted Stage 6B/7/8 records and
+    /// evaluates them in memory; acknowledgement is one small CAS transaction.
+    /// None of the three copies a file or calls a provider, so all three belong
+    /// on the interactive default -- a long timeout would only delay reporting
+    /// a dead sidecar to a reviewer waiting on a verdict.
+    #[test]
+    fn correction_verification_methods_stay_interactive() {
+        assert_eq!(request_timeout_seconds("correction.verifyApplication"), 30);
+        assert_eq!(request_timeout_seconds("correction.getVerification"), 30);
+        assert_eq!(
+            request_timeout_seconds("correction.acknowledgeCorrected"),
+            30
+        );
+    }
 }

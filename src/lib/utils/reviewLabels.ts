@@ -231,6 +231,36 @@ export function componentStatusLabel(value: string): string {
 }
 
 /**
+ * Stage 9B.4 semantic verification. Deliberately worded as evidence about the
+ * correction, never as a verdict on the reviewer or on the translation as a
+ * whole: FAILED says the original obligation is still unsatisfied, and
+ * UNCERTAIN says Bridge cannot tell -- not that the translation is wrong.
+ */
+const VERIFICATION_LABELS: Record<string, string> = {
+  NOT_RUN: "Not verified",
+  PENDING: "Verification pending",
+  PASSED: "Semantic verification passed",
+  FAILED: "Correction verification failed",
+  UNCERTAIN: "Correction verification is uncertain",
+};
+
+const VERIFICATION_TONES: Record<string, BadgeTone> = {
+  NOT_RUN: "neutral",
+  PENDING: "neutral",
+  PASSED: "acceptable",
+  FAILED: "confirmed",
+  UNCERTAIN: "discussion",
+};
+
+export function verificationLabel(value: string): string {
+  return VERIFICATION_LABELS[value] ?? humanize(value);
+}
+
+export function verificationTone(value: string): BadgeTone {
+  return VERIFICATION_TONES[value] ?? "neutral";
+}
+
+/**
  * Severity orders the queue; it never means the issue is real.
  * Callers use this for the tooltip so styling cannot imply otherwise.
  */

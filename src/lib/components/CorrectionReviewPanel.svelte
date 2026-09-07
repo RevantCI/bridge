@@ -12,7 +12,9 @@
     CorrectionReviewContext,
     CorrectionAffectedAnalysisResult,
     AffectedAnalysisState,
+    CorrectionVerificationState,
   } from "../types/correctionReview";
+  import { verificationLabel } from "../utils/reviewLabels";
   import type { AnalysisJobSnapshot } from "../types/analysisJob";
   import type { SettingsData } from "../types/finding";
   import type { CoverageDimension } from "../types/passageSemanticV1";
@@ -29,6 +31,7 @@
 
   const dispatch = createEventDispatcher<{
     reanalyzed: { result: CorrectionAffectedAnalysisResult };
+    corrected: { state: CorrectionVerificationState };
   }>();
 
   let eligibility: CorrectionEligibility | null = null;
@@ -63,6 +66,10 @@
   let affectedState: AffectedAnalysisState = "NOT_RUN";
   let affectedResult: CorrectionAffectedAnalysisResult | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  // Stage 9B.4. The backend owns every verdict here; these only mirror it.
+  let verification: CorrectionVerificationState | null = null;
+  let acknowledgeOpen = false;
+  let acknowledgeNote = "";
 
   $: reviewKey = `${findingId}:${findingRevision}`;
   $: if (findingId && reviewKey !== loadedReviewKey) {
@@ -119,6 +126,15 @@
       && affectedState !== "COMPLETED",
   );
   $: relationshipEvidence = correctionRelationshipEvidence(context);
+  $: verificationStatus = verification?.verificationStatus ?? "NOT_RUN";
+  $: mayVerify = Boolean(
+    verification?.mayVerify
+      && application?.applicationState === "COMPLETED"
+      && !correctionWritesBlocked,
+  );
+  $: mayAcknowledge = Boolean(verification?.mayAcknowledgeCorrected);
+  $: verificationReasons = verification?.reasonExplanations ?? [];
+  $: verificationEvidence = verification?.verification?.payload ?? null;
 
   onDestroy(() => {
     if (pollTimer) clearTimeout(pollTimer);
@@ -204,6 +220,7 @@
       ) ?? null;
       correctionWritesBlocked = Boolean(listed.correctionWritesBlocked);
       await restoreAffectedJob();
+      await refreshVerification();
       initializeDraft();
       await loadHistory(selectedProposalId);
     } catch (exc) {
@@ -223,7 +240,66 @@
     ) ?? application;
     correctionWritesBlocked = Boolean(listed.correctionWritesBlocked);
     await restoreAffectedJob();
+    await refreshVerification();
     await loadHistory(selectedProposalId);
+  }
+
+  async function refreshVerification(): Promise<void> {
+    if (!application) {
+      verification = null;
+      return;
+    }
+    try {
+      verification = await bridge.correctionGetVerification(application.applicationId);
+    } catch (exc) {
+      verification = null;
+      error = message(exc);
+    }
+  }
+
+  async function verifyCorrection(): Promise<void> {
+    if (!application || !mayVerify) return;
+    busy = true;
+    error = "";
+    try {
+      verification = await bridge.correctionVerifyApplication({
+        applicationId: application.applicationId,
+        requestedBy: settings?.reviewerName || "human",
+      });
+      notice = verificationLabel(verification.verificationStatus) + ".";
+    } catch (exc) {
+      error = message(exc);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function acknowledgeCorrected(): Promise<void> {
+    if (!application || !verification || !mayAcknowledge) return;
+    busy = true;
+    error = "";
+    try {
+      verification = await bridge.correctionAcknowledgeCorrected({
+        applicationId: application.applicationId,
+        verificationId: verification.verificationId,
+        expectedVerificationRevision: verification.verificationRevision,
+        expectedFindingRevision: verification.findingRevision,
+        actor: { actorType: "HUMAN", actorId: settings?.reviewerName || "human" },
+        note: acknowledgeNote.trim(),
+      });
+      acknowledgeOpen = false;
+      acknowledgeNote = "";
+      notice = "Marked corrected. The original confirmed issue is retained in history.";
+      dispatch("corrected", { state: verification });
+    } catch (exc) {
+      // A verification that went stale between render and click fails closed;
+      // reload rather than retrying against assumptions that no longer hold.
+      acknowledgeOpen = false;
+      await refreshVerification();
+      error = message(exc);
+    } finally {
+      busy = false;
+    }
   }
 
   function correctionRelationshipEvidence(value: CorrectionReviewContext | null): {
@@ -333,6 +409,7 @@
         ]);
         eligibility = nextEligibility;
         context = nextContext;
+        await refreshVerification();
       } else if (affectedState === "FAILED") {
         error = "Affected passage analysis failed. Scripture remains applied and correction verification remains pending.";
       } else if (affectedState === "CANCELLED") {
@@ -356,6 +433,7 @@
       affectedJob = affectedResult.job;
       affectedState = affectedResult.jobState;
       application = await bridge.correctionGetApplicationStatus(application.applicationId);
+      await refreshVerification();
       notice = affectedState === "RUNNING" ? "Preparing affected analysis…" : notice;
       if (affectedState === "RUNNING") schedulePoll();
     } catch (exc) {
@@ -784,10 +862,16 @@
 
         {#if application}
           <div class="affected-analysis" aria-label="Correction follow-up status">
-            <dl>
+            <!-- Four independent states. Never collapsed into one badge: an
+                 applied correction is not an analysed one, an analysed one is
+                 not a verified one, and a verified one is not a corrected one. -->
+            <dl data-correction-states>
               <dt>Correction application</dt><dd>{application.applicationState}</dd>
-              <dt>Semantic verification</dt><dd>{selectedProposal?.verificationStatus ?? "NOT_RUN"}</dd>
               <dt>Affected analysis</dt><dd>{stageLabel(affectedJob)}</dd>
+              <dt>Semantic verification</dt>
+              <dd data-verification-status>{verificationStatus}</dd>
+              <dt>Your decision</dt>
+              <dd data-qa-disposition>{verification?.qaDisposition || "UNRESOLVED"}</dd>
             </dl>
             {#if mayReanalyze}
               <button
@@ -803,9 +887,196 @@
             {#if affectedState === "RUNNING"}
               <button type="button" class="secondary" disabled={busy} on:click={cancelAffected}>Cancel affected analysis</button>
             {/if}
+
+            <section class="verification" aria-labelledby="verification-title" data-correction-verification>
+              <h5 id="verification-title">Correction verification</h5>
+              <p class="verification-headline" data-verification-headline>
+                {verificationLabel(verificationStatus)}
+              </p>
+
+              {#if verificationStatus === "PASSED"}
+                <p class="verification-detail">
+                  Bridge found current positive evidence that the corrected wording satisfies
+                  the original semantic obligation.
+                </p>
+              {:else if verificationStatus === "FAILED"}
+                <p class="verification-detail">
+                  Current evidence shows the semantic obligation this correction targeted is
+                  still not satisfied. Scripture has not been changed back and the proposal
+                  has not been reopened &mdash; what to do next is your decision.
+                </p>
+              {:else if verificationStatus === "UNCERTAIN"}
+                <p class="verification-detail">
+                  Bridge cannot establish either preservation or failure from current
+                  evidence. This does not mean the translation is wrong.
+                </p>
+              {:else}
+                <p class="verification-detail">
+                  Verification cannot be concluded yet. A correction is never verified by a
+                  finding disappearing.
+                </p>
+              {/if}
+
+              {#if verificationReasons.length}
+                <ul class="verification-reasons" data-verification-reasons>
+                  {#each verificationReasons as reason}
+                    <li><strong>{reason.code}</strong> &mdash; {reason.detail}</li>
+                  {/each}
+                </ul>
+              {/if}
+
+              {#if verificationEvidence}
+                <dl class="verification-evidence" data-verification-evidence>
+                  <dt>Source semantic reference</dt>
+                  <dd data-verification-source>
+                    {verificationEvidence.sourceReferences.join(", ") || "Unavailable"}
+                  </dd>
+                  <dt>Target realization</dt>
+                  <dd data-verification-target>
+                    {verificationEvidence.targetReferences.join(", ") || "Unavailable"}
+                  </dd>
+                  <dt>Affected dimension</dt>
+                  <dd>{verificationEvidence.failedCoverageDimension}</dd>
+                  {#each verificationEvidence.obligations as obligation}
+                    <dt>Current evidence</dt>
+                    <dd>
+                      {obligation.result} &middot; {obligation.reasonCodes.join(", ")}
+                      {#if obligation.cardinalities.length}
+                        <span class="muted"> &middot; {obligation.cardinalities.join(", ")}</span>
+                      {/if}
+                      {#if obligation.directRecheck}
+                        <span class="muted"> &middot; {obligation.directRecheck.explanation}</span>
+                      {/if}
+                    </dd>
+                  {/each}
+                  {#if verificationEvidence.recurringFindings.length}
+                    <dt>Current QA findings</dt>
+                    <dd>
+                      {verificationEvidence.recurringFindings.length} current finding(s) name
+                      the same obligation and dimension. Recurrence is evidence, not a verdict.
+                    </dd>
+                  {/if}
+                </dl>
+              {/if}
+
+              {#if verification && !verification.verificationCurrent && verification.verificationId}
+                <p class="boundary" data-verification-stale>
+                  This verification is no longer current for the present target text. It is
+                  retained as history; re-run affected analysis and verify again.
+                </p>
+              {/if}
+
+              {#if verification?.correctedAcknowledgement}
+                <p class="boundary" data-corrected-acknowledgement>
+                  Marked corrected by {verification.correctedAcknowledgement.acknowledgedBy}
+                  on {verification.correctedAcknowledgement.acknowledgedAt}.
+                  {#if !verification.correctedAcknowledgement.current}
+                    The text has changed since; the historical decision is retained and this
+                    finding may become reviewable again.
+                  {/if}
+                </p>
+              {/if}
+
+              <div class="buttons">
+                {#if mayVerify}
+                  <button
+                    type="button"
+                    class="apply"
+                    disabled={busy}
+                    data-verify-correction
+                    on:click={verifyCorrection}
+                  >{verification?.verificationId ? "Re-verify correction" : "Verify correction"}</button>
+                {/if}
+                {#if mayAcknowledge}
+                  <button
+                    type="button"
+                    class="apply"
+                    disabled={busy}
+                    data-mark-corrected
+                    on:click={() => (acknowledgeOpen = true)}
+                  >Mark correction as corrected</button>
+                {/if}
+              </div>
+              {#if !mayVerify && !verification?.verificationId}
+                <p class="boundary">
+                  Verification becomes available once the correction is applied and affected
+                  analysis has completed for the current text.
+                </p>
+              {:else if verificationStatus === "PASSED" && !mayAcknowledge && !verification?.correctedAcknowledgement}
+                <p class="boundary">
+                  Verification passed. Closing this QA issue still needs your explicit
+                  acknowledgement.
+                </p>
+              {/if}
+            </section>
           </div>
         {/if}
       </div>
+
+      {#if acknowledgeOpen && verification && verificationEvidence && application}
+        <div class="confirm-backdrop" role="presentation">
+          <section
+            class="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="corrected-title"
+            data-corrected-dialog
+          >
+            <h5 id="corrected-title">Mark this correction as corrected?</h5>
+            <p class="apply-warning">
+              This records your conclusion that the verified correction closes the QA issue.
+              It changes no Scripture, no alignment and no proposal. The original confirmed
+              issue and all its evidence are retained.
+            </p>
+            <dl>
+              <dt>Original issue</dt>
+              <dd>
+                {verificationEvidence.failedCoverageDimension}
+                &mdash; required &ldquo;{verificationEvidence.requiredMeaning || "not recorded"}&rdquo;,
+                observed &ldquo;{verificationEvidence.observedMeaning || "not recorded"}&rdquo;
+              </dd>
+              <dt>Correction applied</dt>
+              <dd>
+                {application.applicationId} &middot; {application.applicationState}
+                &middot; {selectedProposal?.proposedText ?? ""}
+              </dd>
+              <dt>Verification result</dt>
+              <dd>{verification.verificationStatus}</dd>
+              <dt>Source semantic reference</dt>
+              <dd>{verificationEvidence.sourceReferences.join(", ") || "Unavailable"}</dd>
+              <dt>Target realization</dt>
+              <dd>{verificationEvidence.targetReferences.join(", ") || "Unavailable"}</dd>
+              <dt>Affected dimension</dt>
+              <dd>{verificationEvidence.failedCoverageDimension}</dd>
+              <dt>Current supporting evidence</dt>
+              <dd>
+                <ul class="verification-reasons">
+                  {#each verificationReasons as reason}
+                    <li>{reason.detail}</li>
+                  {/each}
+                </ul>
+              </dd>
+            </dl>
+            <label for="corrected-note">Note <span class="muted">(optional)</span></label>
+            <textarea id="corrected-note" bind:value={acknowledgeNote} rows="2"></textarea>
+            <div class="buttons">
+              <button
+                type="button"
+                class="apply"
+                disabled={busy}
+                data-confirm-corrected
+                on:click={acknowledgeCorrected}
+              >{busy ? "Marking…" : "Mark corrected"}</button>
+              <button
+                type="button"
+                class="secondary"
+                disabled={busy}
+                on:click={() => (acknowledgeOpen = false)}
+              >Cancel</button>
+            </div>
+          </section>
+        </div>
+      {/if}
 
       {#if confirmationOpen && selectedProposal && selectedTarget && selectedSpan}
         <div class="confirm-backdrop" role="presentation">
@@ -956,6 +1227,12 @@
   .unavailable ul { margin-bottom: 0; padding-left: 1.2rem; }
   .boundary { margin-top: .35rem; }
   .affected-analysis { margin-top: .55rem; padding-top: .55rem; border-top: 1px solid #dbeafe; }
+  .verification { margin-top: .6rem; padding-top: .55rem; border-top: 1px solid #dbeafe; }
+  .verification-headline { margin-bottom: .25rem; font-weight: 650; font-size: var(--fs-md); }
+  .verification-detail { color: #374151; font-size: var(--fs-sm); }
+  .verification-reasons { margin: 0 0 .45rem; padding-left: 1.1rem; font-size: var(--fs-sm); }
+  .verification-reasons li { overflow-wrap: anywhere; }
+  .verification-evidence { margin-bottom: .45rem; }
   .affected-analysis dl, .relationship-truth { margin: 0 0 .45rem; }
   .confirm-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(15, 23, 42, .55); display: grid; place-items: center; padding: 1rem; pointer-events: auto; }
   .confirm-dialog { width: min(42rem, 100%); max-height: calc(100vh - 2rem); overflow-y: auto; background: #fff; border-radius: 8px; padding: 1rem; box-shadow: 0 20px 50px rgba(15,23,42,.35); }
