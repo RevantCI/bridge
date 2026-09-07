@@ -1,6 +1,16 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/svelte";
 
+const { decideVerse, editVerse, runVerseChecks } = vi.hoisted(() => ({
+  decideVerse: vi.fn(),
+  editVerse: vi.fn(),
+  runVerseChecks: vi.fn(),
+}));
+
+vi.mock("../../api/bridgeClient", () => ({
+  bridge: { decideVerse, editVerse, runVerseChecks },
+}));
+
 import VerseList from "../VerseList.svelte";
 import {
   chapterVerseNums,
@@ -8,6 +18,7 @@ import {
   verseTexts,
   findingsByVerse,
   checkStatusByVerse,
+  checkingProgress,
   alignmentStatusByVerse,
   nativeChecksByVerse,
   aiCheckReviewsByVerse,
@@ -60,6 +71,13 @@ function seed(text: string, findings: QaFinding[] = []): void {
   nativeChecksByVerse.set({});
   aiCheckReviewsByVerse.set({});
   selectedVerse.set(null);
+  checkingProgress.set({
+    running: false, percent: 0, label: "", jobId: "", state: "idle", error: "", scope: "chapter",
+  });
+  vi.clearAllMocks();
+  decideVerse.mockResolvedValue(undefined);
+  editVerse.mockResolvedValue({ issueResolutionsNeedingRecheck: 0 });
+  runVerseChecks.mockResolvedValue([]);
 }
 
 /** The one verse row seed() renders, addressed the way the component keys it. */
@@ -175,7 +193,7 @@ describe("VerseList footnote handling", () => {
     expect(marks).toContain(word);
   });
 
-  it("opens finding actions from an underlined span and keeps a missing fix disabled", async () => {
+  it("offers exactly the two actions the review panel offers", async () => {
     seed("alpha beta", [finding({
       start_offset: 0, end_offset: 5, original_text: "alpha", suggested_replacement: null,
     })]);
@@ -185,17 +203,62 @@ describe("VerseList footnote handling", () => {
     });
     expect(screen.getByRole("menu", { name: /Actions for Possible spelling issue/i }))
       .toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Apply proposed fix" })).toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: "Needs discussion" })).toBeEnabled();
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent))
+      .toEqual(["Accept finding", "Ignore"]);
+    // Both stay usable whether or not the check proposed a correction — the
+    // menu never changes height between findings.
+    for (const item of screen.getAllByRole("menuitem")) expect(item).toBeEnabled();
   });
 
-  it("enables apply when the underlined finding carries an exact replacement", async () => {
+  it("accepts without touching the verse when the check proposed no correction", async () => {
+    seed("alpha beta", [finding({
+      start_offset: 0, end_offset: 5, original_text: "alpha", suggested_replacement: null,
+    })]);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector("mark") as HTMLElement);
+    expect(screen.getByRole("menuitem", { name: "Accept finding" }))
+      .toHaveAttribute("title", expect.stringContaining("left alone"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Accept finding" }));
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "f1", "accepted");
+    expect(editVerse).not.toHaveBeenCalled();
+  });
+
+  it("applies the proposed correction as part of accepting", async () => {
     seed("alpha beta", [finding({
       start_offset: 0, end_offset: 5, original_text: "alpha", suggested_replacement: "omega",
     })]);
     render(VerseList, { props: { onSelect: vi.fn() } });
     await fireEvent.contextMenu(document.querySelector("mark") as HTMLElement);
-    expect(screen.getByRole("menuitem", { name: "Apply proposed fix" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Accept finding" }))
+      .toHaveAttribute("title", expect.stringContaining("proposed correction"));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Accept finding" }));
+    expect(editVerse).toHaveBeenCalledWith("1", "6", "omega beta");
+    expect(runVerseChecks).toHaveBeenCalledWith("1", "6", ["local", "greekroom"]);
+  });
+
+  it("does not accept a correction that could not be applied", async () => {
+    // original_text no longer matches the verse, so the fix is stale.
+    seed("alpha beta", [finding({
+      start_offset: 0, end_offset: 5, original_text: "moved", suggested_replacement: "omega",
+    })]);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector("mark") as HTMLElement);
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Accept finding" }));
+    expect(editVerse).not.toHaveBeenCalled();
+    expect(decideVerse).not.toHaveBeenCalled();
+    // Menu stays open with the reason, rather than silently filing a decision.
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("status").textContent).toMatch(/stale/i);
+  });
+
+  it("ignores a finding and drops its underline", async () => {
+    seed("alpha beta", [finding({ start_offset: 0, end_offset: 5, original_text: "alpha" })]);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector("mark") as HTMLElement);
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Ignore" }));
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "f1", "ignored");
+    expect(editVerse).not.toHaveBeenCalled();
+    expect(document.querySelector("mark")).toBeNull();
   });
 
   it("opens the same finding menu from the keyboard, with no pointer involved", async () => {
@@ -207,7 +270,7 @@ describe("VerseList footnote handling", () => {
     expect(row).toHaveAttribute("aria-keyshortcuts", "Shift+F10");
     await fireEvent.keyDown(row, { key: "F10", shiftKey: true });
     expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Apply proposed fix" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Accept finding" })).toBeEnabled();
   });
 
   it("also opens it with the dedicated Menu key", async () => {

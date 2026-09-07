@@ -15,7 +15,7 @@
   export let onSelect: (verse: string) => void;
 
   let openNotes: { kind: VerseNoteKind; notes: VerseNote[]; reference: string } | null = null;
-  let contextMenu: { finding: QaFinding; x: number; y: number } | null = null;
+  let contextMenu: { finding: QaFinding; verse: string; x: number; y: number } | null = null;
   let contextBusy = false;
   // Which underlined finding Left/Right last landed on, scoped to one verse
   // key so switching verses starts at that verse's first finding again.
@@ -24,33 +24,42 @@
   let contextNotice = "";
   let contextNoticeError = false;
 
+  /**
+   * The same two actions ReviewPanel offers on an open Greek Room finding
+   * ("Accept and edit" / "Ignore"), so the menu and the panel cannot disagree
+   * about what a reviewer can do to a finding.
+   *
+   * Accept folds the correction in rather than offering it separately: a fix
+   * a reviewer agrees with and the decision that follows from it are one act,
+   * and there is no apply item left stranded and greyed out on the many checks
+   * that propose no replacement. Each hint says which of the two things Accept
+   * is about to do.
+   *
+   * These write engine FindingStatus values. The QA review queue's
+   * REVIEWER_ACTIONS are a different model over a different data source, and
+   * its "Accept translation as correct" means the opposite of "Accept finding"
+   * here — see the hints, and USER_MANUAL.md §6.4.
+   */
   $: contextActions = contextMenu ? [
     {
-      id: "apply",
-      label: "Apply proposed fix",
-      disabled: contextBusy || contextMenu.finding.suggested_replacement === null
-        || contextMenu.finding.start_offset === null || contextMenu.finding.end_offset === null,
-      title: contextMenu.finding.suggested_replacement === null
-        ? "No proposed fix is available for this finding." : undefined,
-    },
-    // Hints, not renames: these three write engine FindingStatus values, which
-    // the review panel already labels "Accepted"/"Ignored". The QA review
-    // queue's REVIEWER_ACTIONS are a different model over a different data
-    // source and its "Accept translation as correct" means the opposite of
-    // "Accept finding" here, so each item spells out which way it points.
-    {
-      id: "decide:accepted", label: "Accept finding", disabled: contextBusy, separatorBefore: true,
-      title: "This finding is a real issue in the translation.",
+      id: "accept",
+      label: "Accept finding",
+      disabled: contextBusy,
+      title: hasProposedFix(contextMenu.finding)
+        ? "Replace the highlighted words with the proposed correction, re-check the verse, and file this finding as accepted."
+        : "File this finding as accepted. This check proposed no correction, so the verse text is left alone.",
     },
     {
-      id: "decide:rejected", label: "Reject finding", disabled: contextBusy,
-      title: "Bridge should not have raised this — a false positive.",
-    },
-    {
-      id: "decide:needs_discussion", label: "Needs discussion", disabled: contextBusy,
-      title: "Defer this for the team to decide.",
+      id: "ignore",
+      label: "Ignore",
+      disabled: contextBusy,
+      title: "Leave the verse as it is and move this finding to Ignored in the review panel.",
     },
   ] : [];
+
+  const hasProposedFix = (finding: QaFinding): boolean =>
+    finding.suggested_replacement !== null
+      && finding.start_offset !== null && finding.end_offset !== null;
 
   const markerLabel = (kind: VerseNoteKind): string => (kind === "footnote" ? "f" : "x");
   const markerTitle = (kind: VerseNoteKind): string =>
@@ -69,7 +78,7 @@
     event.preventDefault();
     event.stopPropagation();
     onSelect(verse);
-    contextMenu = { finding, x: event.clientX, y: event.clientY };
+    contextMenu = { finding, verse, x: event.clientX, y: event.clientY };
   }
 
   /**
@@ -135,28 +144,35 @@
     const row = event.currentTarget as HTMLElement;
     const anchor = row.querySelector<HTMLElement>(`[data-finding-ids~="${findingIds[index]}"]`) ?? row;
     const rect = anchor.getBoundingClientRect();
-    contextMenu = { finding, x: rect.left, y: rect.bottom };
+    contextMenu = { finding, verse, x: rect.left, y: rect.bottom };
   }
 
   async function onContextAction(event: CustomEvent<{ id: string }>): Promise<void> {
     if (!contextMenu || contextBusy) return;
-    const finding = contextMenu.finding;
+    const { finding, verse } = contextMenu;
     contextBusy = true;
     contextNotice = "";
     try {
-      if (event.detail.id === "apply") {
+      if (event.detail.id === "accept" && hasProposedFix(finding)) {
+        // applySuggestedFindingFix records the accept itself: it hands the
+        // finding id to the save hook ReviewPanel registers, which files it as
+        // accepted once the re-check lands. A fix that could not be applied is
+        // NOT then quietly accepted — the reviewer sees why and the menu stays
+        // open so they can choose again.
         const result = await applySuggestedFindingFix(finding);
         contextNotice = result.message;
         contextNoticeError = !result.ok;
         if (result.ok) contextMenu = null;
-      } else if (event.detail.id.startsWith("decide:")) {
+      } else if (event.detail.id === "accept" || event.detail.id === "ignore") {
+        const accepted = event.detail.id === "accept";
+        // $currentChapter and the verse the menu was opened on, not
+        // finding.chapter/finding.verse: those are numeric anchors, so a verse
+        // bridge ("3-4") would file the decision under "3" and miss the store
+        // entry. ReviewPanel keys its own decisions the same way this does.
         await decideLocalFinding(
-          String(finding.chapter),
-          String(finding.verse),
-          finding.id,
-          event.detail.id.slice("decide:".length) as "accepted" | "rejected" | "needs_discussion",
+          $currentChapter, verse, finding.id, accepted ? "accepted" : "ignored",
         );
-        contextNotice = "Decision recorded.";
+        contextNotice = accepted ? "Finding accepted." : "Finding ignored.";
         contextNoticeError = false;
         contextMenu = null;
       }

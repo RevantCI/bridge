@@ -78,9 +78,10 @@ describe("accessibility", () => {
     expect(screen.getByRole("rowheader", { name: "QUANTITY" })).toBeInTheDocument();
   });
 
-  it("reaches apply-fix in the verse editor without a pointer", async () => {
-    // The review panel has no apply-fix control, so the finding context menu is
-    // the only route to it. Right-click alone would make it pointer-only.
+  it("reaches the fix-applying accept in the verse editor without a pointer", async () => {
+    // "Accept finding" is the only route to a proposed correction — the review
+    // panel has no apply-fix control — so right-click alone would make
+    // applying a fix a pointer-only action.
     const spanned: QaFinding = {
       id: "f1", project_id: "p1", book: "php", chapter: 1, verse: 6,
       start_offset: 0, end_offset: 5, original_text: "alpha",
@@ -104,9 +105,11 @@ describe("accessibility", () => {
     const row = document.querySelector('[data-verse-key="1:6"]') as HTMLElement;
     expect(row).toHaveAttribute("aria-keyshortcuts", "Shift+F10");
     await fireEvent.keyDown(row, { key: "F10", shiftKey: true });
-    expect(screen.getByRole("menuitem", { name: "Apply proposed fix" })).toBeEnabled();
+    const accept = screen.getByRole("menuitem", { name: "Accept finding" });
+    expect(accept).toBeEnabled();
+    expect(accept).toHaveAttribute("title", expect.stringContaining("proposed correction"));
     // Focus lands inside the menu, so the action is operable from there.
-    expect(document.activeElement).toBe(screen.getByRole("menuitem", { name: "Apply proposed fix" }));
+    expect(document.activeElement).toBe(accept);
   });
 
   it("uses a heading hierarchy the reviewer can navigate by", () => {
