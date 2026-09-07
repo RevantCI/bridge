@@ -52,6 +52,7 @@ from typing import Any
 
 from .models import VerseAlignment
 from .tc_project import TranslationCoreProject, _read_json
+from .triage import persisted_findings, triage_hash
 
 
 REPORT_SCHEMA_VERSION = 1
@@ -296,6 +297,13 @@ class _BookReportBuilder:
             "decidedAt": "",
             "note": "",
             "selection": "",
+            # Key into the book's AI-triage store, for rows that carry a
+            # persisted QaFinding. Empty for tN/tW/alignment/AI-review rows,
+            # which are workflow state rather than checker output and are
+            # never triaged. Computed here (cheap, deterministic, no I/O) so
+            # the report screen can merge triage.results by dict lookup
+            # without the report itself depending on triage having run.
+            "triageHash": "",
         }
         row.update(fields)
         row["reference"] = row["reference"] or self._reference(row["chapter"], row["verse"])
@@ -315,25 +323,13 @@ class _BookReportBuilder:
 
     def _persisted_findings(self) -> dict[tuple[str, str], dict[str, dict[str, Any]]]:
         """{(chapter, verse): {finding id: finding dict}} from the chapter
-        snapshots, then whatever the whole-book USFM/Names cache adds. The
-        snapshot wins on a shared id (it carries the verse key the job used,
-        which keeps bridged verses like '3-4' intact)."""
-        by_verse: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
-        for chapter in self.verses_by_chapter:
-            snapshot = self.project.load_check_findings_snapshot(chapter)
-            for verse, findings in snapshot.items():
-                bucket = by_verse.setdefault((chapter, str(verse)), {})
-                for finding in findings or []:
-                    if isinstance(finding, dict) and finding.get("id"):
-                        bucket.setdefault(str(finding["id"]), finding)
-        cache = self.project.load_check_cache()
-        for section in ("wildebeest", "usfm", "names"):
-            for finding in (cache.get(section) or {}).get("findings", []) or []:
-                if not isinstance(finding, dict) or not finding.get("id"):
-                    continue
-                key = (str(finding.get("chapter", "")), str(finding.get("verse", "")))
-                by_verse.setdefault(key, {}).setdefault(str(finding["id"]), finding)
-        return by_verse
+        snapshots, then whatever the whole-book USFM/Names cache adds.
+
+        Lives in triage.py so the report and the AI-triage worker enumerate
+        findings through one code path — if they diverged, triage would buy
+        verdicts for rows the report never shows, or leave shown rows
+        permanently untriaged."""
+        return persisted_findings(self.project, self.verses_by_chapter)
 
     @staticmethod
     def _finding_category(finding: dict[str, Any]) -> str:
@@ -376,6 +372,11 @@ class _BookReportBuilder:
                     fixedByDetail="reviewer" if resolved else "",
                     note=str(finding.get("human_comment") or ""),
                 )
+                if category == CATEGORY_GREEK_ROOM:
+                    fields["triageHash"] = triage_hash(
+                        book=self.book_id, chapter=chapter, verse=verse,
+                        check_type=check_type, finding=finding,
+                    )
                 fields.update(self._decision_fields(chapter, verse, finding_id))
                 self.rows.append(self._row(**fields))
 
