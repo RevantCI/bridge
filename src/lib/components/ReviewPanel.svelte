@@ -101,22 +101,9 @@
   let aiFailedResults: Array<{ chapter: string; verse: string; error: string | null }> = [];
   let translationHelpsReview: TranslationHelpsReview;
 
-  export let onAIBusyChange: (busy: boolean) => void = () => {};
-  export function startChapterAIReview(): void {
-    void startAIReview("chapter");
-  }
-  export function startBookAIReview(): void {
-    void startAIReview("book");
-  }
 
   $: currentReviewReference = `${$project?.path ?? ""}::${$selectedVerse ? verseKey($currentChapter, $selectedVerse) : ""}`;
   $: aiJobBusy = isAIReviewJobActive(aiJob);
-  // The chapter-scope run is a navigation-level action, so its button now
-  // lives in the top bar -- but the job machinery (polling, result
-  // hydration, the Translation-helps refresh) stays here with the per-verse
-  // state it feeds. App reaches it through these two, rather than the whole
-  // orchestration being lifted into a store it does not otherwise need.
-  $: onAIBusyChange(aiJobBusy);
   // Mirrors exactly what .panel-pinned renders. Without it the block shows
   // as an empty padded strip with a rule under it whenever the verse is
   // idle, which is most of the time now the AI status has moved to its tab.
@@ -629,13 +616,33 @@
         </div>
       {:else if activeTab === "ai"}
         <div class="tab-panel" role="tabpanel">
+          <!-- All three scopes together, so the choice is one row and the
+               progress/errors for whichever ran sit directly under it.
+               Chapter and Book only wait on a background check and a running
+               job; Verse additionally waits on the verse-edit lifecycle,
+               because it is the scope an open editor would conflict with. -->
           <div class="ai-run-row">
-            <button
-              class="ai-explain-btn"
-              on:click={() => startAIReview("verse")}
-              disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey) || aiJobBusy}
-              title="Run an evidence-grounded AI review for this verse in the background"
-            >🤖 Run AI review for this verse</button>
+            <span class="ai-run-label">🤖 AI review:</span>
+            <div class="ai-run-buttons">
+              <button
+                class="ai-scope-btn"
+                on:click={() => startAIReview("chapter")}
+                disabled={$checkingProgress.running || aiJobBusy}
+                title="Run an evidence-grounded AI review across every verse in this chapter"
+              >Chapter</button>
+              <button
+                class="ai-scope-btn"
+                on:click={() => startAIReview("book")}
+                disabled={$checkingProgress.running || aiJobBusy}
+                title="Run an evidence-grounded AI review across every verse in this book"
+              >Book</button>
+              <button
+                class="ai-scope-btn"
+                on:click={() => startAIReview("verse")}
+                disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey) || aiJobBusy}
+                title="Run an evidence-grounded AI review for this verse in the background"
+              >Verse</button>
+            </div>
           </div>
         {#if visibleAIJob || aiJobBusy || visibleAIExplainError}
         <div class="section ai-review-controls">
@@ -810,9 +817,11 @@
   .verse-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }
   .edit-btn { padding: 8px 10px; font-size: var(--fs-xs); font-weight: 700; border-radius: 7px; border: none; background: var(--accent-bg); color: var(--accent); cursor: pointer; white-space: nowrap; }
   .align-btn { padding: 8px 10px; font-size: var(--fs-xs); font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; white-space: nowrap; }
-  .ai-run-row { margin-bottom: 12px; }
-  .ai-explain-btn { width: 100%; padding: 9px; font-size: var(--fs-sm); font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; white-space: nowrap; }
-  .edit-btn:disabled, .align-btn:disabled, .ai-explain-btn:disabled { opacity: .55; cursor: not-allowed; }
+  .ai-run-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .ai-run-label { font-size: var(--fs-sm); font-weight: 700; color: var(--text); white-space: nowrap; }
+  .ai-run-buttons { display: flex; gap: 6px; margin-left: auto; }
+  .ai-scope-btn { padding: 7px 12px; font-size: var(--fs-xs); font-weight: 700; border-radius: 7px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--accent); cursor: pointer; white-space: nowrap; }
+  .edit-btn:disabled, .align-btn:disabled, .ai-scope-btn:disabled { opacity: .55; cursor: not-allowed; }
   .empty-panel { padding: 24px 16px; font-size: var(--fs-sm); color: var(--text-3); }
   .ai-explain-section { border-color: var(--accent); }
   .ai-cost { margin-left: auto; font-size: var(--fs-2xs); font-weight: 400; color: var(--text-3); }
