@@ -445,10 +445,10 @@
 
       <!-- The "Automatic AI review" panel is gone: "This verse" is the AI
            review button in the action row above, and "Chapter" is now in the
-           top bar. Only the whole-book run is left here, pending its move to
-           the project details page. The job status below stays regardless of
-           where a run is started from -- it is the only place a running
-           review can be watched, cancelled or retried. -->
+           top bar. The whole-book run stays here by decision: it is the one
+           scope with no natural home elsewhere, and it belongs beside the job
+           status below, which is the only place a running review can be
+           watched, cancelled or retried, wherever it was started from. -->
       <div class="section ai-review-controls">
         <div class="ai-scope-actions">
           <button on:click={() => startAIReview("book")} disabled={$checkingProgress.running || aiJobBusy}>🤖 AI review: whole book</button>
@@ -803,7 +803,7 @@
   .ai-error { font-size: var(--fs-sm); color: var(--danger); line-height: 1.5; margin: 0; }
   .ai-suggestion { font-size: var(--fs-xs); color: var(--accent); margin: -4px 0 8px; }
   .ai-review-controls { border-color: var(--accent); }
-  .ai-scope-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; }
+  .ai-scope-actions { display: grid; grid-template-columns: 1fr; gap: 5px; }
   .ai-scope-actions button, .ai-job-actions button { padding: 6px; font-size: var(--fs-2xs); font-weight: 700; border-radius: 6px; border: 1px solid var(--border-strong); color: var(--accent); background: var(--surface); cursor: pointer; }
   .ai-scope-actions button:disabled, .ai-job-actions button:disabled { opacity: .55; cursor: not-allowed; }
   .ai-job-status { margin-top: 9px; padding: 8px; border-radius: 7px; color: var(--accent); background: var(--accent-bg); }
