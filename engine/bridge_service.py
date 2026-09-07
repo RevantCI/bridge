@@ -1123,11 +1123,15 @@ class BridgeEngine:
 
         books = self._triage_books(book)
         if not books:
+            # Not "no findings" — a book that has been opened but never
+            # checked is still a valid target; the run simply finds nothing
+            # and succeeds. This is the narrower case of nothing to look at.
             return {
                 "state": "unavailable",
                 "message": (
-                    "No opened books in this collection have findings to triage. "
-                    "Run checks first."
+                    f"No opened book '{book}' in this collection." if book else
+                    "No books in this collection have been opened yet, so there is "
+                    "nothing to triage. Open a book and run checks first."
                 ),
                 "jobId": "",
                 "totalBooks": 0,

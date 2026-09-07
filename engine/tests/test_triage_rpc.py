@@ -113,14 +113,29 @@ def test_triage_results_reports_availability_and_stays_empty_before_any_run(fixt
     assert result["running"] is False
 
 
-def test_triage_run_reports_unavailable_when_no_book_has_findings(fixture_project, monkeypatch):
+def test_a_book_with_no_findings_runs_and_succeeds_with_nothing_to_do(fixture_project, monkeypatch):
+    """An opened but unchecked book is a valid target: the run finds nothing
+    and succeeds, rather than reporting a problem the reviewer must act on."""
+    client = StubClient()
+    engine = _open(fixture_project, client, monkeypatch)
+
+    snapshot = _run(engine)
+
+    assert snapshot["state"] == "succeeded"
+    assert snapshot["triaged"] == 0
+    assert client.calls == 0
+    assert call(engine, "triage.results")["result"]["entries"] == {}
+
+
+def test_a_book_filter_naming_nothing_is_unavailable_not_a_crash(fixture_project, monkeypatch):
+    _plant(fixture_project, [_finding()])
     engine = _open(fixture_project, StubClient(), monkeypatch)
-    result = call(engine, "triage.run")["result"]
-    # No findings were ever planted, but the book is open — the run is
-    # pointless rather than broken, and says so.
-    assert result["state"] in {"unavailable", "queued", "running", "succeeded"}
-    if result["state"] == "unavailable":
-        assert "findings" in result["message"].lower()
+
+    result = call(engine, "triage.run", {"book": "hab"})["result"]
+
+    assert result["state"] == "unavailable"
+    assert "hab" in result["message"]
+    assert result["jobId"] == ""
 
 
 # -- the run --------------------------------------------------------------
