@@ -1,4 +1,4 @@
-# Build log: Bridge v0.8.0-beta.14
+# Build log: Bridge v0.8.0-beta.15
 
 Updated: 2026-09-07
 
@@ -4138,3 +4138,53 @@ git diff --check                         passed; line-ending notices only
 Stage 9B.4 remains forbidden without explicit approval. In particular, Stage
 9B.3c never changes verification from PENDING, never writes CORRECTED, and
 never treats disappearance of a current finding as proof of correction.
+
+## Beta 15 — Stage 9B.3c responsive QA review acceptance fix (2026-09-07)
+
+Installed acceptance showed the full `QaFindingDetail` decision footer
+obscuring evidence, especially around 1366×500 and shorter content areas. The
+root cause was `position: sticky; bottom: 0` on the entire decision form inside
+the detail scroller. Its textarea, optional promotion control, explanatory
+copy and wrapped action buttons occupied a large sticky layer. Correction
+Review also imposed a nested 24/19rem scrolling region with sticky actions.
+
+The detail pane is now the single vertical scroll owner. Evidence and history
+come first, the complete decision form follows in normal flow, and Correction
+Review follows the decision. Correction evidence/actions and draft editing
+also use normal flow; only the independent confirmation modal keeps a bounded
+scroll. Text containers remain width-constrained/wrapping and the detail pane
+clips horizontal overflow. No decision, correction, affected-analysis, QA, or
+verification semantics changed.
+
+Automated layout coverage renders long Tamil text and long resource evidence
+at 1920×760, 1366×768, 1366×500, 1550×350, and 820×768. It asserts all evidence
+headings remain present in review order, History/decision/Correction remain
+reachable, decision and correction actions are non-sticky, one vertical
+scroll owner is used, keyboard focus advances normally, and horizontal
+overflow is contained.
+
+All active build metadata is now `0.8.0-beta.15`, including npm lock metadata,
+Cargo lock metadata, Tauri config, Python package/engine identity, Greek Room,
+project-import generator metadata, provider user-agent and frozen smoke
+expectations. Frozen `engine.info` and the installed sidecar both report Beta
+15. The broad sidecar smoke continues to stop at the already documented
+duplicate-import classification mismatch (`exactDuplicate` expected versus
+`possibleDuplicate` returned); it passed its version gate before that point.
+
+```text
+Focused QA/correction/layout frontend    65 passed / 3 files
+Full frontend                           242 passed / 23 files
+npm run check                            0 errors / 0 warnings
+npm run build                            passed; existing >500 kB warning
+cargo test                                7 passed
+cargo check                              passed
+Tauri release + NSIS                    passed
+Installed application version           0.8.0-beta.15
+git diff --check                         passed; line-ending notices only
+```
+
+Installer:
+`src-tauri/target/release/bundle/nsis/Bridge_0.8.0-beta.15_x64-setup.exe`
+(55,732,149 bytes; SHA-256
+`EF666F73475D4609D53B9F9D22AD4BF7A651F7D279584DA130D0254C93DF8DAD`).
+Stage 9B.3c installed acceptance may resume. Stage 9B.4 remains unauthorized.

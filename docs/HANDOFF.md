@@ -2017,6 +2017,34 @@ Stage 9B.4 may define positive semantic verification (`PASSED`, `FAILED`, or
 do not infer verification from finding disappearance, mark the finding
 CORRECTED, change export behavior, or automatically approve Word Alignment.
 
+## Stage 9B.3c installed-acceptance responsive fix (Beta 15)
+
+Installed acceptance exposed a QA-detail layout defect: the complete **Your
+decision** form was sticky at the bottom of the same pane that scrolled the
+evidence, so its textarea, promotion checkbox, explanation, and buttons
+covered evidence on short windows. Correction Review compounded the issue
+with a capped nested scroller and its own sticky action region.
+
+The QA detail now has one vertical scroll owner and normal document order:
+Source/Location/Meaning/Coverage/Resources/What this means/History, then Your
+decision, then Correction Review. Both complete action regions participate in
+normal flow; the correction evidence and draft form no longer create capped
+nested scroll areas. The application confirmation modal retains its bounded
+modal scroll, which is independent and intentional. No QA, correction, or
+Stage 9B.3c semantics changed.
+
+Responsive regressions cover 1920×760, 1366×768, 1366×500, 1550×350, and
+820×768 with long Tamil/source and resource evidence, section ordering,
+history/correction/action reachability, keyboard traversal, one scroll owner,
+and horizontal-overflow containment.
+
+Beta 15 metadata is synchronized across npm, Cargo/Tauri, Python/Greek Room,
+import metadata, API user-agent and frozen-sidecar checks. The installed app,
+release executable, and NSIS installer report `0.8.0-beta.15`. The exact
+installer is `src-tauri/target/release/bundle/nsis/Bridge_0.8.0-beta.15_x64-setup.exe`.
+The responsive installed-acceptance workflow can resume; Stage 9B.4 remains
+unauthorized.
+
 ---
 
 # 38. Export Architecture (Planned, Post-Stage-9)
