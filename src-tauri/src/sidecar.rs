@@ -34,6 +34,56 @@ pub struct LogEntry {
 
 const LOG_CAPACITY: usize = 400;
 
+/// How long the sidecar gets to notice its stdin closed and exit on its own
+/// before it is forced. It only reaches the `for line in sys.stdin` loop
+/// between requests, so this is deliberately short: the window is already
+/// gone by the time RunEvent::Exit fires, and a user closing the app should
+/// not wait on a check that is still running.
+const GRACEFUL_EXIT_WAIT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Force-terminate the sidecar and everything under it. Returns whether a
+/// process actually had to be killed, so a clean stdin-close exit can be told
+/// apart from a forced one in the log.
+///
+/// This kills the *tree* on purpose. A PyInstaller onefile binary is a
+/// bootloader process that spawns the real Python interpreter as a child, and
+/// terminating the bootloader alone leaves that child running — still holding
+/// an open handle on bridge-engine.exe. That is the orphan state that makes
+/// the next `tauri dev` fail inside tauri-build with a bare
+/// `PermissionDenied: Access is denied.` while it tries to refresh the copy of
+/// that executable under target/.
+#[cfg(windows)]
+fn kill_process_tree(pid: u32) -> bool {
+    use std::os::windows::process::CommandExt;
+    // CREATE_NO_WINDOW: a release build is windows_subsystem = "windows" and
+    // has no console, so spawning taskkill would flash one up as the app dies.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        // A non-zero status here is the *expected* result of a clean exit:
+        // taskkill fails because the pid is already gone.
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// UNVERIFIED: Windows is the only target this project has actually run on.
+/// PyInstaller's POSIX bootloader forwards signals to its child, so signalling
+/// the pid we spawned should be enough without a tree walk.
+#[cfg(not(windows))]
+fn kill_process_tree(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -110,6 +160,10 @@ pub struct EngineSidecar {
     generation: Arc<AtomicU64>,
     log: LogBuffer,
     started_once: Arc<AtomicBool>,
+    /// Set by shutdown() before stdin is closed, so the reader task can tell
+    /// an expected exit from a crash. Without it every clean app close files
+    /// an "error" in the diagnostics panel.
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl EngineSidecar {
@@ -122,6 +176,7 @@ impl EngineSidecar {
             generation: Arc::new(AtomicU64::new(0)),
             log: Arc::new(Mutex::new(VecDeque::new())),
             started_once: Arc::new(AtomicBool::new(false)),
+            shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -132,6 +187,44 @@ impl EngineSidecar {
         let buf = self.log.lock().await;
         let skip = buf.len().saturating_sub(limit);
         buf.iter().skip(skip).cloned().collect()
+    }
+
+    /// Stop the sidecar as the app exits. Synchronous, and called from the
+    /// RunEvent::Exit handler on the main thread — there is no async runtime
+    /// left to await on by then.
+    ///
+    /// **Closing stdin is the mechanism, not killing.** `run_stdio_loop`
+    /// iterates `for line in sys.stdin`, so EOF ends the loop and Python
+    /// returns from main on its own, which also lets the PyInstaller
+    /// bootloader delete its own _MEI temp directory — a forced kill leaks one
+    /// per run. Dropping `CommandChild` drops the `stdin_writer` it owns, and
+    /// that is what closes the pipe; there is no explicit close in the API.
+    ///
+    /// Before this existed nothing ever stopped the sidecar: the process is
+    /// designed to stay alive for the whole session and `CommandChild` was
+    /// simply dropped with the app, so every Ctrl+C'd `tauri dev` left a live
+    /// bridge-engine.exe behind. See `kill_process_tree` for why the backstop
+    /// has to take the children too.
+    pub fn shutdown(&self, app: &AppHandle) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+        let Some(child) = self.child.blocking_lock().take() else {
+            return;
+        };
+        let pid = child.pid();
+        drop(child);
+        std::thread::sleep(GRACEFUL_EXIT_WAIT);
+        let forced = kill_process_tree(pid);
+        // record_log is async and emits to a frontend that no longer exists;
+        // append straight to the log file instead, which is the copy that
+        // survives the process anyway.
+        append_log_file(app, &LogEntry {
+            ts_ms: now_ms(),
+            level: "info".to_string(),
+            message: format!(
+                "Sidecar stopped on app exit (pid {pid}, {})",
+                if forced { "forced after the grace period" } else { "exited on stdin close" },
+            ),
+        });
     }
 
     /// Spawn the sidecar binary and start the background reader task that
@@ -192,6 +285,7 @@ impl EngineSidecar {
         let child_slot = self.child.clone();
         let generation = self.generation.clone();
         let log = self.log.clone();
+        let shutting_down = self.shutting_down.clone();
         let app_for_reader = app.clone();
         tauri::async_runtime::spawn(async move {
             while let Some(event) = rx.recv().await {
@@ -228,9 +322,17 @@ impl EngineSidecar {
                     }
                     CommandEvent::Terminated(payload) => {
                         eprintln!("[bridge-engine] terminated: {:?}", payload);
+                        // An exit during shutdown is the point of shutdown, not
+                        // a fault to raise in the diagnostics panel.
+                        let expected = shutting_down.load(Ordering::SeqCst);
                         record_log(
-                            &log, &app_for_reader, "error",
-                            format!("Sidecar process terminated: {:?}", payload),
+                            &log, &app_for_reader,
+                            if expected { "info" } else { "error" },
+                            if expected {
+                                format!("Sidecar exited during shutdown: {:?}", payload)
+                            } else {
+                                format!("Sidecar process terminated: {:?}", payload)
+                            },
                         ).await;
                         break;
                     }
@@ -322,6 +424,51 @@ impl EngineSidecar {
 #[cfg(test)]
 mod tests {
     use super::request_timeout_seconds;
+
+    /// The shutdown path's forced backstop, exercised against real processes.
+    /// Only on Windows: it is the sole target this project has run on, and the
+    /// POSIX branch is marked unverified for that reason.
+    #[cfg(windows)]
+    mod kill_process_tree {
+        use super::super::kill_process_tree;
+        use std::process::{Command, Stdio};
+
+        fn sleeper() -> std::process::Child {
+            // cmd.exe runs ping.exe as a separate child, which is the same
+            // two-process shape PyInstaller's bootloader makes — and the shape
+            // CommandChild::kill() only ever took the first half of.
+            // ping, not timeout: timeout.exe aborts immediately when stdin is
+            // redirected, so the "process" would already be dead on arrival.
+            Command::new("cmd")
+                .args(["/c", "ping -n 30 127.0.0.1"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn a throwaway process to kill")
+        }
+
+        #[test]
+        fn reports_true_and_terminates_a_live_process() {
+            let mut child = sleeper();
+            assert!(kill_process_tree(child.id()), "taskkill should report success");
+            // wait() returning at all proves it died rather than sleeping 30s.
+            let status = child.wait().expect("reap the killed process");
+            assert!(!status.success(), "a terminated process must not exit cleanly");
+        }
+
+        #[test]
+        fn reports_false_once_the_process_is_already_gone() {
+            // This is the expected result of a clean stdin-close exit, and it
+            // is what shutdown() logs as "exited on stdin close" — so getting
+            // it backwards would quietly mislabel every normal shutdown.
+            let mut child = sleeper();
+            let pid = child.id();
+            assert!(kill_process_tree(pid));
+            let _ = child.wait();
+            assert!(!kill_process_tree(pid), "a dead pid has nothing to kill");
+        }
+    }
 
     #[test]
     fn large_project_discovery_and_inspection_have_bounded_headroom() {

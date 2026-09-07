@@ -162,6 +162,17 @@ fn main() {
             commands::export_aligned,
             commands::export_non_aligned,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running translationCore AI Bridge");
+        .build(tauri::generate_context!())
+        .expect("error while running translationCore AI Bridge")
+        // The sidecar is built to outlive any single request and nothing used
+        // to stop it, so every closed window (and every Ctrl+C'd `tauri dev`)
+        // left a bridge-engine.exe running. Besides the stray process, it kept
+        // an open handle on the executable, which made the *next* build fail
+        // inside tauri-build with a bare "Access is denied" as it tried to
+        // refresh target/'s copy of that binary.
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<EngineSidecar>().shutdown(app);
+            }
+        });
 }
