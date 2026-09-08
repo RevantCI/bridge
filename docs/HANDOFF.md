@@ -2629,6 +2629,79 @@ visualization, and unrelated v1 UI work. Do not release.
 
 ---
 
+# 37.9 Stage 9B.4 Installed-Acceptance Preparation (Bridge 0.9.4 candidate, 2026-09-08)
+
+**Not released.** 0.9.4 is the installed-acceptance candidate. Companion schema
+stays **v14**; verification policy stays `correction-verification-policy-v2`.
+
+Driving the 9B.4 flow end to end outside its own unit fixtures for the first
+time broke it in three places.
+
+1. **The correction review UI could never offer a span.**
+   `semantic_location_relationship()` selected `run_id`, validated the run with
+   it, then returned only `payload_json`. `review_context` skips any location
+   without a `runId`, so `candidateSpans` and the candidate `alternatives` list
+   were always empty. Every 9B test builds its `CorrectionIntent` directly, so
+   nothing caught it. Fixed in the reader.
+2. **Every affected re-analysis died.** `save_coverage_account` was a bare
+   `INSERT` against a content-addressed id that is deliberately stable across
+   runs, so re-analysis over the affected range collided on the unchanged
+   verses' accounts and Stage 8 failed with `FoundationConflict`. BUILD_LOG had
+   this recorded as a version-bump-only problem; in fact **nothing but the
+   Scripture edit was needed** to trigger it, so the ordinary post-correction
+   path had never worked. Re-seeding an identical account is now a no-op that
+   preserves the stored row's coverage status, finding link and review status;
+   a genuine identity difference still conflicts. The target-support pass now
+   reads the stored revision like the source-coverage pass already did.
+3. **A cross-language PASSED is unreachable in 0.9.4** — an open product gap,
+   not fixed. PASSED needs Stage 6B to positively re-locate the corrected
+   obligation. No production embedding provider ships; the embedding cache is
+   skipped when the provider is unavailable; and nothing in the running app
+   ever writes `lexical_groups`, so the human-precedent signal is always empty.
+   The remaining evidence sums to about 0.19 against a 0.36 threshold. The
+   verifier correctly answers `UNCERTAIN` with `PROVIDER_LIMITED` rather than
+   claiming a success it cannot demonstrate.
+
+## The acceptance package
+
+`python scripts/seed_correction_acceptance.py <dest>` builds three projects;
+`docs/STAGE_9B4_ACCEPTANCE.md` is the click-by-click script.
+
+```text
+A  PASSED     controlled verification fixture   DIMENSION_PRESERVED, COVERAGE_COVERED
+B  FAILED     controlled verification fixture   DIMENSION_CONTRADICTED
+C  UNCERTAIN  REAL Stage 5->6A->6B->7->8        COVERAGE_POSSIBLY_MISSING, PROVIDER_LIMITED
+```
+
+Only C is production end-to-end and the document says so plainly. C is the
+canonical cross-verse case: a naturally emitted `QUANTITY_PROBLEM` whose source
+obligation is `pas` at PHP 1:3 and whose realization is "some" at PHP 1:6, left
+`UNRESOLVED`/`AI_PROPOSED` for the tester. A and B reuse the Stage 9B.4 tests'
+own controlled-evidence builders so fixture and test cannot drift.
+
+`scripts/inspect_correction_application.py` gained a read-only Word Alignment
+block so acceptance can show that verification neither approves nor rebuilds an
+alignment.
+
+## Known, pre-existing, not caused by this work
+
+`scripts/smoke_sidecars.py` fails its duplicate-classification step
+(`possibleDuplicate` where it expects `exactDuplicate`). `_source_fingerprint`
+falls back to a whole-tree hash and compares it against the value stored at
+registration, but opening a project writes into that tree. Reproduced from
+source with the 0.9.4 generator-metadata line reverted to 0.9.3: byte-identical
+behaviour, so this work is not implicated. Left unfixed; it is not on the
+acceptance path.
+
+## Next boundary
+
+Do **not** release 0.9.4. The Tamil Stage 7 normalization defect,
+REFERENT/PARTICIPANT/TEMPORAL pipeline coverage, correction-history timestamp
+ordering, cross-verse visualization and broader v1 stabilization all remain
+unauthorized. The PASSED product gap above needs its own scope.
+
+---
+
 # 38. Export Architecture (Planned, Post-Stage-9)
 
 The rich Bridge model is authoritative. Do not force passage-aware semantic

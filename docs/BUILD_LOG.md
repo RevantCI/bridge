@@ -1,4 +1,4 @@
-# Build log: Bridge v0.9.3
+# Build log: Bridge v0.9.4
 
 Updated: 2026-09-07
 
@@ -5762,3 +5762,175 @@ Companion database schema unchanged (**v14**) — both records are stored as
 `payload_json`, so the new field needed no column and no migration.
 Verification policy unchanged (`correction-verification-policy-v2`). Version
 unchanged (**0.9.3**); nothing released.
+
+# Stage 9B.4 installed-acceptance preparation, and three defects it exposed (2026-09-08)
+
+Bridge **0.9.4**, prepared as the installed-acceptance candidate. **Not
+released.** Companion schema stays **v14**; verification policy stays
+`correction-verification-policy-v2`.
+
+Preparing the acceptance turned out to be the first time the Stage 9B.4 flow
+had ever been driven end to end outside its own unit fixtures, and it broke in
+three separate places before it produced a verdict at all.
+
+## Defect 1: the correction review UI could never offer a span
+
+`FoundationRepository.semantic_location_relationship()` selected `r.run_id`,
+used it to validate the run, and then returned `json.loads(row["payload_json"])`
+— dropping it. The run id is a column, not part of the immutable payload.
+
+`correction_wording.review_context` walks the finding's locations and does:
+
+```python
+run_id = str(location.get("runId") or "")
+if not run_id:
+    continue
+```
+
+So every location was skipped, `candidateSpans` came back `[]`, and the
+candidate `alternatives` list (which reads `location.get("runId", "")` too) was
+always empty. The Stage 9B.2 reviewer could not pick a span to correct at all.
+Nothing caught it because every 9B test builds its `CorrectionIntent` directly
+rather than choosing from `candidateSpans`.
+
+The reader now returns `{**payload, "runId": row["run_id"]}`. With that, the
+production review context offers exactly `PHP 1:6 · "some" · [0, 4)` for a
+finding whose source obligation is at PHP 1:3.
+
+## Defect 2: every affected re-analysis died on a duplicate coverage account
+
+`save_coverage_account` was a bare `INSERT`, and the account id is a
+deterministic fingerprint of `{owner, dimension, policy}` — deliberately stable
+across runs, because the design is *seed once, then update the same identity in
+place* (`update_coverage_account_status`'s own docstring says so).
+
+Re-analysis therefore re-derives ids that already exist. Clicking
+**Re-analyze affected passage** after any Apply produced:
+
+```text
+QA  FAILED
+  FoundationConflict: Coverage account conflicts with an active obligation:
+  UNIQUE constraint failed: coverage_accounts.id
+```
+
+with Stages 5, 6A, 6B and 7 all completing first. The affected range covers the
+verses the correction did *not* touch, so their accounts always collide — 77 of
+them in the acceptance fixture (29 source-coverage, 48 target-support).
+
+BUILD_LOG had recorded this as "Stage 8 cannot be re-run against an unchanged
+target inventory under a changed engine, model, or calibration version". That
+understated it: **nothing had changed here but the Scripture edit**. It broke
+the ordinary post-correction path, which is why Stage 9B.4 installed acceptance
+had never been runnable.
+
+Re-seeding an identical account is now a no-op. The stored row keeps its
+coverage status, its finding link and — the reason the guard existed — its
+review status, so a human promotion recorded against that obligation survives
+re-analysis untouched. Only a real difference in the identity-bearing fields
+still raises `FoundationConflict`:
+
+```python
+_COVERAGE_ACCOUNT_MUTABLE = {
+    "coverageStatus", "coveredByRelationshipIds", "findingId",
+    "reviewStatus", "lifecycleStatus", "revision",
+}
+```
+
+The Stage 8 target-support pass also had to stop passing its freshly built
+`account.revision` to `update_coverage_account_status`: on a re-run the row it
+kept is already past revision 1. It now reads the stored revision, exactly as
+the source-coverage pass above it already did.
+
+With both fixed, the affected re-analysis went **FAILED → COMPLETED_WITH_WARNINGS**
+and verification produced its first real semantic verdict.
+
+## Finding 3: a cross-language PASSED is unreachable in 0.9.4
+
+The first real verdict was not PASSED:
+
+```text
+source PHP 1:3 -> target PHP 1:6, structural range PHP 1:3-1:6
+verse now "all remembrance of you remains with me ..."
+UNCERTAIN  ['COVERAGE_POSSIBLY_MISSING', 'PROVIDER_LIMITED',
+            'RECURRING_FINDING_SAME_DIMENSION']
+qaDisposition CONFIRMED_TRANSLATION_ERROR   mayAcknowledgeCorrected false
+```
+
+PASSED requires Stage 6B to positively **re-locate** the corrected obligation.
+Every route to `located_minimum = 0.36` is closed for a cross-language project:
+
+```text
+SEMANTIC_SIMILARITY  weight 0.42  no production provider ships (available=False)
+  (embedding cache)              _embedding_map returns {} *before* consulting
+                                 the cache when the provider is unavailable
+HUMAN_PRECEDENT      weight 0.65  human_approved_lexical_precedents() is always
+                                 empty: LexicalAlignmentGroup is constructed
+                                 only in the model module and one test file, so
+                                 no production path ever writes lexical_groups
+LEXICAL              weight 0.38  Greek/English overlap is 0
+CONCEPT              weight 0.15  0.95 for a matching QUANTIFIER kind
+STRUCTURAL_PROXIMITY weight 0.05  0.8 within the same canonical reference
+EXACT_SPAN           weight 0.01  1.0
+                                 -> everything available sums to about 0.19
+```
+
+Target token instance ids fold in `text_revision` and the raw form, so a
+precedent seeded before the correction would reference the old token anyway.
+
+**This is correct behaviour, not a defect.** The verifier refuses to claim a
+success it cannot demonstrate, and says why with `PROVIDER_LIMITED`. But it
+means no real production flow can reach PASSED until either a production
+multilingual embedding provider exists, or something in the app actually writes
+human-approved lexical groups. Recorded as an open product gap; not fixed here.
+
+## What the acceptance package therefore is
+
+`scripts/seed_correction_acceptance.py` builds three projects, and
+`docs/STAGE_9B4_ACCEPTANCE.md` is the click-by-click script.
+
+```text
+A  PASSED     controlled verification fixture   DIMENSION_PRESERVED, COVERAGE_COVERED
+B  FAILED     controlled verification fixture   DIMENSION_CONTRADICTED
+C  UNCERTAIN  REAL Stage 5->6A->6B->7->8 run    COVERAGE_POSSIBLY_MISSING,
+                                                PROVIDER_LIMITED
+```
+
+Only C is production end-to-end, and the document says so in as many words. A
+and B reuse the Stage 9B.4 unit tests' own controlled-evidence builders rather
+than copying them, so fixture and test cannot drift.
+
+C is the canonical cross-verse case: a naturally emitted `QUANTITY_PROBLEM`
+whose source obligation is `πᾶς` at PHP 1:3 and whose target realization is
+"some" at PHP 1:6, left at `UNRESOLVED`/`AI_PROPOSED` for the tester to confirm,
+correct to "all", apply, re-analyse and verify.
+
+Validated through `BridgeEngine` on a copy, so the shipped fixtures stay
+unverified:
+
+```text
+[A] PASSED  (expected PASSED)   mayAcknowledgeCorrected True   disposition unchanged
+[B] FAILED  (expected FAILED)   mayAcknowledgeCorrected False  disposition unchanged
+[C] QUANTITY_PROBLEM ['PHP 1:3','PHP 1:6']  UNRESOLVED/AI_PROPOSED
+    candidateSpans [('PHP 1:6', 'some')]
+```
+
+## Inspector
+
+`scripts/inspect_correction_application.py` gained a read-only **Word
+Alignment** block, because the acceptance has to show that semantic
+verification neither approves nor rebuilds an alignment. It reads the
+`completed/` and `invalid/` markers under
+`.apps/translationCore/tools/wordAlignment/` and reports
+`INVALID` / `COMPLETED` / `PENDING`. On case A after a PASSED verification it
+reports `INVALID` for PHP 1:6 — invalidated by the Apply, untouched by the
+verifier.
+
+## Version
+
+0.9.4 across npm + lockfile, Cargo + lockfile, Tauri config, the Python
+package, `BRIDGE_VERSION`, the Greek Room engine version, the frozen sidecar
+assertion in `scripts/smoke_sidecars.py`, the project-import generator
+metadata, the provider User-Agent, and the current-version docs. Historical
+version statements in BUILD_LOG and HANDOFF are left as written. `engine.info`
+reports `bridgeVersion` and `greekRoom.engineVersion` 0.9.4; `cargo metadata`
+reports 0.9.4 and accepts the lock.

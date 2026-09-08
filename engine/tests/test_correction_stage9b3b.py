@@ -27,7 +27,7 @@ def _hash(text: str) -> str:
 
 def _fixture(
     tmp_path: Path, before: str, original: str, replacement: str, *,
-    project_root: Path | None = None,
+    project_root: Path | None = None, project_id: str = "project-1",
 ):
     root = project_root or tmp_path / "project"
     alignment = root / ".apps" / "translationCore" / "alignmentData" / "php"
@@ -48,11 +48,11 @@ def _fixture(
     }), encoding="utf-8")
     (root / "php.usfm").write_text("\\id PHP\n\\c 1\n\\v 3 IMPORTED THREE\n\\v 6 IMPORTED SIX\n", encoding="utf-8")
     project = TranslationCoreProject(root)
-    runtime = PassageSemanticRuntime(project, "project-1")
+    runtime = PassageSemanticRuntime(project, project_id)
     project.attach_passage_semantic_runtime(runtime)
     repo = runtime.repository
     source_unit_id = "source-unit-php-1-3"
-    repo.create_minimal_semantic_unit(source_unit_id, project_id="project-1")
+    repo.create_minimal_semantic_unit(source_unit_id, project_id=project_id)
     source_unit = repo.semantic_unit(source_unit_id)
     source_unit.update({
         "displayedReferences": ["PHP 1:3"],
@@ -66,7 +66,7 @@ def _fixture(
             (json.dumps(source_unit, ensure_ascii=False), source_unit_id),
         )
         conn.commit()
-    repo.create_qa_finding("finding-1", "project-1")
+    repo.create_qa_finding("finding-1", project_id)
     finding = repo.qa_finding("finding-1")
     finding.update({
         "book": "PHP", "displayedReferences": ["PHP 1:6"],
@@ -82,10 +82,10 @@ def _fixture(
             (json.dumps(finding, ensure_ascii=False),),
         )
         conn.commit()
-    current = repo.current_target_revision("project-1", "PHP", "PHP 1:6")
+    current = repo.current_target_revision(project_id, "PHP", "PHP 1:6")
     start = before.index(original)
     proposal = CorrectionProposalV2(
-        id="proposal-1", qa_finding_id="finding-1", project_id="project-1",
+        id="proposal-1", qa_finding_id="finding-1", project_id=project_id,
         intent=CorrectionIntent(
             failed_dimension=CoverageDimension.LEXICAL_CONTENT,
             observed_meaning="missing", required_meaning="required",

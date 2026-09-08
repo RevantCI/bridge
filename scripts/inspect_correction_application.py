@@ -21,6 +21,7 @@ from typing import Any
 
 
 SEMANTIC_DB = Path(".apps/translationCoreAI/passageSemantic/bridge-semantic.sqlite3")
+WORD_ALIGNMENT = Path(".apps/translationCore/tools/wordAlignment")
 
 
 def _json(path: Path) -> Any:
@@ -143,6 +144,36 @@ def _verification_report(
     }
 
 
+
+def _word_alignment_state(project_root: Path, displayed_reference: str) -> dict[str, Any]:
+    """Word Alignment state for one displayed reference, from disk only.
+
+    Deliberately independent of every semantic record above.  Semantic
+    verification must never approve or rebuild an alignment, so acceptance has
+    to be able to read this without going through anything that could.
+    """
+    parts = str(displayed_reference or "").replace(":", " ").split()
+    if len(parts) < 3:
+        return {"displayedReference": displayed_reference, "wordAlignmentState": "UNKNOWN",
+                "reason": "reference is not BOOK CHAPTER:VERSE"}
+    chapter, verse = parts[-2], parts[-1]
+    root = project_root / WORD_ALIGNMENT
+    invalid = root / "invalid" / chapter / f"{verse}.json"
+    completed = root / "completed" / chapter / f"{verse}.json"
+    if invalid.is_file():
+        state = "INVALID"
+    elif completed.is_file():
+        state = "COMPLETED"
+    else:
+        state = "PENDING"
+    return {
+        "displayedReference": displayed_reference,
+        "wordAlignmentState": state,
+        "invalidMarkerPath": str(invalid) if invalid.is_file() else None,
+        "completedMarkerPath": str(completed) if completed.is_file() else None,
+    }
+
+
 def inspect_database(
     project_root: Path, finding_id: str, proposal_id: str,
 ) -> dict[str, Any]:
@@ -204,6 +235,9 @@ def inspect_database(
                     application["resolvedAffectedScope"] = payload.get("requestedScope")
             application.update(
                 _verification_report(connection, application["application_id"])
+            )
+            application["wordAlignment"] = _word_alignment_state(
+                project_root, str(application.get("target_displayed_reference") or ""),
             )
         report["applications"] = applications
     finally:

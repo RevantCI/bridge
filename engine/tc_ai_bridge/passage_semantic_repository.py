@@ -2408,8 +2408,51 @@ class FoundationRepository:
             raise FoundationValidationError(f"Unknown semantic unit: {unit_id}")
         return json.loads(row[0])
 
+    # Everything on a coverage account that a later pass or a human legitimately
+    # changes.  The rest is the account's content-addressed identity, and a
+    # difference there is a genuine conflict rather than a re-seed.
+    _COVERAGE_ACCOUNT_MUTABLE = frozenset({
+        "coverageStatus", "coveredByRelationshipIds", "findingId",
+        "reviewStatus", "lifecycleStatus", "revision",
+    })
+
+    @classmethod
+    def _coverage_account_identity(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value for key, value in payload.items()
+            if key not in cls._COVERAGE_ACCOUNT_MUTABLE
+        }
+
     def save_coverage_account(self, account: SemanticCoverageAccount) -> None:
+        """Seed one content-addressed coverage account.
+
+        The account id is a fingerprint of ``{owner, dimension, policy}``, so it
+        is deliberately stable across audit runs -- Stage 8 is meant to seed it
+        once and then update the same identity in place.  A re-run therefore
+        re-derives an id that already exists, and a bare INSERT turned every
+        post-correction affected re-analysis into a FoundationConflict: the
+        unchanged verses in the affected range always collide.
+
+        Re-seeding an identical account is a no-op, not an overwrite.  The
+        stored row keeps its coverage status, its finding link and above all its
+        review status, so a human promotion recorded against this obligation
+        survives re-analysis untouched.  Only a real difference in the
+        identity-bearing fields still conflicts.
+        """
         payload = to_wire(account)
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT payload_json FROM coverage_accounts WHERE id=?", (account.id,),
+            ).fetchone()
+            if existing is not None:
+                stored = json.loads(existing["payload_json"])
+                if (self._coverage_account_identity(stored)
+                        == self._coverage_account_identity(payload)):
+                    return
+                raise FoundationConflict(
+                    "Coverage account conflicts with an active obligation: "
+                    f"{account.id} already exists with different semantic identity"
+                )
         with self._connect() as conn:
             try:
                 if conn.execute(
@@ -2774,7 +2817,12 @@ class FoundationRepository:
                 f"Unknown semantic location relationship: {relationship_id}"
             )
         self.semantic_location_run(row["run_id"])
-        return json.loads(row["payload_json"])
+        # The run id is a column, not part of the immutable payload, and every
+        # reader that wants to reach the run's target inventory needs it: the
+        # Stage 9B.2 correction review context skips any location without one,
+        # so dropping it here left `candidateSpans` and the candidate
+        # `alternatives` list permanently empty in the running app.
+        return {**json.loads(row["payload_json"]), "runId": row["run_id"]}
 
     def save_meaning_analysis_run(
         self, *, run_id: str, project_id: str, book: str, range_key: str,

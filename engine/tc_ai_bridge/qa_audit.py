@@ -509,9 +509,14 @@ class QaAuditEngine:
                         )
                         self.repository.save_qa_finding(self._finding_to_dataclass(finding))
                         findings.append(finding)
+                        # The stored revision, not the freshly built one: on a
+                        # re-run the seed above is a no-op and the row it kept
+                        # is already past revision 1.  The source-coverage pass
+                        # above reads it the same way.
                         self.repository.update_coverage_account_status(
                             account.id, coverage_status=status.value, covered_by_relationship_ids=(),
-                            finding_id=finding["id"], expected_revision=account.revision,
+                            finding_id=finding["id"],
+                            expected_revision=self.repository.coverage_account(account.id)["revision"],
                         )
         finally:
             self.repository = real_repository
