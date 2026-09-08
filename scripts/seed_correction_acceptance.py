@@ -37,10 +37,8 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shutil
 import sys
 import time
-import unicodedata
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "engine"))
@@ -82,8 +80,18 @@ PRODUCTION_VERSES = {
 BROKEN_WORD, CORRECTED_WORD = "some", "all"
 
 
-def _norm(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFC", value).casefold().split())
+def _configure_console_output() -> None:
+    """Make the Unicode fixture summary printable from Windows PowerShell.
+
+    Python uses the active Windows code page when stdout is redirected through
+    a pipe.  On the common cp1252 code page, printing the Tamil corrected verse
+    raised ``UnicodeEncodeError`` after all three projects had been seeded.
+    UTF-8 keeps the useful human-readable summary and ``backslashreplace`` is a
+    last-resort guard for unusual stream implementations.
+    """
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
 def _write_identity(root: Path, project_id: str) -> None:
@@ -251,6 +259,7 @@ def seed_case_b(root: Path) -> dict[str, object]:
 
 
 def main() -> int:
+    _configure_console_output()
     destination = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd() / "acceptance-0.9.4"
     destination = destination.resolve()
     if destination.exists():

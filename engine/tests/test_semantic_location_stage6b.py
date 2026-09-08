@@ -150,6 +150,8 @@ def test_mistranslation_location_is_kept_separate_from_meaning_and_true_absence(
     )
     assert quantifier["locationOutcome"] == "LOCATED"
     assert "meaningStatus" not in quantifier
+    stored = runtime.repository.semantic_location_relationship(quantifier["id"])
+    assert stored["runId"] == located["id"]
 
     absent_runtime = _runtime(tmp_path / "absent", language="en", chapters={"1": {"3": "unrelated"}})
     absent = SemanticLocationEngine(absent_runtime).run_range("1", "3")

@@ -292,6 +292,37 @@ def test_qa_cache_hit_on_repeat_run(tmp_path: Path) -> None:
     assert second["id"] == first["id"]
 
 
+def test_qa_reanalysis_after_scripture_edit_reuses_stable_coverage_accounts(
+    tmp_path: Path,
+) -> None:
+    """The ordinary post-correction Stage 8 path must be safely repeatable."""
+    runtime = _runtime(tmp_path, language="en", chapters={"1": {
+        "3": "i thank my god",
+        "4": "always in every prayer",
+        "5": "partnership from the first day until now",
+        "6": "some remembrance of you remains with me",
+    }})
+    first = _run_qa(runtime, None, "1", "3", "1", "6")
+    first_source_accounts = set(first["sourceCoverageAccountIds"])
+    first_target_accounts = set(first["targetSupportAccountIds"])
+
+    runtime.project.apply_scripture_edit(
+        "1", "6", "all remembrance of you remains with me",
+    )
+    second = _run_qa(runtime, None, "1", "3", "1", "6")
+
+    assert second["cacheStatus"] == "MISS"
+    assert set(second["sourceCoverageAccountIds"]) == first_source_accounts
+    # Unedited verses keep stable target units and therefore stable support
+    # accounts; Stage 8 must update them rather than collide at INSERT.
+    assert set(second["targetSupportAccountIds"]) & first_target_accounts
+    with runtime.repository._connect() as conn:
+        count, distinct_count = conn.execute(
+            "SELECT COUNT(*),COUNT(DISTINCT id) FROM coverage_accounts",
+        ).fetchone()
+    assert count == distinct_count
+
+
 # --- Protocol round-trip and no unintended side effects (item 42) -----------
 
 def test_qa_audit_protocol_apis(tmp_path: Path) -> None:

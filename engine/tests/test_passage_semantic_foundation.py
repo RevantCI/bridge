@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 
 import pytest
@@ -294,6 +294,36 @@ def test_semantic_units_relationship_and_coverage_account_persist(tmp_path: Path
     repo.save_coverage_account(account)
     assert repo.semantic_unit(source.id)["side"] == "SOURCE"
     assert repo.semantic_relationship(relationship.id)["meaningStatus"] == "PRESERVED"
+
+
+def test_identical_coverage_account_reseed_preserves_mutable_state(tmp_path: Path) -> None:
+    """A Stage 8 re-run reuses identity without erasing its prior result."""
+    repo = FoundationRepository(tmp_path / "semantic.sqlite3")
+    _token(repo, "s1", TokenSide.SOURCE, TokenLayer.ORTHOGRAPHIC)
+    source = _unit("source-unit", TokenSide.SOURCE, "s1")
+    repo.save_semantic_unit(source)
+    account = SemanticCoverageAccount(
+        id="account-1", project_id="project-1", passage_id="PHP 1:1",
+        direction=AuditDirection.SOURCE_COVERAGE, audit_owner_unit_id=source.id,
+        member_unit_ids=(source.id,), coverage_dimension=CoverageDimension.LEXICAL_CONTENT,
+        semantic_fingerprint="account-fingerprint", covered_by_relationship_ids=(),
+        excluded_duplicate_unit_ids=(), finding_id=None,
+        policy_binding=PolicyBinding.foundation_v1(),
+        review_status=ReviewStatus.UNREVIEWED, lifecycle_status=LifecycleStatus.ACTIVE,
+    )
+    repo.save_coverage_account(account)
+    repo.update_coverage_account_status(
+        account.id, coverage_status="COVERED", covered_by_relationship_ids=(),
+        finding_id=None, expected_revision=1,
+    )
+
+    repo.save_coverage_account(account)
+
+    stored = repo.coverage_account(account.id)
+    assert stored["coverageStatus"] == "COVERED"
+    assert stored["revision"] == 2
+    with pytest.raises(FoundationConflict, match="different semantic identity"):
+        repo.save_coverage_account(replace(account, passage_id="PHP 1:2"))
 
 
 def test_passage_evidence_qa_exportability_and_review_round_trip(tmp_path: Path) -> None:

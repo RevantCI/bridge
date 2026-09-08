@@ -2441,20 +2441,25 @@ class FoundationRepository:
         """
         payload = to_wire(account)
         with self._connect() as conn:
-            existing = conn.execute(
-                "SELECT payload_json FROM coverage_accounts WHERE id=?", (account.id,),
-            ).fetchone()
-            if existing is not None:
-                stored = json.loads(existing["payload_json"])
-                if (self._coverage_account_identity(stored)
-                        == self._coverage_account_identity(payload)):
-                    return
-                raise FoundationConflict(
-                    "Coverage account conflicts with an active obligation: "
-                    f"{account.id} already exists with different semantic identity"
-                )
-        with self._connect() as conn:
             try:
+                # Serialize the identity check and insert.  Without one
+                # transaction, two simultaneous re-analysis requests could
+                # both observe an absent row and make the second, otherwise
+                # identical seed fail at INSERT.
+                conn.execute("BEGIN IMMEDIATE")
+                existing = conn.execute(
+                    "SELECT payload_json FROM coverage_accounts WHERE id=?", (account.id,),
+                ).fetchone()
+                if existing is not None:
+                    stored = json.loads(existing["payload_json"])
+                    if (self._coverage_account_identity(stored)
+                            == self._coverage_account_identity(payload)):
+                        conn.commit()
+                        return
+                    raise FoundationConflict(
+                        "Coverage account conflicts with an active obligation: "
+                        f"{account.id} already exists with different semantic identity"
+                    )
                 if conn.execute(
                     "SELECT 1 FROM semantic_units WHERE id=?", (account.audit_owner_unit_id,)
                 ).fetchone() is None:
