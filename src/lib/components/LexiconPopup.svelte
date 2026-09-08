@@ -87,6 +87,12 @@
   }
   .eyebrow { color: var(--accent); font-size: var(--fs-2xs); letter-spacing: .12em; font-weight: 800; flex: 0 0 100%; }
   .headword { font-size: var(--fs-3xl); font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  /* Headword and lemma are source-language words at display size, where a
+     wrong face is most visible -- pointed Hebrew especially. Both already
+     carry `dir` from the `direction` prop, so keying the face off that
+     attribute picks Hebrew or Greek without any new plumbing. */
+  .headword[dir="rtl"], .lemma[dir="rtl"] { font-family: var(--font-hebrew); }
+  .headword[dir="ltr"], .lemma[dir="ltr"] { font-family: var(--font-greek); }
   button { font: inherit; }
   .close { border: 0; background: none; font-size: var(--fs-4xl); padding: 0 4px; color: var(--text-2); cursor: pointer; }
   .close:hover { color: var(--text); }

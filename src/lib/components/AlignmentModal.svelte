@@ -453,6 +453,11 @@
   .error { background: #FFF0F0; color: var(--danger); }
   .workspace { display: flex; flex-direction: column; gap: 14px; }
   .interlinear { display: flex; gap: 10px; overflow-x: auto; padding: 12px 6px; border: 1px solid var(--border); border-radius: 10px; min-height: 128px; }
+  /* The source column is Hebrew for an OT book and Greek for an NT one, so
+     the face keys off the `dir` the markup already sets from
+     context.sourceDirection rather than being hardcoded to either. */
+  .interlinear[dir="rtl"] { font-family: var(--font-hebrew); }
+  .interlinear[dir="ltr"] { font-family: var(--font-greek); }
   .column { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 76px; flex-shrink: 0; }
   .target-cell {
     display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; box-sizing: border-box;
@@ -466,7 +471,11 @@
   .token small { font-size: var(--fs-3xs); color: var(--text-3); max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
   .occ { margin-left: 3px; font-size: 0.8em; font-weight: 400; color: var(--text-3); }
   .column .token.source { width: 100%; background: #F6F1FF; cursor: pointer; }
-  .token.target { touch-action: none; user-select: none; }
+  /* On the target token itself, not on .aligned-card .word: this one rule
+     covers the aligned cards inside the interlinear -- where it also has to
+     undo the source face inherited from .interlinear -- and the word bank
+     tokens outside it. */
+  .token.target { font-family: var(--font-target); touch-action: none; user-select: none; }
   .token.target.unaligned { background: #EFF7FF; border-color: var(--border-strong); color: var(--text); }
   .token.picked { outline: 2px solid var(--accent); outline-offset: 1px; }
   .already-aligned {
@@ -490,7 +499,7 @@
   .bank-tokens.drop-hover { background: var(--accent-bg); outline: 2px dashed var(--accent); }
   .drag-ghost {
     position: fixed; z-index: 999; transform: translate(-50%, -130%); pointer-events: none;
-    background: var(--accent); color: white; font-size: var(--fs-sm); font-weight: 700;
+    background: var(--accent); color: white; font-family: var(--font-target); font-size: var(--fs-sm); font-weight: 700;
     border-radius: 7px; padding: 6px 10px; box-shadow: 0 8px 20px rgba(0,0,0,.28);
   }
   .empty { color: var(--text-3); font-size: var(--fs-xs); margin: 6px; }

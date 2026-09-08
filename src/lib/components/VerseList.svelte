@@ -381,7 +381,9 @@
   .vnum { font-size: var(--fs-xs); font-weight: 700; color: var(--text-3); width: 26px; flex-shrink: 0; padding-top: 2px; }
   .verse.approved .vnum { color: var(--success); }
   .verse.check-failed .vnum { color: var(--danger, #ef4444); }
-  .vtext { font-size: var(--fs-xl); line-height: 1.85; color: var(--text); }
+  /* --font-target rather than plain inheritance so the leading below can be
+     tuned for Indic ascender/descender depth without moving the UI chrome. */
+  .vtext { font-family: var(--font-target); font-size: var(--fs-xl); line-height: 1.85; color: var(--text); }
   .finding-num { font-size: var(--fs-2xs); font-weight: 700; color: var(--accent); margin-left: 1px; }
   /* Where Shift+F10 would open the menu. A visible ring, not colour alone:
      the underline classes already carry the finding's source colour. */
@@ -416,8 +418,10 @@
   .vedit { flex: 1; min-width: 0; cursor: default; }
   .vedit-row { display: flex; align-items: flex-start; gap: 8px; }
   .vedit textarea {
-    flex: 1; min-width: 0; box-sizing: border-box; font-size: var(--fs-xl); line-height: 1.7; color: var(--text);
-    font-family: inherit; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 8px;
+    /* Same face, size and leading as .vtext above: entering edit mode must not
+       reflow the verse. The line-height was 1.7 and is now matched to 1.85. */
+    flex: 1; min-width: 0; box-sizing: border-box; font-size: var(--fs-xl); line-height: 1.85; color: var(--text);
+    font-family: var(--font-target); padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 8px;
     resize: none; overflow-y: hidden;
   }
   /* Neutral, not accent: the blue box read as a validation state. The focus
