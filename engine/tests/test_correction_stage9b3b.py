@@ -10,10 +10,12 @@ import pytest
 from bridge_service import BridgeEngine
 from greek_room_engine.protocol import EngineRequest
 from tc_ai_bridge.correction_application import CorrectionApplicationService
+from tc_ai_bridge.qa_audit import QaAuditPolicy
 from tc_ai_bridge.passage_semantic_models import (
-    AffectedTargetSpan, CorrectionCreationMode, CorrectionIntent,
-    CorrectionProposalV2, CoverageDimension, LifecycleStatus, PolicyBinding,
-    ReviewStatus, StrictScriptureEditContext,
+    AffectedTargetSpan, AuditDirection, ConfidenceScore, CorrectionCreationMode,
+    CorrectionIntent, CorrectionProposalV2, CoverageDimension, LifecycleStatus,
+    PolicyBinding, QaDisposition, QaFinding, QaFindingKind, ReviewStatus,
+    StrictScriptureEditContext,
 )
 from tc_ai_bridge.passage_semantic_repository import FoundationConflict, FoundationValidationError
 from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime
@@ -66,22 +68,40 @@ def _fixture(
             (json.dumps(source_unit, ensure_ascii=False), source_unit_id),
         )
         conn.commit()
-    repo.create_qa_finding("finding-1", project_id)
+    # Persist the finding through the same canonical repository save path
+    # Stage 8 uses.  Writing the human-decided columns with raw SQL instead
+    # left the schema-v8 Stage 9A queue index (book, kind, direction,
+    # severity/severity_rank, sort_chapter/sort_verse, displayed_reference and
+    # the qa_finding_scope_references rows) at its empty create-time defaults,
+    # so `qa_finding()` and the correction services could read the finding
+    # while `query_qa_findings()` could never return it under a real UI scope.
+    policy = PolicyBinding.foundation_v1()
+    confidence = ConfidenceScore(
+        raw_score=None, calibrated_value=0.0,
+        confidence_policy_version=policy.confidence_policy_version,
+        calibration_version=policy.calibration_version,
+    )
+    kind = QaFindingKind.NEEDS_PASSAGE_REVIEW
+    repo.save_qa_finding(QaFinding(
+        id="finding-1", project_id=project_id, book="PHP", passage_id="PHP",
+        kind=kind, direction=AuditDirection.SOURCE_COVERAGE,
+        source_semantic_unit_ids=(source_unit_id,), target_semantic_unit_ids=(),
+        semantic_relationship_ids=(), evidence_ids=(), explanation="",
+        confidence=confidence, current_target_revision="UNBOUND",
+        qa_disposition=QaDisposition.CONFIRMED_TRANSLATION_ERROR,
+        policy_binding=policy, review_status=ReviewStatus.HUMAN_APPROVED,
+        lifecycle_status=LifecycleStatus.ACTIVE,
+        severity=QaAuditPolicy.severity_for(kind, confidence.calibrated_value),
+        meaning_assessment_ids=(), coverage_account_ids=(),
+        location_outcome_snapshot="", meaning_status_snapshot="",
+        supporting_evidence_ids=(), conflicting_evidence_ids=(),
+        resource_evidence_ids=(), target_content_hashes=(_hash(before),),
+        source_resource_hashes=(), qa_engine_version="stage9b-fixture",
+        qa_policy_version=policy.audit_policy_version, fingerprint="stage9b-fixture",
+        revision=1, displayed_references=("PHP 1:6",),
+        resource_conflict_evidence_ids=(),
+    ))
     finding = repo.qa_finding("finding-1")
-    finding.update({
-        "book": "PHP", "displayedReferences": ["PHP 1:6"],
-        "sourceSemanticUnitIds": [source_unit_id],
-        "targetContentHashes": [_hash(before)],
-        "qaDisposition": "CONFIRMED_TRANSLATION_ERROR",
-        "reviewStatus": "HUMAN_APPROVED", "lifecycleStatus": "ACTIVE",
-    })
-    with repo._connect() as conn:
-        conn.execute(
-            "UPDATE qa_findings SET qa_disposition='CONFIRMED_TRANSLATION_ERROR',"
-            "review_status='HUMAN_APPROVED',lifecycle_status='ACTIVE',payload_json=? WHERE id='finding-1'",
-            (json.dumps(finding, ensure_ascii=False),),
-        )
-        conn.commit()
     current = repo.current_target_revision(project_id, "PHP", "PHP 1:6")
     start = before.index(original)
     proposal = CorrectionProposalV2(

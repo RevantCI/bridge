@@ -5946,6 +5946,114 @@ The next authorized operational boundary remains the installed 0.9.4 A/B/C
 acceptance described in `docs/STAGE_9B4_ACCEPTANCE.md`. Version 0.9.4 remains a
 candidate and has not been released.
 
+# Stage 9B.4 acceptance-fixture queue-visibility repair (2026-09-08)
+
+## Symptom
+
+The installed 0.9.4 candidate opened acceptance case A correctly, but
+Alignment Review → QA showed `Not analyzed` / `Showing 0 of 0 possible
+issues` / `No findings match these filters`, even with **Stale only**
+selected. The read-only inspector proved the finding was present and correct
+in both the seeded folder and Bridge's managed copy
+(`CONFIRMED_TRANSLATION_ERROR` / `HUMAN_APPROVED` / `STALE`, proposal-1
+`ACTIVE`+`PENDING`, `acceptance-a-apply` `COMPLETED`, affected analysis
+`COMPLETED`, PHP 1:3 → PHP 1:6, word alignment `INVALID`), so project
+resolution and copying were not the defect.
+
+## Confirmed root cause
+
+The A/B controlled fixtures reuse the Stage 9B unit-test `_fixture()` in
+`engine/tests/test_correction_stage9b3b.py`. It called
+`repository.create_qa_finding()` — which inserts a *minimal* row — and then
+wrote the human-decided state with raw SQL touching only
+`qa_disposition`, `review_status`, `lifecycle_status` and `payload_json`.
+
+Every schema-v8 Stage 9A queue index column therefore kept its empty
+create-time default, confirmed by reading the seeded database directly:
+
+```text
+book = ''                 kind = 'NEEDS_PASSAGE_REVIEW'
+severity = ''             severity_rank = 99
+sort_chapter = 0          sort_verse = 0
+displayed_reference = ''  qa_finding_scope_references: []
+```
+
+The decisive one is the empty `qa_finding_scope_references` table.
+`query_qa_findings()` resolves a canonical scope through that table
+(`side='SOURCE'` for a `SOURCE_COVERAGE` finding), so with no rows the
+fixture could never match a real UI scope, and the empty `book` column
+failed the book filter as well. Measured against the seeded case A database
+before the fix:
+
+```text
+no scope, STALE          total=1  ['finding-1']
+scoped PHP 1:3–1:6       total=0  []
+book=PHP                 total=0  []
+```
+
+`qa_finding(id)`, the correction services and the inspector all read the
+payload, which was complete — which is exactly why every earlier check
+passed while the queue stayed empty.
+
+## Fix
+
+`_fixture()` now constructs a real `QaFinding` and persists it through
+`repository.save_qa_finding()`, the same canonical path Stage 8's
+`QaAuditEngine` uses — one atomic write that maintains `payload_json`, all
+denormalized queue columns and the scope-reference rows together. Severity
+comes from `QaAuditPolicy.severity_for()` rather than a literal, so the
+fixture cannot drift from the product's own severity policy. No column is
+hand-patched, `query_qa_findings()` is unchanged, nothing special-cases
+`finding-1`, and the UI does not bypass the queue.
+
+The fixture's identity is unchanged: `finding-1`,
+`CONFIRMED_TRANSLATION_ERROR`, `HUMAN_APPROVED`, `STALE` after apply,
+PHP 1:3 → PHP 1:6, revision 1 at creation so every existing
+`expected_finding_revision=1` caller still holds. Proposal, application,
+affected-analysis and verification fixture state are untouched.
+
+## "Not analyzed" is not a suppressor
+
+`AlignmentQaMode.svelte` renders the `NOT_ANALYZED` sentence *inside*
+`{#if scopeReady && !$reviewLoading && $reviewTotal === 0}` — it is a
+consequence of an empty queue, not a cause. The queue list renders
+independently. No frontend repair was needed, and the tester still must not
+click Run analysis on A or B.
+
+## Regression
+
+`engine/tests/test_correction_acceptance_queue_visibility.py` seeds A and B
+with the real seeder into a fresh folder, opens them through
+`BridgeEngine`/`project.open`, and reads the actual `qaReview.getQueue` API
+(never SQLite) at the acceptance UI scope PHP 1:3–PHP 1:6 with
+`lifecycleStatuses=["STALE"]`, asserting `totalCount >= 1`, that `finding-1`
+is returned, and that `qaReview.getFinding` plus
+`correction.listForFinding` still reach the proposal and application. It
+repeats all of that against the authoritative managed copy under
+`<app data>/projects` (registry `managed=True`), and a third test asserts the
+denormalized columns and scope rows directly, so a payload-only regression
+cannot pass it. All six cases fail on the pre-fix helper and pass after it.
+
+## Gates
+
+`test_correction_acceptance_queue_visibility.py` 6 passed;
+`test_correction_acceptance_scripts.py` + `test_correction_stage9b3b/3c/9b4.py`
+85 passed; `test_qa_review_service_stage9a.py` +
+`test_qa_review_stage9a.py` + `test_php_review_walkthrough_stage9a.py`
+90 passed; `git diff --check` clean.
+
+**Only test and acceptance-fixture code changed. No product frontend,
+backend or Rust code changed, so the 0.9.4 installer does not require
+rebuilding.** `C:\bridge-acceptance` was deleted and reseeded, and the
+inspector re-verified case A. Queue visibility was then confirmed on copies
+of the reseeded projects (leaving the seeded folders untouched for the
+tester): case A source `totalCount=1`, case A managed `totalCount=1`, case B
+source `totalCount=1`, case B managed `totalCount=1`, each returning
+`finding-1` as `CONFIRMED_TRANSLATION_ERROR` / `HUMAN_APPROVED` / `STALE`.
+
+0.9.4 remains an unreleased candidate. Stage 9B.4 verification semantics are
+unchanged, and installed acceptance has not been run.
+
 # Bridge 0.9.4 release authorization (2026-09-08)
 
 The project owner subsequently authorized `v0.9.4` for publication as the
