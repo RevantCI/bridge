@@ -5934,3 +5934,14 @@ metadata, the provider User-Agent, and the current-version docs. Historical
 version statements in BUILD_LOG and HANDOFF are left as written. `engine.info`
 reports `bridgeVersion` and `greekRoom.engineVersion` 0.9.4; `cargo metadata`
 reports 0.9.4 and accepts the lock.
+
+# Current continuation handoff refresh (2026-09-08)
+
+Updated `docs/HANDOFF.md` §37.10 with the exact repository, installed candidate,
+last regression-gate, read-only Stage 9B.3c evidence, Stage 9B.4 acceptance, and
+stop-boundary state needed by the next developer. No source code, Scripture,
+acceptance fixture, database, build metadata, or application behavior changed.
+
+The next authorized operational boundary remains the installed 0.9.4 A/B/C
+acceptance described in `docs/STAGE_9B4_ACCEPTANCE.md`. Version 0.9.4 remains a
+candidate and has not been released.

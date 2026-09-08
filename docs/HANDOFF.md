@@ -2702,6 +2702,144 @@ unauthorized. The PASSED product gap above needs its own scope.
 
 ---
 
+# 37.10 Current Resume Handoff — Stage 9B.4 Installed Acceptance Pending (2026-09-08)
+
+This is the current continuation point for the next developer. Treat it as the
+short operational companion to §37.9 and
+`docs/STAGE_9B4_ACCEPTANCE.md`; the architecture and hard constraints elsewhere
+in this document remain authoritative.
+
+## Repository and release state
+
+```text
+branch                          main
+HEAD                            0e79c6e
+origin/main                     0e79c6e
+tracked worktree                clean when this handoff was prepared
+application/build version       0.9.4
+companion schema                v14
+verification policy             correction-verification-policy-v2
+installed Windows app           0.9.4
+candidate installer             src-tauri/target/release/bundle/nsis/
+                                Bridge_0.9.4_x64-setup.exe
+release state                   CANDIDATE ONLY — NOT RELEASED
+installed Stage 9B.4 acceptance NOT RUN
+```
+
+Stages 1–8 and the Stage 9A–9B.4 implementation are present. “Implemented” is
+not the same as installed acceptance or release approval. Preserve the Project
+QA Report, translationCore compatibility, existing human decisions, Scripture
+history, Word Alignment invalidation, and all current correction safeguards.
+
+## Frozen current behavior
+
+The latest Stage 9B.4 preparation fixed two real end-to-end blockers:
+
+1. semantic-location readers now retain `runId`, allowing Correction Review to
+   offer the actual target candidate span;
+2. identical content-addressed coverage accounts can be re-seeded safely during
+   affected re-analysis without overwriting mutable review/coverage state.
+
+Affected re-analysis continues through the single Stage 5→8 pipeline. It does
+not rewrite Scripture, verify automatically, mark a finding `CORRECTED`, or
+approve/rebuild Word Alignment. Verification and the explicit corrected
+acknowledgement remain separate human-visible operations.
+
+The last recorded regression gate is:
+
+```text
+full Python + Greek Room       1014 passed, 0 failed
+frontend Vitest                 307 passed / 24 files
+npm run check                   0 errors / 0 warnings
+npm run build                   passed
+cargo check                     passed
+cargo test                      12 passed
+git diff --check                passed
+```
+
+## Last read-only installed evidence
+
+The existing managed Stage 9B.3c project
+`C:\Users\Benz\AppData\Local\Bridge\data\projects\ta_irv_php-2` was inspected
+without running analysis or changing project state:
+
+```text
+application                    27afe44f-3a05-42e4-a6c2-023b058473ab
+application state              COMPLETED
+affected job                   269096f5-8459-4b7a-81c0-d06cd69da359
+affected job state             COMPLETED_WITH_WARNINGS
+resolved source                PHP 1:3
+resolved target                PHP 1:6
+resolved structural range      PHP 1:3–1:6
+semantic verification          PENDING
+PHP 1:6 Word Alignment         INVALID / reviewable
+```
+
+All five affected-analysis stages completed or were safely reused. The warning
+is `MULTILINGUAL_EMBEDDING_PROVIDER_NOT_CONFIGURED`. The pre-correction QA run
+is retained as `STALE`. The same stable finding recurred in the new active QA
+run, so the canonical finding row was reactivated while its human
+`CONFIRMED_TRANSLATION_ERROR` decision was preserved in review history. Do not
+mistake that stable-identity refresh for deletion of history.
+
+## Exact next permitted work
+
+On explicit approval to run installed acceptance:
+
+1. Confirm `HEAD == origin/main == 0e79c6e` and a clean tracked worktree.
+2. Use the existing 0.9.4 installer; do not call it a release.
+3. Seed a fresh disposable package exactly as documented:
+
+   ```powershell
+   python scripts/seed_correction_acceptance.py C:\bridge-acceptance
+   ```
+
+4. Follow `docs/STAGE_9B4_ACCEPTANCE.md` without abbreviating the restart,
+   idempotency, Scripture-preservation, history, or Word Alignment checks.
+5. Run the read-only inspector after each case and retain its output with the
+   acceptance report:
+
+   ```powershell
+   python scripts/inspect_correction_application.py <project> <findingId> <proposalId>
+   ```
+
+6. Report the three cases truthfully:
+
+   ```text
+   A  controlled evidence       PASSED
+   B  controlled evidence       FAILED
+   C  real production pipeline  UNCERTAIN + PROVIDER_LIMITED
+   ```
+
+Cases A and B are controlled verifier fixtures, not production end-to-end
+proof. Case C is the real cross-language Stage 5→8 flow. In 0.9.4 it must not
+be forced to `PASSED`: no production multilingual embedding provider ships and
+no production path currently persists the human-approved lexical precedent
+needed to reach the location threshold.
+
+## Stop conditions and work still outside this handoff
+
+Stop and report rather than weakening confidence, CAS, provenance, history, or
+human-review boundaries. Do not release 0.9.4 merely because the controlled A
+and B cases pass. Do not begin the following without a separately approved
+scope:
+
+```text
+production multilingual provider / lexical-precedent integration
+Tamil Stage 7 normalization changes
+REFERENT / PARTICIPANT / TEMPORAL pipeline expansion
+correction-history timestamp ordering changes
+cross-verse visualization redesign
+broader v1 stabilization
+export / Scripture Burrito implementation
+```
+
+The known sidecar duplicate-classification smoke mismatch remains unrelated and
+pre-existing; §37.9 records the evidence. Do not fold that defect into Stage
+9B.4 acceptance unless separately authorized.
+
+---
+
 # 38. Export Architecture (Planned, Post-Stage-9)
 
 The rich Bridge model is authoritative. Do not force passage-aware semantic
@@ -2814,12 +2952,14 @@ When this file is used to start a new conversation:
    original numbering assumed otherwise). Check `git log`, run the test
    suites, read the actual code before trusting any stage's status here as
    current truth.
-4. Check whether the Stage 8 working tree was committed before changing
-   code (`git status`/`git log --oneline -5`).
-5. The next major implementation task is **Stage 9 — Human Review and
-   Correction Workflow** (§37).
-6. Do not implement Stage 9's export/Scripture Burrito follow-on (§38)
-   until Stage 9 itself is complete, tested, and reviewed.
+4. Verify the current resume baseline from §37.10 with `git status` and
+   `git log --oneline -5`; do not assume a dirty or divergent tree is safe.
+5. Stages 1–8 and the Stage 9A–9B.4 implementation are present. The immediate
+   boundary is the installed Stage 9B.4 A/B/C acceptance in
+   `docs/STAGE_9B4_ACCEPTANCE.md`, after explicit approval.
+6. Do not start export/Scripture Burrito work (§38), the production-provider
+   gap, or broader v1 stabilization until installed acceptance is reviewed and
+   the next scope is explicitly approved.
 7. Preserve existing Scripture and translationCore behavior.
 8. Continue test-first and stop at stage boundaries.
 9. If repository reality conflicts with this document, report the conflict
