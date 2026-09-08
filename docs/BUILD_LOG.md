@@ -5945,3 +5945,12 @@ acceptance fixture, database, build metadata, or application behavior changed.
 The next authorized operational boundary remains the installed 0.9.4 A/B/C
 acceptance described in `docs/STAGE_9B4_ACCEPTANCE.md`. Version 0.9.4 remains a
 candidate and has not been released.
+
+# Bridge 0.9.4 release authorization (2026-09-08)
+
+The project owner subsequently authorized `v0.9.4` for publication as the
+latest stable GitHub release after the recorded gates completed. This explicit
+decision supersedes the candidate-only hold above. Release notes are stored in
+`docs/RELEASE_0.9.4.md`; the Windows release asset is
+`Bridge_0.9.4_x64-setup.exe`, SHA-256
+`6F3960A6AEB6BF03568267A9E421EB9B62C09EF893364126E56905A32D763951`.

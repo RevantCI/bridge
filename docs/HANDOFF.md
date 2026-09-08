@@ -2840,6 +2840,42 @@ pre-existing; §37.9 records the evidence. Do not fold that defect into Stage
 
 ---
 
+# 37.11 Bridge 0.9.4 Release Authorization (2026-09-08)
+
+The project owner explicitly authorized publishing `v0.9.4` as the latest
+non-prerelease GitHub release after completion of the recorded test gates. This
+authorization supersedes the earlier candidate-only release hold in §37.9 and
+§37.10; it does not weaken any semantic, correction, provenance, Scripture, or
+translationCore invariant.
+
+Release payload:
+
+```text
+tag                            v0.9.4
+release name                   Bridge 0.9.4
+release channel                latest stable / non-prerelease
+Windows asset                  Bridge_0.9.4_x64-setup.exe
+asset SHA-256                  6F3960A6AEB6BF03568267A9E421EB9B62C09EF893364126E56905A32D763951
+asset size                     57,750,273 bytes
+application version            0.9.4
+companion schema               v14
+verification policy            correction-verification-policy-v2
+```
+
+The release includes the Stage 9B.4 verification and explicit corrected
+acknowledgement work, correction eligibility/resource-evidence repair,
+end-to-end affected-analysis persistence fixes, controlled acceptance tooling,
+and the script-aware multilingual font stack. The real cross-language
+verification limitation remains explicit: without a configured production
+multilingual provider or persisted human lexical precedent, Bridge must return
+`UNCERTAIN`/`PROVIDER_LIMITED` rather than manufacture `PASSED`.
+
+After publication, the next development boundary is post-Stage-9 v1
+stabilization, and still requires a separately approved scope. Export and
+Scripture Burrito work remain post-Stage-9 architecture, not part of 0.9.4.
+
+---
+
 # 38. Export Architecture (Planned, Post-Stage-9)
 
 The rich Bridge model is authoritative. Do not force passage-aware semantic
