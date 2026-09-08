@@ -187,6 +187,8 @@ export interface QaFindingDetail {
   resources: ResolvedEvidence[];
   supportingEvidence: ResolvedEvidence[];
   conflictingEvidence: ResolvedEvidence[];
+  /** Resources that disagree with each other; blocks correction until resolved. */
+  resourceConflictEvidence?: ResolvedEvidence[];
   history: ReviewRecord[];
   isStale: boolean;
   reviewEngineVersion: string;

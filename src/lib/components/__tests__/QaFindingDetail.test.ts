@@ -158,7 +158,7 @@ describe("QaFindingDetail", () => {
         ...resource,
         content: `${String(resource.content)} ${LONG_TAMIL}`.repeat(12),
       })),
-      conflictingEvidence: resources.conflictingEvidence,
+      resourceConflictEvidence: resources.resourceConflictEvidence,
       history: history.history,
     };
     const { container } = render(QaFindingDetail, { props: { detail: longDetail } });

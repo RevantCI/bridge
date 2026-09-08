@@ -15,6 +15,7 @@ import json
 import time
 from typing import Any, Iterator
 
+from .meaning_analysis import resource_conflict_evidence_ids
 from .passage_semantic_models import (
     AuditDirection,
     ConfidenceScore,
@@ -470,6 +471,10 @@ class QaAuditEngine:
                         explanation=assessment.get("explanation", ""), confidence=confidence,
                         resource_evidence_ids=(), supporting_evidence_ids=tuple(assessment.get("supportingEvidenceIds", [])),
                         conflicting_evidence_ids=tuple(assessment.get("conflictingEvidenceIds", [])),
+                        # Only a real tN/tW/TWL disagreement, read from the
+                        # assessment's own typed field (or proved from its
+                        # component records when it predates that field).
+                        resource_conflict_evidence_ids=resource_conflict_evidence_ids(assessment),
                         source=source, target=target, fingerprint=fingerprint, policy_binding=policy_binding,
                         target_units=target_units, current_text=current_text,
                     )
@@ -669,6 +674,7 @@ class QaAuditEngine:
         explanation: str, confidence: float, resource_evidence_ids: tuple[str, ...],
         dimension: str = "",
         supporting_evidence_ids: tuple[str, ...], conflicting_evidence_ids: tuple[str, ...],
+        resource_conflict_evidence_ids: tuple[str, ...] = (),
         source: dict[str, Any], target: dict[str, Any], fingerprint: str, policy_binding: PolicyBinding,
         target_units: dict[str, Any], current_text: dict[str, str],
     ) -> dict[str, Any]:
@@ -702,7 +708,11 @@ class QaAuditEngine:
             "displayedReferences": list(references),
             "resourceEvidenceIds": list(resource_evidence_ids),
             "supportingEvidenceIds": list(supporting_evidence_ids),
+            # Meaning-failure evidence.  Kept distinct from the field below:
+            # "the target says something else" is the error a correction fixes,
+            # while a resource conflict is a decision a human owes first.
             "conflictingEvidenceIds": list(conflicting_evidence_ids),
+            "resourceConflictEvidenceIds": list(resource_conflict_evidence_ids),
             "targetContentHashes": list(target_content_hashes(target_references, current_text)),
             "sourceResourceHashes": [str(
                 ((source.get("sourceResource") or {}).get("resourceHash"))
@@ -749,6 +759,7 @@ class QaAuditEngine:
             meaning_status_snapshot=finding["meaningStatusSnapshot"],
             supporting_evidence_ids=tuple(finding["supportingEvidenceIds"]),
             conflicting_evidence_ids=tuple(finding["conflictingEvidenceIds"]),
+            resource_conflict_evidence_ids=tuple(finding.get("resourceConflictEvidenceIds") or ()),
             resource_evidence_ids=tuple(finding["resourceEvidenceIds"]),
             target_content_hashes=tuple(finding["targetContentHashes"]),
             source_resource_hashes=tuple(finding["sourceResourceHashes"]),

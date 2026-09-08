@@ -76,7 +76,30 @@ describe("EvidenceInspector", () => {
     render(EvidenceInspector, { props: { detail: resourceConflict() } });
     expect(screen.getByText(/should be rendered as a blessing/i)).toBeInTheDocument();
     expect(screen.getByText(/treats this term as a greeting/i)).toBeInTheDocument();
-    expect(screen.getByText("Conflicting")).toBeInTheDocument();
+    expect(screen.getByText("Resource conflict")).toBeInTheDocument();
+  });
+
+  it("labels meaning-failure evidence as a meaning difference, not a resource conflict", () => {
+    // The distinction the correction gate turns on: evidence that the target
+    // meaning differs is the finding itself, and must not read as "the
+    // resources disagree", which is what holds a correction back.
+    const detail = quantityContradiction();
+    render(EvidenceInspector, {
+      props: {
+        detail: {
+          ...detail,
+          conflictingEvidence: [{
+            id: "meaning-evidence-1",
+            evidenceSource: "MEANING_ASSESSMENT",
+            kind: "DETERMINISTIC_CONTRADICTION",
+            content: "Explicit quantity changes from ALL to SOME.",
+          }],
+          resourceConflictEvidence: [],
+        },
+      },
+    });
+    expect(screen.getByText("Meaning differs")).toBeInTheDocument();
+    expect(screen.queryByText("Resource conflict")).toBeNull();
   });
 
   it("never hides stale, and says what stale means", () => {

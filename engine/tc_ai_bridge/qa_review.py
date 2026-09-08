@@ -136,6 +136,11 @@ class QaReviewService:
             "resources": self._evidence(finding.get("resourceEvidenceIds") or [], inline),
             "supportingEvidence": self._evidence(finding.get("supportingEvidenceIds") or [], inline),
             "conflictingEvidence": self._evidence(finding.get("conflictingEvidenceIds") or [], inline),
+            # Separate section, because the two block differently: meaning
+            # evidence argues the translation is wrong, a resource conflict
+            # says the resources themselves disagree and holds a correction.
+            "resourceConflictEvidence": self._evidence(
+                finding.get("resourceConflictEvidenceIds") or [], inline),
             "history": self.repository.review_records("QA_FINDING", finding_id),
             "isStale": finding.get("lifecycleStatus") == LifecycleStatus.STALE.value,
             "reviewEngineVersion": REVIEW_ENGINE_VERSION,

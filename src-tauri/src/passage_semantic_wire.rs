@@ -1335,7 +1335,11 @@ pub struct MeaningAssessment {
     pub meaning_confidence: LocationConfidence,
     pub component_assessments: Vec<MeaningComponentAssessment>,
     pub supporting_evidence_ids: Vec<String>,
+    /// Meaning-failure evidence, not resource disagreement.
     pub conflicting_evidence_ids: Vec<String>,
+    /// Genuine resource disagreement only; absent on pre-split payloads.
+    #[serde(default)]
+    pub resource_conflict_evidence_ids: Vec<String>,
     pub location_outcome_snapshot: LocationOutcome,
     pub location_confidence_snapshot: LocationConfidence,
     pub location_review_required: bool,

@@ -768,6 +768,13 @@ class QaFinding:
     # Denormalized so the Stage 9A review queue can order and filter by
     # canonical position without resolving relationships and units first.
     displayed_references: tuple[str, ...] = ()
+    # Genuine resource disagreement only -- two applicable tN/tW/TWL records
+    # that contradict each other.  Deliberately separate from
+    # `conflicting_evidence_ids`, which holds Stage 7 meaning-failure evidence:
+    # that a translation is wrong is the reason to correct it, not a reason to
+    # refuse.  Absent (rather than empty) on findings written before the split,
+    # which is what lets eligibility fail closed on them instead of guessing.
+    resource_conflict_evidence_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

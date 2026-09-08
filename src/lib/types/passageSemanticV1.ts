@@ -423,7 +423,10 @@ export interface QaFinding {
   locationOutcomeSnapshot: string;
   meaningStatusSnapshot: string;
   supportingEvidenceIds: string[];
+  /** Stage 7 meaning-failure evidence: the target meaning differs from the source. */
   conflictingEvidenceIds: string[];
+  /** Genuine resource disagreement only. Absent on findings written before the split. */
+  resourceConflictEvidenceIds?: string[];
   resourceEvidenceIds: string[];
   targetContentHashes: string[];
   sourceResourceHashes: string[];
@@ -768,7 +771,10 @@ export interface MeaningAssessment {
   meaningConfidence: LocationConfidence;
   componentAssessments: MeaningComponentAssessment[];
   supportingEvidenceIds: string[];
+  /** Meaning-failure evidence, not resource disagreement. */
   conflictingEvidenceIds: string[];
+  /** Genuine resource disagreement only. Absent on assessments written before the split. */
+  resourceConflictEvidenceIds?: string[];
   locationOutcomeSnapshot: LocationOutcome;
   locationConfidenceSnapshot: LocationConfidence;
   locationReviewRequired: boolean;

@@ -259,7 +259,39 @@ def test_meaning_overridden_to_preserved_is_blocked() -> None:
 
 def test_unresolved_resource_conflict_is_blocked() -> None:
     service = _service({VERSE: TEXT})
-    _confirmed_finding(service, conflictingEvidenceIds=["ev-1"])
+    _confirmed_finding(service, resourceConflictEvidenceIds=["ev-1"])
+    result = service.evaluate("qa-1")
+    assert result.eligible is False
+    assert CorrectionEligibilityCode.RESOURCE_CONFLICT_REQUIRES_REVIEW.value in _codes(result)
+
+
+def test_meaning_failure_evidence_alone_is_not_a_resource_conflict() -> None:
+    """The two concepts that once shared `conflictingEvidenceIds`.
+
+    Evidence that the target meaning differs is the finding itself. Reading it
+    as "the resources disagree" refused a correction to every meaning failure
+    Bridge could emit; see the Stage 9B meaning-failure eligibility tests.
+    """
+    service = _service({VERSE: TEXT})
+    _confirmed_finding(
+        service,
+        conflictingEvidenceIds=["meaning-evidence-1"],
+        resourceConflictEvidenceIds=[],
+    )
+    result = service.evaluate("qa-1")
+    assert result.eligible is True
+    assert _codes(result) == {CorrectionEligibilityCode.ELIGIBLE.value}
+
+
+def test_a_pre_split_finding_fails_closed_on_its_ambiguous_conflicting_ids() -> None:
+    """No `resourceConflictEvidenceIds` key at all: a 0.9.3 record.
+
+    Nothing on it says whether those ids are meaning evidence or a real
+    resource disagreement, so it blocks until re-analysis rewrites it.
+    """
+    service = _service({VERSE: TEXT})
+    finding = _confirmed_finding(service, conflictingEvidenceIds=["ev-1"])
+    assert "resourceConflictEvidenceIds" not in finding
     result = service.evaluate("qa-1")
     assert result.eligible is False
     assert CorrectionEligibilityCode.RESOURCE_CONFLICT_REQUIRES_REVIEW.value in _codes(result)

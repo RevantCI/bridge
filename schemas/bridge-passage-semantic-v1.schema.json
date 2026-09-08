@@ -356,7 +356,7 @@
     },
     "QaFinding": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "projectId", "book", "passageId", "kind", "direction", "sourceSemanticUnitIds", "targetSemanticUnitIds", "semanticRelationshipIds", "evidenceIds", "explanation", "confidence", "currentTargetRevision", "qaDisposition", "policyBinding", "reviewStatus", "lifecycleStatus", "revision", "severity", "meaningAssessmentIds", "coverageAccountIds", "locationOutcomeSnapshot", "meaningStatusSnapshot", "supportingEvidenceIds", "conflictingEvidenceIds", "resourceEvidenceIds", "targetContentHashes", "sourceResourceHashes", "qaEngineVersion", "qaPolicyVersion", "fingerprint", "displayedReferences"],
+      "required": ["id", "projectId", "book", "passageId", "kind", "direction", "sourceSemanticUnitIds", "targetSemanticUnitIds", "semanticRelationshipIds", "evidenceIds", "explanation", "confidence", "currentTargetRevision", "qaDisposition", "policyBinding", "reviewStatus", "lifecycleStatus", "revision", "severity", "meaningAssessmentIds", "coverageAccountIds", "locationOutcomeSnapshot", "meaningStatusSnapshot", "supportingEvidenceIds", "conflictingEvidenceIds", "resourceConflictEvidenceIds", "resourceEvidenceIds", "targetContentHashes", "sourceResourceHashes", "qaEngineVersion", "qaPolicyVersion", "fingerprint", "displayedReferences"],
       "properties": {
         "id": { "type": "string" }, "projectId": { "type": "string" }, "book": { "type": "string" }, "passageId": { "type": "string" },
         "kind": { "$ref": "#/$defs/QaFindingKind" }, "direction": { "$ref": "#/$defs/AuditDirection" },
@@ -374,6 +374,7 @@
         "locationOutcomeSnapshot": { "type": "string" }, "meaningStatusSnapshot": { "type": "string" },
         "supportingEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "conflictingEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "resourceConflictEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "resourceEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "targetContentHashes": { "type": "array", "items": { "type": "string" } },
         "sourceResourceHashes": { "type": "array", "items": { "type": "string" } },
@@ -522,7 +523,7 @@
     },
     "MeaningAssessment": {
       "type": "object", "additionalProperties": false,
-      "required": ["id", "semanticLocationRelationshipId", "sourceSemanticUnitIds", "targetSemanticUnitIds", "meaningStatus", "meaningConfidence", "componentAssessments", "supportingEvidenceIds", "conflictingEvidenceIds", "locationOutcomeSnapshot", "locationConfidenceSnapshot", "locationReviewRequired", "reason", "explanation", "sourceInventoryFingerprint", "targetInventoryFingerprint", "targetRevisionHashes", "sourceResourceHashes", "policyBinding", "engineVersion", "modelVersion", "reviewStatus", "lifecycleStatus", "revision"],
+      "required": ["id", "semanticLocationRelationshipId", "sourceSemanticUnitIds", "targetSemanticUnitIds", "meaningStatus", "meaningConfidence", "componentAssessments", "supportingEvidenceIds", "conflictingEvidenceIds", "resourceConflictEvidenceIds", "locationOutcomeSnapshot", "locationConfidenceSnapshot", "locationReviewRequired", "reason", "explanation", "sourceInventoryFingerprint", "targetInventoryFingerprint", "targetRevisionHashes", "sourceResourceHashes", "policyBinding", "engineVersion", "modelVersion", "reviewStatus", "lifecycleStatus", "revision"],
       "properties": {
         "id": { "type": "string" }, "semanticLocationRelationshipId": { "type": "string" },
         "sourceSemanticUnitIds": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
@@ -531,6 +532,7 @@
         "componentAssessments": { "type": "array", "items": { "$ref": "#/$defs/MeaningComponentAssessment" } },
         "supportingEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "conflictingEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "resourceConflictEvidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
         "locationOutcomeSnapshot": { "$ref": "#/$defs/LocationOutcome" }, "locationConfidenceSnapshot": { "$ref": "#/$defs/LocationConfidence" },
         "locationReviewRequired": { "type": "boolean" }, "reason": { "$ref": "#/$defs/MeaningAssessmentReason" }, "explanation": { "type": "string" },
         "sourceInventoryFingerprint": { "type": "string" }, "targetInventoryFingerprint": { "type": "string" },

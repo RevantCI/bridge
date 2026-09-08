@@ -86,6 +86,7 @@ export function detail(overrides: Partial<QaFindingDetail> = {}): QaFindingDetai
     resources: [],
     supportingEvidence: [],
     conflictingEvidence: [],
+    resourceConflictEvidence: [],
     history: [],
     isStale: false,
     reviewEngineVersion: "bridge-qa-review-v1",
@@ -202,7 +203,10 @@ export function resourceConflict(): QaFindingDetail {
       resourceVersion: "v86",
       validationStatus: "SUPPORTING",
     }],
-    conflictingEvidence: [{
+    // A genuine resource disagreement: two resources, incompatible readings.
+    // Meaning-failure evidence lives in conflictingEvidence and is a different
+    // thing -- it never blocks a correction on its own.
+    resourceConflictEvidence: [{
       id: "evidence-2",
       evidenceSource: "EVIDENCE_RECORD",
       kind: "TRANSLATION_WORD",

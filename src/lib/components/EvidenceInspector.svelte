@@ -42,8 +42,18 @@
     ...(detail.resources ?? []),
     ...(detail.supportingEvidence ?? []),
     ...(detail.conflictingEvidence ?? []),
+    ...(detail.resourceConflictEvidence ?? []),
   ];
-  $: conflictingIds = new Set((detail.conflictingEvidence ?? []).map((item) => item.id));
+  /**
+   * Two different things, deliberately labelled differently. Meaning evidence
+   * argues the translation differs from the source -- that is the finding, and
+   * it is what a correction fixes. A resource conflict means the resources
+   * themselves disagree, which a human has to resolve before correcting.
+   */
+  $: meaningEvidenceIds = new Set((detail.conflictingEvidence ?? []).map((item) => item.id));
+  $: resourceConflictIds = new Set(
+    (detail.resourceConflictEvidence ?? []).map((item) => item.id),
+  );
 
   /**
    * Whether the reviewer is looking at a mapping problem or a translation
@@ -242,11 +252,13 @@
     {:else}
       <ul class="resources">
         {#each resources as item}
-          <li class:conflicting={conflictingIds.has(item.id)}>
+          <li class:conflicting={resourceConflictIds.has(item.id)}>
             <div class="resource-head">
               <span class="resource-kind">{text(item.kind ?? item.evidenceSource)}</span>
-              {#if conflictingIds.has(item.id)}
-                <ReviewStatusBadge label="Conflicting" tone="confirmed" />
+              {#if resourceConflictIds.has(item.id)}
+                <ReviewStatusBadge label="Resource conflict" tone="confirmed" />
+              {:else if meaningEvidenceIds.has(item.id)}
+                <ReviewStatusBadge label="Meaning differs" tone="neutral" />
               {:else if item.validationStatus}
                 <ReviewStatusBadge
                   label={text(item.validationStatus)}

@@ -23,6 +23,7 @@ from .passage_semantic_models import (
     LocationOutcome,
     MeaningStatus,
     QaDisposition,
+    ResourceValidationStatus,
     ReviewStatus,
 )
 from .passage_semantic_repository import FoundationValidationError
@@ -406,28 +407,71 @@ class CorrectionEligibilityService:
     def _check_resource_conflicts(self, finding: dict[str, Any]) -> list[EligibilityReason]:
         """Block while a source-variant / resource conflict is unresolved.
 
-        A CONFLICTING resource means the sources disagree about what the target
-        should say. Correcting toward one of them is a translation decision a
-        human has to make first, not something eligibility may assume.
+        A CONFLICTING resource means two applicable resources disagree about
+        what the source says. Correcting toward one of them is a translation
+        decision a human has to make first, not something eligibility may
+        assume.
+
+        That is *not* the same as evidence that the target's meaning differs
+        from the source. Stage 7 files an ALTERED / CONTRADICTED /
+        PARTIALLY_PRESERVED / TARGET_ADDS_SPECIFICITY /
+        TARGET_WEAKENS_SPECIFICITY component under `conflictingEvidenceIds`,
+        and that is positive translation-error evidence -- the very thing a
+        correction exists to fix. Reading it here blocked every meaning-failure
+        finding the pipeline could emit, so only the explicitly typed
+        `resourceConflictEvidenceIds` and a CONFLICTING resource record are
+        read now.
         """
         reasons: list[EligibilityReason] = []
-        for evidence_id in finding.get("conflictingEvidenceIds") or []:
+        seen: set[str] = set()
+
+        def block(evidence_id: str, detail: str) -> None:
+            if evidence_id in seen:
+                return
+            seen.add(evidence_id)
             reasons.append(EligibilityReason(
                 CorrectionEligibilityCode.RESOURCE_CONFLICT_REQUIRES_REVIEW,
-                "Conflicting evidence on this finding must be resolved before correcting.",
-                "EVIDENCE_RECORD", str(evidence_id),
+                detail, "EVIDENCE_RECORD", evidence_id,
             ))
+
+        typed = finding.get("resourceConflictEvidenceIds")
+        if typed is None:
+            # Written before the two concepts were separated. Its
+            # `conflictingEvidenceIds` may be either kind and nothing on the
+            # record says which, so fail closed rather than guess. Re-running
+            # the analysis rewrites the finding under its same stable id --
+            # with the human decision preserved -- and clears this.
+            for evidence_id in finding.get("conflictingEvidenceIds") or []:
+                block(
+                    str(evidence_id),
+                    "This finding predates the typed resource-conflict contract; "
+                    "re-run the analysis before correcting.",
+                )
+        else:
+            for evidence_id in typed:
+                block(
+                    str(evidence_id),
+                    "Resources disagree about this passage; resolve the conflict "
+                    "before correcting.",
+                )
+
         for evidence_id in finding.get("resourceEvidenceIds") or []:
             try:
                 evidence = self.repository.evidence_record(str(evidence_id))
             except (FoundationValidationError, AttributeError):
                 continue
-            if str(evidence.get("resourceValidationStatus") or "") == "CONFLICTING":
-                reasons.append(EligibilityReason(
-                    CorrectionEligibilityCode.RESOURCE_CONFLICT_REQUIRES_REVIEW,
+            # `validationStatus` is what `EvidenceRecord` actually serializes;
+            # the old `resourceValidationStatus` key exists on no record, so
+            # this rule never once fired before.
+            status = str(
+                evidence.get("validationStatus")
+                or evidence.get("resourceValidationStatus") or ""
+            )
+            if status == ResourceValidationStatus.CONFLICTING.value:
+                block(
+                    str(evidence_id),
                     "A resource validation conflict on this finding is unresolved.",
-                    "EVIDENCE_RECORD", str(evidence_id),
-                ))
+                )
         return reasons
 
     def _resolve_target_unit(self, unit_id: str) -> dict[str, Any] | None:

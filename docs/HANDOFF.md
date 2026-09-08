@@ -1508,9 +1508,12 @@ Tests: `engine/tests/test_correction_stage9b0.py`, 55 passing.
 3. **Resolved in Stage 9B.1: wording-generation contract.** The provider,
    provenance, alternatives, evidence, edit/reject/regenerate, CAS, and exact
    pre-persistence recheck contract is recorded below.
-4. **Resource-conflict rule is coarse.** Any entry in
-   `conflictingEvidenceIds` blocks eligibility. If some conflicts are
-   acceptable to correct through, that policy needs deciding.
+4. **Resolved 2026-09-08: the resource-conflict rule was reading the wrong
+   field.** Any entry in `conflictingEvidenceIds` blocked eligibility, and
+   Stage 7 files *meaning-failure* evidence there. Genuine resource
+   disagreement now has its own field, `resourceConflictEvidenceIds`, and only
+   that (plus a live CONFLICTING resource record) blocks. Details in
+   BUILD_LOG, "Meaning failure is not resource disagreement".
 5. **The Stage 9A review UI still has not had a human click-through** on a
    populated queue (carried over from the previous §37).
 
@@ -2459,15 +2462,15 @@ They did **not** prove that a finding naturally emitted by production Stage 8
 could enter Stage 9B — it could not have. Do not describe the earlier
 acceptance as fully production end-to-end.
 
-## A second, independent production blocker (found, not fixed)
+## A second, independent production blocker (found here, fixed 2026-09-08)
 
-Every naturally emitted **meaning-failure** finding is blocked by
-`RESOURCE_CONFLICT_REQUIRES_REVIEW`: Stage 7 files the very evidence that a
-meaning failed into `conflictingEvidenceIds`, and Stage 9B.0 blocks on that
+Every naturally emitted **meaning-failure** finding was blocked by
+`RESOURCE_CONFLICT_REQUIRES_REVIEW`: Stage 7 filed the very evidence that a
+meaning failed into `conflictingEvidenceIds`, and Stage 9B.0 blocked on that
 field for *resource* conflicts. Coverage findings (POSSIBLE_OMISSION,
-POSSIBLE_ADDITION) are unaffected and reach `ELIGIBLE` cleanly. Unrelated to
-the hash contract; **not** fixed here; needs its own approved scope. Details in
-BUILD_LOG.
+POSSIBLE_ADDITION) were unaffected and reached `ELIGIBLE` cleanly. Unrelated to
+the hash contract, and fixed in its own gate the next day — see §37.8 below and
+BUILD_LOG, "Meaning failure is not resource disagreement".
 
 ## Verification on 2026-09-07
 
@@ -2498,9 +2501,131 @@ ordered; only which references it is taken over changed.
 ## Next boundary
 
 Do **not** seed the Stage 9B.4 A/B/C acceptance fixtures until this gate is
-reviewed. The cross-verse graphical visualization, the Stage 7 Tamil
-normalization defect, and the meaning-failure eligibility blocker above all
-remain unauthorized/unscheduled.
+reviewed. The cross-verse graphical visualization and the Stage 7 Tamil
+normalization defect remain unauthorized/unscheduled. The meaning-failure
+eligibility blocker named above was fixed the next day in its own gate; see
+§37.8.
+
+---
+
+# 37.8 Meaning-Failure Correction Eligibility Repair (blocker fix, 2026-09-08)
+
+The second production blocker found during the §37.7 gate, fixed in its own
+gate. Nothing was released; version stays **0.9.3**, companion schema stays
+**v14**, verification policy stays `correction-verification-policy-v2`.
+
+## What was wrong
+
+Stage 7 and Stage 9B shared one field for two different concepts.
+
+`meaning_analysis._assessment` files every component whose status is `ALTERED`,
+`CONTRADICTED`, `PARTIALLY_PRESERVED`, `TARGET_ADDS_SPECIFICITY` or
+`TARGET_WEAKENS_SPECIFICITY` into `conflictingEvidenceIds` — evidence that the
+*target meaning differs from the source*. Stage 8 copied that onto the finding.
+`CorrectionEligibilityService._check_resource_conflicts` then read the same
+field as an unresolved **resource** conflict and raised
+`RESOURCE_CONFLICT_REQUIRES_REVIEW` for every id in it.
+
+So the evidence that a translation is wrong was the reason a correction was
+refused. No meaning-failure finding the pipeline could emit — CONTRADICTION,
+MEANING_SHIFT, POSSIBLE_UNDER/OVERTRANSLATION, NEGATION_PROBLEM,
+QUANTITY_PROBLEM, TEMPORAL_PROBLEM, PARTICIPANT_PROBLEM, REFERENT_PROBLEM —
+could reach correction review, however clean the Scripture was.
+
+A second defect made the first one load-bearing: the same method's *other*
+rule read `evidence.get("resourceValidationStatus")`, a key `EvidenceRecord`
+has never serialized (it emits `validationStatus`). That branch had never
+matched anything, so the overloaded meaning field was the only thing enforcing
+resource protection at all. Deleting the overload without repairing the key
+would have removed the protection rather than narrowing it.
+
+## The contract
+
+Two explicitly typed fields on both the Stage 7 assessment and the Stage 8
+finding:
+
+- `conflictingEvidenceIds` — meaning-failure evidence. Unchanged shape and
+  unchanged content. Never blocks a correction.
+- `resourceConflictEvidenceIds` — genuine resource disagreement only. Blocks
+  until a human resolves it.
+
+The new field is derived from what Stage 7 already computed and never
+surfaced: each component's `evidence.resourceStatus`, taken from the
+`validationStatus` of the resource records on the source unit.
+`resource_conflict_evidence_ids(assessment)` reads the stored field and, when
+the assessment predates it, *proves* the answer from the assessment's own
+`componentAssessments` — so a Stage 8 re-run over a cached pre-split Stage 7
+run still writes the correct value rather than an optimistic empty list.
+
+Eligibility reads only that field plus the now-repaired live
+`validationStatus` check on `resourceEvidenceIds`.
+
+## Backward compatibility
+
+A finding written before the split carries `conflictingEvidenceIds` and **no
+`resourceConflictEvidenceIds` key**. Absence is the discriminator: eligibility
+fails closed on such a record and says so in the reason detail. The ids are
+*not* classified by prefix or any other heuristic — the same refusal to
+reinterpret ambiguous stored data as in §37.7.
+
+Re-analysis is the way out. Finding ids are stable and `save_qa_finding`
+preserves `qaDisposition`/`reviewStatus` across a re-run, so a repaired finding
+keeps the reviewer's decision. No engine, model, calibration or policy version
+was bumped: each of those feeds the Stage 8 run fingerprint but not the
+coverage-account fingerprint, so a bump reproduces the duplicate
+`coverage_accounts` `FoundationConflict` recorded in BUILD_LOG. Existing
+0.9.3 findings are therefore repaired the next time the run fingerprint
+legitimately misses cache, and blocked rather than misread until then.
+
+## Two pipeline limits found while proving this (pre-existing, not fixed)
+
+1. Stage 6B only searches coverage-account **owner** units. REFERENT,
+   PARTICIPANT and TEMPORAL_ASPECTUAL source units are created COMPONENT-role
+   / CONDITIONAL-eligibility, so they are never located and cannot produce a
+   meaning-failure finding at all today. Only LEXICAL_CONTENT, QUANTITY and
+   POLARITY units are PRIMARY/ELIGIBLE.
+2. `DeterministicMeaningComparator.compare` never returns `ALTERED` on any
+   input path.
+
+Those two are why the component/dimension matrix is covered in two layers: the
+real pipeline where it reaches, and the real Stage 7 writer plus the real
+eligibility rule where it cannot. Neither limit is a consequence of this
+repair; both are recorded in BUILD_LOG as open observations.
+
+## Verification on 2026-09-08
+
+```text
+new meaning-failure -> 9B production suite   76 passed  (new file, run alone)
+Stage 7 + Stage 8 + 9B.0/9B.1/9B.3a/9B.3b/
+  9B.3c/9B.4 + 9A review + foundation +
+  Stage8->9B hash contract + new           405 passed
+full Python + Greek Room                  1014 passed, 0 failed  (21m36s)
+frontend Vitest                            307 passed (24 files)
+npm run check                              0 errors, 0 warnings
+npm run build                              built
+cargo check                                clean
+cargo test                                 12 passed
+git diff --check                           clean
+```
+
+An earlier combined focused run reported one failure in the new file
+(`test_confirmed_meaning_failure_can_have_a_correction_proposed`). That was a
+wrong assertion in the test, not in the code: after a proposal exists,
+eligibility legitimately reports `CONFLICTING_CORRECTION` naming that proposal,
+which the review panel filters out for a proposal it already holds. The test
+now asserts that shape, and re-evaluates with `ignore_proposal_ids` to confirm
+nothing else blocks. The full 1014-test run above includes the corrected file.
+
+The pre-existing `correction_proposal_history(...)[-1]` ordering flake
+documented in BUILD_LOG did not reproduce in any run of this gate.
+
+Installed desktop acceptance: **NOT RUN**, deliberately. Nothing released.
+
+## Next boundary
+
+Unchanged from §37.7 and still unauthorized: Stage 9B.4 installed acceptance
+fixtures, the Stage 7 Tamil normalization defect, cross-verse graphical
+visualization, and unrelated v1 UI work. Do not release.
 
 ---
 

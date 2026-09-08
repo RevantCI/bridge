@@ -5519,3 +5519,246 @@ src/lib/components/SettingsModal.svelte  fonts attribution in resources pane
 ```
 
 No engine, Rust, wire-shape or schema change. Version unchanged (**0.9.3**).
+
+# Meaning failure is not resource disagreement (2026-09-08)
+
+The second production blocker recorded above, now fixed. Before this, **no
+meaning-failure finding the pipeline could emit was ever correctable**, however
+clean the Scripture and however firmly a reviewer had confirmed it.
+
+## Root cause: one field, two meanings
+
+`meaning_analysis._assessment` split its components into two lists:
+
+```python
+supporting  = components whose status is PRESERVED / NOT_EXPLICIT_BUT_RECOVERABLE
+conflicting = components whose status is ALTERED, CONTRADICTED,
+              TARGET_WEAKENS_SPECIFICITY, TARGET_ADDS_SPECIFICITY,
+              PARTIALLY_PRESERVED
+```
+
+and wrote the second list to `conflictingEvidenceIds`. Read on its own terms
+that is right: the component evidence *conflicts with the claim that meaning
+was preserved*. Stage 8 copied the field onto the finding verbatim.
+
+`correction_eligibility._check_resource_conflicts` then read the same field
+under the other meaning of the word — a **resource** conflict, "the sources
+disagree about what the target should say, so a human must choose first" — and
+raised `RESOURCE_CONFLICT_REQUIRES_REVIEW` for every id in it.
+
+So the evidence that a translation is wrong was being read as a reason not to
+fix it. Reproduced on the real PHP 1:3 → 1:6 pipeline before the change:
+
+```text
+POSSIBLE_OVERTRANSLATION  qa-finding-fa51bd2a4fdc67c54ebc606ed2eed4fb
+  component  LEXICAL_CONTENT  TARGET_ADDS_SPECIFICITY  resourceStatus=SUPPORTING
+  conflictingEvidenceIds  ['meaning-evidence-cfc862dd...', 'source-evidence-2a52a06b...']
+  eligibility codes       {'RESOURCE_CONFLICT_REQUIRES_REVIEW'}
+```
+
+Note the second id: `source-evidence-2a52a06b...` is a real tN/tW record whose
+own `validationStatus` is **SUPPORTING**. It was blocking a correction while
+agreeing with it.
+
+## The second half of the root cause: the rule that never fired
+
+`_check_resource_conflicts` also walked `resourceEvidenceIds` and blocked on
+
+```python
+str(evidence.get("resourceValidationStatus") or "") == "CONFLICTING"
+```
+
+`EvidenceRecord` has a `validation_status` field, which `to_wire` serializes as
+**`validationStatus`**. No evidence record has ever carried a
+`resourceValidationStatus` key, so that branch never matched anything. The only
+thing actually enforcing resource protection was the overloaded meaning field —
+which is why simply deleting the overloaded check would have removed the
+protection outright rather than narrowing it.
+
+## The contract now
+
+Two explicitly typed fields, on both the Stage 7 assessment and the Stage 8
+finding:
+
+```text
+conflictingEvidenceIds        meaning-failure evidence: the target meaning
+                              differs from the source. Positive
+                              translation-error evidence. Never blocks a
+                              correction.
+resourceConflictEvidenceIds   genuine resource disagreement: applicable
+                              tN/tW/TWL records that contradict each other.
+                              Blocks until a human resolves it.
+```
+
+`resourceConflictEvidenceIds` is derived from data Stage 7 already had and had
+never surfaced: each component's `evidence.resourceStatus`, which the
+comparator computes from the `validationStatus` of the resource records
+attached to the source unit.
+`meaning_analysis.component_resource_conflict_evidence_ids()` collects the
+resource ids of every `CONFLICTING` component;
+`resource_conflict_evidence_ids(assessment)` reads the stored field, falling
+back to **proving** it from the assessment's own `componentAssessments` when
+the assessment predates the field. Stage 8 calls the second one, so a re-run
+over a cached pre-split Stage 7 run still writes the correct typed value
+instead of an optimistic empty list.
+
+Eligibility now reads only `resourceConflictEvidenceIds` plus the (repaired)
+live `validationStatus` check on `resourceEvidenceIds`.
+
+## Backward compatibility: absence is the discriminator
+
+A finding written before the split has `conflictingEvidenceIds` and **no**
+`resourceConflictEvidenceIds` key at all. Nothing on such a record says which
+of the two kinds its ids are, so eligibility fails closed on it:
+
+```python
+typed = finding.get("resourceConflictEvidenceIds")
+if typed is None:      # pre-split record -- cannot prove, so block
+    block every conflictingEvidenceIds entry
+else:                  # post-split record -- trust the typed field
+    block every entry of typed
+```
+
+Deliberately *not* done: inspecting the ids' prefixes (`meaning-evidence-`
+versus `source-evidence-`) to guess which kind they are. That is exactly the
+heuristic reinterpretation the hash-contract repair also refused.
+
+The way out is re-analysis, not reinterpretation. Finding ids are stable
+(`_stable_finding_id` excludes engine/policy versions and this field), and
+`save_qa_finding` preserves `qaDisposition` / `reviewStatus` / `revision` on a
+re-run, so a repaired finding keeps the reviewer's decision.
+`test_re_analysis_repairs_a_legacy_finding_and_keeps_the_human_decision` pins
+all of that.
+
+**No engine or policy version was bumped**, on purpose. `QA_ENGINE_VERSION`,
+`MEANING_ENGINE_VERSION` and the model/calibration versions all feed the Stage
+8 run fingerprint but not the coverage-account fingerprint, so bumping any of
+them makes the first Stage 8 re-run against an unchanged target inventory die
+with `FoundationConflict` on a duplicate `coverage_accounts` row — the separate
+open defect recorded above. Existing findings are therefore repaired the next
+time the run fingerprint legitimately misses cache (any Scripture edit,
+source-lock change, policy change or fresh import), and are blocked rather than
+misread until then.
+
+## What the real pipeline can and cannot emit
+
+Established while proving the matrix, and worth recording because it bounds
+what "dimension coverage" can honestly mean here:
+
+- `SemanticLocationEngine.run_range` only searches **coverage-account owner
+  units** (`primary`). `source_semantic_inventory` creates REFERENT,
+  PARTICIPANT and TEMPORAL_ASPECTUAL units with `role=COMPONENT` and
+  `eligibility=CONDITIONAL`, so they are never owners, never located, and
+  cannot produce a meaning-failure finding today. Only LEXICAL_CONTENT
+  (LEXICAL), QUANTITY (QUANTIFIER) and POLARITY (NEGATION) units are
+  PRIMARY/ELIGIBLE.
+- `DeterministicMeaningComparator.compare` never returns `ALTERED` on any input
+  path. `MeaningPolicy.aggregate` handles it and an AI comparator would produce
+  it, but the shipped deterministic one cannot.
+- Bridge's own resource validation attaches evidence only to tokens it
+  **matched**, and marks unmatched evidence `CONFLICTING` — so a CONFLICTING
+  record is never attached to a unit, and `evidence.resourceStatus` is never
+  `CONFLICTING` in an unmodified run. The resource-conflict tests write that
+  state through the store on purpose and say so in the docstring.
+
+All three are pre-existing properties of the inventory and comparator, not
+consequences of this repair. They are the reason the matrix is covered in two
+layers: the real pipeline where it reaches, and the real Stage 7 writer plus
+the real eligibility rule where it does not.
+
+## Verified on the real pipeline
+
+Real Stage 5 → 6A → 6B → 7 → 8, no hand-built finding, confirmed through
+`qa_review.decide_finding`:
+
+```text
+kind                        POSSIBLE_OVERTRANSLATION
+finding id                  qa-finding-fa51bd2a4fdc67c54ebc606ed2eed4fb (unchanged)
+component                   LEXICAL_CONTENT / TARGET_ADDS_SPECIFICITY
+displayedReferences         ['PHP 1:3', 'PHP 1:6']  -- source 1:3, target 1:6
+resourceConflictEvidenceIds []
+eligibility codes           {'ELIGIBLE'}
+correction proposal         created, edited to HUMAN_MODIFIED, applied
+```
+
+Naturally emitted meaning failures now reaching eligibility, each from its own
+real run:
+
+```text
+QUANTITY_PROBLEM           QUANTITY         CONTRADICTED                ALL -> SOME (pas)
+NEGATION_PROBLEM           POLARITY         CONTRADICTED                ou dropped
+POSSIBLE_UNDERTRANSLATION  LEXICAL_CONTENT  TARGET_WEAKENS_SPECIFICITY  epiteleo -> "carry on"
+POSSIBLE_UNDERTRANSLATION  LEXICAL_CONTENT  PARTIALLY_PRESERVED         enarchomai -> "finish"
+POSSIBLE_OVERTRANSLATION   LEXICAL_CONTENT  TARGET_ADDS_SPECIFICITY     unlicensed "only"
+```
+
+The POLARITY row is Greek → English on purpose: the open Tamil polarity
+tokenizer defect must not be what decides this result.
+
+Resource protection, proven twice:
+
+```text
+one of two resource records on a located source unit set CONFLICTING
+  -> Stage 7 component resourceStatus=CONFLICTING
+  -> Stage 8 emits kind RESOURCE_CONFLICT, id in resourceConflictEvidenceIds
+  -> eligible=False, RESOURCE_CONFLICT_REQUIRES_REVIEW
+
+an already-eligible confirmed finding whose resourceEvidenceIds record later
+turns CONFLICTING  ->  eligible=False   (the branch that had never once fired)
+```
+
+## Verification on 2026-09-08
+
+```text
+new meaning-failure -> 9B production suite   76 passed  (new file, run alone)
+Stage 7 + Stage 8 + 9B.0/9B.1/9B.3a/9B.3b/
+  9B.3c/9B.4 + 9A review + foundation +
+  Stage8->9B hash contract + new           405 passed
+full Python + Greek Room                  1014 passed, 0 failed  (21m36s)
+frontend Vitest                            307 passed (24 files)
+npm run check                              0 errors, 0 warnings
+npm run build                              built
+cargo check                                clean
+cargo test                                 12 passed
+git diff --check                           clean
+```
+
+An earlier combined focused run reported one failure in the new file
+(`test_confirmed_meaning_failure_can_have_a_correction_proposed`). That was a
+wrong assertion in the test, not in the code: after a proposal exists,
+eligibility legitimately reports `CONFLICTING_CORRECTION` naming that proposal,
+which the review panel filters out for a proposal it already holds. The test
+now asserts that shape, and re-evaluates with `ignore_proposal_ids` to confirm
+nothing else blocks. The full 1014-test run above includes the corrected file.
+
+The pre-existing `correction_proposal_history(...)[-1]` ordering flake
+documented in BUILD_LOG did not reproduce in any run of this gate.
+
+Installed desktop acceptance: **NOT RUN**, deliberately. Nothing released.
+
+## Files changed
+
+```text
+engine/tc_ai_bridge/meaning_analysis.py           typed resourceConflictEvidenceIds
+                                                  + the two derivation helpers
+engine/tc_ai_bridge/qa_audit.py                   carries it onto the finding
+engine/tc_ai_bridge/passage_semantic_models.py    QaFinding field
+engine/tc_ai_bridge/correction_eligibility.py     reads only typed conflicts;
+                                                  validationStatus key repaired;
+                                                  pre-split records fail closed
+engine/tc_ai_bridge/qa_review.py                  resourceConflictEvidence section
+engine/tests/test_meaning_failure_eligibility_stage9b.py   new
+engine/tests/test_correction_stage9b0.py          decision table extended
+schemas/bridge-passage-semantic-v1.schema.json    QaFinding + MeaningAssessment
+src/lib/types/passageSemanticV1.ts                optional new field
+src/lib/types/qaReview.ts                         resourceConflictEvidence
+src/lib/components/EvidenceInspector.svelte       "Meaning differs" versus
+                                                  "Resource conflict" badges
+src/lib/components/__tests__/                     fixtures + two tests
+src-tauri/src/passage_semantic_wire.rs            MeaningAssessment, serde default
+```
+
+Companion database schema unchanged (**v14**) — both records are stored as
+`payload_json`, so the new field needed no column and no migration.
+Verification policy unchanged (`correction-verification-policy-v2`). Version
+unchanged (**0.9.3**); nothing released.

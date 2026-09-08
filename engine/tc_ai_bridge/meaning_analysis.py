@@ -16,7 +16,7 @@ from typing import Any
 from .passage_semantic_models import (
     LocationCalibrationStatus, LocationOutcome, MeaningAssessmentReason,
     MeaningComponentStatus, MeaningEvidenceKind, MeaningRunStatus, MeaningStatus,
-    Realization,
+    Realization, ResourceValidationStatus,
 )
 
 
@@ -33,6 +33,51 @@ def _sha(value: str) -> str:
 
 def _json_hash(value: Any) -> str:
     return _sha(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+
+
+# --- Meaning failure vs. resource disagreement -------------------------------
+#
+# Two different things were once filed in one field.  `conflictingEvidenceIds`
+# holds the evidence that the *target meaning differs from the source* -- an
+# ALTERED, CONTRADICTED, PARTIALLY_PRESERVED, TARGET_ADDS_SPECIFICITY or
+# TARGET_WEAKENS_SPECIFICITY component.  That is positive translation-error
+# evidence: precisely what a correction exists to fix, and never a reason to
+# refuse one.
+#
+# A *resource* conflict is the narrower, separately typed thing below: two
+# applicable tN/tW/TWL records disagreeing about what the source says.  Only
+# that may block a correction, because choosing between the resources is a
+# translation decision a human has to make first.
+
+
+def component_resource_conflict_evidence_ids(
+    components: list[dict[str, Any]],
+) -> tuple[str, ...]:
+    """The resource records behind every CONFLICTING component, deduplicated."""
+    ids: list[str] = []
+    for component in components:
+        evidence = component.get("evidence") or {}
+        if str(evidence.get("resourceStatus") or "") != ResourceValidationStatus.CONFLICTING.value:
+            continue
+        ids.extend(str(item) for item in evidence.get("resourceEvidenceIds") or ())
+    return tuple(dict.fromkeys(ids))
+
+
+def resource_conflict_evidence_ids(assessment: dict[str, Any]) -> tuple[str, ...]:
+    """Genuine resource disagreements on one Stage 7 assessment.
+
+    Reads the typed field when the assessment carries it.  An assessment
+    written before the field existed is *proved* from its own stored
+    ``componentAssessments`` -- each component records the resource status the
+    comparator actually observed -- rather than reinterpreted from the
+    overloaded conflicting-evidence list.
+    """
+    stored = assessment.get("resourceConflictEvidenceIds")
+    if stored is not None:
+        return tuple(str(item) for item in stored)
+    return component_resource_conflict_evidence_ids(
+        assessment.get("componentAssessments") or [],
+    )
 
 
 def _norm(value: str) -> str:
@@ -288,6 +333,8 @@ class MeaningAnalysisEngine:
         supporting = [evidence_id for item in components
                       if item["status"] in {"PRESERVED", "NOT_EXPLICIT_BUT_RECOVERABLE"}
                       for evidence_id in [item["evidence"]["id"], *item["evidence"]["resourceEvidenceIds"]]]
+        # Meaning-failure evidence: the components that say the target meaning
+        # differs.  Not a resource conflict -- see the module note above.
         conflicting = [evidence_id for item in components
                        if item["status"] in {"ALTERED", "CONTRADICTED", "TARGET_WEAKENS_SPECIFICITY",
                                               "TARGET_ADDS_SPECIFICITY", "PARTIALLY_PRESERVED"}
@@ -307,6 +354,8 @@ class MeaningAnalysisEngine:
             },
             "componentAssessments": components,
             "supportingEvidenceIds": supporting, "conflictingEvidenceIds": conflicting,
+            "resourceConflictEvidenceIds": list(
+                component_resource_conflict_evidence_ids(components)),
             "locationOutcomeSnapshot": relationship["locationOutcome"],
             "locationConfidenceSnapshot": relationship["locationConfidence"],
             "locationReviewRequired": location_review_required,
