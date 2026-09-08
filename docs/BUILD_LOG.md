@@ -5337,3 +5337,185 @@ engine/tests/test_qa_target_hash_contract_stage8_9b.py   new — production path
 Schema unchanged (**v14**). Version unchanged (**0.9.2**). No frontend, Rust or
 wire-shape change: `targetContentHashes` is still `string[]` and still
 positionally ordered; only which references it is taken over changed.
+
+# Indic and source-script font support (2026-09-08)
+
+Implements `docs/plans/FONT_SUPPORT_PLAN.md`. Before this, `src/index.css`
+set one Latin stack (`-apple-system, "Inter", Segoe UI, Helvetica, Arial`)
+on `body`, and none of those faces cover Tamil, Devanagari, Bengali, Telugu,
+Kannada, Malayalam, Gujarati, Gurmukhi, Odia or Urdu. Target Scripture
+rendered through whatever WebView2 fell back to — a face the reviewer did
+not choose, varying by machine, and tofu on a machine with no Indic font
+installed.
+
+## Fallback-by-coverage, not language detection
+
+The design decision worth keeping: nothing reads `targetLanguageId` and maps
+it to a script. CSS already resolves font fallback **per glyph** by coverage,
+so a single stack that names every script face gets Latin chrome to Inter,
+Tamil past Inter to Vijaya, and Devanagari past both to Noto Serif
+Devanagari. Three consequences, all load-bearing:
+
+- The nine components that render target text (`AlignmentModal`,
+  `CorrectionReviewPanel`, `EvidenceInspector`, `FindingContextMenu`,
+  `ProjectReportScreen`, `SemanticAlignmentMode`, `TopBar`,
+  `VerseNotesPopup`, `VerseList`) needed **no** change to render correctly.
+  One `body` rule did it.
+- A mixed-script string renders correctly inside one text node — a finding
+  message like `Missing word "அருள்" in verse 3` puts the Latin in Inter and
+  the Tamil in Vijaya without being split.
+- Adding a gateway language is a data change, not a code change, so long as
+  its script is already in `--font-indic`.
+
+Declaring thirteen `@font-face` families costs nothing at runtime: the
+webview reads a font file off disk only when a glyph actually lands on it, so
+a Tamil-only project never touches the other twelve.
+
+## What is bundled, and what deliberately is not
+
+`public/fonts/` (new; Vite's default `publicDir`, so no `vite.config.ts`
+change was needed — files are copied verbatim into `dist/` and served from
+`tauri://localhost/fonts/…`). 23 files, 1.8 MB, produced by the new
+`scripts/vendor-fonts.py` and committed rather than downloaded at build time,
+because Bridge must build and run offline.
+
+**Vijaya and Nirmala UI are named in the CSS stack and must never be
+bundled.** They ship with Windows and Microsoft grants no redistribution
+right; putting either TTF in the repo or the installer is a licence
+violation. Naming them resolves the installed system font by family name in
+WebView2 and needs no permission. Since the build target is
+`x86_64-pc-windows-msvc`, Vijaya is present on essentially every real user's
+machine — the bundled Noto faces are the floor for macOS/Linux dev machines
+and stripped Windows installs. `public/fonts/README.md` says this where
+someone adding a font would go looking.
+
+Bundled versions:
+
+```text
+Noto Serif Tamil / Devanagari / Bengali / Telugu / Kannada / Malayalam /
+Gujarati / Gurmukhi / Oriya, Noto Nastaliq Urdu
+        google/fonts@5e35378e6bda803962ee6fd257e444a7d459660d, OFL 1.1
+Gentium Plus (Regular + Bold)   same commit, OFL 1.1
+Ezra SIL 2.51 (Regular)         software.sil.org, OFL 1.1 + MIT/X11
+```
+
+Per-file source sha256 is recorded in `public/fonts/README.md`.
+
+## Two things about the upstream fonts that the plan could not have known
+
+Both found by fetching them rather than reading about them, per this repo's
+standing rule:
+
+1. **The Noto families are published only as variable fonts.** google/fonts
+   ships `NotoSerifTamil[wdth,wght].ttf`, not a static pair. The plan called
+   for statics on size grounds and was right to: measured, the variable
+   Tamil WOFF2 is **181 KB** against **66 KB** for the static Regular+Bold
+   pair. So `vendor-fonts.py` instances each family at `wght` 400/700
+   (pinning `wdth` 100 where that axis exists) with
+   `fontTools.varLib.instancer`. Instancing resolves variation deltas and
+   does not touch the glyph set or shaping tables; the script asserts glyph
+   count and GSUB/GPOS lookup counts are unchanged after every instance and
+   refuses to write a font where they are not.
+
+2. **There is no "Noto Serif Greek" family.** Greek lives in plain Noto
+   Serif's `greek-ext` subset. `--font-greek` therefore leads with **Gentium
+   Plus** — the plan's own second choice, OFL, published as real statics, and
+   a stronger polytonic face than Noto Serif — with Noto Serif named behind
+   it. Gentium Plus is 600 KB of the 1.8 MB total, by far the largest item;
+   it is a very large Latin/Greek/Cyrillic/IPA font and is not subsetted (see
+   below).
+
+Also: **Ezra SIL has no bold cut.** It gets one `@font-face`. Bridge never
+bolds source Scripture, so a bold context would get synthetic bold rather
+than a wrong face.
+
+Nothing is subsetted, deliberately. Complex-script shaping lives entirely in
+GSUB/GPOS, and a subsetter that drops the wrong lookup breaks Tamil conjuncts
+or Hebrew mark positioning in a way that presents as a rendering bug rather
+than a font bug — expensive to debug later, and not worth ~100 KB.
+
+## Verification actually performed
+
+Source- and asset-level only. **The visual desktop checks in the plan's §8
+steps 2–6 have not been run** — they need the real window.
+
+```text
+npm run check    0 errors, 0 warnings
+npm run test     306 passed (24 files)
+npm run build    clean; all 23 files in dist/fonts/, every one referenced
+                 by the built CSS; served with content-type font/woff2 and
+                 a valid wOF2 header
+```
+
+Coverage against real project input, not hand-picked samples:
+
+```text
+IRVTam Luke + Philippians   all 90 distinct chars resolve in Noto Serif Tamil
+UHB, all 39 books           all 77 Hebrew-block codepoints resolve in Ezra
+                            SIL, cantillation included
+UGNT, all 27 books          all 166 polytonic codepoints resolve in Gentium
+```
+
+And shaped through HarfBuzz — the engine the webview itself uses — because
+cmap coverage alone would not catch instancing having broken a GSUB lookup:
+
+```text
+IRVTam Tamil        22 chars -> 21 glyphs   (the conjunct forms)
+Nastaliq Urdu       10 chars -> 18 glyphs
+UHB Genesis 1:1    109 chars -> 110 glyphs  through Ezra SIL
+UGNT John 1:1       36 chars ->  47 glyphs  through Gentium Plus
+```
+
+Zero `.notdef` in any of them.
+
+## Deviations from the plan in the pane tuning
+
+- `AlignmentModal`'s `.interlinear` was to get `--font-hebrew` outright. That
+  would have put Ezra SIL on every NT book's Greek source column. The markup
+  already sets `dir={context.sourceDirection}` on that element, so the face
+  keys off it: `[dir="rtl"]` → Hebrew, `[dir="ltr"]` → Greek.
+- `--font-target` went on `.token.target` rather than the planned
+  `.aligned-card .word`. One rule then covers the aligned cards inside the
+  interlinear — where it also has to undo the source face they would
+  otherwise inherit — and the word-bank tokens outside it. `.drag-ghost`
+  carries a target word too and takes the token as well.
+- `LexiconPopup`'s `.headword`/`.lemma` were flagged as possibly needing more
+  plumbing than they were worth, with Greek left to fall back. They did not:
+  both already render `dir={direction}`, so two attribute selectors gate the
+  face and Greek gets Gentium Plus properly.
+- `VerseList`'s `.vedit textarea` line-height went 1.7 → 1.85 to match
+  `.vtext`, so entering edit mode does not reflow the verse.
+
+## Known adjustment deferred
+
+**Urdu needs roughly `line-height: 2.0`.** Nastaliq's steep baseline cascade
+clips at the 1.85 the other scripts use. Bridge has no Urdu project today, so
+no special case was added — this is the note for whenever the first one lands.
+A per-script line-height needs a signal the fallback chain deliberately does
+not carry, so it would go on the scripture panes via `targetLanguageId`, not
+into `--font-indic`.
+
+## CSP
+
+`src-tauri/tauri.conf.json` has `"csp": null`, so no `font-src` directive was
+needed. **If CSP is ever tightened, it must include `font-src 'self'`** or
+every bundled font is blocked silently. `"resources": ["resources/"]` in the
+same file is for the Python sidecar and is unrelated — fonts ride inside the
+frontend `dist/`.
+
+## Files changed
+
+```text
+public/fonts/                            new — 23 WOFF2 + OFL.txt,
+                                         GentiumPlus-OFL.txt,
+                                         EzraSIL-Licenses.txt, README.md
+scripts/vendor-fonts.py                  new — how they were produced
+src/index.css                            @font-face block, font tokens, body
+src/lib/components/VerseList.svelte      .vtext, .vedit textarea
+src/lib/components/AlignmentModal.svelte .interlinear[dir], .token.target,
+                                         .drag-ghost
+src/lib/components/LexiconPopup.svelte   .headword[dir], .lemma[dir]
+src/lib/components/SettingsModal.svelte  fonts attribution in resources pane
+```
+
+No engine, Rust, wire-shape or schema change. Version unchanged (**0.9.3**).

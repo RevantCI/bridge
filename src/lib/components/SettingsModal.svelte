@@ -236,6 +236,13 @@
         {:else}
           <p class="muted">Open a project to see whether it uses bundled UHB 3.0.0 or UGNT 0.34.</p>
         {/if}
+        <h3 class="sub">Fonts</h3>
+        <p class="desc">Bridge bundles typefaces for the Indian gateway-language scripts and for Hebrew and Greek source text, so Scripture renders correctly with no network access and no font installation.</p>
+        <div class="kv"><span>Indian scripts</span><span>Noto Serif (Nastaliq for Urdu)</span></div>
+        <div class="kv"><span>Hebrew</span><span>Ezra SIL 2.51</span></div>
+        <div class="kv"><span>Greek</span><span>Gentium Plus</span></div>
+        <div class="resource-note">All bundled fonts are licensed under the SIL Open Font License 1.1, with the MIT/X11 licence additionally covering Ezra SIL's Hebrew layout intelligence. The full licence texts ship alongside the font files in the installed app under <code>fonts/</code>.</div>
+        <div class="resource-note">On Windows, Tamil and the other Indian scripts prefer Vijaya and Nirmala UI where they are installed. Those are Microsoft fonts and are not redistributed with Bridge; the bundled faces above are the fallback.</div>
       {:else if activePane === "security"}
         <h3>Security & privacy</h3>
         <p class="desc">Project data and Greek Room findings never leave this machine unless you explicitly use AI explain.</p>
@@ -257,6 +264,9 @@
   .nav-item.active { background: var(--accent-bg); color: var(--accent); }
   .settings-body { flex: 1; padding: 20px 24px; overflow-y: auto; }
   h3 { font-size: var(--fs-lg); margin: 0 0 4px; color: var(--text); }
+  /* Second heading inside a pane -- h3's own margin is bottom-only. */
+  h3.sub { margin-top: 24px; }
+  code { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
   .desc { font-size: var(--fs-xs); color: var(--text-2); margin: 0 0 16px; }
   .muted { font-size: var(--fs-sm); color: var(--text-3); }
   .field { margin-bottom: 14px; }
