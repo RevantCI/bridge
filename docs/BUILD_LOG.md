@@ -6062,3 +6062,19 @@ decision supersedes the candidate-only hold above. Release notes are stored in
 `docs/RELEASE_0.9.4.md`; the Windows release asset is
 `Bridge_0.9.4_x64-setup.exe`, SHA-256
 `6F3960A6AEB6BF03568267A9E421EB9B62C09EF893364126E56905A32D763951`.
+
+# Bridge 0.9.5 release (2026-09-08)
+
+The project owner authorized `v0.9.5` for publication as the latest stable
+GitHub release, published directly rather than as a draft. 0.9.5 is a
+maintenance release: version fields moved 0.9.4 → 0.9.5 across `package.json`,
+`package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`,
+`engine/pyproject.toml`, `BRIDGE_VERSION`, `ENGINE_VERSION`, the
+`translationCore-AI-Bridge` user agent, the import generator build stamp and
+`tc_ai_bridge.__version__`. The only functional change over 0.9.4 is the
+Stage 9B.4 acceptance-fixture queue-visibility repair recorded above; no
+product frontend, backend or Rust code changed, and the installer was rebuilt
+only so the numbered build matches the version fields.
+
+Release notes are stored in `docs/RELEASE_0.9.5.md`; the Windows release asset
+is `Bridge_0.9.5_x64-setup.exe`, SHA-256 `58ABC03FAF19D6880F093A9AA7A722F94302FDBCB0B89339B6B335CEF4008F0C`.

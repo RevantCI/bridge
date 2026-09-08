@@ -2876,6 +2876,45 @@ Scripture Burrito work remain post-Stage-9 architecture, not part of 0.9.4.
 
 ---
 
+# 37.12 Bridge 0.9.5 Release (2026-09-08)
+
+The project owner authorized publishing `v0.9.5` as the latest non-prerelease
+GitHub release, without a draft step. 0.9.5 is a maintenance release on top of
+0.9.4.
+
+**No product frontend, backend, or Rust behavior changed between 0.9.4 and
+0.9.5.** The only functional change is the Stage 9B.4 acceptance-fixture
+queue-visibility repair recorded in `docs/BUILD_LOG.md`: `_fixture()` in
+`engine/tests/test_correction_stage9b3b.py` now persists through
+`repository.save_qa_finding()` rather than a minimal insert plus hand-patched
+SQL, so the seeded A/B cases carry their denormalized Stage 9A queue columns
+and `qa_finding_scope_references` rows and are actually visible in
+Alignment Review → QA. `engine/tests/test_correction_acceptance_queue_visibility.py`
+locks that in against the real `qaReview.getQueue` API.
+
+The installer was rebuilt only so the numbered build matches the version
+fields; it carries no behavior change over `Bridge_0.9.4_x64-setup.exe`.
+
+Release payload:
+
+```text
+tag                            v0.9.5
+release name                   Bridge 0.9.5
+release channel                latest stable / non-prerelease
+Windows asset                  Bridge_0.9.5_x64-setup.exe
+asset SHA-256                  58ABC03FAF19D6880F093A9AA7A722F94302FDBCB0B89339B6B335CEF4008F0C
+asset size                     57,709,313 bytes
+application version            0.9.5
+companion schema               v14
+verification policy            correction-verification-policy-v2
+```
+
+Stage 9B.4 verification semantics are unchanged, and installed Stage 9B.4
+A/B/C acceptance (`docs/STAGE_9B4_ACCEPTANCE.md`) has still not been run end to
+end by a tester. It remains the next authorized operational boundary.
+
+---
+
 # 38. Export Architecture (Planned, Post-Stage-9)
 
 The rich Bridge model is authoritative. Do not force passage-aware semantic
