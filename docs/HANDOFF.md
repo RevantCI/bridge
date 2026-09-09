@@ -1517,22 +1517,42 @@ Tests: `engine/tests/test_correction_stage9b0.py`, 55 passing.
 5. **The Stage 9A review UI still has not had a human click-through** on a
    populated queue (carried over from the previous §37).
 
-## Queued change that touches the §39 boundary
+## Queued change that touches the §39 boundary — DECIDED 2026-09-09
 
 Issue **#28** (tN/tW auto-apply above 85% confidence) is filed and approved in
-principle, and carries one decision still open: whether "confidence alone
-decides" also removes the rule that AI never overwrites an imported or
-human-made selection.
+principle, and carried one decision open: whether "confidence alone decides"
+also removes the rule that AI never overwrites an imported or human-made
+selection.
+
+**The project owner settled this on 2026-09-09: the overwrite protection is
+KEPT.** "Confidence alone decides" applies to **empty** selections only.
+
+In scope for #28 — raise the bar to `> 0.85` and drop the four supporting
+policy gates (evidence non-empty, Stage 3 `native_tc_apply_allowed`,
+verdict/nothing-to-select coherence, contradictory-QA at >= 0.75).
+
+Out of scope, and staying — AI never overwrites a tN/tW selection that was
+imported or made by a human. `save_check_selection()` keeps that protection and
+`test_basic_ai_never_overwrites_a_human_selection` stays as its regression
+cover.
 
 That rule is not an implementation detail. §39 lists *silently overwrite
 human-approved work* in the hard do-not list and *protect human decisions* in
-the do list, and it is currently enforced in `save_check_selection()` with
-`test_basic_ai_never_overwrites_a_human_selection` as its regression cover.
+the do list. Dropping the evidence / Stage 3 mapping / contradictory-QA
+**policy** gates does not conflict with §39. Dropping the **overwrite
+protection** would have, which is why it needed an explicit call rather than
+being settled while coding.
 
-Dropping the evidence / Stage 3 mapping / contradictory-QA **policy** gates
-does not conflict with §39. Dropping the **overwrite protection** does. Anyone
-picking up #28 should treat that as a governance decision needing an explicit
-call, not a detail to settle while coding. Recorded on the issue as well.
+Resulting behaviour: a >85% proposal auto-applies where nothing has been
+selected yet; where a human or the import already chose, the proposal still
+requires the manual button regardless of confidence.
+
+Implementation has **not** started. `engine/bridge_service.py:1869` still reads
+`if float(review.confidence or 0.0) < 0.82:` inside
+`_safe_ai_selection_reason()` (line 1856), with `native_tc_apply_allowed`
+imported at line 105 and applied at line 1874. The project board wrongly showed
+#28 as Done; it was moved back to Backlog on 2026-09-09. The decision is
+recorded on the issue as well.
 
 Note that #28 concerns the `tc_ai_bridge` AI review path (tN/tW selections),
 not the Stage 5-9 passage-semantic pipeline — but it moves the same

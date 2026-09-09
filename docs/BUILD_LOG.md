@@ -6078,3 +6078,120 @@ only so the numbered build matches the version fields.
 
 Release notes are stored in `docs/RELEASE_0.9.5.md`; the Windows release asset
 is `Bridge_0.9.5_x64-setup.exe`, SHA-256 `58ABC03FAF19D6880F093A9AA7A722F94302FDBCB0B89339B6B335CEF4008F0C`.
+
+# Issue backlog reconciliation and #28 governance decision (2026-09-09)
+
+No product code changed. This session reconciled the GitHub issue tracker and
+project board #6 ("Bridge: Full Bible QA Orchestrator") against repository
+reality at `5e220a5`, and recorded one governance decision.
+
+## The board and the issue state had diverged
+
+Eleven issues were marked **Done** on the board while still **OPEN** on GitHub.
+Each was checked against the actual code rather than trusting either source.
+Eight were genuinely complete and were closed with the proving commit and
+file:line recorded on the issue:
+
+```text
+#29  verse actions to top, three AI review scopes   ReviewPanel.svelte:619-630
+                                                    1ed775c 3a50d76 967547b 1d3cc59
+#30  alignment occurrence counter                   AlignmentModal.svelte:97-99,325,341
+                                                    7c215c0
+#32  correction.applyProposal sidecar timeout       sidecar.rs:176 (=180), test :556
+#35  Automatic AI review panel removed              panel gone, progress bar kept
+                                                    ReviewPanel.svelte:654
+#37  CI release build and publish                   .github/workflows/release.yml
+#38  finding context menu                           FindingContextMenu.svelte
+                                                    831f35c 889e355 12eb081
+#39  base font size and Tamil→Vijaya                a06b3a2 + index.css:79-89
+#40  settings panel closes after save               86843a0
+```
+
+Three were **not** implemented despite the Done marking, and were moved back to
+Backlog on the board:
+
+- **#23** (passage-aware many:many alignment). The AI proposal schema is still
+  strictly pairwise 1:1 — `normalize_link_response()`
+  (`alignment_reliability.py:150`) requires exactly one `top_id` and one
+  `bottom_id` per link and raises otherwise (lines 159-162). Multi-token groups
+  appear only downstream when `compile_link_proposal` merges pairwise links.
+  What *did* land is `propose_alignment()`'s `cross_verse_alignment_exclusions()`
+  call (`ai_client.py:348`), which is a **protective** use of the semantic layer
+  enforcing §39's *never fake cross-verse alignment for translationCore* — not
+  richer proposal generation.
+- **#28** (tN/tW auto-apply above 85%). `bridge_service.py:1869` still gates at
+  `0.82` with all five policy checks intact in `_safe_ai_selection_reason()`
+  (line 1856).
+- **#31** (semantic filtering of Greek Room findings). No suppression state
+  exists in the QA list UI. The confusion is likely with AI triage (`68ae7cc`,
+  `b568bf9`, merged as #41), which is model-based false-positive *scoring* on
+  the project report — online-only, per-finding model cost, a different surface
+  and a different mechanism from reusing already-computed Stage 6B/7/8 evidence.
+
+The lesson matches this repo's standing rule: a status marker is a claim about
+the code, and claims get verified against the code.
+
+## #28 decided: overwrite protection is kept
+
+The open governance question flagged in `4e5a94a` and HANDOFF §"Queued change
+that touches the §39 boundary" was settled by the project owner. "Confidence
+alone decides" applies to **empty** selections only; AI still never overwrites
+an imported or human-made tN/tW selection. `save_check_selection()` keeps that
+protection and `test_basic_ai_never_overwrites_a_human_selection` remains its
+regression cover. HANDOFF is updated in place with the decision.
+
+## Six thin issues expanded
+
+#12, #14, #16, #17, #18 and #19 were one-to-three-line stubs (148-298 chars).
+Each was rewritten against current code with a verified current-state section,
+scope, acceptance criteria and the real hazards recorded in this repo. The
+substantive finding, in #12:
+
+**There are now five independent job managers, not one**, each with its own
+conflict exception, each running a single thread, each allowing one active job:
+
+```text
+engine/check_jobs.py                CheckJobManager       280 lines  in-memory
+engine/ai_review_jobs.py            AIReviewJobManager    280 lines  in-memory
+engine/report_jobs.py               ReportJobManager      198 lines  in-memory
+engine/project_sweep.py             ProjectSweepManager   170 lines  in-memory
+engine/tc_ai_bridge/analysis_jobs.py AnalysisJobManager   720 lines  PERSISTS
+```
+
+Only `AnalysisJobManager` survives a restart. The other four hold state purely
+in process memory, so "resume after app restart" is not one feature but four
+modules needing a persistence story they do not have. #12's original body also
+pointed at `tc_ai_bridge/check_jobs.py`; the file is `engine/check_jobs.py`.
+
+## #44-#47 confirmed as a real direction, conflicts recorded
+
+The project owner confirmed that database persistence, user management,
+real-time collaboration and project-management workflows are planned direction,
+not speculative capture. The architecture conflicts were recorded on #44 with
+cross-references from #45, #46 and #47, so they are decided deliberately rather
+than discovered mid-implementation. The load-bearing points:
+
+- **Bridge already has a database.** `passage_semantic_repository.py` is real
+  SQLite at `DATABASE_SCHEMA_VERSION = 14` with forward migration and a
+  newer-than-supported guard (line 1092). #44 is therefore not "files →
+  database" but "which remaining file stores move, and which must not".
+- **The translationCore-compatible on-disk shape is a compatibility contract.**
+  `manifest.json`, `<book>.usfm`, `<book>/<chapter>.json` and
+  `.apps/translationCore/**` cannot move without ending interoperability.
+  Bridge-private `.bridge/**` and `.apps/translationCoreAI/**` are fair game.
+- **`actor_id` defaults to the literal string `"human"`** (lines 3695, 4212,
+  4275). Every existing decision and correction is signed that way, so #45
+  needs an explicit migration decision — silently reassigning them would
+  misattribute human decisions, which §39 protects. Roles also create an
+  unanswered policy question: may user B overwrite user A's confirmed decision?
+- **`expected_revision` optimistic concurrency exists** (line 178 schema, lines
+  3695/4212/4275 API) and is real groundwork for #46, but it is single-writer
+  shaped: it rejects a stale write rather than merging.
+- **One desktop window, one sidecar** is the current process model and is the
+  largest conflict, upstream of #44/#45/#46 alike.
+
+## Gates
+
+Documentation and issue-tracker changes only. No Python, frontend or Rust
+source changed, so per the repository's testing policy the full Python suite
+was **not** run and is not claimed. `git diff --check` passes.
