@@ -409,12 +409,15 @@
         ]);
         eligibility = nextEligibility;
         context = nextContext;
-        await refreshVerification();
       } else if (affectedState === "FAILED") {
         error = "Affected passage analysis failed. Scripture remains applied and correction verification remains pending.";
       } else if (affectedState === "CANCELLED") {
         notice = "Affected passage analysis was cancelled. Correction verification remains pending.";
       }
+      // Verification is backend-owned even for technical terminal outcomes.
+      // Refresh after every terminal transition so an earlier ANALYSIS_RUNNING
+      // explanation cannot survive FAILED, CANCELLED, or warning completion.
+      await refreshVerification();
     } catch (exc) {
       error = message(exc);
     }
@@ -450,6 +453,7 @@
       affectedJob = await bridge.analysisJobCancel(affectedJob.jobId);
       affectedState = analysisState(affectedJob);
       if (affectedState === "RUNNING") schedulePoll();
+      else await refreshVerification();
     } catch (exc) {
       error = message(exc);
     } finally {

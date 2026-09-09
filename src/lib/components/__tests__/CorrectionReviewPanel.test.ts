@@ -681,6 +681,44 @@ describe("CorrectionReviewPanel", () => {
   });
 
   it.each([
+    ["FAILED", false, "ANALYSIS_FAILED", "Affected passage analysis failed technically."],
+    ["CANCELLED", false, "ANALYSIS_CANCELLED", "Affected passage analysis was cancelled."],
+    ["COMPLETED_WITH_WARNINGS", false, "PROVIDER_LIMITED", "Analysis completed with provider limitations."],
+  ])(
+    "refreshes backend verification after RUNNING transitions to %s",
+    async (overallStatus, searchIncomplete, reasonCode, detail) => {
+      const applied = {
+        ...proposal, lifecycleStatus: "STALE", reviewStatus: "HUMAN_APPROVED",
+        verificationStatus: "PENDING", revision: 3,
+      };
+      api.list.mockResolvedValue({
+        findingId: "qa-quantity", proposals: [applied], applications: [completedApplication],
+      });
+      api.analysisStatus.mockResolvedValue(analysisJob({
+        overallStatus, searchIncomplete, currentStage: "", completedAt: "now",
+      }));
+      api.getVerification
+        .mockResolvedValueOnce(pendingState(
+          ["ANALYSIS_NOT_RUN"], "Affected passage analysis has not been run.",
+        ))
+        .mockResolvedValueOnce(pendingState(
+          ["ANALYSIS_RUNNING"], "Affected passage analysis is running.",
+        ))
+        .mockResolvedValue(pendingState([reasonCode], detail));
+      render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+      await fireEvent.click(await screen.findByRole("button", { name: "Re-analyze affected passage" }));
+
+      await waitFor(() => expect(api.getVerification).toHaveBeenCalledTimes(3), { timeout: 2000 });
+      await waitFor(() => {
+        expect(document.querySelector("[data-correction-verification] [data-verification-reasons]"))
+          .toHaveTextContent(detail);
+      });
+      expect(screen.queryByText(/Affected passage analysis is running/i)).toBeNull();
+    },
+  );
+
+  it.each([
     ["FAILED", "Retry affected analysis"],
     ["CANCELLED", "Retry affected analysis"],
     ["SEARCH_INCOMPLETE", "Retry affected analysis"],
