@@ -214,6 +214,42 @@ def test_audit_policy_change_invalidates_cache_fingerprint(
     assert second["fingerprint"] != first["fingerprint"]
 
 
+def test_help_resource_revision_rebuilds_a_self_consistent_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new tN/tW/TWL snapshot must not reuse units citing old evidence.
+
+    Source semantic fingerprints intentionally describe the semantic unit, but
+    the persisted unit identity must also distinguish its immutable evidence
+    binding.  Otherwise a rebuilt inventory can load an old same-id unit whose
+    evidence IDs are absent from the new inventory payload.
+    """
+    inventory = _inventory(tmp_path, "PHP")
+    first = inventory.build_range("1", "3", "1", "6")
+    first_enriched = next(unit for unit in first["units"] if unit["evidenceIds"])
+
+    original_file_hash = inventory_module._file_hash
+
+    def revised_file_hash(path: Path | None) -> str:
+        value = original_file_hash(path)
+        return value if path is None else f"revised-{value}"
+
+    monkeypatch.setattr(inventory_module, "_file_hash", revised_file_hash)
+    second = inventory.build_range("1", "3", "1", "6")
+
+    assert second["cacheStatus"] == "MISS"
+    assert second["fingerprint"] != first["fingerprint"]
+    evidence_ids = {item["id"] for item in second["evidence"]}
+    assert evidence_ids
+    assert all(set(unit["evidenceIds"]) <= evidence_ids for unit in second["units"])
+    replacement = next(
+        unit for unit in second["units"]
+        if unit["semanticFingerprint"] == first_enriched["semanticFingerprint"]
+    )
+    assert replacement["id"] != first_enriched["id"]
+    assert replacement["evidenceIds"] != first_enriched["evidenceIds"]
+
+
 def test_minimal_source_semantic_protocol_apis(tmp_path: Path) -> None:
     project = _project(tmp_path / "api-project", "PHP")
     engine = BridgeEngine()

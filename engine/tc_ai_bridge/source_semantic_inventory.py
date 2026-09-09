@@ -364,12 +364,32 @@ class SourceSemanticInventory:
         evidence_ids: Iterable[str] = (), features: dict[str, str] | None = None,
     ) -> SourceSemanticUnit:
         token_ids = tuple(token["id"] for token in tokens)
+        bound_evidence_ids = tuple(dict.fromkeys(evidence_ids))
         semantic_features = {**(features or {}), "inventoryRule": suffix}
         semantic_fingerprint = _json_hash({
             "kind": kind.value, "tokens": token_ids, "suffix": suffix,
             "features": semantic_features, "policy": AUDIT_POLICY_VERSION,
         })
-        unit_id = "source-unit-" + semantic_fingerprint[:32]
+        # A semantic fingerprint identifies the source meaning independently
+        # of optional help resources.  The persisted unit row is immutable,
+        # however, and therefore its identity must additionally bind the exact
+        # tN/tW/TWL evidence revision it cites.  Without that binding, a new
+        # help-resource snapshot can collide with an older unit and `_save_unit`
+        # returns evidence IDs that are absent from the newly built inventory.
+        # A child unit's immutable payload also embeds its audit-owner ID, so a
+        # resource revision that versions the owner must version the child.
+        # Evidence-free self-owned canonical units retain their legacy identity.
+        persistence_binding = {
+            "semanticFingerprint": semantic_fingerprint,
+            "evidenceIds": sorted(bound_evidence_ids),
+            "auditOwnerUnitId": owner_id or "SELF",
+        }
+        persistence_fingerprint = (
+            semantic_fingerprint
+            if not bound_evidence_ids and owner_id is None
+            else _json_hash(persistence_binding)
+        )
+        unit_id = "source-unit-" + persistence_fingerprint[:32]
         return SourceSemanticUnit(
             id=unit_id, side=TokenSide.SOURCE, project_id=self.project_id, book=self.book,
             kind=kind, displayed_references=tuple(dict.fromkeys(t["displayedReference"] for t in tokens)),
@@ -379,7 +399,7 @@ class SourceSemanticInventory:
             raw_surface=" ".join(str(t["rawForm"]) for t in tokens),
             normalized_surface=" ".join(str(t["normalizedForm"]) for t in tokens),
             semantic_features=semantic_features, unit_confidence=_confidence(), provenance=provenance,
-            evidence_ids=tuple(dict.fromkeys(evidence_ids)), resource_validation_ids=(),
+            evidence_ids=bound_evidence_ids, resource_validation_ids=(),
             audit_eligibility=eligibility, semantic_obligation=obligation,
             accounting_role=role, audit_owner_unit_id=owner_id or unit_id,
             coverage_dimension=dimension, semantic_fingerprint=semantic_fingerprint,
