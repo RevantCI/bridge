@@ -2929,9 +2929,168 @@ companion schema               v14
 verification policy            correction-verification-policy-v2
 ```
 
-Stage 9B.4 verification semantics are unchanged, and installed Stage 9B.4
-A/B/C acceptance (`docs/STAGE_9B4_ACCEPTANCE.md`) has still not been run end to
-end by a tester. It remains the next authorized operational boundary.
+Stage 9B.4 verification semantics are unchanged. Subsequent installed
+acceptance results and the real Case C blocker repair supersede the original
+pending-A/B/C status here; see §37.13 for the current operational boundary.
+
+---
+
+# 37.13 Stage 9B.4 real Case C blocker repair (2026-09-09)
+
+Installed acceptance completed Cases A and B. The first real production Case C
+attempt correctly applied the cross-verse `some` to `all` edit at PHP 1:6 for
+the PHP 1:3 source obligation, kept PHP 1:3 Scripture unchanged, invalidated
+Word Alignment PHP 1:6, and resolved the affected range as PHP 1:3--1:6. Its
+affected analysis then failed at Stage 5 with:
+
+```text
+FoundationValidationError:
+Source semantic unit references missing resource evidence
+```
+
+## Proven root cause
+
+This was an immutable-row identity collision during Stage 5 reconstruction,
+not target-edit invalidation of source data:
+
+- the seeded source inventory was `source-inventory-f358dd26f73280f455d8c75b0f5c5e90`
+  with resource fingerprint `f358dd26f73280f455d8c75b0f5c5e90`;
+- the installed bundled tN/tW/TWL snapshot produced resource fingerprint
+  `506fdb42...`, so affected analysis correctly rebuilt rather than reusing the
+  old source inventory;
+- evidence identities include resource hashes, so all 35 resource-evidence IDs
+  changed in the rebuilt payload;
+- semantic unit identity did not include its evidence binding. `_save_unit()`
+  therefore found 53 older same-ID immutable units and returned them with their
+  old evidence IDs, while publishing only the new 35 evidence records;
+- the validator then correctly rejected those units because their
+  `evidenceIds` were excluded from the newly constructed inventory payload.
+
+Representative offending records from the installed failure were:
+
+```text
+source-unit-92151cafc9cb8ea5b1d7ac9562b6c00f
+  surface:       τῷ Θεῷ μου
+  source ref:    PHP 1:3
+  missing ID:    source-evidence-f36bef005fa48bbc8c8d0af333e50e4e
+
+source-unit-4c236a128c6a25f6f8a556098a31b05e
+  surface:       τῷ
+  source ref:    PHP 1:3
+  missing IDs:   source-evidence-1b23cbbc8511ecb95856b75bc8a10909
+                 source-evidence-61189c1be59d8196910b4afb8619f06e
+                 source-evidence-f36bef005fa48bbc8c8d0af333e50e4e
+```
+
+Every old evidence row still existed and was `ACTIVE`; none was `STALE` or
+`SUPERSEDED`. They were absent only from the new Stage 5 payload because that
+payload was built from a different resource revision. No correction or
+invalidation dependency edge changed a source unit or source evidence
+lifecycle. The relevant persisted edge remained `LOCATION_RUN ->
+SOURCE_INVENTORY`; target-edit invalidation propagated only through target-side
+dependencies. With one fixed source/resource snapshot, the Stage 5 fingerprint
+is target-independent and is unchanged by the PHP 1:6 edit. The observed
+fingerprint change came exclusively from the installed resource revision.
+
+The initial Stage 5 run succeeded because its units and evidence were created
+from one snapshot. The later rebuild exposed the identity collision because it
+combined newly generated evidence with previously persisted immutable units.
+
+## Repair
+
+`SourceSemanticInventory._unit()` now keeps the stable
+`semanticFingerprint` meaning-only, but derives the immutable persisted unit ID
+from that fingerprint plus the exact sorted `evidenceIds` and embedded audit
+owner identity. Evidence-free, self-owned canonical units keep their legacy
+identity. Consequently a resource revision publishes a new, internally
+self-consistent unit/evidence set instead of reusing an incompatible immutable
+row. Child records also version when an evidence-bound audit owner versions.
+
+The strict `unit.evidenceIds` subset validator remains unchanged. There is no
+schema migration, application-version change, confidence-policy change,
+verification-verdict-policy change, Tamil/PHP special case, or source/target
+invalidation broadening.
+
+The second installed defect was frontend state retention. After any affected
+analysis terminal transition (`FAILED`, `CANCELLED`, `COMPLETED`, or
+`COMPLETED_WITH_WARNINGS`), `CorrectionReviewPanel.svelte` now reloads the
+backend-owned verification state. It does not infer failure/cancellation
+reasons locally. An explicit cancel that returns a terminal job does the same.
+
+Files changed for this blocker:
+
+```text
+engine/tc_ai_bridge/source_semantic_inventory.py
+engine/tests/test_source_semantic_inventory_stage5.py
+engine/tests/test_correction_case_c_production.py
+src/lib/components/CorrectionReviewPanel.svelte
+src/lib/components/__tests__/CorrectionReviewPanel.test.ts
+docs/HANDOFF.md
+```
+
+## Regression and gates
+
+New regression coverage performs the genuine production sequence:
+
+```text
+Stage 5 -> 6A -> 6B -> 7 -> 8
+-> natural cross-verse QUANTITY finding
+-> human confirmation and human wording
+-> canonical correction application at PHP 1:6
+-> simulated changed help-resource revision
+-> affected PHP 1:3--1:6 analysis
+```
+
+It proves Stage 5 publishes a self-consistent inventory, the affected job ends
+`COMPLETED` or `COMPLETED_WITH_WARNINGS`, PHP 1:3 remains untouched, PHP 1:6 is
+corrected, source/target provenance remains independent, Word Alignment PHP
+1:6 remains invalid/reviewable, and the latest affected attempt is
+authoritative while history is retained.
+
+Completed gates:
+
+```text
+focused Stage 5/foundation/invalidation/Stage 9B.3a--9B.4/real Case C  159 passed
+full Python + Greek Room                                                1026 passed
+CorrectionReviewPanel Vitest                                            54 passed
+full frontend Vitest                                                    310 passed
+svelte-check                                                            0 errors, 0 warnings
+Vite production build                                                   pass
+Tauri/Rust release build + NSIS                                         pass
+git diff --check                                                        pass
+```
+
+Rust command/wire behavior did not change, so a separate cargo test/check run
+was not required; the Tauri release build compiled the Rust application
+successfully. A sidecar smoke invocation was not counted as a gate: the current
+script still hard-codes the prior 0.9.4 engine version and, when tested with a
+temporary local adjustment, reaches a pre-existing duplicate-project
+classification expectation that does not match current registry behavior.
+Neither issue is part of this Stage 9B.4 runtime blocker.
+
+## Installed candidate and next boundary
+
+The repaired current-version installer was built and installed successfully:
+
+```text
+installer  C:\Users\Benz\projects\bridge\src-tauri\target\release\bundle\nsis\Bridge_0.9.5_x64-setup.exe
+size       57,757,404 bytes
+SHA-256    3E16250DBA671766C562549CD9191C938F2D123688E1369B41A9B2874397DB92
+installed  0.9.5 (installed engine hash matches the packaged release engine)
+```
+
+A fresh, untouched acceptance package is ready at:
+
+```text
+C:\bridge-acceptance-stage9b4-fix
+Case C: C:\bridge-acceptance-stage9b4-fix\C-uncertain-production
+manifest: C:\bridge-acceptance-stage9b4-fix\acceptance-manifest.json
+```
+
+Resume only the real Case C installed acceptance using
+`docs/STAGE_9B4_ACCEPTANCE.md`. The expected no-provider result remains
+`UNCERTAIN`/`PROVIDER_LIMITED`; do not change verdict policy. Do not release or
+start v1 stabilization until the owner reviews this fresh Case C result.
 
 ---
 
@@ -3049,9 +3208,11 @@ When this file is used to start a new conversation:
    current truth.
 4. Verify the current resume baseline from §37.10 with `git status` and
    `git log --oneline -5`; do not assume a dirty or divergent tree is safe.
-5. Stages 1–8 and the Stage 9A–9B.4 implementation are present. The immediate
-   boundary is the installed Stage 9B.4 A/B/C acceptance in
-   `docs/STAGE_9B4_ACCEPTANCE.md`, after explicit approval.
+5. Stages 1–8 and the Stage 9A–9B.4 implementation are present. Installed
+   Stage 9B.4 Cases A and B passed. The real Case C blocker and terminal-state
+   UI defect are repaired as recorded in §37.13; the immediate boundary is to
+   rerun only Case C from the fresh package documented there, following
+   `docs/STAGE_9B4_ACCEPTANCE.md`.
 6. Do not start export/Scripture Burrito work (§38), the production-provider
    gap, or broader v1 stabilization until installed acceptance is reviewed and
    the next scope is explicitly approved.
