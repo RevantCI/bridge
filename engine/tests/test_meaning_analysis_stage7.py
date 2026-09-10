@@ -344,6 +344,33 @@ def test_hebrew_points_do_not_hide_polarity_or_quantity_contradictions() -> None
     assert polarity_confidence >= 0.95
 
 
+def test_tamil_negation_preserves_polarity_with_combining_marks() -> None:
+    status, confidence, kind, explanation = DeterministicMeaningComparator.compare(
+        "οὐ", "இல்லை", "POLARITY", "NEGATION", "LEXICALLY_REALIZED", {},
+    )
+    assert status.value == "PRESERVED"
+    assert confidence >= 0.95
+    assert kind.value == "POLARITY"
+    assert "both sides" in explanation
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["café", "Việt", "Ἰησοῦς", "கொண்டு", "नहीं", "عَرَبِيّ"],
+)
+def test_stage7_lexical_comparison_accepts_canonical_nfc_nfd_equivalence(
+    raw: str,
+) -> None:
+    status, confidence, kind, _explanation = DeterministicMeaningComparator.compare(
+        unicodedata.normalize("NFC", raw),
+        unicodedata.normalize("NFD", raw),
+        "LEXICAL_CONTENT",
+    )
+    assert status.value == "PRESERVED"
+    assert confidence >= 0.8
+    assert kind.value == "LEXICAL_CONCEPT"
+
+
 def test_no_space_target_and_analyzer_unavailable_are_conservative(tmp_path: Path) -> None:
     runtime = _runtime(
         tmp_path, language="ja", chapters={"1": {"3": "初めに神が天と地を造った。"}},

@@ -92,6 +92,74 @@ def _run_qa(runtime: PassageSemanticRuntime, provider: SemanticEmbeddingProvider
     )
 
 
+def test_tamil_negative_preservation_does_not_emit_false_negation_problem(
+    tmp_path: Path,
+) -> None:
+    raw_target = unicodedata.normalize("NFD", "இல்லை")
+    runtime = _runtime(
+        tmp_path,
+        language="ta",
+        chapters={"1": {"22": raw_target}},
+    )
+    scripture_path = runtime.project.path / "php" / "1.json"
+    scripture_before = scripture_path.read_bytes()
+    qa = _run_qa(
+        runtime,
+        FixtureEmbeddingProvider(paired_vectors([("οὐ", "இல்லை")])),
+        "1", "22",
+    )
+    assert not any(finding["kind"] == "NEGATION_PROBLEM" for finding in qa["findings"])
+    meaning = runtime.repository.meaning_analysis_run(qa["meaningRunId"])
+    polarity = [
+        component
+        for assessment in meaning["assessments"]
+        for component in assessment["componentAssessments"]
+        if component["coverageDimension"] == "POLARITY"
+    ]
+    assert polarity
+    assert all(component["status"] == "PRESERVED" for component in polarity)
+    assert scripture_path.read_bytes() == scripture_before
+    assert runtime.project.target_verse_text("1", "22") == raw_target
+
+
+def test_fresh_meaning_fingerprint_refreshes_stable_target_account_status(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime(tmp_path, language="en", chapters={"1": {"3": "all"}})
+    provider = FixtureEmbeddingProvider(paired_vectors([("πᾶς", "all")]))
+    location = SemanticLocationEngine(runtime, provider).run_range("1", "3")
+    first_meaning = MeaningAnalysisEngine(runtime, model_version="pre-v11-simulation").run_range(
+        "1", "3", location_run_id=location["id"],
+    )
+    first_qa = QaAuditEngine(runtime).run_range(
+        "1", "3", meaning_run_id=first_meaning["id"],
+    )
+    account_id = first_qa["targetSupportAccountIds"][0]
+    account = runtime.repository.coverage_account(account_id)
+    expected_status = account["coverageStatus"]
+    wrong_status = "UNCERTAIN" if expected_status != "UNCERTAIN" else "SOURCE_SUPPORTED"
+    runtime.repository.update_coverage_account_status(
+        account_id,
+        coverage_status=wrong_status,
+        covered_by_relationship_ids=(),
+        finding_id=None,
+        expected_revision=account["revision"],
+    )
+
+    fresh_meaning = MeaningAnalysisEngine(runtime, model_version="v11-cache-regression").run_range(
+        "1", "3", location_run_id=location["id"],
+    )
+    fresh_qa = QaAuditEngine(runtime).run_range(
+        "1", "3", meaning_run_id=fresh_meaning["id"],
+    )
+    refreshed = runtime.repository.coverage_account(account_id)
+
+    assert fresh_qa["cacheStatus"] == "MISS"
+    assert fresh_qa["fingerprint"] != first_qa["fingerprint"]
+    assert refreshed["coverageStatus"] == expected_status
+    assert refreshed["reviewStatus"] == account["reviewStatus"]
+
+
 # --- Precedence / severity policy (item 11, 24, 25) -------------------------
 
 @pytest.mark.parametrize(("dimension", "status", "expected_kind"), [

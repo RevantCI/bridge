@@ -1393,24 +1393,16 @@ def test_protocol_verify_acknowledge_and_restart_on_the_managed_project(
     assert (managed / "php" / "1.json").read_bytes() == scripture
 
 
-def test_tamil_negation_polarity_limit_is_pinned_not_worked_around(
+def test_tamil_negation_polarity_is_grapheme_safe_through_verification(
     tmp_path: Path,
 ) -> None:
-    """Pin a Stage 7 limitation this stage deliberately does not paper over.
-
-    ``_comparison_norm`` splits Tamil at every virama and vowel sign, so Stage
-    7's whole-token POLARITY check cannot see the negative in ``இல்லை`` and
-    reports CONTRADICTED against a Greek negative. Stage 9B.4 must not
-    re-judge Stage 7 meaning, so verification faithfully reports FAILED here.
-    If Stage 7's normalization is fixed, this test fails and must be updated
-    together with the Stage 7/8 goldens.
-    """
+    """The V1.1 comparison key keeps Tamil vowel signs and pulli attached."""
     from tc_ai_bridge.meaning_analysis import DeterministicMeaningComparator
 
     status, _confidence, _kind, _explanation = DeterministicMeaningComparator.compare(
         "οὐ", "இல்லை", "POLARITY", "NEGATION", "LEXICALLY_REALIZED", {},
     )
-    assert status.value == "CONTRADICTED"
+    assert status.value == "PRESERVED"
 
     _root, _project, runtime, application_service, _finding, _proposal = _fixture(
         tmp_path, BEFORE, ORIGINAL_SPAN, "இல்லை",
@@ -1427,11 +1419,9 @@ def test_tamil_negation_polarity_limit_is_pinned_not_worked_around(
     _analysis_job(runtime, application, runs, provider_retrieval="FULL")
     service = CorrectionVerificationService(runtime, _Jobs(runtime.repository))
     result = service.verify(application["applicationId"], requested_by="Reviewer")
-    # Persisted PRESERVED versus a recheck that says CONTRADICTED: two current
-    # assessments disagree, so verification abstains rather than picking one.
-    assert result["verificationStatus"] == "UNCERTAIN"
-    assert ReasonCode.CONFLICTING_CURRENT_ASSESSMENT in result["verificationReasonCodes"]
-    assert result["mayAcknowledgeCorrected"] is False
+    assert result["verificationStatus"] == "PASSED"
+    assert ReasonCode.DIMENSION_PRESERVED in result["verificationReasonCodes"]
+    assert result["mayAcknowledgeCorrected"] is True
 
 
 def test_affected_analysis_still_never_sets_a_verification_verdict(

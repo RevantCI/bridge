@@ -11,6 +11,7 @@ from tc_ai_bridge.analysis_jobs import (
     AnalysisJobManager,
     AnalysisJobNotFound,
 )
+from tc_ai_bridge.unicode_comparison import COMPARISON_NORMALIZATION_VERSION
 from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime
 from tc_ai_bridge.tc_project import TranslationCoreProject
 
@@ -329,6 +330,9 @@ def test_changed_selected_range_gets_distinct_persisted_scope_and_fingerprint(
     assert persisted["requestedScope"] == second["requestedScope"]
     assert persisted["canonicalReferences"] == expected_second
     assert persisted["policyVersions"]
+    assert persisted["policyVersions"]["comparisonNormalizationVersion"] == (
+        COMPARISON_NORMALIZATION_VERSION
+    )
     assert persisted["targetRevision"]
 
 
