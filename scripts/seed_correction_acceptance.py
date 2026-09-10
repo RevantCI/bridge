@@ -260,7 +260,7 @@ def seed_case_b(root: Path) -> dict[str, object]:
 
 def main() -> int:
     _configure_console_output()
-    destination = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd() / "acceptance-0.9.4"
+    destination = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd() / "acceptance-0.9.6"
     destination = destination.resolve()
     if destination.exists():
         raise SystemExit(

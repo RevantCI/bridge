@@ -1,7 +1,7 @@
-# Stage 9B.4 installed desktop acceptance — Bridge 0.9.4
+# Stage 9B.4 installed desktop acceptance — Bridge 0.9.6
 
-Candidate build, **not released**. Everything below is run against the
-installed `Bridge_0.9.4_x64-setup.exe`, not `tauri dev`.
+Run everything below against the installed `Bridge_0.9.6_x64-setup.exe`, not
+`tauri dev`.
 
 Seed the three projects first, from the repository:
 
@@ -28,7 +28,7 @@ evidence directly so the verifier meets a decisive PASSED and a decisive
 FAILED; do not describe them as production end-to-end in any report.
 
 **Why the real case cannot reach PASSED.** A PASSED verdict requires Stage 6B
-to positively *re-locate* the corrected obligation. In 0.9.4 every route to the
+to positively *re-locate* the corrected obligation. In 0.9.6 every route to the
 0.36 location threshold is closed for a cross-language project:
 
 - no production multilingual embedding provider ships (`available = False`),

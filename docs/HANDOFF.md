@@ -3089,8 +3089,44 @@ manifest: C:\bridge-acceptance-stage9b4-fix\acceptance-manifest.json
 
 Resume only the real Case C installed acceptance using
 `docs/STAGE_9B4_ACCEPTANCE.md`. The expected no-provider result remains
-`UNCERTAIN`/`PROVIDER_LIMITED`; do not change verdict policy. Do not release or
-start v1 stabilization until the owner reviews this fresh Case C result.
+`UNCERTAIN`/`PROVIDER_LIMITED`; do not change verdict policy. The release hold
+in this repair record was subsequently superseded by the owner's explicit safe
+0.9.6 authorization in §37.14. The v1 stabilization hold remains.
+
+---
+
+# 37.14 Bridge 0.9.6 release (2026-09-10)
+
+The project owner explicitly chose a safe new `v0.9.6` release rather than
+rewriting the already-public `v0.9.5` tag or replacing its asset. 0.9.6
+contains the Stage 9B.4 Case C source-inventory consistency repair and terminal
+verification-state refresh recorded in §37.13.
+
+Release payload:
+
+```text
+tag                            v0.9.6
+release name                   Bridge 0.9.6
+release channel                latest stable / non-prerelease
+Windows asset                  Bridge_0.9.6_x64-setup.exe
+asset SHA-256                  C7328D6C0BD48C570B0A24391630744D6F0449CF7FE6217ECF4F6EF0BC7D0C3D
+asset size                     57,751,384 bytes
+application version            0.9.6
+companion schema               v14
+verification policy            correction-verification-policy-v2
+```
+
+Version metadata is synchronized across package.json/package-lock.json,
+Tauri/Cargo, the Python engine, Greek Room, API user-agent and import generator.
+Active acceptance tooling and user-facing documentation name 0.9.6.
+`docs/RELEASE_0.9.6.md` contains the public notes and exact gate results.
+
+Installed Stage 9B.4 Cases A and B passed. The repaired Case C path is protected
+by a real production regression and a fresh manual package at
+`C:\bridge-acceptance-stage9b4-fix\C-uncertain-production`; the final installed
+Case C click-through remains the next operational acceptance check. No
+verification verdict policy, schema, Scripture or translationCore behavior was
+weakened for this release.
 
 ---
 

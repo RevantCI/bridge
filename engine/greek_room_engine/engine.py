@@ -15,7 +15,7 @@ from .adapters.names_adapter import NamesAdapter, NamesCheckError
 from .models.finding import QaFinding
 from .protocol import EngineRequest, EngineResponse, Methods
 
-ENGINE_VERSION = "0.9.5"
+ENGINE_VERSION = "0.9.6"
 
 
 class GreekRoomEngine:

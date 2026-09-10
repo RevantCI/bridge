@@ -104,6 +104,10 @@ def main() -> int:
     parser.add_argument("--max-import-seconds", type=float, default=10.0)
     args = parser.parse_args()
     engine = args.engine.resolve()
+    repository_root = Path(__file__).resolve().parent.parent
+    expected_bridge_version = str(json.loads(
+        (repository_root / "package.json").read_text(encoding="utf-8")
+    )["version"])
     extension = engine.suffix if sys.platform == "win32" else ""
     helper = engine.with_name(f"bridge-usfm-checker{extension}")
     if not engine.is_file() or not helper.is_file():
@@ -125,7 +129,7 @@ def main() -> int:
     # resource as unavailable, which would look like this smoke test
     # catching a real regression when it's actually just an incomplete
     # invocation.
-    resources_dir = Path(__file__).resolve().parent.parent / "engine" / "resources"
+    resources_dir = repository_root / "engine" / "resources"
     if not resources_dir.is_dir():
         raise SystemExit(f"Expected bundled resources at {resources_dir} for this smoke test")
 
@@ -167,7 +171,7 @@ def main() -> int:
             info = request("info", "engine.info", {})
             if not info.get("success"):
                 raise SystemExit(f"Request info failed: {info}")
-            if info.get("result", {}).get("bridgeVersion") != "0.9.4":
+            if info.get("result", {}).get("bridgeVersion") != expected_bridge_version:
                 raise SystemExit(f"Frozen engine version is stale or inconsistent: {info}")
             wildebeest = (
                 info.get("result", {})

@@ -6195,3 +6195,46 @@ than discovered mid-implementation. The load-bearing points:
 Documentation and issue-tracker changes only. No Python, frontend or Rust
 source changed, so per the repository's testing policy the full Python suite
 was **not** run and is not claimed. `git diff --check` passes.
+
+# Bridge 0.9.6 release (2026-09-10)
+
+The project owner authorized a safe new `v0.9.6` release instead of moving
+the already-public `v0.9.5` tag. Version metadata was synchronized across
+Node, Tauri/Rust, the Python engine, Greek Room, API user-agent, import
+generator, active documentation and acceptance tooling.
+
+0.9.6 contains the Stage 9B.4 real Case C repair:
+
+- Stage 5 immutable semantic-unit persistence identities now bind their exact
+  resource evidence and audit owner while stable semantic fingerprints remain
+  meaning-only;
+- a changed tN/tW/TWL snapshot can no longer combine old semantic-unit rows
+  with a new evidence payload;
+- correction verification is refreshed from the backend after every terminal
+  affected-analysis state;
+- a real Stage 5 through Stage 8 cross-verse correction/re-analysis regression
+  protects PHP 1:3 source provenance, PHP 1:6 target mutation, the PHP
+  1:3--1:6 affected range and invalid/reviewable Word Alignment.
+
+Release gates:
+
+```text
+focused Stage 5/foundation/invalidation/Stage 9B.3a-9B.4/real Case C  159 passed
+full Python + Greek Room                                                1026 passed
+frontend Vitest                                                         310 passed / 24 files
+CorrectionReviewPanel Vitest                                             54 passed
+npm run check                                                             0 errors / 0 warnings
+npm run build                                                             passed
+cargo check                                                               passed
+cargo test                                                                12 passed
+Tauri/NSIS release build                                                  passed
+git diff --check                                                          passed
+```
+
+The frozen-sidecar smoke check passes the 0.9.6 version handshake and then
+stops at the already-documented synthetic duplicate-project classification
+mismatch. It is not claimed as passing.
+
+Release notes are stored in `docs/RELEASE_0.9.6.md`. The Windows asset is
+`Bridge_0.9.6_x64-setup.exe`, 57,751,384 bytes, SHA-256
+`C7328D6C0BD48C570B0A24391630744D6F0449CF7FE6217ECF4F6EF0BC7D0C3D`.
