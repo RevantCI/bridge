@@ -31,6 +31,7 @@ from .meaning_analysis import (
     MEANING_POLICY_VERSION,
     DeterministicMeaningComparator,
 )
+from .unicode_comparison import COMPARISON_NORMALIZATION_VERSION
 from .passage_semantic_models import (
     ActorType,
     CoverageDimension,
@@ -430,6 +431,7 @@ class CorrectionVerificationService:
             "location": LOCATION_ENGINE_VERSION,
             "meaning": MEANING_ENGINE_VERSION,
             "meaningPolicy": MEANING_POLICY_VERSION,
+            "comparisonNormalization": COMPARISON_NORMALIZATION_VERSION,
             "qa": QA_ENGINE_VERSION,
             "qaPolicy": QA_POLICY_VERSION,
         })

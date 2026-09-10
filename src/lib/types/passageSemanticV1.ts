@@ -819,6 +819,7 @@ export interface MeaningAnalysisRun {
   sourceInventoryFingerprint: string;
   targetInventoryFingerprint: string;
   meaningEngineVersion: string;
+  comparisonNormalizationVersion: string;
   meaningPolicyVersion: string;
   modelVersion: string;
   calibrationVersion: string;

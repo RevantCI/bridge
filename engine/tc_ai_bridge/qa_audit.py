@@ -495,6 +495,7 @@ class QaAuditEngine:
                     )
                     self.repository.save_coverage_account(account)
                     target_support_ids.append(account.id)
+                    finding_id = None
                     if status == TargetSupport.POSSIBLY_UNSUPPORTED:
                         finding = self._build_finding(
                             kind=QaFindingKind.POSSIBLE_ADDITION, direction=AuditDirection.TARGET_SUPPORT,
@@ -509,15 +510,23 @@ class QaAuditEngine:
                         )
                         self.repository.save_qa_finding(self._finding_to_dataclass(finding))
                         findings.append(finding)
-                        # The stored revision, not the freshly built one: on a
-                        # re-run the seed above is a no-op and the row it kept
-                        # is already past revision 1.  The source-coverage pass
-                        # above reads it the same way.
-                        self.repository.update_coverage_account_status(
-                            account.id, coverage_status=status.value, covered_by_relationship_ids=(),
-                            finding_id=finding["id"],
-                            expected_revision=self.repository.coverage_account(account.id)["revision"],
-                        )
+                        finding_id = finding["id"]
+                    # A comparison-policy bump deliberately re-runs Stage 8
+                    # against the same stable target-unit identity.  The seed
+                    # is idempotent so human review metadata survives, but the
+                    # freshly derived status and relationship coverage must
+                    # replace the old algorithm's result rather than letting
+                    # it masquerade as current.
+                    self.repository.update_coverage_account_status(
+                        account.id,
+                        coverage_status=status.value,
+                        covered_by_relationship_ids=tuple(
+                            relationship["id"] for relationship in relationships
+                            if relationship.get("locationOutcome") == _LOCATED
+                        ),
+                        finding_id=finding_id,
+                        expected_revision=self.repository.coverage_account(account.id)["revision"],
+                    )
         finally:
             self.repository = real_repository
 

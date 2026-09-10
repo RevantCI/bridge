@@ -28,6 +28,7 @@ from .meaning_analysis import (
     MEANING_MODEL_VERSION,
     MEANING_POLICY_VERSION,
 )
+from .unicode_comparison import COMPARISON_NORMALIZATION_VERSION
 from .qa_audit import (
     QA_CALIBRATION_VERSION,
     QA_CONFIDENCE_POLICY_VERSION,
@@ -172,6 +173,7 @@ class AnalysisJobManager:
             "locationConfidencePolicyVersion": LOCATION_CONFIDENCE_POLICY_VERSION,
             "locationCalibrationVersion": LOCATION_CALIBRATION_VERSION,
             "meaningEngineVersion": MEANING_ENGINE_VERSION,
+            "comparisonNormalizationVersion": COMPARISON_NORMALIZATION_VERSION,
             "meaningPolicyVersion": str(
                 getattr(meaning_policy, "version", MEANING_POLICY_VERSION)
             ),

@@ -10,7 +10,6 @@ import hashlib
 import json
 import re
 import time
-import unicodedata
 from typing import Any
 
 from .passage_semantic_models import (
@@ -18,13 +17,17 @@ from .passage_semantic_models import (
     MeaningComponentStatus, MeaningEvidenceKind, MeaningRunStatus, MeaningStatus,
     Realization, ResourceValidationStatus,
 )
+from .unicode_comparison import (
+    COMPARISON_NORMALIZATION_VERSION,
+    comparison_normalize,
+)
 
 
-MEANING_ENGINE_VERSION = "bridge-meaning-analysis-v1"
+MEANING_ENGINE_VERSION = "bridge-meaning-analysis-v2"
 MEANING_POLICY_VERSION = "meaning-policy-v1"
 MEANING_CONFIDENCE_POLICY_VERSION = "meaning-confidence-v1"
 MEANING_CALIBRATION_VERSION = "meaning-uncalibrated-v1"
-MEANING_MODEL_VERSION = "deterministic-component-comparator-v1"
+MEANING_MODEL_VERSION = "deterministic-component-comparator-v2"
 
 
 def _sha(value: str) -> str:
@@ -80,24 +83,18 @@ def resource_conflict_evidence_ids(assessment: dict[str, Any]) -> tuple[str, ...
     )
 
 
-def _norm(value: str) -> str:
-    value = unicodedata.normalize("NFC", value).casefold()
-    return " ".join(re.findall(r"[^\W_]+", value, flags=re.UNICODE))
-
-
 def _comparison_norm(value: str) -> str:
-    """Fold comparison text without changing persisted/displayed Unicode forms.
+    """Build a grapheme-safe key without changing persisted/displayed text.
 
     UHB tokens may carry Hebrew points and cantillation.  Those marks must not
-    prevent a deterministic lexical category match, while marks in unrelated
-    scripts (including Tamil vowel signs) must remain intact.
+    prevent this controlled Stage 7 lexical-category match.  That fold is
+    explicit and limited to Biblical Hebrew annotations; marks in every other
+    script (including Tamil vowel signs) remain in their orthographic runs.
     """
-    decomposed = unicodedata.normalize("NFD", value).casefold()
-    without_hebrew_marks = "".join(
-        character for character in decomposed
-        if not ("\u0591" <= character <= "\u05c7" and unicodedata.combining(character))
+    return comparison_normalize(
+        value,
+        ignore_biblical_hebrew_annotations=True,
     )
-    return " ".join(re.findall(r"[^\W_]+", without_hebrew_marks, flags=re.UNICODE))
 
 
 class MeaningPolicy:
@@ -403,6 +400,7 @@ class MeaningAnalysisEngine:
             ],
             "engine": MEANING_ENGINE_VERSION, "policy": self.policy.version,
             "model": self.model_version, "calibration": MEANING_CALIBRATION_VERSION,
+            "comparisonNormalization": COMPARISON_NORMALIZATION_VERSION,
         })
         cached = self.repository.meaning_analysis_for_fingerprint(
             self.project_id, self.book, location["rangeKey"], fingerprint,
@@ -529,6 +527,7 @@ class MeaningAnalysisEngine:
             "sourceInventoryFingerprint": source["fingerprint"],
             "targetInventoryFingerprint": target["fingerprint"],
             "meaningEngineVersion": MEANING_ENGINE_VERSION,
+            "comparisonNormalizationVersion": COMPARISON_NORMALIZATION_VERSION,
             "meaningPolicyVersion": self.policy.version,
             "modelVersion": self.model_version,
             "calibrationVersion": MEANING_CALIBRATION_VERSION,
