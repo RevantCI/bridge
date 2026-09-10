@@ -6238,3 +6238,133 @@ mismatch. It is not claimed as passing.
 Release notes are stored in `docs/RELEASE_0.9.6.md`. The Windows asset is
 `Bridge_0.9.6_x64-setup.exe`, 57,751,384 bytes, SHA-256
 `C7328D6C0BD48C570B0A24391630744D6F0449CF7FE6217ECF4F6EF0BC7D0C3D`.
+
+# V1.1 world-language Unicode semantic normalization (2026-09-10)
+
+Baseline: `main` at release commit/tag `b0de092` / `v0.9.6`, companion
+schema v14, correction verification policy v2. This stabilization changes
+semantic comparison only; it does not change the public app version, the
+database schema, authoritative Scripture, translationCore alignment data, or
+persistent coordinate semantics.
+
+## Root cause and dependency trace
+
+Stage 7's `_comparison_norm()` decomposed input to NFD and then ran Python
+stdlib `re.findall(r"[^\W_]+")`. Python's word class excludes Unicode Mark
+code points, so orthography was fragmented at vowel signs, viramas and
+diacritics. Examples from the old function included `இல்லை -> இல ல`,
+`नहीं -> नह`, `عَرَبِيّ -> ع ர ب ي`, `Ἰησοῦς -> ι ησου σ`, and
+`Việt -> vie t`. The POLARITY path requires whole tokens, so Greek `οὐ` and
+Tamil `இல்லை` were falsely classified as contradictory.
+
+The audited dependency path is:
+
+```text
+current raw target Scripture (chapter JSON; never rewritten)
+  -> Stage 6A NFC token metadata / raw code-point spans (unchanged)
+  -> Stage 6B frozen location and exact raw quote (unchanged)
+  -> unicode_comparison.py transient NFC + casefold + grapheme runs (new)
+  -> Stage 7 deterministic component comparison (fixed)
+  -> Stage 8 coverage/support synthesis (consumes fresh Stage 7)
+  -> Stage 9B.4 direct Stage 7 recheck and verification (fresh fingerprint)
+
+frontend code-point helpers / correction CAS (inspected; unchanged)
+```
+
+Other normalization paths were inspected. `passage_semantic_runtime.py`
+already tokenizes with Unicode Letter/Mark/Number properties and persists raw
+code-point spans; `semantic_location.py` uses NFC/casefold but does not strip
+marks; `semantic_mapping.py` retains L/M/N source quote material; and the
+frontend uses `Array.from()`/explicit conversion helpers at semantic span
+edges. No source-resource, Scripture-write, or translationCore normalization
+path was changed.
+
+## Architecture
+
+`unicode_comparison.py` defines
+`unicode-comparison-nfc-grapheme-v2`. It uses canonical NFC (never NFKC/NFKD),
+Unicode `casefold()`, a second NFC stabilization after folding, and one
+module-compiled `regex` `\X` expression. Comparison tokens are conservative
+punctuation/separator/symbol-delimited orthographic runs. Letter and Number
+bases plus all attached Mark clusters survive. Internal format controls such
+as ZWJ/ZWNJ/WORD JOINER survive; standalone leading/trailing directional
+controls do not become tokens. Empty, punctuation-only, mark-only, emoji and
+supplementary-plane inputs fail safely.
+
+Stage 7's controlled UHB inventory retains its prior intentional ability to
+compare pointed/cantillated Hebrew with unpointed category forms through an
+explicit opt-in Biblical-Hebrew annotation fold. The default Unicode
+normalizer preserves Hebrew marks, all Arabic harakat, and marks in every
+other script. This policy derives a transient key only; it never changes UHB
+text, token identity or evidence IDs.
+
+The bounded 8,192-entry in-process key cache avoids repeatedly segmenting the
+small controlled Stage 7 inventories. A 13-script microbenchmark over 10,000
+calls measured the legacy regex at 13.90 microseconds/call, a cold grapheme
+normalization at 202.34 microseconds/call, and the normal cached Stage 7 path
+at 0.38 microseconds/call. The Unicode-correct cold path is costlier but still
+sub-millisecond for the representative multi-script string; regexes are not
+compiled per call.
+
+## Cache and persistence safety
+
+- Stage 7 engine: `bridge-meaning-analysis-v1` ->
+  `bridge-meaning-analysis-v2`.
+- Stage 7 deterministic model: `deterministic-component-comparator-v1` ->
+  `deterministic-component-comparator-v2`.
+- New explicit comparison version:
+  `unicode-comparison-nfc-grapheme-v2`.
+- Analysis-job `policyVersions`, the Stage 7 run fingerprint/payload, and the
+  Stage 9B.4 verifier fingerprint carry the comparison version. Stage 8's key
+  already consumes the Stage 7 run ID/fingerprint, so it cannot reuse an old
+  Stage 8 result after this change.
+- Existing stable target coverage-account identities remain stable so human
+  review survives, but Stage 8 now refreshes their derived status and covered
+  relationships on every genuine cache miss. An old algorithm's mutable
+  status can no longer remain attached to a fresh run.
+
+Schema remains v14. Persistent spans remain exact half-open Unicode code-point
+offsets `[startCodePoint,endCodePoint)` over raw Scripture. Correction apply
+still requires exact reference, raw span text, revision/hash and CAS; it never
+uses a normalized key and never performs fuzzy relocation.
+
+## Regression matrix and semantic consequence
+
+Focused tests cover Tamil, Devanagari, Malayalam, Telugu, Bengali, Kannada,
+Gujarati, Gurmukhi, Odia, Sinhala, Hebrew, Arabic, Greek, Vietnamese, Latin,
+Thai, Khmer, Myanmar and Lao, plus NFC/NFD equivalence, punctuation,
+ZWJ/ZWNJ/WORD JOINER, malformed mark-only data, emoji and supplementary-plane
+letters. The Tamil production-path regression runs the bundled UGNT source for
+PHP 1:22 through Stage 5 -> 6A -> 6B -> 7 -> 8 against an NFD-encoded `இல்லை`
+target fixture. Stage 7 now records PRESERVED polarity, Stage 8 emits no false
+NEGATION_PROBLEM, and the chapter JSON remains byte-identical. Stage 9B.4's
+fresh direct recheck agrees and can pass only because persisted current
+evidence is independently PRESERVED/COVERED. Its `POSSIBLY_MISSING ->
+UNCERTAIN` contract is unchanged.
+
+No second real Indic or Vietnamese translation corpus is bundled with the
+repository. Those scripts are therefore covered at the normalization/property
+layer, not presented as production semantic-language validation; adding
+invented lexical semantics solely for a test would violate this task's
+language-independent boundary. Thai/Khmer/Lao/Myanmar grapheme integrity is
+guaranteed, but dictionary-quality word segmentation is explicitly not
+claimed.
+
+## Verification
+
+```text
+focused Unicode + Stage 7 + Stage 8 + analysis cache + Stage 9B.4 + Case C
+                                                                    175 passed
+frontend Vitest                                              310 passed / 24 files
+npm run check                                                0 errors / 0 warnings
+npm run build                                                passed; existing >500 kB warning
+cargo test                                                   12 passed
+cargo check                                                  passed
+full Python + Greek Room                         1069 passed / 0 failed (36m32s)
+git diff --check                                             passed; line-ending notices only
+```
+
+The first sandboxed Cargo runs reported both process-tree termination tests as
+failed because `taskkill` lacked permission. The required unsandboxed rerun
+passed all 12; no Rust change was made. No installer or public release was
+built.

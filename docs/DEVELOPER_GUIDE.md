@@ -32,6 +32,23 @@ review selections grounded in bundled evidence; Advanced mode keeps them as
 editable proposals, and every stored selection records its provenance. Full detail:
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
+**Unicode semantic-comparison invariant (V1.1):** authoritative Scripture is
+never normalized or rewritten for comparison. Stage 7 derives transient NFC,
+Unicode-case-folded comparison keys by walking extended grapheme clusters and
+preserving Letter, Number, and Mark material. Canonically equivalent NFC/NFD
+spellings therefore compare consistently, while compatibility distinctions are
+not erased. Punctuation and symbols remain comparison boundaries. Internal
+ZWJ/ZWNJ/WORD JOINER controls are retained in orthographic runs; standalone
+directional controls do not become semantic tokens. The one explicit exception
+is Stage 7's controlled Biblical-Hebrew category matching, which can derive an
+unpointed consonantal key without changing UHB token identity or stored text.
+
+Grapheme safety is not universal lexical segmentation. The generic comparison
+tokenizer intentionally does not claim dictionary-quality boundaries for
+Thai, Khmer, Lao, Myanmar, or other no-space writing systems. Persistent spans
+remain exact half-open Unicode code-point offsets over raw text, and normalized
+comparison keys must never be used to apply a correction.
+
 **Never integrated directly:** Greek Room's `ephesus/` web API (Docker,
 database, its own web UI) — Bridge only uses the underlying check modules,
 not the reference web app around them.

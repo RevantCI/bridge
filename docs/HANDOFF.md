@@ -3275,3 +3275,66 @@ The end goal is:
 > where a human reviewer should investigate a possible translation
 > error — without silently changing Scripture or manufacturing
 > certainty.**
+
+---
+
+# 43. V1.1 Unicode and Grapheme-Safe Semantic Comparison
+
+V1.1 resolves the Stage 7 Tamil polarity defect recorded historically in
+§37.6 without introducing a Tamil-specific branch. The old NFD plus
+`[^\W_]+` path discarded Unicode Mark code points globally. Stage 7 now uses
+the shared `unicode_comparison.py` transient comparison layer:
+
+```text
+raw authoritative Scripture (unchanged)
+  -> canonical NFC + Unicode casefold + NFC
+  -> extended grapheme clusters (`regex` \X)
+  -> conservative L/N/M orthographic runs
+  -> deterministic Stage 7 comparison
+```
+
+Punctuation/separators/symbols are boundaries. Attached combining marks and
+internal format controls survive. Malformed standalone marks and controls do
+not become semantic tokens. Compatibility normalization is not used. The UHB
+controlled-category path has an explicit opt-in consonantal comparison key for
+Hebrew points/cantillation; default normalization preserves those marks, and
+no UHB token, source identity or evidence record changes.
+
+The old `இல்லை -> இல ல` result is now `இல்லை -> இல்லை`. In the real
+Stage 5–8 PHP 1:22 test path, Greek `οὐ` and NFD Tamil `இல்லை` produce a
+PRESERVED POLARITY component and no false Stage 8 NEGATION_PROBLEM. Stage 9B.4
+uses the same corrected comparator for its fresh direct recheck, while still
+requiring positive current persisted evidence. Possible absence remains
+UNCERTAIN; it never becomes FAILED merely because wording was not located.
+
+Cache identity advances from meaning engine/model v1 to v2 and carries
+`unicode-comparison-nfc-grapheme-v2` through analysis-job policy identity,
+Stage 7 fingerprints, Stage 8's inherited Stage 7 fingerprint and Stage 9B.4
+verification identity. Old broken judgments therefore cannot present as
+current. Companion schema remains v14 and public app version remains 0.9.6.
+
+Persistence and correction boundaries are unchanged:
+
+- Scripture is never normalized on disk;
+- translationCore alignment behavior is unchanged;
+- spans remain `[startCodePoint,endCodePoint)` over raw text;
+- Apply still checks exact reference/text/span/revision/hash with CAS;
+- no fuzzy relocation exists;
+- human review status survives Stage 8 status refresh.
+
+The focused world-language matrix covers Tamil, Devanagari, Malayalam,
+Telugu, Bengali, Kannada, Gujarati, Gurmukhi, Odia, Sinhala, Hebrew, Arabic,
+Greek, Vietnamese, Latin, Thai, Khmer, Myanmar and Lao. NFC/NFD equivalence,
+punctuation, format controls, emoji, supplementary-plane code points and
+malformed mark-only input are also covered. Thai/Khmer/Lao/Myanmar text may
+remain a whole no-space comparison run: grapheme safety is guaranteed, but
+V1.1 does not claim universal lexical segmentation.
+
+Focused semantic/cache/correction tests: **175 passed**. Full Python plus
+Greek Room: **1069 passed / 0 failed**. Frontend: **310/310**, Svelte check:
+**0/0**, production build: passed, Rust: **12/12** plus `cargo check`.
+
+The next conversation must not start V1.2, cross-verse visualization, new
+semantic dimensions/providers or a release without explicit approval. Start
+from the V1.1 commit(s), verify the worktree and full gate, then wait for the
+next approved stabilization boundary.
