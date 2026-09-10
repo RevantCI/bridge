@@ -70,15 +70,145 @@ reasons — this table is the fast way to see both.
 | **4** | USFM structural checker + versification | ✅ Done (2026-08-20 / 2026-08-21). Both vendored from `BibleNLP/greek-room`, wired into the existing check pipeline. Backend/protocol-only — no dedicated UI panel, matching how other checks surface as inline findings. |
 | **5** | Names & Transliteration (Uroman + Smart Edit Distance) | ✅ Done (2026-08-21). Whole-book spelling-consistency check wired into `verse.runChecks`'s existing `"local"` checks list — no frontend change needed. |
 | **6** | Alignment Intelligence (UAlign corpus stats) | ✅ Statistics engine done (2026-08-24). Turned out to need a real prerequisite not in the original plan: you can't compute stats over "human-approved alignments" with no way to create one — so the **manual word-alignment editor** (see `ALIGNMENT.md`) was built first, then corpus statistics (co-occurrence, translation probability, PMI, optional SED phonetic boost) computed from Bridge's own completed alignments — not a vendored `ualign.py`. Backend/protocol-only, two read-only methods, no UI yet. |
-| **7** | Paratext/Logos connectors, AI explain, drag-and-drop | ✅ All four slices have real work. AI alignment proposals and drag-and-drop are verified end-to-end. AI explain is wired to real materialized tN/tW evidence. The Paratext companion now performs identity-gated, idempotent Project Note handoff and has been manually verified against a running Paratext project, including sent-state persistence after restart. The Logos PowerShell/COM bridge is process/protocol tested, but actual COM calls remain unverified because Logos is not installed. |
-| *(Stage 3 follow-up)* | — | Language-independent semantic passage mapping and a 40-case IRVTam discovery queue are built. All 40 Luke/Philippians proposals have now been human-reviewed and verified after restart: 38 confirmed, one corrected, and one rejected (95% combined proposal agreement). The remaining Beta 15 gate is to convert those decisions into sanitized regression fixtures, make only evidence-supported classification/confidence changes, and complete installed acceptance. |
+| **7** | Paratext/Logos connectors, AI explain, drag-and-drop | ✅ All four slices have real work. AI alignment proposals and drag-and-drop are verified end-to-end. AI explain is wired to real materialized tN/tW evidence. The Paratext companion performs identity-gated, idempotent Project Note handoff and preserves sent state after restart. The Logos PowerShell/COM bridge is process/protocol tested; later live Logos 53.1 inbound/outbound navigation was also verified. |
+| *(Stage 3 follow-up)* | — | Language-independent semantic passage mapping and a 40-case IRVTam discovery queue are built. All 40 Luke/Philippians proposals were human-reviewed and verified after restart: 38 confirmed, one corrected, and one rejected (95% combined proposal agreement). This became the validation evidence base for the later passage-semantic stages; the Beta 15 instructions below are retained as a historical checkpoint, not the current resume boundary. |
 | *(Passage-semantic Stages 4-8)* | Source/target semantic inventories, passage-aware location, meaning preservation, bidirectional QA | ✅ Done (2026-09-01 / 2026-09-02). Deterministic throughout — none of these stages uses a language model. Note the numbering collision: these are semantic **Stages**, a different axis from the Greek Room **Phases** above. Production caveat: `SemanticEmbeddingProvider.available` is `False` in the shipped app, so location runs there use lexical/structural evidence only; `scripts/seed_review_fixture.py` seeds a project with a fixture provider for exercising the review UI. |
 | *(Stage 9A)* | Human QA review, evidence inspection, disposition workflow | ✅ Done, including Stage 9A.4 orchestration (2026-09-03). A 2026-09-04 follow-up kept a running analysis job visible while the reviewer navigates (it was previously dropped), and fixed the Logos VBScript shim going silent on any COM error, and bounded the Bridge navigation publish retry. Alignment Review is a top-level Word/Semantic/Passage/QA surface; `qaReview.*`, `semanticReview.*` and `reviewHistory.*` record decisions with optimistic concurrency. **Run analysis** now executes Stages 5–8 as a persisted background job for passage/chapter/book/range and refreshes the queue. Findings are classified only — no correction generation or application, which remains Stage 9B. Normal runtime visibly reports limited retrieval until a production multilingual embedding provider is configured. |
-| *(Stage 9B)* | Correction wording, review, explicit apply, affected re-analysis, semantic verification | ✅ Done through **9B.4** (2026-09-07). 9B.0 schema/eligibility, 9B.1 wording generation, 9B.2 review UI, 9B.3a persistence/recovery, 9B.3b the first authorized Scripture write behind an explicit human confirmation, 9B.3c affected re-analysis, 9B.4 positive semantic verification plus explicit `CORRECTED` acknowledgement. Companion schema is now **v14** (`correction_verifications`). The load-bearing rule: a correction is never verified because a finding disappeared — verification asks whether the original failed obligation is now positively satisfied by current Stage 6B/7/8 evidence, and `PASSED` alone never sets `CORRECTED`. Verification is read-only with respect to Scripture and never approves Word Alignment. Installed desktop acceptance of the verify → Mark corrected flow is NOT RUN. A 2026-09-07 blocker fix (HANDOFF §37.7) corrected Stage 8's `qaFinding.targetContentHashes`, which had been persisting the Stage 6A *range* fingerprint into a field Stage 9B reads as exact per-verse hashes — so no finding the production pipeline emitted could pass correction eligibility. Earlier 9B.3b/9B.3c installed acceptance used a pre-seeded finding and did not cover that path. A second, independent blocker fix on 2026-09-08 (HANDOFF §37.8) separated *meaning failure* from *resource disagreement*: Stage 7 filed every ALTERED / CONTRADICTED / PARTIALLY_PRESERVED / TARGET_ADDS_SPECIFICITY / TARGET_WEAKENS_SPECIFICITY component under `conflictingEvidenceIds`, and eligibility read that field as an unresolved resource conflict — so the evidence that a translation is wrong was refusing the correction that would fix it. Genuine disagreement now has its own `resourceConflictEvidenceIds`; findings written before the split fail closed until re-analysis rewrites them. Installed acceptance is still NOT RUN. |
+| *(Stage 9B)* | Correction wording, review, explicit apply, affected re-analysis, semantic verification | ✅ Done through **9B.4**. 9B.0 schema/eligibility, 9B.1 wording generation, 9B.2 review UI, 9B.3a persistence/recovery, 9B.3b the first authorized Scripture write behind explicit human confirmation, 9B.3c affected re-analysis, and 9B.4 positive semantic verification plus explicit `CORRECTED` acknowledgement are present. Schema is **v14**. Stage 8 target-hash and resource-conflict blockers, Case C source-inventory consistency, and terminal verification refresh were repaired before release v0.9.6. A correction is never verified merely because a finding disappeared: current Stage 6B/7/8 evidence must positively satisfy the original obligation, and `PASSED` alone never sets `CORRECTED`. |
 | *(Project QA report)* | — | ✅ Done (2026-09-04). **Generate report** on the project screen builds a whole-collection QA report in a background sidecar job (`report.generate/status/get/cancel/export`, `tc_ai_bridge/qa_report.py`, `report_jobs.py`): every book's Greek Room / tN / tW / alignment / AI-review progress, and every issue as a filterable row (category, book, chapter, verse, issue, AI proposal, fixed by human/machine, pass/fail) with charts and CSV / TSV / print-to-PDF export. Needed one piece of new persistence: a succeeded check job now snapshots its findings to `.apps/translationCoreAI/checkFindings/<book>/<chapter>.json` (the rollup only ever kept ids). Installed-app acceptance still NOT RUN. |
 | *(AI triage)* | — | ✅ Done (2026-09-07). Optional, **online-only** false-positive scoring layered on that report — see §5. Backend, protocol and report-screen UI; live model behaviour and installed-app acceptance NOT RUN. |
 
-### Beta 15 developer handoff — 2026-08-31
+### 2.1 Complete project history and current continuation
+
+Bridge has two numbering systems. The original product roadmap uses **Phases
+1–7**; the later passage-semantic architecture uses **Stages 1–9**. They are
+different axes, and both are now implemented. This chronology reconciles the
+historical checkpoints below with the current repository.
+
+#### Original Phases 1–7
+
+1. **Protocol and sidecar consolidation.** `BridgeEngine` unified Greek Room
+   and `tc_ai_bridge` behind the JSON sidecar protocol. Existing project,
+   decision, edit, and transaction-journal behavior stayed authoritative.
+2. **Real desktop frontend.** Svelte/Tauri was connected to the real sidecar,
+   with a single-window Windows/WebView2 project, chapter, verse, finding, and
+   navigation workflow.
+3. **Persistent application workflow.** Stable projects, decisions, edits,
+   settings, background check jobs, aligned/non-aligned export, restart
+   recovery, safe provider settings, and collection-aware import landed. The
+   import path was reduced from roughly 4–6 minutes for 66 books to about 5–6
+   seconds through lazy per-book normalization.
+4. **USFM and versification.** The Greek Room structural checker and
+   deterministic versification detection, org-reference normalization, and
+   back-versification map were integrated. Reference numbers remain anchors,
+   not universal semantic boundaries.
+5. **Names and transliteration.** Whole-book consistency checking combined
+   Uroman with vendored Smart Edit Distance and performance-safe candidate
+   blocking. Similarity remains evidence, never proof of an error.
+6. **Alignment intelligence.** Bridge first added the manual Word Alignment
+   editor required to create human-approved data, then calculated
+   co-occurrence, translation probability, PMI, and optional phonetic-boost
+   statistics from Bridge's completed alignments. Native translationCore
+   alignment remains the verse-local lexical representation.
+7. **External integrations and AI assistance.** AI alignment proposals,
+   evidence-grounded AI explanations, native drag-and-drop import,
+   identity-gated Paratext note handoff, and Paratext/Logos navigation were
+   implemented. Proposals require the appropriate human action; external
+   availability never becomes authority over Bridge state.
+
+#### Translation-help and Beta 6–15 evolution
+
+The beta sequence progressively added occurrence-aware tN/tW review, Basic and
+Advanced modes, resumable verse/chapter/book AI jobs, current/stale lifecycle,
+clear cancellation and retry, exact target selections, persisted resolutions,
+Paratext handoff, language-aware passage mappings, and the ranked semantic
+validation UI. Installed acceptance established project preservation,
+human-selection protection, restart persistence, explicit Apply AI proposal,
+`Cancelled` status, and alignment/export behavior.
+
+The IRVTam validation corpus supplied 40 machine proposals across Luke and
+Philippians. Human review produced 38 confirmations, one correction, one
+rejection, and 95% combined proposal agreement. The durable cross-verse
+regression is:
+
+```text
+source PHP 1:3  τῷ Θεῷ μου
+target PHP 1:6  என் தேவனை
+CROSS_VERSE_REORDERED · meaning preserved
+```
+
+This is a representative corpus case, not a Tamil rule.
+
+#### Passage-semantic Stages 1–9
+
+- **Stages 1, 2, and 2.1:** repository analysis, codebase-specific technical
+  design, and the review/lifecycle, semantic-unit, ownership, lineage,
+  Unicode-coordinate, policy-version, and SQLite amendments.
+- **Stage 3:** canonical schemas, token lineage/instances, semantic units,
+  lexical solutions, coverage accounts, correction proposals, SQLite
+  migration/recovery/backup, and cross-language validation foundation.
+- **Stage 4:** current-text authority and runtime integration. Editable chapter
+  JSON supplies wording; preserved imported USFM supplies structure. Edits
+  stale dependent records without silently relocating human work.
+- **Stage 5:** comprehensive UHB/UGNT source semantic inventory. tN/tW/TWL
+  enrich and validate the inventory rather than defining it.
+- **Stage 6A:** an independent target semantic inventory whose construction
+  does not assume source expectations.
+- **Stage 6B:** passage-aware source-to-target location with structural-window
+  expansion and controlled search budgets. Exhaustion means review is needed,
+  not omission.
+- **Stage 7:** deterministic meaning-preservation assessment, separate from
+  location and coverage.
+- **Stage 8:** separate source-coverage and target-support audits, conservative
+  possible-error classifications, and explicit resource-conflict evidence.
+- **Stage 9A:** the Word/Semantic/Passage/QA Alignment Review surface,
+  evidence inspection, review history, dispositions, scoped queues, and
+  persisted analysis jobs.
+- **Stage 9B.0–9B.4:** correction eligibility and wording, proposal review,
+  crash-safe application ledger, explicit human apply with exact CAS,
+  affected-passage re-analysis, positive semantic verification, and separate
+  human `CORRECTED` acknowledgement.
+
+#### Stabilization and releases
+
+- **v0.9.4:** Stage 9B.4 acceptance boundary and correction verification.
+- **v0.9.5:** canonical acceptance-fixture repair.
+- **v0.9.6:** Case C source-inventory consistency and terminal verification
+  refresh repair. This is the current public release at commit `b0de092`.
+- **V1.1, local after v0.9.6:** Stage 7 comparison became Unicode-canonical and
+  grapheme-safe. The Tamil polarity defect was fixed without a language branch;
+  semantic/cache versions were advanced while schema stayed v14 and the public
+  app version stayed 0.9.6.
+
+Local baseline immediately before this documentation consolidation:
+
+```text
+branch                         main
+public baseline                b0de092 / v0.9.6
+V1.1 implementation            5cc3ce7
+V1.1 tests                     ef49e9e
+V1.1 handoff                   4444ea7
+companion schema               v14
+public application version     0.9.6
+remote status                  local main 3 commits ahead before this docs commit
+```
+
+The verified V1.1 gates are 175 focused tests, 1069 full Python/Greek Room
+tests, 310 frontend tests, Svelte check with zero errors/warnings, production
+frontend build, 12 Rust tests, `cargo check`, and `git diff --check`.
+
+The next safe operational sequence is to push V1.1 only when authorized, build
+an internal installed-acceptance package without publishing a release, verify
+real multilingual projects and cache invalidation, record the results, and
+obtain an explicit V1.2 boundary. Do not begin export/Scripture Burrito,
+cross-verse visualization, new providers, or new semantic dimensions merely
+because the numbered phases and stages are complete.
+
+### Historical Beta 15 developer handoff — 2026-08-31
+
+> This subsection is retained as an audit snapshot. Its “next” instructions
+> describe the repository on 2026-08-31 and are superseded by §2.1 and the
+> latest sections of `HANDOFF.md`.
 
 Start from `main` at `933d48c` (`feat(dashboard): split project dashboard into
 book list and report panels`) or a later descendant. The working tree was clean

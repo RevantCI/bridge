@@ -3338,3 +3338,266 @@ The next conversation must not start V1.2, cross-verse visualization, new
 semantic dimensions/providers or a release without explicit approval. Start
 from the V1.1 commit(s), verify the worktree and full gate, then wait for the
 next approved stabilization boundary.
+
+---
+
+# 44. Master Project History and Resume Context
+
+This section is the concise, current entry point for a new development
+conversation. It reconciles the original seven-phase product roadmap, the
+later passage-semantic stages, the correction-loop releases, and V1.1. Older
+“next boundary” paragraphs remain valuable historical evidence but do not
+override this section or repository reality.
+
+## 44.1 Current repository baseline
+
+Immediately before this history update the verified state was:
+
+```text
+repository                     RevantCI/bridge
+working directory              C:\Users\Benz\projects\bridge
+branch                         main
+public release                 v0.9.6
+public release commit          b0de092
+origin/main                    b0de092
+V1.1 implementation commit     5cc3ce7
+V1.1 test commit               ef49e9e
+V1.1 documentation commit      4444ea7
+companion schema               v14
+verification policy            correction-verification-policy-v2
+application version            0.9.6
+worktree                       clean before this documentation change
+```
+
+The three V1.1 commits are local descendants of v0.9.6 and had not been
+pushed, packaged, versioned, or released. Do not reset them. Verify `git
+status`, `git log --oneline -5`, and the local/remote relation at the start of
+the next conversation.
+
+## 44.2 The two roadmaps
+
+Bridge has two numbering systems:
+
+1. **Original product Phases 1–7**, covering the desktop application,
+   analysis tools, alignment intelligence, AI assistance, and external
+   integrations.
+2. **Passage-semantic Stages 1–9**, covering the semantic foundation,
+   inventories, location, meaning, QA, review, and correction loop.
+
+They are not sequential parts of one numbering scheme. In particular,
+original Phase 7 is not semantic Stage 7. Both roadmaps are implemented.
+
+## 44.3 Original Phases 1–7
+
+### Phase 1 — protocol and sidecar consolidation
+
+`BridgeEngine` unified `GreekRoomEngine` and `tc_ai_bridge` behind one JSON
+sidecar protocol. Project access, QA decisions, edits, and transaction journals
+use the canonical services rather than parallel in-memory implementations.
+
+### Phase 2 — real Svelte/Tauri desktop application
+
+The Svelte frontend, Rust/Tauri command layer, and Python sidecar were wired
+end to end. Bridge became a single-window Windows/WebView2 application using
+real project, chapter, verse, finding, navigation, and engine state.
+
+### Phase 3 — persistent project workflow
+
+This phase delivered stable project identities and collections, safe import,
+chapter/book workflows, persistent decisions and edits, settings, aligned and
+non-aligned export, and cancellable/retryable background checks. Unplanned but
+essential work included secure provider-secret storage, recovery behavior,
+current/stale AI-review state, and lazy import normalization that reduced the
+66-book path from minutes to seconds.
+
+### Phase 4 — USFM structure and versification
+
+Bridge integrated the Greek Room USFM structural checker and deterministic
+versification detection, org-reference normalization, and back-versification
+mapping. Displayed references are normalized before semantic cross-verse
+classification; verse numbers are anchors rather than meaning boundaries.
+
+### Phase 5 — names and transliteration
+
+Whole-book spelling consistency combines Uroman, vendored Smart Edit Distance,
+and bounded candidate search. Name/transliteration similarity is supporting
+evidence and never independently proves a translation error.
+
+### Phase 6 — alignment intelligence
+
+The manual Word Alignment editor was built first because human-approved
+alignments did not previously exist inside Bridge. Corpus statistics then used
+Bridge's completed alignments for co-occurrence, translation probability, PMI,
+and optional phonetic evidence. Native translationCore alignment remains the
+truthful verse-local lexical projection.
+
+### Phase 7 — AI assistance, import, Paratext, and Logos
+
+Bridge added AI alignment proposals, evidence-grounded tN/tW explanation and
+review, native drag-and-drop import, identity-gated/idempotent Paratext Project
+Note handoff, and Paratext/Logos navigation. Advanced AI proposals require an
+explicit Apply action, human/imported selections stay protected, and external
+application state never overrides Bridge's project authority. Paratext handoff
+and live Logos 53.1 inbound/outbound navigation were verified in later work.
+
+## 44.4 Beta and semantic-validation bridge
+
+The Beta 6–15 line added occurrence-aware translation-help cards, Basic and
+Advanced modes, resumable verse/chapter/book AI jobs, clear cancellation and
+retry, exact selection safeguards, saved resolution evidence, stale/recheck
+lifecycle, Paratext sent-state persistence, and language-independent passage
+mapping.
+
+The generated IRVTam validation set contained 40 machine-proposed Luke and
+Philippians mappings. Human review after restart recorded 38 confirmed, one
+corrected, and one rejected decision with 95% combined agreement. Their
+provenance remains machine/AI proposed until the separate human review record;
+the artifact must never be rewritten as originally human-authored. The central
+cross-verse regression is:
+
+```text
+source semantic reference      PHP 1:3
+source wording                 τῷ Θεῷ μου
+target realization reference   PHP 1:6
+target wording                 என் தேவனை
+relationship                   CROSS_VERSE_REORDERED
+meaning status                 PRESERVED
+```
+
+This evidence proves one corpus relationship, not a Tamil-specific linguistic
+rule.
+
+## 44.5 Passage-semantic Stages 1–9
+
+```text
+Stage 1       repository analysis                         complete
+Stage 2/2.1   technical design and mandatory amendments   complete
+Stage 3       schemas, identities, SQLite foundation      complete
+Stage 4       runtime/current-text integration            complete
+Stage 5       comprehensive UHB/UGNT source inventory     complete
+Stage 6A      independent target inventory                complete
+Stage 6B      passage-aware location                      complete
+Stage 7       meaning preservation                        complete
+Stage 8       source coverage and target support QA       complete
+Stage 9A      human QA review and scoped analysis         complete
+Stage 9B      correction loop through 9B.4                complete
+```
+
+The semantic architecture deliberately coordinates with rather than replaces
+translationCore. Rich meaning, cross-verse, implicit, split, merged, evidence,
+review, lifecycle, and QA data live in companion SQLite storage.
+
+Current editable chapter JSON is authoritative for wording. Preserved imported
+USFM supplies paragraph, poetry, heading, note, cross-reference, bridge, and
+other structure. Old imported wording must never re-enter semantic analysis or
+clean export after a Bridge edit.
+
+Source and target inventories are independent. UHB/UGNT define the complete
+source audit base; tN/tW/TWL enrich or challenge units but do not define the
+inventory and are not infallible. Location, meaning, coverage, target support,
+resource validation, review status, lifecycle, and QA disposition remain
+separate judgments.
+
+## 44.6 Stage 9 human correction history
+
+The completed correction loop is:
+
+```text
+confirmed QA issue
+  -> eligibility and correction intent
+  -> human wording or optional provider suggestion
+  -> persisted proposal and review
+  -> explicit human Apply
+  -> transaction/application ledger and dependent invalidation
+  -> affected structural-passage re-analysis
+  -> positive verification against current Stage 6B/7/8 evidence
+  -> separate explicit human CORRECTED acknowledgement
+```
+
+Stage 9B.0 defined eligibility and wording contracts; 9B.1 implemented wording
+generation; 9B.2 added proposal review; 9B.3a added crash-safe persistence and
+recovery; 9B.3b added the first explicit human Scripture mutation; 9B.3c added
+affected re-analysis; and 9B.4 added positive verification and human
+acknowledgement.
+
+Acceptance exposed and fixed several production-only defects: analysis-scope
+and QA-queue synchronization, cross-verse source/target provenance display,
+WebView2 Review application activation, target verse-hash identity, resource
+conflict versus meaning-failure evidence, Case C source-inventory consistency,
+terminal verification refresh, and short-window QA detail overlap. Historical
+findings and decisions remain persisted across scope changes.
+
+A correction is never verified because a finding disappeared. The original
+semantic obligation must be positively satisfied by current evidence from the
+exact affected analysis job. `PASSED` never silently becomes `CORRECTED`.
+
+## 44.7 Releases and current stabilization
+
+- **v0.9.4** published the initial Stage 9B.4 acceptance boundary.
+- **v0.9.5** repaired canonical acceptance-fixture seeding.
+- **v0.9.6** published the Case C source-inventory consistency and terminal
+  verification-refresh repairs. It remains the current public release.
+- **V1.1** is committed locally after v0.9.6. It fixes the global Unicode Mark
+  loss in Stage 7 comparison using NFC, Unicode casefolding, extended grapheme
+  clusters, and conservative Letter/Number/Mark runs. It does not change
+  Scripture, spans, schema, translationCore behavior, or the public version.
+
+V1.1 advances the meaning engine/model from v1 to v2 and carries
+`unicode-comparison-nfc-grapheme-v2` through analysis, Stage 7, inherited Stage
+8, and Stage 9B.4 verification fingerprints. The old `இல்லை -> இல ல` failure
+is now `இல்லை -> இல்லை`; Greek `οὐ` versus Tamil `இல்லை` preserves POLARITY
+and does not create a false `NEGATION_PROBLEM`.
+
+Verified V1.1 gates:
+
+```text
+focused semantic/cache/correction                    175 passed
+full Python plus Greek Room                         1069 passed
+frontend Vitest                                      310 passed / 24 files
+Svelte check                                         0 errors / 0 warnings
+frontend production build                            passed
+Rust tests                                           12 passed
+cargo check                                          passed
+git diff --check                                     passed
+```
+
+## 44.8 Non-negotiable continuity rules
+
+- Never hardcode Tamil, Philippians, or a fixed verse window.
+- Verse numbers are reference anchors, not semantic boundaries.
+- Never rewrite Scripture automatically or reuse stale imported wording.
+- Never silently move, replace, or approve human work.
+- Never equate unaligned, null-aligned, not-located, and missing.
+- Never convert search/computation failure into omission/addition.
+- Never treat embeddings or translation helps as proof.
+- Never manufacture same-verse translationCore alignment for cross-verse
+  meaning.
+- Persistent spans remain half-open Unicode code-point offsets over raw text.
+- Correction Apply requires exact reference, span, current text,
+  revision/hash, CAS, and explicit human action; normalized text is never an
+  edit coordinate.
+- Keep dependency/coverage DAGs separate from cyclic semantic relation graphs.
+- Preserve one authoritative active lexical solution per scope/profile/layers
+  and exclusive membership within each lexical layer.
+- Keep `ReviewStatus`, `LifecycleStatus`, and `QaDisposition` independent.
+- Preserve clean USFM and native translationCore behavior.
+
+## 44.9 Current next boundary
+
+The next safe operational sequence is:
+
+1. verify the clean local V1.1 commit stack and remote relation;
+2. push V1.1 to `origin/main` only with explicit authorization;
+3. build an internal Windows acceptance installer without publishing a
+   release;
+4. test real Tamil and other available multilingual projects, including old
+   semantic caches;
+5. confirm fresh fingerprints, preserved human decisions, byte-identical
+   Scripture during analysis, exact Stage 9B correction safety, and unchanged
+   translationCore behavior;
+6. record installed-acceptance evidence;
+7. request an explicit V1.2 boundary.
+
+Do not begin V1.2, cross-verse visualization, new semantic dimensions,
+production providers, export/Scripture Burrito work, a version bump, or a
+release without separate approval.
