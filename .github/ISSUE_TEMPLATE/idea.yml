@@ -1,0 +1,67 @@
+name: Idea
+description: Something Bridge could do. No commitment — ideas are triaged weekly.
+title: "[Idea] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are cheap and welcome. Filing one is not a promise that it will be
+        built — the maintainer triages open issues weekly and either lets them stand
+        or closes them with a written reason.
+
+        Four short answers are enough. If a field is genuinely unknown, say "don't know"
+        rather than guessing.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What goes wrong today?
+      description: One or two sentences describing the problem, not the solution.
+      placeholder: Reviewers lose their place when moving between chapters, so a long checking session gets broken up.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: who
+    attributes:
+      label: Who hits this?
+      description: If nobody real hits it, the idea usually answers itself.
+      options:
+        - A translator or reviewer using the app
+        - A translation team lead
+        - Us, while developing or debugging
+        - Someone installing or deploying Bridge
+        - Not sure yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: smallest
+    attributes:
+      label: Smallest version that would help
+      description: What is the first slice worth shipping? Not the full vision — the first useful piece.
+      placeholder: Previous/next buttons at the top of the chapter view. No keyboard shortcuts, no history.
+    validations:
+      required: true
+
+  - type: textarea
+    id: breaks
+    attributes:
+      label: What might this break or touch?
+      description: |
+        Best guess is fine. Flag it here if it seems to touch any of these, because they need a
+        decision before code: the database schema, the append-only correction ledger, golden
+        files, the confidence thresholds, or anything needing a network connection at runtime.
+      placeholder: Frontend only as far as I can tell. Doesn't touch the engine or the database.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the open and closed issues and this isn't already there
+          required: true
+        - label: I understand this is an idea, not a commitment to build it
+          required: true

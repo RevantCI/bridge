@@ -1,0 +1,309 @@
+# Pull-request merge gate.
+#
+# release.yml stays exactly as it is: it builds and ships the Windows installer on a
+# tag, and it is the only place the frozen sidecars and the real installer are
+# exercised. What it is not is a merge gate -- it only runs on tags, and it never runs
+# the Python suite at all. This workflow closes that gap: the analysis engine is the
+# product, so its tests gate every PR.
+#
+# Job placement is deliberate:
+#   frontend         -> ubuntu-latest. svelte-check and jsdom Vitest have no platform
+#                       surface, and both were confirmed green locally on 2026-09-11
+#                       (0 errors/0 warnings; 310 tests in 24 files).
+#   rust             -> windows-latest. See the job for why: two sidecar.rs tests are
+#                       #[cfg(windows)], and the crate has never been built on Linux by
+#                       anything in this repo.
+#   engine           -> windows-latest. Windows x64 is the only verified target and the
+#                       only platform the product ships on; constraints-py312-windows.txt
+#                       is the verified pin set release.yml installs, so the gate and the
+#                       shipped artifact agree on versions; and the Logos/Paratext
+#                       connector tests only ever execute here. The repo is public, so
+#                       Actions minutes are free and the usual Linux cost argument does
+#                       not apply.
+#
+#                       It is slow: 41m39s for 1063 tests, versus 17m13s for the same
+#                       suite on Linux. Most of that gap is the autouse tmp_path fixture
+#                       in conftest.py paid ~1060 times on a slower filesystem. If this
+#                       becomes painful, measure with --durations=20 before trimming
+#                       anything -- do not start deselecting tests to make the number
+#                       look better.
+#
+# Nothing here builds an installer or a frozen sidecar. That stays in release.yml,
+# where a 90-minute budget is appropriate; a gate that slow is one people learn to
+# route around.
+#
+# Work on this repo goes directly onto main, so the `push` trigger is the one that
+# matters most -- these jobs are the only automated gate there is. Path filters apply
+# to push as well as to pull_request, deliberately: main takes every commit now, and
+# a README edit should not cost a 20-minute engine run. The filters include ci.yml
+# itself, so a change to the gate always re-runs everything the gate defines.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  # A new push to a PR cancels the previous run for that PR.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Which parts of the repo did this PR touch? Everything below keys off this, so
+  # a frontend-only PR doesn't pay for a Rust compile or a Windows runner.
+  # ---------------------------------------------------------------------------
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      engine: ${{ steps.filter.outputs.engine }}
+      rust: ${{ steps.filter.outputs.rust }}
+      goldens: ${{ steps.filter.outputs.goldens }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # paths-filter diffs against the merge base; on a push to main it needs
+          # real history rather than the default single-commit checkout.
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'src/**'
+              - 'index.html'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'svelte.config.js'
+              - 'vite.config.ts'
+              - 'vitest.config.ts'
+              - 'tsconfig.json'
+              - 'tailwind.config.js'
+              - 'postcss.config.js'
+              # A change to the gate itself re-runs every job it defines. Without
+              # this, a PR that edits ci.yml skips everything and merges green having
+              # proved nothing about the workflow it just changed.
+              - '.github/workflows/ci.yml'
+            engine:
+              - 'engine/**'
+              # Not cosmetic. The engine suite reaches out of engine/ for both of
+              # these: test_passage_semantic_foundation.py reads
+              # schemas/fixtures/unicode-spans-v1.json, and four correction tests
+              # import scripts/seed_review_fixture.py,
+              # scripts/seed_correction_acceptance.py and
+              # scripts/inspect_correction_application.py. Without these lines a PR
+              # editing only a seed script would skip the suite it breaks.
+              - 'schemas/**'
+              - 'scripts/**'
+              # A change to the gate itself re-runs every job it defines. Without
+              # this, a PR that edits ci.yml skips everything and merges green having
+              # proved nothing about the workflow it just changed.
+              - '.github/workflows/ci.yml'
+            rust:
+              - 'src-tauri/**'
+              # A change to the gate itself re-runs every job it defines. Without
+              # this, a PR that edits ci.yml skips everything and merges green having
+              # proved nothing about the workflow it just changed.
+              - '.github/workflows/ci.yml'
+            goldens:
+              # The real location. There is no goldens/ directory and no
+              # __snapshots__ anywhere in the repo -- the Stage 5 and Stage 6B
+              # goldens are two JSON files that live with the tests that read them:
+              #   engine/tests/fixtures/stage5-source-golden-v1.json
+              #   engine/tests/fixtures/stage6b-location-golden-v1.json
+              #
+              # This guard keys on the filename, so a new golden MUST have "golden"
+              # in its name to be protected. Kept deliberately looser than
+              # '*-golden-*.json' so that e.g. stage7-golden.json is still caught.
+              - 'engine/tests/fixtures/*golden*.json'
+
+  # ---------------------------------------------------------------------------
+  # Frontend: svelte-check + vitest. Fast, runs on most PRs.
+  # ---------------------------------------------------------------------------
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: svelte-check
+        run: npm run check
+      - name: Vitest
+        run: npm run test
+
+  # ---------------------------------------------------------------------------
+  # Engine: the Python suite. This is the gap this workflow exists to close --
+  # the analysis engine is the product and no workflow ran its tests before now.
+  # ---------------------------------------------------------------------------
+  engine:
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
+    runs-on: windows-latest
+    # Measured on this runner, run 34588971270: 41m39s for 1063 tests. That is ~2.4x
+    # the 17m13s the same suite takes on Linux -- Windows pays for the autouse
+    # tmp_path fixture on every one of ~1060 tests, and additionally runs the
+    # PowerShell/cscript Logos and Paratext connector tests that skip on Linux.
+    # 60 leaves real headroom over the measured number without hiding a hang.
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # 3.12, not 3.13, to match release.yml: wildebeest-nlp cannot compile
+          # under 3.13. The `wildebeest` extra is deliberately NOT installed here
+          # (WildebeestAdapter falls back to its mock on its own), but keeping the
+          # interpreter aligned with the release build means the gate and the
+          # shipped artifact are not tested on different Pythons.
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            engine/pyproject.toml
+            engine/constraints-py312-windows.txt
+      - name: Install engine dependencies
+        # There is no requirements*.txt in this repo. The engine is an editable
+        # install from engine/pyproject.toml; constraints-py312-windows.txt pins the
+        # verified Windows set and is what release.yml uses.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints-py312-windows.txt -e ".[dev]"
+      # ~120MB, over GitHub's single-file push limit and not tracked by LFS, so it
+      # lives as a release asset (see docs/DEVELOPER_SETUP.md and release.yml, which
+      # does the same thing). Without it 16 Stage 3 tests in
+      # test_semantic_mapping_stage3.py and test_semantic_corpus_discovery.py fail with
+      # SemanticMappingError: they construct SemanticSourceRepository with an explicit
+      # path and so bypass the conftest fixture that points everything else at a
+      # deliberately nonexistent DB.
+      #
+      # Confirmed by run 34588971270: 16 failed, 1047 passed without this step.
+      - name: Download Stage 3 semantic-source DB
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path resources/semantic_mapping | Out-Null
+          gh release download stage3-semantic-db-v0.3 `
+            --repo ${{ github.repository }} `
+            --pattern bridge_semantic_source_v0.3.sqlite `
+            --dir resources/semantic_mapping `
+            --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Stage 3 DB download failed" }
+
+      - name: Run the Python suite
+        # Both test roots: greek_room_engine has its own tests/ that plain `pytest`
+        # from engine/ would still collect, but naming them keeps this honest about
+        # what is being gated. -p no:cacheprovider and PYTHONDONTWRITEBYTECODE keep a
+        # stale .pyc in the vendored trees from masking a real change.
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider
+
+  # ---------------------------------------------------------------------------
+  # Rust / Tauri shell.
+  # ---------------------------------------------------------------------------
+  rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    # windows-latest, matching release.yml, for two reasons. The soft one: sidecar.rs
+    # gates two of its tests behind #[cfg(windows)] (the taskkill process-tree kill),
+    # so a Linux host silently compiles them out and gates less than it appears to.
+    # The hard one: nothing in this project has ever built the Tauri crate on Linux --
+    # release.yml only ever runs cargo on Windows -- so a Linux job here would be an
+    # unverified guess about webkit2gtk availability shipped as a merge gate.
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Satisfy tauri-build's bundle inputs
+        # tauri-build resolves every bundle.externalBin AND bundle.resources entry
+        # inside its build script, so ANY cargo command -- `cargo test` included --
+        # fails outright unless both exist. On a fresh checkout neither does: the
+        # sidecars and src-tauri/resources are build output and .gitignore'd (only
+        # binaries/README.txt is tracked). release.yml gets away without this step
+        # because build-sidecars.ps1 runs first; this job deliberately skips that,
+        # since building PyInstaller sidecars just to run unit tests would cost most
+        # of the release budget.
+        #
+        # Confirmed the hard way: run 34587550433 cleared the externalBin check with
+        # the stubs below and then failed on `resource path `resources` doesn't exist`.
+        #
+        # The binary stubs are never executed -- the unit tests in sidecar.rs and
+        # passage_semantic_wire.rs are pure logic and never spawn the engine. The
+        # resources copy mirrors build-sidecars.ps1 exactly (engine/resources ->
+        # src-tauri/resources) rather than faking a directory, so the build script
+        # sees what it sees in a real build.
+        shell: bash
+        run: |
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          case "$triple" in *windows*) ext=".exe" ;; *) ext="" ;; esac
+          mkdir -p src-tauri/binaries
+          for name in bridge-engine bridge-usfm-checker; do
+            echo 'CI stub, never executed' > "src-tauri/binaries/${name}-${triple}${ext}"
+          done
+          cp -r engine/resources src-tauri/resources
+          ls -l src-tauri/binaries
+          ls src-tauri/resources
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+  # ---------------------------------------------------------------------------
+  # Golden notice. Re-baselining a golden should be a deliberate act, never a side
+  # effect of another change -- but there is no label to gate it on and no branch
+  # protection to enforce a gate with, so this reports loudly and passes. It is a
+  # prompt to look, not a wall.
+  # ---------------------------------------------------------------------------
+  golden-notice:
+    needs: changes
+    if: needs.changes.outputs.goldens == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Say which goldens moved
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          echo "::warning title=Golden baseline modified::This change edits Stage 5/6B golden baselines. Re-baselining should be deliberate and reviewed on its own -- if a golden is failing because of your change, that is a finding to report, not a file to regenerate."
+          echo "Golden files touched:"
+          git diff --name-only "$BASE" HEAD -- 'engine/tests/fixtures/*golden*.json' || true
+
+  # ---------------------------------------------------------------------------
+  # One required status check for branch protection to point at, so the protection
+  # rule doesn't have to be edited every time a job is added or a path filter skips one.
+  # ---------------------------------------------------------------------------
+  ci-ok:
+    if: always()
+    # `changes` is in this list on purpose. Without it, a failure in the filter job
+    # skips every downstream job, ci-ok sees nothing but "skipped", and the gate goes
+    # green on a run that tested absolutely nothing.
+    needs: [changes, frontend, engine, rust, golden-notice]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job failed
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "Job results: $results"
+          case "$results" in
+            *failure*|*cancelled*) echo "::error::A required check did not pass."; exit 1 ;;
+            *) echo "All required checks passed or were skipped." ;;
+          esac
