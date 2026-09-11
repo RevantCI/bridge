@@ -19,6 +19,33 @@ relative to wherever it's checked out, not a hardcoded machine path.
 
 ---
 
+## Where to pick up — 2026-09-11 (persistence / identity / team direction, #44–#47)
+
+A second, separate thread of work now runs alongside the semantic stages this file
+tracks. Its design record is [`TEAM_ARCHITECTURE.md`](TEAM_ARCHITECTURE.md); its
+decisions are the three 2026-09-11 entries in [`DECISIONS.md`](DECISIONS.md); its
+steps are GitHub issues **#74–#81**, in that order, plus findings **#82** and **#83**.
+Nothing in it changes the invariants below: the translationCore on-disk files, the
+v14 semantic DB, the append-only ledger and offline-first all stay as they are.
+
+State at end of day:
+
+- Done and pushed: `TEAM_ARCHITECTURE.md`; #74 steps 1–2 (engine tests packaged by
+  area under `engine/tests/<area>/`, pytest config + markers in `engine/pyproject.toml`,
+  `pytest-xdist` pinned; `pytest -n auto -m "not slow"` from `engine/` is the inner
+  loop). Measurements in `BUILD_LOG.md`'s #74 section. CI stays serial — parallel was
+  measured slower on the 4-vCPU runner.
+- Not started: #75–#81 (the workbench SQLite, identity, engine session model, hub,
+  dashboard). No persistence or identity code exists yet.
+- **Next task:** #83 (two pushes to `main` cancel each other's CI run — a one-line
+  `ci.yml` fix), then #82 (share the Stage 5–8 fixture build; ~2,700 of ~3,700
+  test-seconds are per-test setup), then #75. Do #82 before #76 so the migration tests
+  do not inherit the slow fixtures.
+- Housekeeping: an untracked `--help/` folder in the repo root is disposable seed output;
+  delete it.
+
+---
+
 # 1. Project
 
 You are continuing development of:
