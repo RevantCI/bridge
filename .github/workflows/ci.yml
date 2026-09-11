@@ -1,0 +1,258 @@
+# Pull-request merge gate.
+#
+# release.yml stays exactly as it is: it builds and ships the Windows installer on a
+# tag, and it is the only place the frozen sidecars and the real installer are
+# exercised. What it is not is a merge gate -- it only runs on tags, and it never runs
+# the Python suite at all. This workflow closes that gap: the analysis engine is the
+# product, so its tests gate every PR.
+#
+# Job placement is deliberate:
+#   frontend         -> ubuntu-latest. svelte-check and jsdom Vitest have no platform
+#                       surface, and both were confirmed green locally on 2026-09-11
+#                       (0 errors/0 warnings; 310 tests in 24 files).
+#   rust             -> windows-latest. See the job for why: two sidecar.rs tests are
+#                       #[cfg(windows)], and the crate has never been built on Linux by
+#                       anything in this repo.
+#   engine           -> windows-latest. The suite does run on Linux -- measured
+#                       2026-09-11 under WSL/Ubuntu on CPython 3.11: 1017 passed,
+#                       1 skipped, 17m13s, with the only 3 failures being
+#                       PowerShell/cscript Logos-connector tests that are skipif-guarded
+#                       and executed solely because WSL exposes the Windows PATH. On a
+#                       genuine Linux runner they skip.
+#
+#                       Windows is still the right host for it. Windows x64 is the only
+#                       verified target and the only platform the product ships on;
+#                       constraints-py312-windows.txt is the verified pin set and is what
+#                       release.yml installs, so the gate and the shipped artifact agree
+#                       on versions; and those 3 Logos/Paratext connector tests only ever
+#                       execute here. This repo is public, so Actions minutes are free and
+#                       the usual Linux cost argument does not apply.
+#
+# Nothing here builds an installer or a frozen sidecar. That stays in release.yml,
+# where a 90-minute budget is appropriate; a merge gate that slow is one people learn
+# to route around.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+    # labeled/unlabeled matter: golden-guard reads the label set out of the event
+    # payload, so applying `goldens:rebaselined` has to re-trigger the run or the
+    # guard would stay red until someone pushed an unrelated commit.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+
+concurrency:
+  # A new push to a PR cancels the previous run for that PR.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Which parts of the repo did this PR touch? Everything below keys off this, so
+  # a frontend-only PR doesn't pay for a Rust compile or a Windows runner.
+  # ---------------------------------------------------------------------------
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      engine: ${{ steps.filter.outputs.engine }}
+      rust: ${{ steps.filter.outputs.rust }}
+      goldens: ${{ steps.filter.outputs.goldens }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # paths-filter diffs against the merge base; on a push to main it needs
+          # real history rather than the default single-commit checkout.
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'src/**'
+              - 'index.html'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'svelte.config.js'
+              - 'vite.config.ts'
+              - 'vitest.config.ts'
+              - 'tsconfig.json'
+              - 'tailwind.config.js'
+              - 'postcss.config.js'
+            engine:
+              - 'engine/**'
+              # Not cosmetic. The engine suite reaches out of engine/ for both of
+              # these: test_passage_semantic_foundation.py reads
+              # schemas/fixtures/unicode-spans-v1.json, and four correction tests
+              # import scripts/seed_review_fixture.py,
+              # scripts/seed_correction_acceptance.py and
+              # scripts/inspect_correction_application.py. Without these lines a PR
+              # editing only a seed script would skip the suite it breaks.
+              - 'schemas/**'
+              - 'scripts/**'
+            rust:
+              - 'src-tauri/**'
+            goldens:
+              # The real location. There is no goldens/ directory and no
+              # __snapshots__ anywhere in the repo -- the Stage 5 and Stage 6B
+              # goldens are two JSON files that live with the tests that read them:
+              #   engine/tests/fixtures/stage5-source-golden-v1.json
+              #   engine/tests/fixtures/stage6b-location-golden-v1.json
+              #
+              # This guard keys on the filename, so a new golden MUST have "golden"
+              # in its name to be protected. Kept deliberately looser than
+              # '*-golden-*.json' so that e.g. stage7-golden.json is still caught.
+              - 'engine/tests/fixtures/*golden*.json'
+
+  # ---------------------------------------------------------------------------
+  # Frontend: svelte-check + vitest. Fast, runs on most PRs.
+  # ---------------------------------------------------------------------------
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: svelte-check
+        run: npm run check
+      - name: Vitest
+        run: npm run test
+
+  # ---------------------------------------------------------------------------
+  # Engine: the Python suite. This is the gap this workflow exists to close --
+  # the analysis engine is the product and no workflow ran its tests before now.
+  # ---------------------------------------------------------------------------
+  engine:
+    needs: changes
+    if: needs.changes.outputs.engine == 'true' || github.event_name == 'push'
+    runs-on: windows-latest
+    # 17m13s measured on Linux/3.11; a Windows runner is generally slower, so 30
+    # would be uncomfortably close to the edge.
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # 3.12, not 3.13, to match release.yml: wildebeest-nlp cannot compile
+          # under 3.13. The `wildebeest` extra is deliberately NOT installed here
+          # (WildebeestAdapter falls back to its mock on its own), but keeping the
+          # interpreter aligned with the release build means the gate and the
+          # shipped artifact are not tested on different Pythons.
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            engine/pyproject.toml
+            engine/constraints-py312-windows.txt
+      - name: Install engine dependencies
+        # There is no requirements*.txt in this repo. The engine is an editable
+        # install from engine/pyproject.toml; constraints-py312-windows.txt pins the
+        # verified Windows set and is what release.yml uses.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -c constraints-py312-windows.txt -e ".[dev]"
+      - name: Run the Python suite
+        # Both test roots: greek_room_engine has its own tests/ that plain `pytest`
+        # from engine/ would still collect, but naming them keeps this honest about
+        # what is being gated. -p no:cacheprovider and PYTHONDONTWRITEBYTECODE keep a
+        # stale .pyc in the vendored trees from masking a real change.
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider
+
+  # ---------------------------------------------------------------------------
+  # Rust / Tauri shell.
+  # ---------------------------------------------------------------------------
+  rust:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    # windows-latest, matching release.yml, for two reasons. The soft one: sidecar.rs
+    # gates two of its tests behind #[cfg(windows)] (the taskkill process-tree kill),
+    # so a Linux host silently compiles them out and gates less than it appears to.
+    # The hard one: nothing in this project has ever built the Tauri crate on Linux --
+    # release.yml only ever runs cargo on Windows -- so a Linux job here would be an
+    # unverified guess about webkit2gtk availability shipped as a merge gate.
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Stub the external sidecars
+        # tauri-build resolves every bundle.externalBin entry for the host target
+        # triple inside its build script, so ANY cargo command fails outright while
+        # src-tauri/binaries/ is empty -- and it IS empty on a fresh checkout, because
+        # the real sidecars are build output and .gitignore'd (only README.txt is
+        # tracked). release.yml gets away without this step only because it runs
+        # build-sidecars.ps1 first; this job deliberately does not, since building
+        # PyInstaller sidecars just to run unit tests is most of the release budget.
+        #
+        # These stubs exist purely to satisfy the build script's existence check.
+        # Nothing in `cargo test` executes them: the unit tests in sidecar.rs and
+        # passage_semantic_wire.rs are pure logic and never spawn the engine.
+        shell: bash
+        run: |
+          triple="$(rustc -vV | sed -n 's/^host: //p')"
+          case "$triple" in *windows*) ext=".exe" ;; *) ext="" ;; esac
+          mkdir -p src-tauri/binaries
+          for name in bridge-engine bridge-usfm-checker; do
+            echo 'CI stub, never executed' > "src-tauri/binaries/${name}-${triple}${ext}"
+          done
+          ls -l src-tauri/binaries
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+  # ---------------------------------------------------------------------------
+  # Golden guard. Re-baselining goldens must be a deliberate, labelled act -- never a
+  # side effect of another change. This is the check that makes that rule real.
+  # ---------------------------------------------------------------------------
+  golden-guard:
+    needs: changes
+    if: needs.changes.outputs.goldens == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the goldens:rebaselined label
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'goldens:rebaselined') }}
+        run: |
+          echo "::error::This PR modifies golden files under engine/tests/fixtures/."
+          echo "Re-baselining goldens is its own PR, reviewed on its own, labelled 'goldens:rebaselined'."
+          echo "If a golden is failing because of your change, that is a finding to report -- not a file to regenerate."
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # One required status check for branch protection to point at, so the protection
+  # rule doesn't have to be edited every time a job is added or a path filter skips one.
+  # ---------------------------------------------------------------------------
+  ci-ok:
+    if: always()
+    # `changes` is in this list on purpose. Without it, a failure in the filter job
+    # skips every downstream job, ci-ok sees nothing but "skipped", and the gate goes
+    # green on a run that tested absolutely nothing.
+    needs: [changes, frontend, engine, rust, golden-guard]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job failed
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "Job results: $results"
+          case "$results" in
+            *failure*|*cancelled*) echo "::error::A required check did not pass."; exit 1 ;;
+            *) echo "All required checks passed or were skipped." ;;
+          esac

@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+Read it before writing code here. It records the constraints that are not visible
+from the source and the ones that are expensive to get wrong. If a request in your
+session conflicts with anything in this file, stop and say so rather than working
+around it — ask the maintainer (@RevantCI).
+
+`CONTRIBUTING.md` is the companion: this file holds the technical constraints, that
+one holds the idea → issue → PR flow.
+
 ## What this is
 
 Bridge is a local-first Bible translation QA workbench (a rewrite of a legacy
@@ -159,6 +167,140 @@ linked via `.bridge/collection.json` on every sibling. Only the first book
 is normalized eagerly; the rest carry `.bridge/lazy-import.json` and
 normalize on first open (this is why a 66-book import is ~5s, not minutes).
 
+## Hard invariants
+
+These are the things that cost real people real work if they break. Every one of
+them is enforced somewhere in the code or the tests; none of them is aspirational.
+
+**The correction ledger is append-only.** Proposals are never updated in place and
+never deleted. An edit, a rejection or a supersession writes a new row and the
+previous wording survives as a snapshot
+(`passage_semantic_repository.py`'s proposal history, added in Stage 9B.1).
+Crash recovery, the audit trail, and the ability to explain to a translation team
+why a verse changed all depend on this. The same rule holds for the tN/tW
+disposition history in `tc_project.py` — compacting a record must not compact its
+lifecycle events.
+
+**Token lineage is identity.** Tokens carry a `lineage_id` and an
+`instance_fingerprint` (`token_lineages` / `token_instances`, unique on the pair).
+Code that re-tokenises, re-imports, or rebuilds an inventory must resolve lineage
+through `token_lineage_candidates` — `SAME_LINEAGE` / `POSSIBLE_SUCCESSOR` /
+`SPLIT_FROM` / `MERGED_FROM` / `NO_CORRESPONDENCE` — not mint fresh ids. A broken
+lineage silently detaches a team's review history from the text it was about.
+This is the same class of rule as gotcha 3 below: identity has to survive a
+re-run, or decisions keyed to it are lost.
+
+**Staleness propagates through the dependency graph.** `record_dependencies`
+plus `pending_invalidations` are what mark downstream analysis `STALE` rather
+than silently keeping it. If you add a derived record type, register it — there
+is a real test, `test_dependency_graph_invariants`, asserting that every writable
+record type appears in the authoritative `record_type -> table` map at the top of
+`passage_semantic_repository.py`. A derived value that never goes stale is worse
+than no derived value.
+
+**Latest job authoritative, history retained.** `lifecycle_status` carries
+`SUPERSEDED` precisely so a superseded analysis attempt can stay on disk. Do not
+prune superseded rows to save space.
+
+**Schema changes are migrations.** The companion SQLite database is at
+**schema v14** (`DATABASE_SCHEMA_VERSION` in
+`engine/tc_ai_bridge/passage_semantic_repository.py`). There is no `migrations/`
+directory and no `.sql` files — the schema and every `_MIGRATION_V1` … `_V14`
+block live in that one module, applied in order. Any change needs: a version
+bump, a new forward migration block, a test that opens a v14 fixture and migrates
+it successfully, and a note in `docs/HANDOFF.md`. The repository refuses to open a
+database newer than it understands, and never downgrades. Never edit the schema in
+place and never assume a user's project can be recreated — for a translation team,
+that database *is* months of work.
+
+**Offline operation is a product invariant, not a preference.** Do not introduce a
+runtime dependency on a network service, a hosted API, or a login, in any code path
+a translator hits during normal work. The one bundled network-shaped thing —
+`ai_client.py` — is explicitly optional, human-invoked, and never on the path that
+imports, checks, or opens a project. If a feature seems to need a network call, say
+so and stop; that is an architecture decision, not an implementation detail.
+
+## The analysis pipeline, and why stage numbers matter
+
+The passage-aware semantic pipeline runs in numbered stages, followed by human
+review and correction. Note the numbering collision flagged in
+`DEVELOPER_GUIDE.md`: these semantic **Stages** are a different axis from the
+Greek Room **Phases**, and the two are easy to confuse in older notes.
+
+| Stage | Does | Lives in |
+|---|---|---|
+| 4 | Runtime integration | `passage_semantic_runtime.py` |
+| 5 | Source semantic inventory, from UHB/UGNT | `source_semantic_inventory.py` |
+| 6A | Target semantic inventory | `target_semantic_inventory.py` |
+| 6B | Passage-aware source→target location | `semantic_location.py` |
+| 7 | Meaning-preservation analysis | `meaning_analysis.py` |
+| 8 | Bidirectional source-coverage / target-support QA | `qa_audit.py` |
+| 9A | Human review UI: the QA findings queue | `qa_review` methods + Alignment Review |
+| 9B.0–9B.4 | Correction proposal → review → authorized apply → affected re-analysis → positive verification → human `CORRECTED` acknowledgement | `correction_*` services |
+
+Get the numbers right before quoting them: **6B is the location engine and 7 is
+meaning preservation**, not 7 and 8. The test files are named for their stage
+(`test_semantic_location_stage6b.py`, `test_meaning_analysis_stage7.py`,
+`test_qa_audit_stage8.py`) and so are the goldens — use them as the source of
+truth over any prose, including this file.
+
+Each stage's module docstring states what it deliberately does *not* do, and those
+refusals are load-bearing:
+
+- **Stage 5 is source-only.** It never reads target Scripture.
+- **Stage 6A is target-only, and is built independently of Stage 5 on purpose.**
+  That independence is what makes the later comparison meaningful. Do not
+  "optimise" Stage 6A by seeding it from Stage 5 output.
+- **Stage 7 never relocates target expressions** — it analyses frozen Stage 6B
+  locations.
+- **Stage 8 never re-runs Stage 6B location search and never re-judges Stage 7.**
+- **Stage 9B.4 never re-judges Stage 7 meaning.** Verification asks whether the
+  original failed obligation is now positively satisfied by current Stage 6B/7/8
+  evidence. A correction is never verified merely because a finding disappeared,
+  and `PASSED` alone never sets `CORRECTED`.
+
+## Goldens and thresholds
+
+**The goldens are two files**, and they are not in a `goldens/` directory —
+they sit beside the tests that read them:
+
+```
+engine/tests/fixtures/stage5-source-golden-v1.json    <- test_source_semantic_inventory_stage5.py
+engine/tests/fixtures/stage6b-location-golden-v1.json <- test_semantic_location_stage6b.py
+```
+
+There are no Vitest snapshots and no `__snapshots__` directories anywhere in the
+repo. `golden-guard` keys on the filename, so **a new golden must have `golden` in
+its name** and live in that directory or it is not protected.
+
+**Never re-baseline a golden as part of another change.** If your change makes one
+fail, that is a finding to report, not a file to regenerate. Re-baselining is its
+own PR, doing nothing else, carrying the `goldens:rebaselined` label — which
+`.github/workflows/ci.yml`'s `golden-guard` job enforces.
+
+**The confidence thresholds are uncalibrated.** The 0.85 / 0.9 cut-offs in
+`qa_audit.py`'s `severity_for()` (MEANING_SHIFT → HIGH, and HIGH → CRITICAL) are
+placeholders, as is every confidence value elsewhere in the pipeline —
+`MEANING_CALIBRATION_VERSION` is literally `"meaning-uncalibrated-v1"`, and raw
+score and calibrated value are deliberately kept as separate fields so a real
+calibration can land later. Do not build behaviour that assumes these numbers are
+meaningful, and do not tune them to make a test pass.
+
+**Known-pinned bug: Tamil negation.** `meaning_analysis._comparison_norm` does
+`re.findall(r"[^\W_]+")` over NFD-decomposed text. Indic combining marks are not
+alphanumeric, so a Tamil word is **split at every virama and vowel sign** and the
+marks are discarded: `இல்லை` becomes two tokens. Stage 7's POLARITY branch tests
+whole tokens, so it cannot see the negative and returns `CONTRADICTED` against a
+Greek negative — a false contradiction, on this project's primary target language.
+(`_category` survives because it substring-matches, so QUANTITY, TEMPORAL and
+PARTICIPANT still work. The docstring's claim that Tamil vowel signs "remain
+intact" is wrong.) This is pinned deliberately by
+`test_tamil_negation_polarity_limit_is_pinned_not_worked_around`, which asserts
+both the comparator's current output and that Stage 9B.4 verification reports the
+resulting disagreement as `UNCERTAIN` rather than papering over it. When Stage 7
+is fixed that test fails on purpose. Do not work around it locally in an unrelated
+change. **This is scheduled work, not accepted behaviour.**
+
 ## Non-obvious gotchas (confirmed still true in current code, not assumed)
 
 1. `TranslationCoreProject.summary` is a `@property` — `summary()` crashes.
@@ -247,3 +389,55 @@ disagree). `docs/ALIGNMENT.md` and `docs/IMPORTS.md` document the
 manual-alignment and import subsystems respectively. `docs/QA_TEST_MATRIX.md`
 is the release gate — a feature isn't release-ready because its unit tests
 pass; check the matrix's source/frozen/desktop rows.
+
+## How to work here
+
+`CONTRIBUTING.md` has the full flow. The short version, and the parts that apply
+to an AI-assisted session specifically:
+
+1. **Every change belongs to an accepted issue.** No issue, no PR.
+2. **Small and single-purpose.** One issue per PR. A PR that touches the engine,
+   the schema and the UI at once cannot be reviewed properly by one person.
+3. **Never push to `main`.** Branch, PR, wait for review.
+4. **Say what you verified.** In the PR description, separate what you ran and
+   watched work from what you believe to be true because the code looks right.
+   This matters more here than anywhere else: a confident explanation is not
+   evidence. "I built the installer, imported a project and the findings
+   appeared" is evidence. "The tests pass" is evidence. "This should now handle
+   the edge case" is not.
+5. **Report surprises, don't absorb them.** If you find a bug adjacent to your
+   task, file it. Don't fix it quietly in the same PR.
+6. **Verification gates.** Frontend: `npm run check` + `npm run test` + `npm run
+   build`. Engine: the pytest suite. Shell: `cargo check` *and* `cargo test` —
+   both, not just the compile. `.github/workflows/ci.yml` runs the first three on
+   every PR; `docs/QA_TEST_MATRIX.md` is the release gate beyond that, and a
+   feature is not release-ready just because its unit tests pass.
+7. **Don't trust the frozen build because source passed.** The two have diverged
+   before. `scripts/smoke_sidecars.py` checks the frozen pair, and it is
+   currently `continue-on-error` in `release.yml` because of a known,
+   pre-existing `project.inspectImport` classification mismatch — so a green
+   release build is not evidence the sidecars are healthy.
+
+## Stop and ask before writing any code
+
+These are cheap to start and expensive to undo. If a task appears to require one,
+raise it as a question in the issue rather than deciding it in a commit:
+
+- Changing the companion database schema (currently v14)
+- Anything that adds a server, an account, a login, or a network round-trip on a
+  runtime path a translator hits
+- Re-baselining either golden
+- Changing the confidence thresholds or the auto-apply behaviour
+- A second Scripture writer, or an alternative path for applying corrections to
+  the text — Stage 9B.3b's authorized write behind an explicit human confirmation
+  is deliberately the only one
+- Bundling or switching the multilingual embedding model
+  (`SemanticEmbeddingProvider.available` is `False` in the shipped app today, so
+  production location runs use lexical/structural evidence only — that is a known
+  state, not a bug to fix in passing)
+- Adding a third vendored upstream tree under `engine/vendor/`
+
+---
+
+*Maintainer: @RevantCI. When in doubt, the answer is a question in the issue, not
+a commit.*

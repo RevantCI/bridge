@@ -1,0 +1,60 @@
+# Review routing. The point is not gatekeeping -- it's that the parts of Bridge where a
+# mistake destroys a translation team's work always get a second reader, while the parts
+# where a mistake is visible and cheap can move quickly.
+#
+# CODEOWNERS only does anything once branch protection on `main` has "Require review
+# from Code Owners" enabled. Until then this file is documentation.
+#
+# Last matching pattern wins, so the faster-lane entries are deliberately at the bottom.
+
+# Default: anything not matched below.
+*                                       @RevantCI
+
+# --- Needs maintainer review, always -----------------------------------------
+
+# The analysis engine: Stages 5-9, the QA adapters, and the vendored Greek Room trees.
+/engine/                                @RevantCI
+
+# The Tauri/Rust shell, including sidecar lifecycle and the passage-semantic wire.
+/src-tauri/                             @RevantCI
+
+# Companion-database schema and migrations. A bad migration is unrecoverable for a real
+# project. Note there is no migrations/ directory and no .sql files: the whole schema
+# and every _MIGRATION_V1..V14 block live inside this one module.
+/engine/tc_ai_bridge/passage_semantic_repository.py   @RevantCI
+/engine/tc_ai_bridge/passage_semantic_models.py       @RevantCI
+
+# The JSON wire schema and its fixtures.
+/schemas/                               @RevantCI
+
+# Golden files. Changes here also need the goldens:rebaselined label (see ci.yml).
+# They are not in a goldens/ directory -- they sit beside the tests that read them.
+/engine/tests/fixtures/                 @RevantCI
+
+# Release and CI machinery.
+/.github/                               @RevantCI
+
+# Fixture-seeding and build scripts. The engine suite imports three of these directly,
+# so a change here can break tests without touching engine/.
+/scripts/                               @RevantCI
+
+# The documents that define how we work and what the constraints are.
+/CLAUDE.md                              @RevantCI
+/CONTRIBUTING.md                        @RevantCI
+/docs/HANDOFF.md                        @RevantCI
+/docs/BUILD_LOG.md                      @RevantCI
+/docs/ARCHITECTURE.md                   @RevantCI
+/docs/DECISIONS.md                      @RevantCI
+/docs/QA_TEST_MATRIX.md                 @RevantCI
+
+# --- Faster lane --------------------------------------------------------------
+# Frontend work: still reviewed, but either of us can approve it.
+#
+# TODO(maintainer): replace @HANDLE-TBD with the real GitHub username before enabling
+# "Require review from Code Owners". GitHub silently ignores an unknown handle -- the
+# rule does not error, it just never requests that reviewer.
+/src/                                   @RevantCI @HANDLE-TBD
+
+# User-facing documentation.
+/docs/USER_MANUAL.md                    @RevantCI @HANDLE-TBD
+/README.md                              @RevantCI @HANDLE-TBD
