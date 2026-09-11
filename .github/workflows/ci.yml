@@ -47,9 +47,13 @@ on:
     branches: [main]
 
 concurrency:
-  # A new push to a PR cancels the previous run for that PR.
+  # A new push to a PR cancels the previous run for that PR. On `push`,
+  # `github.ref` is `refs/heads/main` for every commit, so without the
+  # event_name guard a push to main cancels the PREVIOUS commit's still-running
+  # gate instead of its own -- and work here goes straight onto main, so two
+  # pushes a few minutes apart is the normal case, not the exception (#83).
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
