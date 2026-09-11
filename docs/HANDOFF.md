@@ -28,21 +28,24 @@ steps are GitHub issues **#74–#81**, in that order, plus findings **#82** and 
 Nothing in it changes the invariants below: the translationCore on-disk files, the
 v14 semantic DB, the append-only ledger and offline-first all stay as they are.
 
-State at end of day:
+State as of 2026-09-11 (Benz's session, picking this up same day):
 
 - Done and pushed: `TEAM_ARCHITECTURE.md`; #74 steps 1–2 (engine tests packaged by
   area under `engine/tests/<area>/`, pytest config + markers in `engine/pyproject.toml`,
   `pytest-xdist` pinned; `pytest -n auto -m "not slow"` from `engine/` is the inner
   loop). Measurements in `BUILD_LOG.md`'s #74 section. CI stays serial — parallel was
   measured slower on the 4-vCPU runner.
+- #82 landed differently than first proposed: profiling showed the ~60 s/test cost was
+  mostly the repository's SQLite connect/close/fsync overhead, not the pipeline rebuild,
+  so `369f648`/`cc1ff33` opt out of fsync/WAL in tests instead of module-scoping the
+  fixture. Local suite 18:56 → 3:17, CI serial 35:18 → 14:50. The issue stays open but is
+  now second-order — module-scoping the read-only cases still waits for #74 step 4.
+- #83 fixed (`9bf8857`): `cancel-in-progress` scoped to `pull_request` only, since on
+  `push` the concurrency group was the same for every commit to `main` and a new push
+  cancelled the previous commit's still-running gate.
 - Not started: #75–#81 (the workbench SQLite, identity, engine session model, hub,
   dashboard). No persistence or identity code exists yet.
-- **Next task:** #83 (two pushes to `main` cancel each other's CI run — a one-line
-  `ci.yml` fix), then #82 (share the Stage 5–8 fixture build; ~2,700 of ~3,700
-  test-seconds are per-test setup), then #75. Do #82 before #76 so the migration tests
-  do not inherit the slow fixtures.
-- Housekeeping: an untracked `--help/` folder in the repo root is disposable seed output;
-  delete it.
+- **Next task:** #75 (workbench SQLite repository skeleton — `TEAM_ARCHITECTURE.md` §3).
 
 ---
 
