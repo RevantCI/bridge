@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unicodedata
 from pathlib import Path
+from tests.support.paths import FIXTURES_DIR
 
 import pytest
 
@@ -280,7 +281,7 @@ def test_minimal_source_semantic_protocol_apis(tmp_path: Path) -> None:
 
 def test_stage5_frozen_golden_semantic_roles(tmp_path: Path) -> None:
     fixture = json.loads(
-        (Path(__file__).parent / "fixtures" / "stage5-source-golden-v1.json").read_text(encoding="utf-8")
+        (FIXTURES_DIR / "stage5-source-golden-v1.json").read_text(encoding="utf-8")
     )
     for index, case in enumerate(fixture["cases"]):
         result = _inventory(tmp_path / str(index), case["book"]).build_range(

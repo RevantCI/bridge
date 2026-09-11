@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 
-ENGINE_ROOT = Path(__file__).resolve().parents[1]
+from tests.support.paths import ENGINE_ROOT
 
 
 class Sidecar:

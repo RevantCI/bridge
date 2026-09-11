@@ -52,8 +52,8 @@ from tc_ai_bridge.tc_project import TranslationCoreProject  # noqa: E402
 
 from seed_review_fixture import FixtureEmbeddingProvider  # noqa: E402
 
-from tests.test_correction_stage9b3b import _apply, _fixture  # noqa: E402
-from tests.test_correction_stage9b4 import (  # noqa: E402
+from tests.correction.test_correction_stage9b3b import _apply, _fixture  # noqa: E402
+from tests.correction.test_correction_stage9b4 import (  # noqa: E402
     BEFORE,
     ORIGINAL_SPAN,
     _analysis_job,

@@ -34,8 +34,8 @@ pip install -e ".[dev]"
 pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider
 ```
 
-Single test file or test: `pytest tests/test_bridge_service.py -v` or
-`pytest tests/test_bridge_service.py::test_open_real_fixture_project -v`.
+Single test file or test: `pytest tests/service/test_bridge_service.py -v` or
+`pytest tests/service/test_bridge_service.py::test_open_real_fixture_project -v`.
 Set `PYTHONDONTWRITEBYTECODE=1` first if re-running after editing vendored
 files (stale `.pyc` in `vendor/*/__pycache__` can otherwise mask an edit).
 
@@ -193,7 +193,7 @@ re-run, or decisions keyed to it are lost.
 **Staleness propagates through the dependency graph.** `record_dependencies`
 plus `pending_invalidations` are what mark downstream analysis `STALE` rather
 than silently keeping it. If you add a derived record type, register it — there
-are two real tests asserting it, both in `engine/tests/test_correction_stage9b0.py`:
+are two real tests asserting it, both in `engine/tests/correction/test_correction_stage9b0.py`:
 `test_every_writable_dependency_type_is_registered` checks that every writable
 record type appears in the authoritative `RECORD_DEPENDENCY_TABLES` map at the top
 of `passage_semantic_repository.py`, and

@@ -88,7 +88,7 @@ from tc_ai_bridge.unicode_coordinates import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[2]
+from tests.support.paths import REPO_ROOT as ROOT
 
 
 def _solution(repo: FoundationRepository, solution_id: str, *, authoritative: bool = False) -> None:

@@ -15,7 +15,7 @@ from tc_ai_bridge.unicode_comparison import COMPARISON_NORMALIZATION_VERSION
 from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime
 from tc_ai_bridge.tc_project import TranslationCoreProject
 
-from .test_qa_audit_stage8 import _runtime
+from tests.semantic.test_qa_audit_stage8 import _runtime
 
 
 def _wait(manager: AnalysisJobManager, job_id: str, timeout: float = 5.0) -> dict[str, Any]:

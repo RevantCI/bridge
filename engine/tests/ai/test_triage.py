@@ -23,7 +23,7 @@ from tc_ai_bridge.triage import (
 )
 from tc_ai_bridge.triage_prompts import FAMILIES, family_for, instructions_for
 
-from .test_bridge_service import fixture_project  # noqa: F401
+from tests.service.test_bridge_service import fixture_project  # noqa: F401
 
 
 def _finding(**overrides):

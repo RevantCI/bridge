@@ -35,7 +35,7 @@ from greek_room_engine.protocol import EngineRequest
 from tc_ai_bridge.secret_store import AppSettings
 
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+from tests.support.paths import SCRIPTS_DIR as SCRIPTS
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 

@@ -148,7 +148,7 @@ cross-verse, `reordered: True`, 12 findings in the review queue.
 
 ### The walkthrough
 
-`engine/tests/test_php_review_walkthrough_stage9a.py` drives the review APIs
+`engine/tests/review/test_php_review_walkthrough_stage9a.py` drives the review APIs
 over the reordered passage — Greek 1:3 to Tamil 1:6, 1:4 to 1:4, 1:5 to 1:3,
 1:6 to 1:5 — and imports the seeder, so what a human opens is what the tests
 assert on.
@@ -467,7 +467,7 @@ the command layer — no additions needed there.)
 `engine/bridge_service.py`, `src-tauri/src/commands.rs`,
 `src-tauri/src/main.rs`, `src/lib/api/bridgeClient.ts`,
 `src/lib/types/qaReview.ts` (new),
-`engine/tests/test_qa_review_service_stage9a.py` (new, 37 tests).
+`engine/tests/review/test_qa_review_service_stage9a.py` (new, 37 tests).
 
 ## Stage 9A.0 — Review-queue storage preflight (2026-09-02)
 
@@ -534,7 +534,7 @@ Cache hits short-circuit before any audit pass; a cached run reports only
 
 **Files:** `engine/tc_ai_bridge/passage_semantic_repository.py`,
 `engine/tc_ai_bridge/qa_audit.py`,
-`engine/tests/test_qa_review_stage9a.py` (new, 17 tests).
+`engine/tests/persistence/test_qa_review_stage9a.py` (new, 17 tests).
 
 ### Found while surveying: Stage 8 has no Rust wire and no client methods
 
@@ -755,7 +755,7 @@ claim. Did not implement a QA-specific verdict for the ἐπιτελέσει/ந
 precedence path) — no dedicated completion/continuation finding kind was
 requested by the spec.
 
-**Tests**: `engine/tests/test_qa_audit_stage8.py`, 27 cases — precedence/
+**Tests**: `engine/tests/semantic/test_qa_audit_stage8.py`, 27 cases — precedence/
 severity policy (parametrized over all 5 dimension→kind mappings plus
 generic status precedence and resource-conflict override), all→some
 quantity problem, genuine absence, ambiguous/search-incomplete blocking
@@ -1526,7 +1526,7 @@ the USFM findings, computed lazily on first request rather than on every
   the book mapped back to the project's own numbering, for display/export
   use without hand-rolling the mapping direction.
 
-**Verified**: `engine/tests/test_versification.py` (22 tests against the
+**Verified**: `engine/tests/versification/test_versification.py` (22 tests against the
 real vendored data — including the Psalm 3 shift and its back-versification
 round trip, real merge/split mappings, unknown books, USFM verse
 bridges/segments passed straight through, and a direct real-bug-reproduction
@@ -1835,7 +1835,7 @@ USFM checker and versification both shipped backend/protocol-only.
   false-positive class and the vendored module's own Jim/Kim example are
   both asserted to NOT be flagged; a bigram-blocking performance regression
   guard.
-- `engine/tests/test_names_check.py` (6 tests) — protocol-level, through
+- `engine/tests/service/test_names_check.py` (6 tests) — protocol-level, through
   `BridgeEngine.handle_request`: a real finding surfaces via
   `verse.runChecks` with `checks: ["names"]`, is correctly absent when
   "names" isn't requested, has a stable id across a fresh `BridgeEngine`
@@ -1981,7 +1981,7 @@ genuinely CPU-only, zero AI/API cost: no LLM tokens, no network calls, just
 counting already-known token pairs from alignment JSON already on disk
 plus a few arithmetic formulas over those counts.
 
-**Verified**: `engine/tests/test_alignment_statistics.py` (7 new tests, no
+**Verified**: `engine/tests/alignment/test_alignment_statistics.py` (7 new tests, no
 mocks) — completed-only filtering (an incomplete sibling verse is excluded),
 hand-computed PMI/probability values checked against the formula directly,
 multi-book aggregation with a real lazy-sibling skip, protocol-level
@@ -2118,7 +2118,7 @@ Room/AI feature in Bridge.
   gained `AlignmentAiProposal`/`AlignmentAiProposeResponse` (documented
   inline with the same snake_case rationale as above).
 
-**Verified**: `engine/tests/test_ai_alignment_propose.py` (4 new tests, real
+**Verified**: `engine/tests/alignment/test_ai_alignment_propose.py` (4 new tests, real
 `compile_link_proposal`/`apply_proposal` logic exercised through
 `BridgeEngine.handle_request` with a fake transport, no mocks of Bridge's
 own code) — `alignment.aiPropose` fails with a clear `ai_error` when no API
@@ -2383,7 +2383,7 @@ install will do the real functional testing).
   repeated polling safe), so a poll-only helper matches the existing
   design rather than falling short of it.
 - **What's genuinely verified, real subprocess-level testing, not just
-  syntax-checking**: `engine/tests/test_logos_connector.py` (4 tests) proves
+  syntax-checking**: `engine/tests/connectors/test_logos_connector.py` (4 tests) proves
   `LogosConnectorClient` actually spawns this exact script in `-STA` mode,
   exchanges real newline-delimited JSON, and a real "Logos isn't installed"
   COM failure round-trips as a clean `LogosConnectorError` — not a hang, not
@@ -2780,7 +2780,7 @@ dependency changes. Audit and upgrade these separately.
 
 ## Tests added
 
-`engine/tests/test_project_import.py` covers:
+`engine/tests/project_io/test_project_import.py` covers:
 
 - Read-only USFM preview and missing-language detection.
 - Raw SFM normalization and provenance.
@@ -2817,7 +2817,7 @@ At the time this document was originally written the working tree was uncommitte
 it has since been committed. Files involved in this import work were:
 
 - `engine/tc_ai_bridge/project_import.py` (new)
-- `engine/tests/test_project_import.py` (new)
+- `engine/tests/project_io/test_project_import.py` (new)
 - `engine/bridge_service.py`
 - `src/lib/components/ImportScreen.svelte`
 - `src/lib/api/bridgeClient.ts`
@@ -2969,8 +2969,8 @@ button.
 New: `scripts/vendor-strongs-lexicon.mjs`,
 `engine/tc_ai_bridge/lexicon_resources.py`,
 `engine/tc_ai_bridge/morphology_codes.py`,
-`engine/tests/test_lexicon_resources.py`,
-`engine/tests/test_morphology_codes.py`,
+`engine/tests/resources/test_lexicon_resources.py`,
+`engine/tests/resources/test_morphology_codes.py`,
 `src/lib/components/LexiconPopup.svelte`,
 `engine/resources/{hbo,el-x-koine}/lexicons/strongs/v1.0.2_openscriptures/`
 (vendored data + NOTICE.md/PROVENANCE.json/index.json).
@@ -2978,7 +2978,7 @@ New: `scripts/vendor-strongs-lexicon.mjs`,
 Modified: `engine/bridge_service.py` (new method + dispatch branch),
 `engine/tc_ai_bridge/resource_materializer.py` (net no-op after the fix above
 — comment explains why the lexicon is deliberately *not* mirrored into app
-storage), `engine/tests/test_bridge_service.py`,
+storage), `engine/tests/service/test_bridge_service.py`,
 `src-tauri/src/commands.rs`, `src-tauri/src/main.rs`,
 `src/lib/api/bridgeClient.ts`, `src/lib/types/finding.ts`,
 `src/lib/components/AlignmentModal.svelte` (per-token info button, wired to
@@ -3342,7 +3342,7 @@ frontend (`AIReviewResult` in `types/finding.ts`) and nothing renders it —
 which is why this presented as a silent "nothing happened". Surfacing it is
 not done.
 
-Regression tests (`tests/test_semantic_mapping_stage3.py`):
+Regression tests (`tests/semantic/test_semantic_mapping_stage3.py`):
 `test_one_rejected_row_does_not_discard_the_rest_of_the_batch`,
 `test_word_selections_inside_a_clause_span_are_applicable`, and
 `test_hallucinated_target_quote_is_rejected` rewritten — it asserted the
@@ -3551,7 +3551,7 @@ are one code point here and two UTF-16 units there.
 
 ### Tests and gates
 
-`tests/test_correction_stage9b0.py` — 55 tests, all passing.
+`tests/correction/test_correction_stage9b0.py` — 55 tests, all passing.
 
 Two pre-existing tests updated, both by the spec's own requirements:
 `test_correction_application_requires_human_and_stales_dependencies` asserted
@@ -3697,7 +3697,7 @@ interactive (a sixth `sidecar::tests` case pins that).
 
 ### Verification
 
-`tests/test_qa_report.py` — 11 tests (snapshot written by a real check job
+`tests/service/test_qa_report.py` — 11 tests (snapshot written by a real check job
 and read back with a decision applied; lazy/missing siblings not
 materialized; tN/tW provenance for Bridge AI / human / translationCore /
 invalidated / nothing-to-select with an AI proposal merged in; Ignore on a
@@ -3784,7 +3784,7 @@ remain outside this stage.
 
 ### Tests and regression gates
 
-`engine/tests/test_correction_stage9b1.py`: **33 passed**. Coverage includes
+`engine/tests/correction/test_correction_stage9b1.py`: **33 passed**. Coverage includes
 real backend eligibility, immediate pre-persistence recheck, offline human
 wording, provider fallback/privacy/provenance, deterministic suggestions,
 alternative ownership, all requested semantic repair shapes, exact span/hash/
@@ -3927,7 +3927,7 @@ change. The Project QA Report remains a frozen regression surface.
 
 ### Test-first implementation
 
-Added `tests/test_correction_stage9b3a.py` before the implementation. Its first
+Added `tests/correction/test_correction_stage9b3a.py` before the implementation. Its first
 collection exposed an undeclared `jsonschema` test dependency; the test was
 corrected to validate exact canonical-schema fields/enums using the repository's
 existing dependency-free schema strategy rather than widening production or
@@ -4948,7 +4948,7 @@ word-bank movement, the verse-edit audit, tN/tW `verseEdits`, a filesystem
 backup and a journal write.
 
 Measured rather than guessed, driving the real service through the Stage
-9B.3b fixture (`_fixture`/`_apply` in `tests/test_correction_stage9b3b.py`)
+9B.3b fixture (`_fixture`/`_apply` in `tests/correction/test_correction_stage9b3b.py`)
 with the semantic DB padded to a range of sizes. `scripts/inspect_correction_application.py`
 was not usable for this: it is a read-only inspector for an already-applied
 correction on an installed project and times nothing.
@@ -5308,7 +5308,7 @@ non-deterministic gate is worth less than the tests in it.
 ## Correction to the earlier Stage 9B.3b / 9B.3c acceptance claim
 
 The 9B.3b and 9B.3c installed acceptance used a **controlled pre-seeded
-finding**: `tests/test_correction_stage9b3b.py::_fixture` calls
+finding**: `tests/correction/test_correction_stage9b3b.py::_fixture` calls
 `repo.create_qa_finding(...)` and then `UPDATE qa_findings SET payload_json=?`
 with `"targetContentHashes": [_hash(before)]` — hashes that already conformed
 to the Stage 9B reader contract.
@@ -5331,7 +5331,7 @@ engine/tc_ai_bridge/qa_target_hash.py             new — the contract, one plac
 engine/tc_ai_bridge/qa_audit.py                   writer: per-target-ref hashes
 engine/tc_ai_bridge/correction_eligibility.py     reader: pair against target refs
 engine/tc_ai_bridge/passage_semantic_runtime.py   _sha256_text delegates
-engine/tests/test_qa_target_hash_contract_stage8_9b.py   new — production path
+engine/tests/semantic/test_qa_target_hash_contract_stage8_9b.py   new — production path
 ```
 
 Schema unchanged (**v14**). Version unchanged (**0.9.2**). No frontend, Rust or
@@ -5747,8 +5747,8 @@ engine/tc_ai_bridge/correction_eligibility.py     reads only typed conflicts;
                                                   validationStatus key repaired;
                                                   pre-split records fail closed
 engine/tc_ai_bridge/qa_review.py                  resourceConflictEvidence section
-engine/tests/test_meaning_failure_eligibility_stage9b.py   new
-engine/tests/test_correction_stage9b0.py          decision table extended
+engine/tests/correction/test_meaning_failure_eligibility_stage9b.py   new
+engine/tests/correction/test_correction_stage9b0.py          decision table extended
 schemas/bridge-passage-semantic-v1.schema.json    QaFinding + MeaningAssessment
 src/lib/types/passageSemanticV1.ts                optional new field
 src/lib/types/qaReview.ts                         resourceConflictEvidence
@@ -5963,7 +5963,7 @@ resolution and copying were not the defect.
 ## Confirmed root cause
 
 The A/B controlled fixtures reuse the Stage 9B unit-test `_fixture()` in
-`engine/tests/test_correction_stage9b3b.py`. It called
+`engine/tests/correction/test_correction_stage9b3b.py`. It called
 `repository.create_qa_finding()` — which inserts a *minimal* row — and then
 wrote the human-decided state with raw SQL touching only
 `qa_disposition`, `review_status`, `lifecycle_status` and `payload_json`.
@@ -6022,7 +6022,7 @@ click Run analysis on A or B.
 
 ## Regression
 
-`engine/tests/test_correction_acceptance_queue_visibility.py` seeds A and B
+`engine/tests/correction/test_correction_acceptance_queue_visibility.py` seeds A and B
 with the real seeder into a fresh folder, opens them through
 `BridgeEngine`/`project.open`, and reads the actual `qaReview.getQueue` API
 (never SQLite) at the acceptance UI scope PHP 1:3–PHP 1:6 with

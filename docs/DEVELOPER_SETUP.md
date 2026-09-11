@@ -103,7 +103,7 @@ as the full DB:
 `pytest` doesn't need any of this — `engine/conftest.py`'s autouse fixture
 points `BRIDGE_SEMANTIC_SOURCE_DB` at a path that can't exist, so the whole
 suite runs with Stage 3 cleanly "unavailable" by default. Stage 3's own
-tests (`engine/tests/test_semantic_mapping_stage3.py`) construct their DB
+tests (`engine/tests/semantic/test_semantic_mapping_stage3.py`) construct their DB
 path explicitly and are unaffected either way.
 
 To point at a DB copy living somewhere other than

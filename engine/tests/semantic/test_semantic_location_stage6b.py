@@ -4,6 +4,7 @@ from collections import Counter
 import hashlib
 import json
 from pathlib import Path
+from tests.support.paths import FIXTURES_DIR
 import unicodedata
 
 import pytest
@@ -121,7 +122,7 @@ def test_irvtam_php_passage_reordering_is_discovered_without_engine_book_rules(t
             source_ref = source_units[unit_id]["canonicalReferences"][0]
             votes.setdefault(source_ref, Counter())[target_ref] += 1
     golden = json.loads((
-        Path(__file__).parent / "fixtures" / "stage6b-location-golden-v1.json"
+        FIXTURES_DIR / "stage6b-location-golden-v1.json"
     ).read_text(encoding="utf-8"))
     expected = {
         item["sourceReference"]: item["targetReference"]

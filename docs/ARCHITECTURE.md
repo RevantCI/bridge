@@ -158,7 +158,7 @@ Key implementation notes discovered while wiring this up (worth knowing before e
 - `TranslationCoreProject.summary` is a **property**, not a method.
 - `TranslationCoreProject.__init__` already creates its own `self.journal` (a `TransactionJournal` scoped to the right `companion_dir()`) — don't create a second one.
 - Decision persistence already exists and is correct: `record_qa_decision()` / `qa_decisions_for_verse()` write atomic, audited JSON under `companion_dir()/qaDecisions/...`. `BridgeEngine.decide_verse()` calls these directly rather than reinventing an in-memory store.
-- All of this was verified against a **real fixture project** built directly from reading `TranslationCoreProject`'s actual parsing code (see `tests/test_bridge_service.py`), not assumed — including a real transaction-journal backup being created on `verse.edit` and a real QA-decision JSON file landing on disk on `verse.decide`.
+- All of this was verified against a **real fixture project** built directly from reading `TranslationCoreProject`'s actual parsing code (see `tests/service/test_bridge_service.py`), not assumed — including a real transaction-journal backup being created on `verse.edit` and a real QA-decision JSON file landing on disk on `verse.decide`.
 
 Protocol methods implemented so far: `ping`, `engine.info`, `project.open`,
 `project.list`, `project.forget`, `project.scan`, `project.inspectImport`, `project.import`, `chapter.verses`,

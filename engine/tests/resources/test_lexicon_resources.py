@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tests.support.paths import REPO_ROOT
 
 from tc_ai_bridge.lexicon_resources import bundled_resources_root, lexicon_entry_for_strong
 
@@ -12,7 +13,7 @@ def test_bundled_resources_root_prefers_env_override(tmp_path, monkeypatch):
 
 
 def test_hash_verified_lexicons_are_byte_preserved_by_git_on_windows():
-    attributes = (Path(__file__).parents[2] / ".gitattributes").read_text(encoding="utf-8")
+    attributes = (REPO_ROOT / ".gitattributes").read_text(encoding="utf-8")
     assert "engine/resources/hbo/lexicons/strongs/v1.0.2_openscriptures/** -text -diff" in attributes
     assert "engine/resources/el-x-koine/lexicons/strongs/v1.0.2_openscriptures/** -text -diff" in attributes
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from tests.support.paths import REPO_ROOT
 import sqlite3
 
 import pytest
@@ -341,7 +342,7 @@ def test_unicode_application_snapshot_round_trips_exact_code_points(tmp_path: Pa
 
 def test_application_and_strict_context_validate_against_canonical_schema() -> None:
     schema = json.loads(
-        (Path(__file__).parents[2] / "schemas" / "bridge-passage-semantic-v1.schema.json")
+        (REPO_ROOT / "schemas" / "bridge-passage-semantic-v1.schema.json")
         .read_text(encoding="utf-8")
     )
     intent = to_wire(_intent())
@@ -356,7 +357,7 @@ def test_application_and_strict_context_validate_against_canonical_schema() -> N
     assert set(strict_context) == set(schema["$defs"]["StrictScriptureEditContext"]["required"])
     assert intent["applicationState"] in schema["$defs"]["CorrectionApplicationState"]["enum"]
     assert intent["actor"]["actorType"] in schema["$defs"]["ActorType"]["enum"]
-    root = Path(__file__).parents[2]
+    root = REPO_ROOT
     typescript = (root / "src" / "lib" / "types" / "correctionReview.ts").read_text(
         encoding="utf-8"
     )
@@ -589,7 +590,7 @@ def test_semantic_backup_records_application_checksum_and_timestamp(tmp_path: Pa
 
 
 def test_stage9b3a_recovery_coordinator_still_contains_no_scripture_writer() -> None:
-    root = Path(__file__).parents[2]
+    root = REPO_ROOT
     service_source = (root / "engine" / "bridge_service.py").read_text(encoding="utf-8")
     assert "CORRECTION_APPLY_PROPOSAL =" in service_source
     recovery_source = (root / "engine" / "tc_ai_bridge" / "correction_application_recovery.py").read_text(encoding="utf-8")

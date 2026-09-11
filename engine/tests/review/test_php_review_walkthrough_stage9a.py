@@ -20,7 +20,7 @@ import sys
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parent.parent.parent / "scripts"
+from tests.support.paths import SCRIPTS_DIR as SCRIPTS
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 

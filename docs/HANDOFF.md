@@ -1016,7 +1016,7 @@ No BUILD_LOG.md narrative or session-reported verification numbers exist
 for this stage's original landing (see §43 — this is a real, pre-existing
 documentation gap, not something Stage 8 introduced). Measured directly
 during Stage 8 verification instead: **focused Stage 7 suite: 22 passed**
-(`pytest engine/tests/test_meaning_analysis_stage7.py -q`).
+(`pytest engine/tests/semantic/test_meaning_analysis_stage7.py -q`).
 
 ---
 
@@ -1039,7 +1039,7 @@ rejecting anything else).
 
 **Complete (2026-09-02).** Key files: `engine/tc_ai_bridge/qa_audit.py`,
 `qa_benchmark.py`, `engine/resources/qa_audit/{omission,addition}-benchmark-v1.json`,
-`engine/tests/test_qa_audit_stage8.py`. Full narrative:
+`engine/tests/semantic/test_qa_audit_stage8.py`. Full narrative:
 `docs/BUILD_LOG.md`, entry "Stage 8 — Bidirectional Source Coverage, Target
 Support, and Translation QA (2026-09-02)".
 
@@ -1085,7 +1085,7 @@ construction site unmodified). Extending these tripped the repo's existing
 canonical-schema parity tests — `schemas/bridge-passage-semantic-v1.schema.json`
 and `src/lib/types/passageSemanticV1.ts` were updated to match (both are
 treated as load-bearing contracts, not incidental docs — see
-`engine/tests/test_passage_semantic_foundation.py`).
+`engine/tests/persistence/test_passage_semantic_foundation.py`).
 
 **`QaAuditPolicy`** (`qa-policy-v1`, one centralized versioned
 gate/precedence/severity policy):
@@ -1372,7 +1372,7 @@ the project identity through `ProjectRegistry` rather than hardcoding one —
 without that, Bridge refuses the companion database as belonging to a
 different project.
 
-`engine/tests/test_php_review_walkthrough_stage9a.py` drives the review APIs
+`engine/tests/review/test_php_review_walkthrough_stage9a.py` drives the review APIs
 over the reordered passage (Greek 1:3→Tamil 1:6, 1:4→1:4, 1:5→1:3, 1:6→1:5)
 and imports the seeder, so what a human opens is what the tests assert on.
 The load-bearing assertion is that **no `POSSIBLE_OMISSION` is raised for a
@@ -1490,7 +1490,7 @@ Full engineering narrative in [`BUILD_LOG.md`](BUILD_LOG.md) under "Stage 9B.0
   `correction.listForFinding` — read-only. **`correction.applyProposal` does
   not exist and must not be added before 9B.3.**
 
-Tests: `engine/tests/test_correction_stage9b0.py`, 55 passing.
+Tests: `engine/tests/correction/test_correction_stage9b0.py`, 55 passing.
 
 ## Historical blockers recorded before Stage 9B.1
 
@@ -2473,7 +2473,7 @@ separate open defect.
 
 Those installed acceptances used a **controlled pre-seeded finding** whose
 `targetContentHashes` already conformed to the Stage 9B reader contract
-(`tests/test_correction_stage9b3b.py::_fixture` writes the row directly). They
+(`tests/correction/test_correction_stage9b3b.py::_fixture` writes the row directly). They
 genuinely validated the correction application transaction, exact Scripture
 mutation, invalidation, affected re-analysis, cross-verse provenance and
 persistence/recovery.
@@ -2905,11 +2905,11 @@ GitHub release, without a draft step. 0.9.5 is a maintenance release on top of
 **No product frontend, backend, or Rust behavior changed between 0.9.4 and
 0.9.5.** The only functional change is the Stage 9B.4 acceptance-fixture
 queue-visibility repair recorded in `docs/BUILD_LOG.md`: `_fixture()` in
-`engine/tests/test_correction_stage9b3b.py` now persists through
+`engine/tests/correction/test_correction_stage9b3b.py` now persists through
 `repository.save_qa_finding()` rather than a minimal insert plus hand-patched
 SQL, so the seeded A/B cases carry their denormalized Stage 9A queue columns
 and `qa_finding_scope_references` rows and are actually visible in
-Alignment Review → QA. `engine/tests/test_correction_acceptance_queue_visibility.py`
+Alignment Review → QA. `engine/tests/correction/test_correction_acceptance_queue_visibility.py`
 locks that in against the real `qaReview.getQueue` API.
 
 The installer was rebuilt only so the numbered build matches the version
@@ -3021,8 +3021,8 @@ Files changed for this blocker:
 
 ```text
 engine/tc_ai_bridge/source_semantic_inventory.py
-engine/tests/test_source_semantic_inventory_stage5.py
-engine/tests/test_correction_case_c_production.py
+engine/tests/semantic/test_source_semantic_inventory_stage5.py
+engine/tests/correction/test_correction_case_c_production.py
 src/lib/components/CorrectionReviewPanel.svelte
 src/lib/components/__tests__/CorrectionReviewPanel.test.ts
 docs/HANDOFF.md

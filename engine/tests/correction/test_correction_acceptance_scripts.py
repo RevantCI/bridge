@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+from tests.support.paths import SCRIPTS_DIR as SCRIPTS
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 

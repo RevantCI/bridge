@@ -7,7 +7,7 @@ import time
 
 import tc_ai_bridge.source_semantic_inventory as inventory_module
 
-ROOT = Path(__file__).resolve().parents[2]
+from tests.support.paths import REPO_ROOT as ROOT
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

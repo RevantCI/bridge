@@ -739,19 +739,9 @@ def test_staling_the_finding_stales_its_correction_proposal(tmp_path: Path) -> N
 # --- Safety boundary: Stage 9B.0 must not alter Scripture -------------------
 
 def _stage9a_fixtures():
-    """Reuse the proven Stage 9A pipeline fixture builders.
+    """Reuse the proven Stage 9A pipeline fixture builders from tests.review."""
+    from tests.review import test_qa_review_service_stage9a as module
 
-    Loaded by path rather than imported: the tests directory is not a package,
-    so a plain import resolves only when pytest happens to have inserted it on
-    sys.path.
-    """
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(
-        "_stage9a_fixtures", Path(__file__).with_name("test_qa_review_service_stage9a.py"))
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
     return module
 
 

@@ -36,7 +36,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-ENGINE_ROOT = Path(__file__).resolve().parent.parent
+from tests.support.paths import ENGINE_ROOT
 
 _MIXED_WORKLOAD_SCRIPT = textwrap.dedent("""
     import json
