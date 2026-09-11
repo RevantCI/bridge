@@ -208,12 +208,19 @@ jobs:
         # the command says exactly what is gated. PYTHONDONTWRITEBYTECODE keeps a
         # stale .pyc in the vendored trees from masking a real change; -p
         # no:cacheprovider keeps .pytest_cache out of a throwaway runner (locally it
-        # is useful -- `pytest --lf` -- so it is not in addopts). -n auto runs the
-        # suite across the runner's cores with pytest-xdist: separate processes,
-        # so the vendored versification GIL hazard does not apply (#74).
+        # is useful -- `pytest --lf` -- so it is not in addopts).
+        #
+        # Deliberately NOT `-n auto` here, although pytest-xdist is installed and is
+        # the right default locally (~3x on a 10-core laptop). Measured on this
+        # runner 2026-09-11 (#74 step 2): serial 35m18s (run 34598941837) vs
+        # `-n auto` 54m51s (run 34603932107), same 1072 passed / 1 skipped. The
+        # suite's cost is ~90 tests that each rebuild the Stage 5-8 pipeline for
+        # ~60 s (#82); four workers on four shared vCPUs stretched every one of
+        # those to ~155 s. Until #82 shares that setup, parallelism here is a loss.
+        # Re-measure with `-n 2` on a nightly run (#74 step 3), not on the gate.
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider -n auto
+        run: pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider
 
   # ---------------------------------------------------------------------------
   # Rust / Tauri shell.

@@ -6592,3 +6592,23 @@ Not done yet: step 3 (`scripts/affected_tests.py`, selection on PRs, full suite 
 every push to `main`, nightly) and step 4 (RPC-wiring tests out of the stage files,
 shared builders in `tests/support/`). Not verified: the CI runner's wall time under
 `-n auto` on 4 vCPUs — the first push carrying this entry will show it.
+
+### CI measurement (same day) — `-n auto` reverted on the runner
+
+The push carrying step 2 measured what the local run could not:
+
+| run | engine job | pytest summary |
+|---|---|---|
+| 34598941837 (step 1, serial) | 36m01s | 1072 passed, 1 skipped in 35:18 |
+| 34603932107 (step 2, `-n auto`) | 55m38s | 1072 passed, 1 skipped in 54:51 |
+
+Parallel was **1.55× slower** on windows-latest. The slowest-25 list shows why: the
+same Stage 5–8 setups that take ~60 s serial took 150–163 s with four workers on four
+shared vCPUs (`test_correction_case_c_production` 49 s → 263 s). Locally `-n auto` is
+a ~3× win on 10 real cores; on the runner it is a loss until #82 removes the repeated
+setup. `ci.yml` is back to the serial command with the measurement in its comment;
+`pytest-xdist` stays installed and stays the documented local default. CI collects
+1073 rather than the local 1078 because `wildebeest-nlp` is not installed there, so
+`greek_room_engine/tests/test_wildebeest_real.py` skips at import (one skip entry,
+five tests never collected) — identical in both runs, not an effect of this work.
+
