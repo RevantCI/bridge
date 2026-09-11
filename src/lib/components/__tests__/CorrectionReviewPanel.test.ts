@@ -140,7 +140,7 @@ const reviewContext = {
 
 const settings = {
   provider: "openai", apiBaseUrl: "", model: "gpt-test", reviewerName: "Reviewer",
-  reviewerMode: "advanced", paratextUsername: "", paratextNavigation: false,
+  reviewerNameUpdatedAt: "", reviewerMode: "advanced", paratextUsername: "", paratextNavigation: false,
   logosNavigation: false, hasApiKey: true, aiUsage: { tokens: 0, estimatedCostUSD: 0 },
 };
 
@@ -443,6 +443,65 @@ describe("CorrectionReviewPanel", () => {
     await fireEvent.click(await screen.findByRole("button", { name: "Generate another suggestion" }));
     expect(api.regenerate).toHaveBeenCalledWith("proposal-1", expect.objectContaining({ expectedProposalRevision: 1 }));
     expect(await screen.findByText(/2 proposals retained/i)).toBeInTheDocument();
+  });
+
+  it("V11-002: every actor-attributed call site sends the identical, non-empty settings reviewer name", async () => {
+    // Structural guarantee across all eight sites at once: before this fix,
+    // disposition/apply calls fell back to the literal "human" while
+    // proposal calls fell back to `undefined` (silently dropped from the
+    // request) for the exact same settings state. A single shared helper
+    // function used everywhere makes that divergence impossible to
+    // reintroduce by editing just one call site.
+    const callSites = correctionReviewPanelSource.match(/reviewerActorId\(\)/g) ?? [];
+    // 8 call sites + 1 in the helper's own definition/return statement.
+    expect(callSites.length).toBe(9);
+    expect(correctionReviewPanelSource).not.toMatch(/reviewerName\s*\|\|\s*"human"/);
+    expect(correctionReviewPanelSource).not.toMatch(/reviewerName\s*\|\|\s*undefined/);
+
+    // Functional confirmation for one site from each formerly-divergent
+    // group: "create" (used to fall back to `undefined`) and "apply" (used
+    // to fall back to the literal "human") both now send the same settings
+    // value with nothing else in play.
+    api.list.mockResolvedValue({ findingId: "qa-quantity", proposals: [] });
+    render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+    await fireEvent.click(await screen.findByRole("button", { name: "Create correction proposal" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Write correction manually" }));
+    await fireEvent.input(screen.getByLabelText("Meaning currently expressed"), { target: { value: "missing" } });
+    await fireEvent.input(screen.getByLabelText("Meaning required"), { target: { value: "present" } });
+    await fireEvent.input(screen.getByLabelText("Proposed wording"), { target: { value: "new wording" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Save proposal" }));
+    await waitFor(() => expect(api.create).toHaveBeenCalledWith(
+      expect.objectContaining({ actorId: "Reviewer" }),
+    ));
+  });
+
+  it("V11-002: history never renders the literal word \"undefined\", even with incomplete records", async () => {
+    api.list.mockResolvedValue({ findingId: "qa-quantity", proposals: [proposal] });
+    api.history.mockResolvedValue({
+      proposalId: "proposal-1",
+      events: [
+        // A human-authored event: the backend always sends providerMetadata
+        // as {} (not null) when there is no AI involved -- this used to
+        // pass `{#if item.providerMetadata}` (an empty object is truthy)
+        // and render "undefined · undefined" for providerName/model.
+        { ...event("CREATED"), actorType: "HUMAN", actorId: "Reviewer", providerMetadata: {} },
+        // An AI-authored event: type + identifier must both be visible so a
+        // reviewer can never mistake AI wording for something a person wrote.
+        { ...event("SUGGESTED"), actorType: "AI", actorId: "gpt-5.6", providerMetadata: { providerName: "openai", model: "gpt-5.6" } },
+        // An old, pre-actorType row: genuinely missing data must fall back
+        // to a clear label, never the literal string "undefined".
+        { ...event("STALE"), actorType: undefined, actorId: undefined, providerMetadata: null, eventType: "STALE" },
+      ],
+    });
+    render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+    const historyEntry = await screen.findByText(/HUMAN\s*·\s*Reviewer/);
+    const historySection = historyEntry.closest("ol")!;
+
+    expect(historySection.textContent).not.toMatch(/undefined/);
+    expect(within(historySection).getByText(/HUMAN\s*·\s*Reviewer/)).toBeInTheDocument();
+    expect(within(historySection).getByText(/AI\s*·\s*gpt-5\.6/)).toBeInTheDocument();
+    expect(within(historySection).getByText("openai · gpt-5.6")).toBeInTheDocument();
+    expect(within(historySection).getByText(/Unknown actor/)).toBeInTheDocument();
   });
 
   it("makes stale state obvious and disables current actions", async () => {

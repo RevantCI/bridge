@@ -15,7 +15,7 @@
     AffectedAnalysisState,
     CorrectionVerificationState,
   } from "../types/correctionReview";
-  import { verificationLabel } from "../utils/reviewLabels";
+  import { actorLabel, providerLabel, verificationLabel } from "../utils/reviewLabels";
   import type { AnalysisJobSnapshot } from "../types/analysisJob";
   import type { SettingsData } from "../types/finding";
   import type { CoverageDimension } from "../types/passageSemanticV1";
@@ -145,6 +145,16 @@
     return exc instanceof Error ? exc.message : String(exc);
   }
 
+  // V11-002: every actor-attributed call in this panel must agree on the
+  // same fallback -- disposition/apply calls previously fell back to the
+  // literal "human" while proposal calls fell back to `undefined` (silently
+  // dropped from the request, then re-defaulted by the backend), so the
+  // same reviewer in the same session ended up attributed two different
+  // ways. One identical expression, everywhere.
+  function reviewerActorId(): string {
+    return settings?.reviewerName || "Unnamed Reviewer";
+  }
+
   function uniqueReferences(values: unknown): string[] {
     if (!Array.isArray(values)) return [];
     return [...new Set(values.map(String).map((item) => item.trim()).filter(Boolean))];
@@ -265,7 +275,7 @@
     try {
       verification = await bridge.correctionVerifyApplication({
         applicationId: application.applicationId,
-        requestedBy: settings?.reviewerName || "human",
+        requestedBy: reviewerActorId(),
       });
       notice = verificationLabel(verification.verificationStatus) + ".";
     } catch (exc) {
@@ -285,7 +295,7 @@
         verificationId: verification.verificationId,
         expectedVerificationRevision: verification.verificationRevision,
         expectedFindingRevision: verification.findingRevision,
-        actor: { actorType: "HUMAN", actorId: settings?.reviewerName || "human" },
+        actor: { actorType: "HUMAN", actorId: reviewerActorId() },
         note: acknowledgeNote.trim(),
       });
       acknowledgeOpen = false;
@@ -431,7 +441,7 @@
     try {
       affectedResult = await bridge.correctionReanalyzeAffected({
         applicationId: application.applicationId,
-        requestedBy: settings?.reviewerName || "human",
+        requestedBy: reviewerActorId(),
         retry,
       });
       affectedJob = affectedResult.job;
@@ -484,7 +494,7 @@
         findingId,
         findingRevision: eligibility?.findingRevision || findingRevision,
         proposal: selectedProposal,
-        actorId: settings?.reviewerName || "human",
+        actorId: reviewerActorId(),
         applicationId,
       });
       confirmationOpen = false;
@@ -557,7 +567,7 @@
         humanProposedText: requestSuggestion ? "" : proposedText.trim(),
         explanation: explanation.trim(),
         requestSuggestion,
-        actorId: settings?.reviewerName || undefined,
+        actorId: reviewerActorId(),
       });
       proposals = [...proposals, created];
       selectedProposalId = created.id;
@@ -589,7 +599,7 @@
         proposedText: text.trim(),
         explanation: why.trim(),
         expectedProposalRevision: selectedProposal.revision,
-        actorId: settings?.reviewerName || undefined,
+        actorId: reviewerActorId(),
       });
       proposals = proposals.map((item) => item.id === updated.id ? updated : item);
       await loadHistory(updated.id);
@@ -615,7 +625,7 @@
     try {
       const updated = await bridge.correctionRejectProposal(selectedProposal.id, {
         expectedProposalRevision: selectedProposal.revision,
-        actorId: settings?.reviewerName || undefined,
+        actorId: reviewerActorId(),
         note: reviewNote.trim(),
       });
       proposals = proposals.map((item) => item.id === updated.id ? updated : item);
@@ -637,7 +647,7 @@
     try {
       const replacement = await bridge.correctionRegenerateProposal(oldId, {
         expectedProposalRevision: selectedProposal.revision,
-        actorId: settings?.reviewerName || undefined,
+        actorId: reviewerActorId(),
       });
       await reloadProposals(replacement.id);
       notice = "A new suggestion was created. The previous proposal remains in history.";
@@ -817,12 +827,10 @@
           {#if history.length}
             <ol class="history">
               {#each history as item}
-                <li><strong>{item.eventType}</strong> · {item.actorId || item.actorType}
+                <li><strong>{item.eventType || "Unknown event"}</strong> · {actorLabel(item.actorType, item.actorId)}
                   <time datetime={item.createdAt}>{item.createdAt}</time>
-                  {#if item.providerMetadata}
-                    <span class="history-provenance">
-                      {item.providerMetadata.providerName} · {item.providerMetadata.model}
-                    </span>
+                  {#if providerLabel(item.providerMetadata)}
+                    <span class="history-provenance">{providerLabel(item.providerMetadata)}</span>
                   {/if}
                   {#if item.note || item.reason}<p>{item.note || item.reason}</p>{/if}
                 </li>

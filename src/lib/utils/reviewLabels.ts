@@ -267,6 +267,36 @@ export function verificationTone(value: string): BadgeTone {
 export const SEVERITY_IS_PRIORITY_ONLY =
   "Severity sets review order only. It does not mean the issue is confirmed.";
 
+/**
+ * V11-002: history rows must make HUMAN/AI/SYSTEM/MIGRATION attribution
+ * visible at a glance -- a person's name must never look like it authored
+ * AI-generated wording, and vice versa. Uniform "TYPE · id" for every kind
+ * (rather than hiding the type just for HUMAN) makes that unambiguous
+ * without special-casing. Missing fields (older, pre-actorType rows) fall
+ * back to whatever is present rather than the literal word "undefined".
+ */
+export function actorLabel(
+  actorType: string | null | undefined, actorId: string | null | undefined,
+): string {
+  const type = String(actorType || "").trim();
+  const id = String(actorId || "").trim();
+  if (type && id) return `${type} · ${id}`;
+  return type || id || "Unknown actor";
+}
+
+/**
+ * V11-002: the backend always sends providerMetadata as `{}` rather than
+ * null when a history event has no AI provenance (e.g. a HUMAN edit), so
+ * `{#if item.providerMetadata}` alone is truthy for an empty object and
+ * rendered "undefined · undefined". Only a real, populated field counts.
+ */
+export function providerLabel(
+  meta: { providerName?: string; model?: string } | null | undefined,
+): string {
+  if (!meta) return "";
+  return [meta.providerName, meta.model].filter(Boolean).join(" · ");
+}
+
 /** The four conclusions a reviewer may reach, in the order they are offered. */
 export const REVIEWER_ACTIONS = [
   {
