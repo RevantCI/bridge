@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 
-const { getSettings, getNavigationStatus, setSettings } = vi.hoisted(() => ({
+const { getSettings, getNavigationStatus, setSettings, engineInfo } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   getNavigationStatus: vi.fn(),
   setSettings: vi.fn(),
+  engineInfo: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
@@ -12,6 +13,7 @@ vi.mock("../../api/bridgeClient", () => ({
     getSettings,
     navigationStatus: getNavigationStatus,
     setSettings,
+    engineInfo,
   },
 }));
 
@@ -45,6 +47,9 @@ function navigationState(
 describe("SettingsModal connections", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    engineInfo.mockResolvedValue({
+      bridgeVersion: "0.9.6", companionSchemaVersion: 14, projectOpen: false, greekRoom: {},
+    });
     getSettings.mockResolvedValue({
       provider: "openai",
       apiBaseUrl: "",
@@ -83,6 +88,9 @@ describe("SettingsModal connections", () => {
 describe("SettingsModal manual override", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    engineInfo.mockResolvedValue({
+      bridgeVersion: "0.9.6", companionSchemaVersion: 14, projectOpen: false, greekRoom: {},
+    });
     getNavigationStatus.mockResolvedValue(navigationState());
     setSettings.mockImplementation(async (params: Record<string, unknown>) => ({
       ...params, hasApiKey: false,
@@ -134,6 +142,9 @@ describe("SettingsModal manual override", () => {
 describe("SettingsModal reviewer name (V11-002/V11-005)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    engineInfo.mockResolvedValue({
+      bridgeVersion: "0.9.6", companionSchemaVersion: 14, projectOpen: false, greekRoom: {},
+    });
     getNavigationStatus.mockResolvedValue(navigationState());
     setSettings.mockImplementation(async (params: Record<string, unknown>) => ({
       ...params, hasApiKey: false,
@@ -180,5 +191,39 @@ describe("SettingsModal reviewer name (V11-002/V11-005)", () => {
     await waitFor(() => expect(setSettings).toHaveBeenCalledWith(
       expect.objectContaining({ reviewerName: "Alice" }),
     ));
+  });
+});
+
+describe("SettingsModal version display (V11-011)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getNavigationStatus.mockResolvedValue(navigationState());
+    getSettings.mockResolvedValue({
+      provider: "openai", apiBaseUrl: "", model: "gpt-5.6", hasApiKey: false,
+      reviewerName: "benz", reviewerNameUpdatedAt: "",
+      reviewerMode: "basic", paratextNavigation: false, logosNavigation: false,
+    });
+  });
+
+  it("shows the version and schema exactly as the running process reports them, not a fixed constant", async () => {
+    // A deliberately unusual, mismatched pair a hardcoded frontend copy of
+    // "0.9.6"/"14" would never produce -- proves this reads the real
+    // runtime value rather than a constant baked into the component.
+    engineInfo.mockResolvedValue({
+      bridgeVersion: "9.9.9-test", companionSchemaVersion: 999,
+      projectOpen: false, greekRoom: {},
+    });
+    render(SettingsModal, { props: { initialPane: "ai", onClose: vi.fn() } });
+
+    expect(await screen.findByText(/Bridge 9\.9\.9-test/)).toBeInTheDocument();
+    expect(screen.getByText(/Schema v999/)).toBeInTheDocument();
+  });
+
+  it("shows nothing rather than a stale placeholder while engine info hasn't loaded", async () => {
+    engineInfo.mockImplementation(() => new Promise(() => {})); // never resolves
+    const { container } = render(SettingsModal, { props: { initialPane: "ai", onClose: vi.fn() } });
+
+    await waitFor(() => expect(screen.queryByText(/Loading/)).not.toBeInTheDocument());
+    expect(container.querySelector(".about-version")).toBeNull();
   });
 });

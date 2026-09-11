@@ -117,6 +117,16 @@ export interface EngineLogEntry {
   message: string;
 }
 
+/** V11-011: what's actually running in this process right now, read from
+ * the same constants the rest of the sidecar uses (BRIDGE_VERSION,
+ * DATABASE_SCHEMA_VERSION) -- not a separately maintained build stamp. */
+export interface EngineInfo {
+  bridgeVersion: string;
+  companionSchemaVersion: number;
+  projectOpen: boolean;
+  greekRoom: Record<string, unknown>;
+}
+
 /** Live diagnostics entries as sidecar.rs records them (spawn/restart/
  * terminate, request timeouts, relayed stderr). Fires after the initial
  * `engineLogRecent()` fetch, so the panel never needs to poll. */
@@ -158,7 +168,7 @@ export const bridge = {
   onEngineLog,
   onEngineRespawned,
 
-  engineInfo(): Promise<Record<string, unknown>> {
+  engineInfo(): Promise<EngineInfo> {
     return call("engine_info");
   },
 

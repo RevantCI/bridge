@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { bridge } from "../api/bridgeClient";
+  import { bridge, type EngineInfo } from "../api/bridgeClient";
   import { manualOverrideMode, navigationStatus, project, reviewerMode } from "../stores";
   import type { NavigationSyncState, SettingsData } from "../types/finding";
 
@@ -22,6 +22,7 @@
   let logosNavigation = false;
   let reviewerName = "";
   let reviewerNameUpdatedAt = "";
+  let engineInfo: EngineInfo | null = null;
 
   const providerPresets: Record<string, string> = {
     openai: "",
@@ -51,6 +52,13 @@
       console.error("failed to load settings", e);
     } finally {
       loading = false;
+    }
+    // Separate from the block above: a slow or failed version lookup is not
+    // critical enough to hold the rest of Settings behind "Loading…".
+    try {
+      engineInfo = await bridge.engineInfo();
+    } catch (e) {
+      console.error("failed to load engine info", e);
     }
   }
 
@@ -125,6 +133,11 @@
       <button class="nav-item" class:active={activePane === "connections"} on:click={() => (activePane = "connections")}>Connections</button>
       <button class="nav-item" class:active={activePane === "resources"} on:click={() => (activePane = "resources")}>Resources & licenses</button>
       <button class="nav-item" class:active={activePane === "security"} on:click={() => (activePane = "security")}>Security</button>
+      {#if engineInfo}
+        <div class="about-version" title="What this window is actually running, not what Windows says was installed">
+          Bridge {engineInfo.bridgeVersion} · Schema v{engineInfo.companionSchemaVersion}
+        </div>
+      {/if}
     </div>
 
     <div class="settings-body">
@@ -272,8 +285,9 @@
   .settings-modal { width: 640px; height: 480px; background: var(--surface); border-radius: 14px; display: flex; overflow: hidden; position: relative; }
   .close-btn { position: absolute; top: 10px; right: 10px; z-index: 2; width: 28px; height: 28px; border-radius: 6px; border: none; background: transparent; color: var(--text-2); font-size: var(--fs-lg); cursor: pointer; }
   .close-btn:hover { background: var(--surface-2); }
-  .settings-nav { width: 170px; background: var(--surface-2); border-right: 1px solid var(--border); padding: 14px 8px; flex-shrink: 0; }
+  .settings-nav { width: 170px; background: var(--surface-2); border-right: 1px solid var(--border); padding: 14px 8px; flex-shrink: 0; display: flex; flex-direction: column; }
   .nav-title { font-size: var(--fs-sm); font-weight: 700; color: var(--text); padding: 6px 10px 12px; }
+  .about-version { margin-top: auto; padding: 8px 10px 2px; font-size: var(--fs-2xs); color: var(--text-3); border-top: 1px dashed var(--border); }
   .nav-item { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); background: transparent; border: none; cursor: pointer; margin-bottom: 2px; }
   .nav-item:hover { background: var(--surface); }
   .nav-item.active { background: var(--accent-bg); color: var(--accent); }

@@ -50,6 +50,7 @@ from tc_ai_bridge.lexicon_resources import lexicon_entry_for_strong, HEBREW_PREF
 from tc_ai_bridge.morphology_codes import decode_morph
 from tc_ai_bridge.project_registry import ProjectIdentityError, ProjectRegistry, source_fingerprints
 from tc_ai_bridge.passage_semantic_repository import (
+    DATABASE_SCHEMA_VERSION,
     FoundationConflict,
     FoundationValidationError,
 )
@@ -540,6 +541,13 @@ class BridgeEngine:
     def info(self) -> dict[str, Any]:
         return {
             "bridgeVersion": BRIDGE_VERSION,
+            # V11-011: the only prior way to confirm what's actually running
+            # was Windows' "Installed apps" list, which reports what was
+            # installed, not what this process loaded. Both values come from
+            # the same constants everything else in this process already
+            # uses (BRIDGE_VERSION, DATABASE_SCHEMA_VERSION) -- no separate
+            # build-stamped source of truth exists to read a commit id from.
+            "companionSchemaVersion": DATABASE_SCHEMA_VERSION,
             "projectOpen": self.project is not None,
             "greekRoom": self.greek_room.info(),
         }
@@ -3377,7 +3385,11 @@ class BridgeEngine:
         Accepted as a known limitation, same tradeoff as the two functions
         it depends on."""
         self._require_project()
-        result = self.project.apply_scripture_edit(chapter, verse, new_text, **strict_options)
+        result = self.project.apply_scripture_edit(
+            chapter, verse, new_text,
+            username=self.settings.reviewer_name or "Bridge Reviewer",
+            **strict_options,
+        )
         self._consistency_findings_by_book.pop(str(self.project.path), None)
         resolutions = self.project.list_issue_resolutions(chapter, verse)
         return {

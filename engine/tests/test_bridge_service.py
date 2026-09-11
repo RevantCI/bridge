@@ -1109,6 +1109,73 @@ def test_edit_verse_with_unchanged_text_fails_gracefully(fixture_project):
     assert result["error"]["code"] == "project_error"
 
 
+def test_edit_verse_journals_the_configured_reviewer_not_ai_bridge_reviewer(
+    fixture_project, tmp_path, monkeypatch,
+):
+    """V11-010: edit_verse() used to call apply_scripture_edit() without
+    username=, so its 'AI Bridge Reviewer' signature default silently fired
+    on every real edit. It must now record the actual configured reviewer."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from tc_ai_bridge.secret_store import AppSettings
+
+    isolated = AppSettings(path=tmp_path / "settings.json")
+    isolated.reviewer_name = "Alice"
+    engine = BridgeEngine(settings=isolated)
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    result = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "edited by Alice"})
+    edit_record = json.loads(Path(result["result"]["verseEdit"]).read_text(encoding="utf-8"))
+
+    assert edit_record["username"] == "Alice"
+    assert edit_record["username"] != "AI Bridge Reviewer"
+
+
+def test_a_later_edit_by_a_different_reviewer_does_not_rewrite_the_earlier_journal_entry(
+    fixture_project, tmp_path, monkeypatch,
+):
+    """V11-010: renaming yourself in Settings must never retroactively alter
+    who an already-written journal entry says made an earlier edit."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from tc_ai_bridge.secret_store import AppSettings
+
+    isolated = AppSettings(path=tmp_path / "settings.json")
+    isolated.reviewer_name = "Alice"
+    engine = BridgeEngine(settings=isolated)
+    call(engine, "project.open", {"path": str(fixture_project)})
+
+    first = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "Alice's edit"})
+    first_edit_path = Path(first["result"]["verseEdit"])
+    first_record_before = json.loads(first_edit_path.read_text(encoding="utf-8"))
+    assert first_record_before["username"] == "Alice"
+
+    isolated.reviewer_name = "Bob"
+    second = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "Bob's later edit"})
+    second_edit_path = Path(second["result"]["verseEdit"])
+
+    first_record_after = json.loads(first_edit_path.read_text(encoding="utf-8"))
+    second_record = json.loads(second_edit_path.read_text(encoding="utf-8"))
+    assert first_record_after["username"] == "Alice"  # unchanged by Bob's later edit
+    assert second_record["username"] == "Bob"
+
+
+def test_engine_info_reports_the_real_app_version_and_schema_version(monkeypatch):
+    """V11-011: the in-app version display must read the same constants the
+    rest of the process uses, not a separately maintained copy. Prove it by
+    changing the real source and confirming engine.info() moves with it,
+    rather than asserting a fixed literal that a hardcoded copy would also
+    satisfy."""
+    import bridge_service
+
+    monkeypatch.setattr(bridge_service, "BRIDGE_VERSION", "9.9.9-test")
+    monkeypatch.setattr(bridge_service, "DATABASE_SCHEMA_VERSION", 999)
+    engine = BridgeEngine()
+
+    result = call(engine, "engine.info")["result"]
+
+    assert result["bridgeVersion"] == "9.9.9-test"
+    assert result["companionSchemaVersion"] == 999
+
+
 def test_open_missing_project_fails_gracefully():
     engine = BridgeEngine()
     result = call(engine, "project.open", {"path": "/no/such/path"})
