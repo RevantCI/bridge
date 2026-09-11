@@ -6672,3 +6672,12 @@ call, in the app too) is recorded on #43.
 after this, and per-test rebuilds are what keeps tests isolated from each other's
 mutations; module-scoping is worth doing where a test is read-only, after step 4 gives
 the builders a home.
+
+### CI measurement (same day) — serial runner with fsync off
+
+Run 34615835615 (push 369f648, windows-latest, serial): **1073 passed, 1 skipped in
+14:50**, engine job 15m38s. The serial baseline one commit before the step 2 work
+(34598941837) was 35:18 / 36m01s, so the runner gained 2.4× against the local 5.7× —
+the runner's disk was less fsync-bound than its 46–62 s setups suggested, and what
+remains there is CPU. That makes `-n 2` on the runner worth one nightly measurement
+(step 3), not a gate change.
