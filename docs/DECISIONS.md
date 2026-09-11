@@ -19,16 +19,36 @@ to prevent. Rejected ideas belong here too.
 
 ---
 
-## 2026-09-11 — Ideas live in Discussions, the board holds accepted work only
+## 2026-09-11 — Ideas are issues; no proposal stage, no status labels
 
-**Decision:** New ideas go to Discussions → Ideas. They become issues only when the
-maintainer accepts them and applies `status:accepted`.
-**Because:** AI makes ideas nearly free to produce, and eleven filed in a single day sat
-next to committed work and made the backlog unreadable. Separating them keeps ideas cheap
-and the board honest.
-**Rules out:** treating an open issue as "someone might do this one day". If it's on the
-board, it's agreed.
-**Revisit when:** the team grows past three people and triage becomes a bottleneck.
+**Decision:** New ideas go straight to an issue using the Idea template. There is no
+Discussions stage, no `status:proposed`/`status:accepted` gate, and no ceremony
+between filing and working. Triage is the maintainer reading open issues, labelling
+them by `effort:`/`area:`, or closing them with a written reason.
+**Because:** the alternative considered was ideas-in-Discussions promoted to issues on
+acceptance, which keeps the board short and true. On a two-person project that is more
+bookkeeping than it buys: it needs Discussions enabled, three more labels, and a
+promotion step that is really just the maintainer deciding — which they can do on the
+issue itself.
+**Rules out:** reading "issue exists" as "we agreed to do this". The board is now a
+mix of committed work and unsorted ideas, and the labels are what distinguish them.
+**Revisit when:** the open-issue count stops being readable in one sitting, or a third
+person joins.
+
+## 2026-09-11 — Work goes directly onto main; CI is the only gate
+
+**Decision:** No branch protection, no required review, no CODEOWNERS. Commits land on
+`main`. `.github/workflows/ci.yml` runs the frontend, engine and Rust suites on every
+push to `main` and on every PR.
+**Because:** with two people, a required second review is a queue of one, and the real
+defect risk in this project is not "nobody looked" — it is that the Python analysis
+engine had no automated test run at all. Fixing the gate was worth more than adding
+process around the merge.
+**Rules out:** relying on review as a safety net. Everything now depends on CI being
+honest, which is why `golden-notice` warns rather than blocks and why a red run on
+`main` is treated as a real failure rather than a formality.
+**Revisit when:** a third person joins, or a defect reaches a translation team that a
+second reader would plausibly have caught.
 
 ## 2026-09-11 — Offline-first is an invariant, not a default
 

@@ -1,14 +1,13 @@
 name: Idea
 description: Something Bridge could do. No commitment — ideas are triaged weekly.
 title: "[Idea] "
-labels: ["status:proposed"]
 body:
   - type: markdown
     attributes:
       value: |
-        Ideas are cheap and welcome. Nothing here is a promise that it will be built —
-        the maintainer triages these weekly and either accepts (it becomes an issue on
-        the board), defers, or closes with a written reason.
+        Ideas are cheap and welcome. Filing one is not a promise that it will be
+        built — the maintainer triages open issues weekly and either lets them stand
+        or closes them with a written reason.
 
         Four short answers are enough. If a field is genuinely unknown, say "don't know"
         rather than guessing.
@@ -62,7 +61,7 @@ body:
     attributes:
       label: Before submitting
       options:
-        - label: I searched Discussions and Issues and this isn't already there
+        - label: I searched the open and closed issues and this isn't already there
           required: true
         - label: I understand this is an idea, not a commitment to build it
           required: true

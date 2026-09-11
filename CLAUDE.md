@@ -277,13 +277,16 @@ engine/tests/fixtures/stage6b-location-golden-v1.json <- test_semantic_location_
 ```
 
 There are no Vitest snapshots and no `__snapshots__` directories anywhere in the
-repo. `golden-guard` keys on the filename, so **a new golden must have `golden` in
-its name** and live in that directory or it is not protected.
+repo. `golden-notice` keys on the filename, so **a new golden must have `golden` in
+its name** and live in that directory or CI will not flag a change to it.
 
 **Never re-baseline a golden as part of another change.** If your change makes one
-fail, that is a finding to report, not a file to regenerate. Re-baselining is its
-own PR, doing nothing else, carrying the `goldens:rebaselined` label — which
-`.github/workflows/ci.yml`'s `golden-guard` job enforces.
+fail, that is a finding to report, not a file to regenerate. A re-baseline is its own
+commit doing nothing else, with the reason in the message.
+`.github/workflows/ci.yml`'s `golden-notice` job raises a warning naming the files
+whenever one moves — it does not block, so it is a prompt to look, not a gate. Nothing
+mechanical will stop you re-baselining by accident; this rule is the only thing that
+does.
 
 **The confidence thresholds are uncalibrated.** The 0.85 / 0.9 cut-offs in
 `qa_audit.py`'s `severity_for()` (MEANING_SHIFT → HIGH, and HIGH → CRITICAL) are
@@ -402,10 +405,14 @@ pass; check the matrix's source/frozen/desktop rows.
 `CONTRIBUTING.md` has the full flow. The short version, and the parts that apply
 to an AI-assisted session specifically:
 
-1. **Every change belongs to an accepted issue.** No issue, no PR.
+1. **Non-trivial work should have an issue**, so the reason survives the commit.
+   File it with the Idea template; there is no acceptance step to wait for.
 2. **Small and single-purpose.** One issue per PR. A PR that touches the engine,
    the schema and the UI at once cannot be reviewed properly by one person.
-3. **Never push to `main`.** Branch, PR, wait for review.
+3. **Work goes directly onto `main`.** There is no branch protection and no
+   required review, so CI on `main` is the only automated gate — treat a red run
+   as a real failure, not a formality. Branch when you want a second opinion
+   before something lands, not as a matter of routine.
 4. **Say what you verified.** In the PR description, separate what you ran and
    watched work from what you believe to be true because the code looks right.
    This matters more here than anywhere else: a confident explanation is not

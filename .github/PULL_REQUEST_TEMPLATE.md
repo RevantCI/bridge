@@ -36,12 +36,12 @@ is not the same as having seen it work.
 
 ## Risk check
 
-Tick anything this PR touches. Any tick means it needs maintainer review before merge
+Tick anything this PR touches. Any tick is worth a conversation before it lands
 (see *Stop and ask before writing any code* in `CLAUDE.md`).
 
 - [ ] Companion database schema
 - [ ] The correction ledger or token lineage
-- [ ] Golden files (if ticked, this PR must carry `goldens:rebaselined` and do nothing else)
+- [ ] Golden baselines under `engine/tests/fixtures/` (a re-baseline should do nothing else)
 - [ ] Confidence thresholds or auto-apply behaviour
 - [ ] Adds a network call, an account, or a login to a runtime path
 - [ ] Analysis pipeline (Stages 5–9)

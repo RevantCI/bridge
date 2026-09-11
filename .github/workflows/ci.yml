@@ -29,18 +29,20 @@
 #                       the usual Linux cost argument does not apply.
 #
 # Nothing here builds an installer or a frozen sidecar. That stays in release.yml,
-# where a 90-minute budget is appropriate; a merge gate that slow is one people learn
-# to route around.
+# where a 90-minute budget is appropriate; a gate that slow is one people learn to
+# route around.
+#
+# Work on this repo goes directly onto main, so the `push` trigger is the one that
+# matters most -- these jobs are the only automated gate there is. Path filters apply
+# to push as well as to pull_request, deliberately: main takes every commit now, and
+# a README edit should not cost a 20-minute engine run. The filters include ci.yml
+# itself, so a change to the gate always re-runs everything the gate defines.
 
 name: CI
 
 on:
   pull_request:
     branches: [main]
-    # labeled/unlabeled matter: golden-guard reads the label set out of the event
-    # payload, so applying `goldens:rebaselined` has to re-trigger the run or the
-    # guard would stay red until someone pushed an unrelated commit.
-    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -127,7 +129,7 @@ jobs:
   # ---------------------------------------------------------------------------
   frontend:
     needs: changes
-    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -148,7 +150,7 @@ jobs:
   # ---------------------------------------------------------------------------
   engine:
     needs: changes
-    if: needs.changes.outputs.engine == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.engine == 'true'
     runs-on: windows-latest
     # 17m13s measured on Linux/3.11; a Windows runner is generally slower, so 30
     # would be uncomfortably close to the edge.
@@ -191,7 +193,7 @@ jobs:
   # ---------------------------------------------------------------------------
   rust:
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || github.event_name == 'push'
+    if: needs.changes.outputs.rust == 'true'
     # windows-latest, matching release.yml, for two reasons. The soft one: sidecar.rs
     # gates two of its tests behind #[cfg(windows)] (the taskkill process-tree kill),
     # so a Linux host silently compiles them out and gates less than it appears to.
@@ -206,18 +208,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - name: Stub the external sidecars
-        # tauri-build resolves every bundle.externalBin entry for the host target
-        # triple inside its build script, so ANY cargo command fails outright while
-        # src-tauri/binaries/ is empty -- and it IS empty on a fresh checkout, because
-        # the real sidecars are build output and .gitignore'd (only README.txt is
-        # tracked). release.yml gets away without this step only because it runs
-        # build-sidecars.ps1 first; this job deliberately does not, since building
-        # PyInstaller sidecars just to run unit tests is most of the release budget.
+      - name: Satisfy tauri-build's bundle inputs
+        # tauri-build resolves every bundle.externalBin AND bundle.resources entry
+        # inside its build script, so ANY cargo command -- `cargo test` included --
+        # fails outright unless both exist. On a fresh checkout neither does: the
+        # sidecars and src-tauri/resources are build output and .gitignore'd (only
+        # binaries/README.txt is tracked). release.yml gets away without this step
+        # because build-sidecars.ps1 runs first; this job deliberately skips that,
+        # since building PyInstaller sidecars just to run unit tests would cost most
+        # of the release budget.
         #
-        # These stubs exist purely to satisfy the build script's existence check.
-        # Nothing in `cargo test` executes them: the unit tests in sidecar.rs and
-        # passage_semantic_wire.rs are pure logic and never spawn the engine.
+        # Confirmed the hard way: run 34587550433 cleared the externalBin check with
+        # the stubs below and then failed on `resource path `resources` doesn't exist`.
+        #
+        # The binary stubs are never executed -- the unit tests in sidecar.rs and
+        # passage_semantic_wire.rs are pure logic and never spawn the engine. The
+        # resources copy mirrors build-sidecars.ps1 exactly (engine/resources ->
+        # src-tauri/resources) rather than faking a directory, so the build script
+        # sees what it sees in a real build.
         shell: bash
         run: |
           triple="$(rustc -vV | sed -n 's/^host: //p')"
@@ -226,27 +234,34 @@ jobs:
           for name in bridge-engine bridge-usfm-checker; do
             echo 'CI stub, never executed' > "src-tauri/binaries/${name}-${triple}${ext}"
           done
+          cp -r engine/resources src-tauri/resources
           ls -l src-tauri/binaries
+          ls src-tauri/resources
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test
 
   # ---------------------------------------------------------------------------
-  # Golden guard. Re-baselining goldens must be a deliberate, labelled act -- never a
-  # side effect of another change. This is the check that makes that rule real.
+  # Golden notice. Re-baselining a golden should be a deliberate act, never a side
+  # effect of another change -- but there is no label to gate it on and no branch
+  # protection to enforce a gate with, so this reports loudly and passes. It is a
+  # prompt to look, not a wall.
   # ---------------------------------------------------------------------------
-  golden-guard:
+  golden-notice:
     needs: changes
-    if: needs.changes.outputs.goldens == 'true' && github.event_name == 'pull_request'
+    if: needs.changes.outputs.goldens == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Require the goldens:rebaselined label
-        if: ${{ !contains(github.event.pull_request.labels.*.name, 'goldens:rebaselined') }}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Say which goldens moved
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
-          echo "::error::This PR modifies golden files under engine/tests/fixtures/."
-          echo "Re-baselining goldens is its own PR, reviewed on its own, labelled 'goldens:rebaselined'."
-          echo "If a golden is failing because of your change, that is a finding to report -- not a file to regenerate."
-          exit 1
+          echo "::warning title=Golden baseline modified::This change edits Stage 5/6B golden baselines. Re-baselining should be deliberate and reviewed on its own -- if a golden is failing because of your change, that is a finding to report, not a file to regenerate."
+          echo "Golden files touched:"
+          git diff --name-only "$BASE" HEAD -- 'engine/tests/fixtures/*golden*.json' || true
 
   # ---------------------------------------------------------------------------
   # One required status check for branch protection to point at, so the protection
@@ -257,7 +272,7 @@ jobs:
     # `changes` is in this list on purpose. Without it, a failure in the filter job
     # skips every downstream job, ci-ok sees nothing but "skipped", and the gate goes
     # green on a run that tested absolutely nothing.
-    needs: [changes, frontend, engine, rust, golden-guard]
+    needs: [changes, frontend, engine, rust, golden-notice]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any required job failed
