@@ -6612,3 +6612,63 @@ setup. `ci.yml` is back to the serial command with the measurement in its commen
 `greek_room_engine/tests/test_wildebeest_real.py` skips at import (one skip entry,
 five tests never collected) — identical in both runs, not an effect of this work.
 
+
+### #82 — the "slow fixture setup" was SQLite fsync, not stage logic (2026-09-11)
+
+The step 0 baseline blamed the slow tail on per-test Stage 5–8 rebuilds (#82). A
+cProfile of one Tamil PHP 1:3–6 build (`tests/review/test_qa_review_service_stage9a.py`'s
+`_project` + `_run`, run on its own) says the rebuild itself is cheap and the
+repository's I/O pattern is not:
+
+| where | one pipeline build |
+|---|---:|
+| total | 11.4 s |
+| `sqlite3.Connection.commit` × 720 | 5.4 s |
+| `Connection.close` × 1,789 (WAL checkpoint on last close) | 1.9 s |
+| `Connection.execute` × 12,200 | 1.8 s |
+| `sqlite3.connect` × 1,789 | 0.8 s |
+
+`FoundationRepository._connect` opens a fresh connection per method call with
+`PRAGMA synchronous = FULL` + WAL and closes it; every commit is an fsync. Swapping
+only the pragmas (nothing else) on the same build: FULL/WAL 10.0 s, OFF/WAL 5.9 s,
+OFF/MEMORY 3.1 s. `synchronous = NORMAL` was no faster than FULL here.
+
+**Landed:** a session-scoped autouse fixture in `tests/conftest.py` that replaces
+`_connect` with `synchronous = OFF` + `journal_mode = MEMORY`; `BRIDGE_TEST_DURABLE_SQLITE=1`
+restores the product pragmas. The product code keeps FULL — that database is months of
+a team's work and the durability guarantee is not the test suite's to trade.
+
+| run | before | after |
+|---|---|---|
+| `test_qa_target_hash_contract_stage8_9b.py`, 9 tests, serial, local | 98.8 s | 23.7 s |
+| full suite, `-n auto`, local (10 cores) | 18:56 (step 2, 1077 passed) | **3:17** (1079 passed) |
+
+Nothing asserted changed; the count is 1078 + one new regression test. Not measured:
+the serial CI runner, which the first push carrying this entry will show — its 46–62 s
+setups against the same code's 10 s locally point at slower fsync on the runner's disk,
+so the gain there should be at least proportional. `-n auto` on the runner is worth
+re-trying once that number is in (the step 2 loss was fsync contention across four
+workers, which this removes); not changed in this commit. The `_SLOW_FILES` marker list
+was chosen at ~5 s average per test under the old I/O and is now stale as a *measure*;
+re-measure it as part of step 4 rather than guessing.
+
+**What the speed-up exposed (#84):** with fsync gone, `test_correction_stage9b1.py`
+failed in two of four runs with the proposal history in the wrong order
+(`['CREATED', 'REJECTED', 'EDITED']`). `correction_proposal_history`,
+`correction_verification_history` and `review_records` ordered by `created_at,id`;
+ids are `uuid4` and on Python 3.12/Windows `datetime.now()` advances about every 15 ms
+(200,000 calls → 48 distinct values), so events written in one tick sorted at random.
+The fsync between writes had been hiding it; the app's apply → re-analysis flow can
+write several events to one proposal inside one request, so the audit trail could
+already come back out of order on a fast disk. Fixed by tie-breaking on `rowid`
+(insertion order; no table is `WITHOUT ROWID`, the ledgers never delete, nothing runs
+`VACUUM`) with a regression test that freezes `_now` over ten events and fails on the
+old query. The durable fix is a monotonic sequence column per ledger table — a v15
+migration, and the maintainer's call — and the same rule applies to #75's `change_log`.
+The repository-level cost itself (a connect + checkpoint + fsync round trip per method
+call, in the app too) is recorded on #43.
+
+**What #82's original proposal is now:** still valid, second-order. A build costs ~3 s
+after this, and per-test rebuilds are what keeps tests isolated from each other's
+mutations; module-scoping is worth doing where a test is read-only, after step 4 gives
+the builders a home.

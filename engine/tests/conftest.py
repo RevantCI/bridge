@@ -1,4 +1,9 @@
+from contextlib import contextmanager
+import os
 from pathlib import Path
+import sqlite3
+from typing import Iterator
+
 import pytest
 
 _SEMANTIC_MAPPING_RESOURCES = Path(__file__).resolve().parents[1] / "resources" / "semantic_mapping"
@@ -69,3 +74,50 @@ def pytest_collection_modifyitems(config, items):
             names.add("slow")
         for name in names:
             item.add_marker(getattr(pytest.mark, name))
+
+
+# ---------------------------------------------------------------------------
+# SQLite durability opt-out. The companion repository opens a fresh connection
+# for every method call with `PRAGMA synchronous = FULL` + WAL and closes it
+# again; one Stage 5-8 pipeline build does that ~1,800 times and commits ~720
+# times, each commit an fsync and each close a WAL checkpoint. Profiled
+# 2026-09-11 (#82): ~10 s of an 11 s Tamil PHP build was that I/O, not stage
+# logic. Tests do not need crash durability -- tmp_path is thrown away -- so
+# they run with fsync off and the rollback journal in memory. Measured on the
+# hash-contract file: 98.8 s -> 23.7 s for the same nine tests, nothing asserted
+# changed. The product keeps FULL: that database is months of a team's work.
+# Set BRIDGE_TEST_DURABLE_SQLITE=1 to run with the product pragmas (the weekly
+# serial run in ci.yml is the intended place; #74 step 3).
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True, scope="session")
+def _sqlite_without_fsync():
+    if os.environ.get("BRIDGE_TEST_DURABLE_SQLITE"):
+        yield
+        return
+    from tc_ai_bridge import passage_semantic_repository as repo
+
+    original = repo.FoundationRepository._connect
+
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        conn = sqlite3.connect(str(self.path), timeout=5.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA synchronous = OFF")
+        conn.execute("PRAGMA journal_mode = MEMORY")
+        if self.read_only:
+            conn.execute("PRAGMA query_only = ON")
+        if conn.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
+            conn.close()
+            raise repo.FoundationError("SQLite foreign-key enforcement could not be enabled")
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    repo.FoundationRepository._connect = _connect
+    try:
+        yield
+    finally:
+        repo.FoundationRepository._connect = original
