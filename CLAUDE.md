@@ -31,7 +31,7 @@ macOS/Linux are planned but unverified.
 ```bash
 cd engine
 pip install -e ".[dev]"
-pytest -n auto            # full suite, parallel (pytest-xdist); what CI runs
+pytest -n auto            # full suite, parallel (pytest-xdist) -- ~3x locally; CI stays serial, see ci.yml
 pytest -n auto -m "not slow"   # inner loop: drops the sidecar/subprocess/concurrency tests
 pytest tests/correction   # one area; tests/ is packaged by engine area (see below)
 ```
