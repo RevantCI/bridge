@@ -6368,3 +6368,142 @@ The first sandboxed Cargo runs reported both process-tree termination tests as
 failed because `taskkill` lacked permission. The required unsandboxed rerun
 passed all 12; no Rust change was made. No installer or public release was
 built.
+
+# V1.1 installed-acceptance build, real Tamil-negation fixture, and V11-001
+verse-editor fix (2026-09-11)
+
+## Local acceptance build
+
+`.\scripts\build-sidecars.ps1` rebuilt both frozen executables from V1.1 HEAD
+(they had been stale since the pre-V1.1 `b0de092` release build). `npm run
+tauri build` then produced the installer. Because the app version is
+unchanged (`0.9.6`), the NSIS bundler writes the same filename as the
+published release, `Bridge_0.9.6_x64-setup.exe` — so the existing published
+installer (sha256 `c7328d6c0bd48c570b0a24391630744d6f0449cf7fe6217ecf4f6ef0bc7d0c3d`,
+built 2026-09-09 from `b0de092`) was copied out before the build. After the
+build, the new artifact was copied to a distinct name,
+`Bridge_V1.1-prerelease_x64-setup.exe` (sha256
+`c961c640c60ba73485da2f4c840829b3da74266982bbe2a05a7acef30112b52c`, size
+57,763,124 bytes, embedded `FileVersion`/`ProductVersion` still `0.9.6`), and
+the original published bits were restored to their original filename —
+verified byte-identical (same sha256) before and after. Neither file was
+deleted or silently overwritten. A `smoke_sidecars.py` run against the fresh
+frozen `bridge-engine.exe` failed one unrelated assertion (project-duplicate
+classification returned `possibleDuplicate` instead of `exactDuplicate` on
+self-check); `git show --stat` on all three V1.1 commits confirmed none touch
+`project_registry.py`/`project_import.py`, so this is a pre-existing,
+out-of-scope issue, not a V1.1 regression — likely local project-registry
+state accumulated across repeated dev-machine runs, not investigated
+further. Full acceptance-case detail lives in `docs/V1_1_UNICODE_ACCEPTANCE.md`.
+
+## Real Tamil-negation acceptance fixture (V1.1 Case A)
+
+The pre-existing Stage 9B.4 acceptance fixtures (`scripts/seed_correction_acceptance.py`,
+`seed_case_a`/`seed_case_b`/`seed_case_c`) exercise the correction loop but
+never the Unicode-comparison fix itself. Added `seed_case_a_negation()`,
+wired into `main()` as a fourth destination folder `D-tamil-negation`
+(deliberately not reusing `A`, which already names the Stage 9B.4
+PASSED-controlled fixture). It restages, verbatim, the exact source/target
+text already validated by two `ef49e9e` unit tests:
+
+- `test_meaning_analysis_stage7.py::test_tamil_negation_preserves_polarity_with_combining_marks`
+  — `DeterministicMeaningComparator.compare("οὐ", "இல்லை", "POLARITY", "NEGATION", ...)`.
+- `test_qa_audit_stage8.py::test_tamil_negative_preservation_does_not_emit_false_negation_problem`
+  — book `PHP`, chapter `1`, verse `22`, language `ta`, target text `இல்லை`.
+
+Real bundled UGNT `PHP 1:22` genuinely ends "...οὐ γνωρίζω", which is why
+that reference was chosen — not an invented pairing. Unlike `seed_case_a`/
+`seed_case_b` (which publish controlled evidence directly), this follows
+`seed_case_c`'s pattern: builds a minimal project at that reference,
+registers it, and runs the real Stage 5→6A→6B→7→8 pipeline through
+`AnalysisJobManager` with a `FixtureEmbeddingProvider` pairing `οὐ`/`இல்லை`.
+
+Before trusting the result, confirmed the source panel genuinely reflects
+bundled Greek, not the "no original-language source" failure mode a wrong
+reference would produce — read the persisted source semantic unit and its
+underlying token instance directly: `rawSurface: "οὐ"`, `provenance:
+"DETERMINISTIC_RULE"`, and critically `resourceId: "ugnt"`, `resourceVersion:
+"0.34"`, `resourceHash: "319eaef950cd855aae56a293483223cee6240df03e72e5364ee674e05eee8472"`,
+`strong: "G3756"`, `morphology: "Gr,D,,,,,,,,,"` — a real bundled token, not
+fabricated.
+
+Result, first try, no adjustment: Stage 7 POLARITY component `PRESERVED`,
+confidence `0.96`, explanation "Explicit negative polarity is present on
+both sides." Stage 8: 9 findings, all `POSSIBLE_OMISSION` (expected — only
+`οὐ` carries a matching fixture embedding vector, so every other real PHP
+1:22 source token legitimately has no located target correspondence), zero
+`NEGATION_PROBLEM`. Reproduced identically (same deterministic source-unit
+id) across two independent seeding runs. Additive only:
+`git diff --stat` showed 111 insertions, 0 deletions, and `seed_case_a`/
+`seed_case_b`/`seed_case_c` and their destination folders are untouched
+(confirmed via the two existing tests that import them by name,
+`test_correction_case_c_production.py` and
+`test_correction_acceptance_queue_visibility.py`, neither of which
+references `main()`'s case list or count).
+
+## V11-001: verse editor did not refresh after a correction applied
+
+**Symptom**, reproduced in installed acceptance: after applying a
+`some`→`all` correction at PHP 1:6, the editor pane kept showing "some
+remembrance..." until a full project reload, even though Word Alignment
+already showed the token "all".
+
+**Root cause**, confirmed by reading, not re-derived: `CorrectionReviewPanel
+.svelte`'s `applyCorrection()` — on `applicationState === "COMPLETED"` it
+refreshed only eligibility, context, and `reloadProposals()`, never the
+shared `verseTexts` store. `saveVerseEdit()` in `verseEditor.ts` (the
+direct-edit path) does update that store, which is why direct edits render
+immediately and corrections did not. `App.svelte`'s `ensureChapterData()`
+early-returns once a chapter's verses are already cached, so nothing
+re-fetches on its own short of a full reload.
+
+**Fix**, respecting the Phase 2 invariant that frontend state must mirror
+persisted backend state rather than compute it locally: traced
+`correction_application.py`'s `apply()` — it writes the final text, hash-
+verifies the write, and persists the writer's own result into
+`result_metadata={"canonicalEdit": result}`, which `bridge_service.py`
+returns straight through as part of `CorrectionApplicationIntent`. Confirmed
+against a real applied record (read during the acceptance-build work above)
+that the wire shape is exactly `resultMetadata.canonicalEdit.newText` in
+camelCase — the backend's own authoritative record of what it wrote, not
+something to recompute from `finalVerse`/`selectedProposal.proposedText`.
+Added `refreshVerseTextFromApplication()` to `verseEditor.ts`: parses the
+application's `targetDisplayedReference` (the correction's target verse —
+`selectedSpan`'s reference, never the finding's source reference, which
+differ for cross-verse corrections) using the same "BOOK C:V" regex
+`SemanticMappingValidation.svelte`'s `navigate()` already relies on (not a
+new ad-hoc pattern), then updates `verseTexts` and marks
+`alignmentStatusByVerse` `invalid` for that verse — mirroring
+`saveVerseEdit()`'s existing update shape. One import and one call site
+added to `CorrectionReviewPanel.svelte`; no restructuring, no backend or
+protocol change.
+
+**Test-first.** Wrote two Vitest cases in `CorrectionReviewPanel.test.ts`
+first: applying a cross-verse correction (source `PHP 1:3`, target
+`PHP 1:6`) must update only the target verse's text and mark its alignment
+invalid, leaving the source verse's text untouched; a non-`COMPLETED`
+application state must touch neither store. Proved the first case fails
+without the fix — `git stash`ed just the two source files (not the test),
+reran: 55 passed, 1 failed (`expected 'some remembrance...' to be 'all
+remembrance...'`); the second case passed even pre-fix, correctly, since
+nothing should touch the store either way when the state isn't `COMPLETED`.
+Restored the fix (`git stash pop`) and reran: 56/56 passed.
+
+## Verification
+
+```text
+Vitest (full suite)          312 passed / 24 files  (baseline 310/24; delta
+                                                      is exactly the 2 new tests)
+npm run check                0 errors / 0 warnings
+npm run build                passed; existing >500 kB warning
+  (+0.36 kB from the new code)
+git diff --check             passed
+```
+
+Schema (`v14`), verification policy (`correction-verification-policy-v2`),
+and app version (`0.9.6`) are unchanged. Nothing was committed or pushed as
+part of building/testing this work; `docs/HANDOFF.md` §44.10 records the
+same summary. Full Python/Greek Room and Rust suites were not rerun this
+session (explicitly deferred, not silently skipped) — the last confirmed
+full-Python run this cycle was 1063 passed / 1 skipped / 0 failed, and nothing
+touched under `engine/` since.

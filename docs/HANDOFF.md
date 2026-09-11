@@ -3582,22 +3582,86 @@ git diff --check                                     passed
 - Keep `ReviewStatus`, `LifecycleStatus`, and `QaDisposition` independent.
 - Preserve clean USFM and native translationCore behavior.
 
-## 44.9 Current next boundary
+## 44.9 Current next boundary (superseded — see 44.10)
 
-The next safe operational sequence is:
+The next safe operational sequence was:
 
-1. verify the clean local V1.1 commit stack and remote relation;
-2. push V1.1 to `origin/main` only with explicit authorization;
+1. verify the clean local V1.1 commit stack and remote relation; **done**;
+2. push V1.1 to `origin/main` only with explicit authorization; **done
+   2026-09-11**, see 44.10;
 3. build an internal Windows acceptance installer without publishing a
-   release;
+   release; **done**, see 44.10;
 4. test real Tamil and other available multilingual projects, including old
-   semantic caches;
+   semantic caches; **partially done** — a real-pipeline Tamil-negation
+   fixture now exists (44.10), but the full installed, human-driven GUI
+   walkthrough across Cases A-D in `docs/V1_1_UNICODE_ACCEPTANCE.md` is
+   still pending;
 5. confirm fresh fingerprints, preserved human decisions, byte-identical
    Scripture during analysis, exact Stage 9B correction safety, and unchanged
-   translationCore behavior;
-6. record installed-acceptance evidence;
-7. request an explicit V1.2 boundary.
+   translationCore behavior; **pending** (needs the same GUI walkthrough);
+6. record installed-acceptance evidence; **pending**;
+7. request an explicit V1.2 boundary; **not reached**.
 
 Do not begin V1.2, cross-verse visualization, new semantic dimensions,
 production providers, export/Scripture Burrito work, a version bump, or a
 release without separate approval.
+
+## 44.10 V1.1 installed-acceptance build, real Tamil-negation fixture, and
+V11-001 verse-editor fix (2026-09-11)
+
+**Local acceptance build.** `npm run tauri build` from V1.1 HEAD produced
+`Bridge_V1.1-prerelease_x64-setup.exe` (sha256
+`c961c640c60ba73485da2f4c840829b3da74266982bbe2a05a7acef30112b52c`, embedded
+version still `0.9.6` — unchanged, no silent bump). The bundler always
+writes `Bridge_0.9.6_x64-setup.exe`, the same filename as the published
+release, so the original was backed up before the build and restored
+byte-for-byte afterward (sha256
+`c7328d6c0bd48c570b0a24391630744d6f0449cf7fe6217ecf4f6ef0bc7d0c3d`, verified
+identical before/after). Full detail, all four acceptance cases, and the
+pending human GUI checklist are in `docs/V1_1_UNICODE_ACCEPTANCE.md`.
+
+**Real Tamil-negation acceptance fixture (V1.1 Case A).** The original
+Case A/B/C acceptance fixtures (`scripts/seed_correction_acceptance.py`)
+covered Stage 9B.4's correction loop but not the Unicode-comparison
+regression itself. Added `seed_case_a_negation()` / destination folder
+`D-tamil-negation`, restaging — verbatim, not invented — the exact
+Greek `οὐ` / Tamil `இல்லை` pair from the `ef49e9e` unit tests
+(`test_tamil_negation_preserves_polarity_with_combining_marks`,
+`test_tamil_negative_preservation_does_not_emit_false_negation_problem`) at
+the real reference **PHP 1:22**, whose bundled UGNT text genuinely ends
+"...οὐ γνωρίζω". Runs the real Stage 5→6A→6B→7→8 pipeline via
+`AnalysisJobManager` (the same pattern as `seed_case_c()`). Confirmed the
+source token is genuinely bundled, not fabricated (`resourceId: "ugnt"`,
+`resourceVersion: "0.34"`, `strong: "G3756"`), and the result: Stage 7
+POLARITY `PRESERVED` (confidence 0.96, "Explicit negative polarity is
+present on both sides"), Stage 8 zero `NEGATION_PROBLEM` findings (9
+`POSSIBLE_OMISSION` findings, expected since only `οὐ` carries a matching
+fixture embedding vector). Reproduced identically across independent runs.
+Additive only — `seed_case_a/b/c` and their destination folders are
+untouched.
+
+**V11-001 fixed: verse editor did not refresh after a correction applied.**
+Root cause: `CorrectionReviewPanel.svelte`'s `applyCorrection()` refreshed
+eligibility/context/proposals on `COMPLETED` but never touched the shared
+`verseTexts` store, so the editor pane kept showing pre-correction text
+until a full project reload. Fix respects the Phase 2 invariant (frontend
+mirrors persisted backend state, never computes it locally): the backend's
+own application response already carries the authoritative new text at
+`resultMetadata.canonicalEdit.newText` (confirmed against a real applied
+record), so a new `refreshVerseTextFromApplication()` helper in
+`verseEditor.ts` reads that — keyed off `targetDisplayedReference`, the
+correction's target verse, never the finding's source verse — and updates
+`verseTexts` plus `alignmentStatusByVerse` (marking the verse `invalid`,
+since application invalidates Word Alignment). No backend/protocol change.
+Test-first: two new Vitest cases in `CorrectionReviewPanel.test.ts`
+confirmed failing pre-fix (55 passed/1 failed) and passing post-fix
+(56/56), via a temporary `git stash` of just the two source files.
+
+**Frontend gates after both changes:** Vitest 312 passed / 24 files
+(baseline 310/24, delta is exactly the two new tests), `svelte-check` 0
+errors/0 warnings, production build passed (same pre-existing >500 kB
+chunk warning). Schema, verification policy, and app version all remain
+unchanged (`v14`, `correction-verification-policy-v2`, `0.9.6`).
+
+Not yet done: the human-driven installed GUI walkthrough of
+`docs/V1_1_UNICODE_ACCEPTANCE.md`'s Cases A-D, and any V1.2 scoping.
