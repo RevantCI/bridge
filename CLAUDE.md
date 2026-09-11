@@ -193,9 +193,14 @@ re-run, or decisions keyed to it are lost.
 **Staleness propagates through the dependency graph.** `record_dependencies`
 plus `pending_invalidations` are what mark downstream analysis `STALE` rather
 than silently keeping it. If you add a derived record type, register it — there
-is a real test, `test_dependency_graph_invariants`, asserting that every writable
-record type appears in the authoritative `record_type -> table` map at the top of
-`passage_semantic_repository.py`. A derived value that never goes stale is worse
+are two real tests asserting it, both in `engine/tests/test_correction_stage9b0.py`:
+`test_every_writable_dependency_type_is_registered` checks that every writable
+record type appears in the authoritative `RECORD_DEPENDENCY_TABLES` map at the top
+of `passage_semantic_repository.py`, and
+`test_dependency_tables_all_exist_and_are_stale_propagatable` checks each mapped
+table can actually carry a `STALE` lifecycle. (The comment at
+`passage_semantic_repository.py:63` names a `test_dependency_graph_invariants` that
+does not exist under that name — trust the test files, not the comment.) A derived value that never goes stale is worse
 than no derived value.
 
 **Latest job authoritative, history retained.** `lifecycle_status` carries
@@ -207,8 +212,10 @@ prune superseded rows to save space.
 `engine/tc_ai_bridge/passage_semantic_repository.py`). There is no `migrations/`
 directory and no `.sql` files — the schema and every `_MIGRATION_V1` … `_V14`
 block live in that one module, applied in order. Any change needs: a version
-bump, a new forward migration block, a test that opens a v14 fixture and migrates
-it successfully, and a note in `docs/HANDOFF.md`. The repository refuses to open a
+bump, a new forward migration block, a migration test in the established
+`test_v13_to_v14_migration_is_additive_and_keeps_v13_data_readable` style — build a
+database at the previous version, migrate forward, assert the old rows are still
+readable — and a note in `docs/HANDOFF.md`. The repository refuses to open a
 database newer than it understands, and never downgrades. Never edit the schema in
 place and never assume a user's project can be recreated — for a translation team,
 that database *is* months of work.
