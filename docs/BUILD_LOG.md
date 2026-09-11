@@ -6681,3 +6681,58 @@ Run 34615835615 (push 369f648, windows-latest, serial): **1073 passed, 1 skipped
 the runner's disk was less fsync-bound than its 46–62 s setups suggested, and what
 remains there is CPU. That makes `-n 2` on the runner worth one nightly measurement
 (step 3), not a gate change.
+
+## 2026-09-11 — #75: workbench SQLite repository skeleton
+
+`engine/tc_ai_bridge/workbench_repository.py` (`WorkbenchRepository`, schema v1) and
+`engine/tc_ai_bridge/workspace_repository.py` (`WorkspaceRepository`, a bare `devices`
+table so far). `TranslationCoreProject.__init__` now opens `bridge-workbench.sqlite3`
+beside the journal (`tc_project.py`); creating an empty database is the only
+observable change — no existing store moved, the v14 database untouched, per the
+issue's own "Does not" list.
+
+Schema v1 creates all nineteen tables from `TEAM_ARCHITECTURE.md` §§3.1/3.2 plus
+`change_log`, using the connection discipline and migration-ladder shape copied from
+`FoundationRepository` (`passage_semantic_repository.py:1070-1150`). One generic
+`_write()` does the revision check and the change_log append inside the same
+`BEGIN IMMEDIATE`, matching `record_human_review`'s pattern
+(`passage_semantic_repository.py:3712-3736`); `expected_revision=None` is
+last-writer-wins. `change_log.seq` is `AUTOINCREMENT`, and `change_log_entries()`
+orders by it rather than `created_at` — deliberately, since #84 (fixed the same day,
+above) is exactly this failure mode: uuid4-derived ids plus ~15 ms `datetime.now()`
+granularity on Python 3.12/Windows make `created_at` ties non-deterministic, and
+that entry names `change_log` by name as needing the same monotonic-column fix.
+`BEFORE DELETE`/`BEFORE UPDATE` triggers on `change_log` reject everything except
+`synced_at`, using `IS NOT` rather than `<>` so a NULL `book_id` can't make the
+trigger's `WHEN` clause silently pass.
+
+**Verified by running.** `pytest tests/persistence -q`: 114 passed — the package's
+existing 87 plus this step's new `test_workbench_repository.py` (27), covering schema
+creation, both triggers, a revision conflict, one-change_log-row-per-write across
+every one of the 19 mutable tables, and a static grep guard that nothing in
+`tc_ai_bridge/*.py` updates `change_log` except `synced_at`.
+
+**Surprise, caught by the full suite, not by reading.** First full run
+(`pytest -n auto`): 1101 passed / **3 failed** / 1 skipped, 10:45. One failure was
+real:
+`test_alignment_statistics.py::test_build_corpus_stats_performance_over_a_realistically_sized_completed_corpus`
+went from comfortably under its 5.0 s ceiling to 5.49 s. `WorkbenchRepository` copied
+`FoundationRepository`'s connection discipline exactly, including `synchronous=FULL`
++ `journal_mode=WAL`, but the suite's fsync opt-out above (#82) only ever patched
+`FoundationRepository._connect`. Every `TranslationCoreProject.__init__` now also
+pays one real fsync'd schema migration — precisely the cost #82 removed for the v14
+database, reintroduced here for the new one. Fixed by extending
+`tests/conftest.py`'s `_sqlite_without_fsync` fixture to patch both classes. Re-run:
+1103 passed / **1 failed** / 1 skipped, **7:03** — faster than the first run despite
+the new component, because every project-opening test stopped paying WAL/fsync
+twice over. The remaining failure (`test_ai_explain.py`, "AI review job did not
+finish") is a different test than the corpus-stats one, reproduces the same failure
+shape a different test hit on the first run
+(`test_ai_review_stale_after_apply.py`), and matches the step-2 entry above's own
+"1077 passed, 1 failed" under `-n auto` — a pre-existing fixed-10s async-job-poll
+flake under 12-way contention, not caused by this change; both failing tests pass
+individually in isolation. Filed as #85 rather than fixed here.
+
+Not measured: CI, since `-n auto` is not the gate there. Not done: any #76/#77 store
+migration, or wiring `WorkspaceRepository`'s path into `bridge_service.py` — both out
+of scope for this issue.

@@ -16,6 +16,7 @@ from .usfm import strip_usfm, whitespace_tokens
 
 from .models import VerseAlignment
 from .transaction_journal import TransactionJournal
+from .workbench_repository import WorkbenchRepository
 from .paratext_notes import append_paratext_note, validate_notes_11, convert_comment_list_to_notes_11, convert_legacy_notes_11, EXTERNAL_NOTE_SOURCE
 from .alignment_reliability import structural_issues, alignment_fingerprint
 
@@ -80,6 +81,9 @@ class TranslationCoreProject:
         self._index_cache: dict[str, list[dict[str, Any]]] = {}
         self._checks_by_verse_cache: dict[tuple[str, str], list[dict[str, Any]]] | None = None
         self.journal = TransactionJournal(self.path, self.companion_dir())
+        # #75: the workbench DB skeleton. Nothing reads from or writes to it
+        # yet -- creating an empty database is the only observable change.
+        self.workbench = WorkbenchRepository(self.companion_dir() / 'bridge-workbench.sqlite3')
         # Stage 4 attaches an advisory companion runtime after project identity
         # is resolved. Direct TranslationCoreProject users remain unchanged.
         self.passage_semantic_runtime: Any | None = None

@@ -88,6 +88,12 @@ def pytest_collection_modifyitems(config, items):
 # changed. The product keeps FULL: that database is months of a team's work.
 # Set BRIDGE_TEST_DURABLE_SQLITE=1 to run with the product pragmas (the weekly
 # serial run in ci.yml is the intended place; #74 step 3).
+#
+# `WorkbenchRepository` (#75) copies FoundationRepository's connection
+# discipline verbatim and every `TranslationCoreProject.__init__` opens one,
+# so it gets the same opt-out for the same reason -- without it,
+# test_alignment_statistics.py's 5-second corpus-stats ceiling started
+# failing under real fsync+WAL cost added to project construction itself.
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True, scope="session")
 def _sqlite_without_fsync():
@@ -95,29 +101,36 @@ def _sqlite_without_fsync():
         yield
         return
     from tc_ai_bridge import passage_semantic_repository as repo
+    from tc_ai_bridge import workbench_repository as workbench
 
-    original = repo.FoundationRepository._connect
+    def _make_connect(error_cls):
+        @contextmanager
+        def _connect(self) -> Iterator[sqlite3.Connection]:
+            conn = sqlite3.connect(str(self.path), timeout=5.0)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute("PRAGMA synchronous = OFF")
+            conn.execute("PRAGMA journal_mode = MEMORY")
+            if self.read_only:
+                conn.execute("PRAGMA query_only = ON")
+            if conn.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
+                conn.close()
+                raise error_cls("SQLite foreign-key enforcement could not be enabled")
+            try:
+                yield conn
+            finally:
+                conn.close()
+        return _connect
 
-    @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(str(self.path), timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA busy_timeout = 5000")
-        conn.execute("PRAGMA synchronous = OFF")
-        conn.execute("PRAGMA journal_mode = MEMORY")
-        if self.read_only:
-            conn.execute("PRAGMA query_only = ON")
-        if conn.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
-            conn.close()
-            raise repo.FoundationError("SQLite foreign-key enforcement could not be enabled")
-        try:
-            yield conn
-        finally:
-            conn.close()
-
-    repo.FoundationRepository._connect = _connect
+    patched = {
+        repo.FoundationRepository: (repo.FoundationRepository._connect, repo.FoundationError),
+        workbench.WorkbenchRepository: (workbench.WorkbenchRepository._connect, workbench.WorkbenchError),
+    }
+    for cls, (_, error_cls) in patched.items():
+        cls._connect = _make_connect(error_cls)
     try:
         yield
     finally:
-        repo.FoundationRepository._connect = original
+        for cls, (original, _) in patched.items():
+            cls._connect = original

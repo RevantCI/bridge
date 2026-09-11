@@ -164,6 +164,9 @@ A raw Scripture import becomes a translationCore-compatible book project:
 <project>/.apps/translationCoreAI/checkFindings/<book>/<chapter>.json
                                                 the findings behind those ids, from the last succeeded
                                                 check job — what the project QA report reads
+<project>/.apps/translationCoreAI/bridge-workbench.sqlite3
+                                                schema v1 (#75). Created empty on every project open;
+                                                no store above has moved into it yet — that's #76/#77.
 ```
 
 `TranslationCoreProject` (`tc_ai_bridge/tc_project.py`) is the reader/writer
@@ -233,6 +236,12 @@ readable — and a note in `docs/HANDOFF.md`. The repository refuses to open a
 database newer than it understands, and never downgrades. Never edit the schema in
 place and never assume a user's project can be recreated — for a translation team,
 that database *is* months of work.
+
+This same discipline now has a second, independent ladder: `bridge-workbench.sqlite3`
+(`WorkbenchRepository`, `engine/tc_ai_bridge/workbench_repository.py`,
+`WORKBENCH_SCHEMA_VERSION`, currently v1). It is a different database with its own
+version number — a workbench schema bump is never a v14 bump and vice versa; each
+gets its own migration block and its own compatibility test.
 
 **Offline operation is a product invariant, not a preference.** Do not introduce a
 runtime dependency on a network service, a hosted API, or a login, in any code path

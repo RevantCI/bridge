@@ -43,9 +43,16 @@ State as of 2026-09-11 (Benz's session, picking this up same day):
 - #83 fixed (`9bf8857`): `cancel-in-progress` scoped to `pull_request` only, since on
   `push` the concurrency group was the same for every commit to `main` and a new push
   cancelled the previous commit's still-running gate.
-- Not started: #75–#81 (the workbench SQLite, identity, engine session model, hub,
-  dashboard). No persistence or identity code exists yet.
-- **Next task:** #75 (workbench SQLite repository skeleton — `TEAM_ARCHITECTURE.md` §3).
+- #75 landed: `WorkbenchRepository` (schema v1, `change_log`, one generic `_write()`)
+  and a bare-bones `WorkspaceRepository` (`devices` only). `TranslationCoreProject`
+  opens the workbench DB now; no existing store has moved into it. Fixing this
+  exposed a real overhead regression (WAL/fsync cost added to every project open)
+  and a pre-existing `-n auto` contention flake, filed as #85 — see `BUILD_LOG.md`.
+- Not started: #76–#81 (moving the human-owned stores in, identity, engine session
+  model, hub, dashboard).
+- **Next task:** #76 (human-owned stores behind the `tc_project.py` seam, lazy
+  migration — `TEAM_ARCHITECTURE.md` §3.1/§3.5). Do #82's remaining module-scoping
+  idea only after #74 step 4, per that issue's own comment thread.
 
 ---
 
