@@ -130,3 +130,55 @@ describe("SettingsModal manual override", () => {
     ));
   });
 });
+
+describe("SettingsModal reviewer name (V11-002/V11-005)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getNavigationStatus.mockResolvedValue(navigationState());
+    setSettings.mockImplementation(async (params: Record<string, unknown>) => ({
+      ...params, hasApiKey: false,
+      reviewerName: params.reviewerName, reviewerNameUpdatedAt: "2026-09-11T08:00:00+00:00",
+    }));
+  });
+
+  it("shows the OS-seeded reviewer name as never explicitly changed", async () => {
+    getSettings.mockResolvedValue({
+      provider: "openai", apiBaseUrl: "", model: "gpt-5.6", hasApiKey: false,
+      reviewerName: "benz", reviewerNameUpdatedAt: "",
+      reviewerMode: "basic", paratextNavigation: false, logosNavigation: false,
+    });
+    render(SettingsModal, { props: { initialPane: "quality", onClose: vi.fn() } });
+
+    expect(await screen.findByLabelText("Reviewer name")).toHaveValue("benz");
+    expect(screen.getByText(/never explicitly changed/i)).toBeInTheDocument();
+  });
+
+  it("shows the last-changed timestamp once the reviewer has been renamed", async () => {
+    getSettings.mockResolvedValue({
+      provider: "openai", apiBaseUrl: "", model: "gpt-5.6", hasApiKey: false,
+      reviewerName: "Alice", reviewerNameUpdatedAt: "2026-09-10T12:00:00+00:00",
+      reviewerMode: "basic", paratextNavigation: false, logosNavigation: false,
+    });
+    render(SettingsModal, { props: { initialPane: "quality", onClose: vi.fn() } });
+
+    expect(await screen.findByLabelText("Reviewer name")).toHaveValue("Alice");
+    expect(screen.getByText(/Last changed/i)).toBeInTheDocument();
+  });
+
+  it("saves an edited reviewer name and reflects the fresh timestamp back", async () => {
+    getSettings.mockResolvedValue({
+      provider: "openai", apiBaseUrl: "", model: "gpt-5.6", hasApiKey: false,
+      reviewerName: "benz", reviewerNameUpdatedAt: "",
+      reviewerMode: "basic", paratextNavigation: false, logosNavigation: false,
+    });
+    render(SettingsModal, { props: { initialPane: "quality", onClose: vi.fn() } });
+    const field = await screen.findByLabelText("Reviewer name");
+
+    await fireEvent.input(field, { target: { value: "Alice" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(setSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ reviewerName: "Alice" }),
+    ));
+  });
+});

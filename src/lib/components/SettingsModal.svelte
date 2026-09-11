@@ -20,6 +20,8 @@
   let allowOverride = false;
   let paratextNavigation = false;
   let logosNavigation = false;
+  let reviewerName = "";
+  let reviewerNameUpdatedAt = "";
 
   const providerPresets: Record<string, string> = {
     openai: "",
@@ -41,6 +43,8 @@
       allowOverride = s.reviewerMode === "advanced";
       paratextNavigation = s.paratextNavigation;
       logosNavigation = s.logosNavigation;
+      reviewerName = s.reviewerName || "";
+      reviewerNameUpdatedAt = s.reviewerNameUpdatedAt || "";
       reviewerMode.set(s.reviewerMode);
       navigationStatus.set(await bridge.navigationStatus());
     } catch (e) {
@@ -62,11 +66,13 @@
     try {
       const params: Record<string, unknown> = {
         provider, apiBaseUrl, model, reviewerMode: manualOverrideMode(allowOverride),
-        paratextNavigation, logosNavigation,
+        paratextNavigation, logosNavigation, reviewerName,
       };
       if (apiKey.trim()) params.apiKey = apiKey.trim();
       const result = await bridge.setSettings(params);
       hasApiKey = result.hasApiKey;
+      reviewerName = result.reviewerName || "";
+      reviewerNameUpdatedAt = result.reviewerNameUpdatedAt || "";
       reviewerMode.set(result.reviewerMode);
       apiKey = "";
       const status = await bridge.navigationStatus();
@@ -163,6 +169,15 @@
       {:else if activePane === "quality"}
         <h3>Quality engine</h3>
         <p class="desc">Greek Room checks run fully offline and never leave this machine.</p>
+        <div class="field">
+          <label for="reviewerName">Reviewer name</label>
+          <input id="reviewerName" type="text" bind:value={reviewerName} placeholder="Your name" />
+          <div class="hint">
+            Recorded against every decision, proposal, application, and verification you make — shown in each finding's history.
+            {#if reviewerNameUpdatedAt}Last changed {new Date(reviewerNameUpdatedAt).toLocaleString()}.
+            {:else}Never explicitly changed — seeded from your OS account.{/if}
+          </div>
+        </div>
         <div class="field">
           <div class="field-label">tN / tW selections</div>
           <label class="mode-option" class:selected={allowOverride}>

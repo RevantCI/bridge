@@ -861,6 +861,9 @@ export interface SettingsData {
   apiBaseUrl: string;
   model: string;
   reviewerName: string;
+  /** ISO-8601 UTC, or "" if never explicitly changed via Settings (the
+   * OS-seeded default on a fresh profile does not count as a change). */
+  reviewerNameUpdatedAt: string;
   reviewerMode: "basic" | "advanced";
   paratextUsername: string;
   paratextNavigation: boolean;
