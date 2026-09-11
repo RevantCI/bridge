@@ -17,3 +17,55 @@ def tamil_php_usfm():
 @pytest.fixture(scope="session")
 def tamil_luk_usfm():
     return _SEMANTIC_MAPPING_RESOURCES / "regression" / "43LUKIRVTam.SFM"
+
+
+# ---------------------------------------------------------------------------
+# Directory- and file-level markers, applied automatically so an author cannot
+# forget them. Registered (and explained) in engine/pyproject.toml; --strict-markers
+# rejects anything not listed there. Per-test `slow` marks live on the tests.
+# ---------------------------------------------------------------------------
+_DIRECTORY_MARKERS = {
+    "connectors": ("desktop", "subprocess"),
+    "resources": ("resources",),
+}
+# `slow` is applied per file, to the files whose tests average more than ~5 s.
+# Measured 2026-09-11 (serial baseline, docs/BUILD_LOG.md #74): these eleven files
+# plus the two subprocess files hold ~2,700 of the suite's ~3,700 test-seconds, almost
+# all of it fixture *setup* that rebuilds the Stage 5-8 pipeline for every test (#82).
+_SLOW_FILES = (
+    "test_qa_review_service_stage9a.py",        # 660 s / 37 tests
+    "test_qa_target_hash_contract_stage8_9b.py", # 465 s / 9
+    "test_meaning_failure_eligibility_stage9b.py",  # 377 s / 72
+    "test_source_semantic_inventory_stage5.py",  # 254 s / 16
+    "test_ai_explain.py",                        # 203 s / 11
+    "test_semantic_location_stage6b.py",         # 195 s / 14
+    "test_qa_audit_stage8.py",                   # 169 s / 30
+    "test_resource_materializer.py",             # 129 s / 10
+    "test_ai_review_stale_after_apply.py",       #  96 s / 4
+    "test_semantic_corpus_discovery.py",         #  70 s / 5
+    "test_knowledge_base_ta.py",                 #  54 s / 4
+    "test_correction_case_c_production.py",      #  49 s / 1
+)
+_FILE_MARKERS = {
+    "test_stdio_e2e.py": ("subprocess", "slow"),
+    "test_versification_concurrency.py": ("subprocess", "slow"),
+    "test_semantic_mapping_stage3.py": ("stage3db",),
+    "test_semantic_corpus_discovery.py": ("stage3db",),
+    "test_semantic_validation.py": ("stage3db",),
+    "test_correction_acceptance_queue_visibility.py": ("external",),
+    "test_correction_acceptance_scripts.py": ("external",),
+    "test_correction_case_c_production.py": ("external",),
+    "test_php_review_walkthrough_stage9a.py": ("external",),
+    "test_passage_semantic_foundation.py": ("external",),
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        path = Path(str(item.fspath))
+        names = set(_DIRECTORY_MARKERS.get(path.parent.name, ()))
+        names.update(_FILE_MARKERS.get(path.name, ()))
+        if path.name in _SLOW_FILES:
+            names.add("slow")
+        for name in names:
+            item.add_marker(getattr(pytest.mark, name))

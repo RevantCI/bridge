@@ -26,10 +26,11 @@ dependency files change).
 cd engine
 py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pip install -c constraints-py312-windows.txt -e ".[dev,wildebeest]"
-.venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v
+.venv\Scripts\python.exe -m pytest -n auto
 ```
 
-Expect **224 passed** on the maintained Windows/Python 3.12 environment
+Expect **1078 collected** (2026-09-11; pass/skip split recorded in
+`docs/BUILD_LOG.md`'s #74 section) on the maintained Windows/Python 3.12 environment
 (baseline as of 2026-08-26).
 
 Try `python demo.py` for a live walkthrough against a throwaway fixture
@@ -249,8 +250,9 @@ re-debugging from scratch.
 
 ## Running the QA gate
 
-- Python: `pytest tests/ greek_room_engine/tests/ -v` from `engine/` — expect
-  224 passed on the current baseline.
+- Python: `pytest -n auto` from `engine/` (both test roots are `testpaths`) —
+  expect the counts recorded in `docs/BUILD_LOG.md`'s #74 section; `-m "not slow"`
+  is the inner loop, `pytest tests/<area>` runs one package.
 - Svelte: `npm run check` (svelte-check) and `npm run build`.
 - Rust: standard `cargo build`/`cargo test` inside `src-tauri/`.
 - Full release acceptance (frozen sidecars, NSIS installer, exact artifact

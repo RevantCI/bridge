@@ -31,8 +31,22 @@ macOS/Linux are planned but unverified.
 ```bash
 cd engine
 pip install -e ".[dev]"
-pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider
+pytest -n auto            # full suite, parallel (pytest-xdist); what CI runs
+pytest -n auto -m "not slow"   # inner loop: drops the sidecar/subprocess/concurrency tests
+pytest tests/correction   # one area; tests/ is packaged by engine area (see below)
 ```
+
+`testpaths`, `pythonpath`, markers and `--durations=25` live in
+`engine/pyproject.toml` (`[tool.pytest.ini_options]`), so a bare `pytest` from
+`engine/` collects both roots. `engine/tests/` is a package tree mirroring the
+engine: `service` (dispatcher, stdio, protocol), `jobs`, `persistence`,
+`semantic` (Stages 3–8), `review` (9A), `correction` (9B), `alignment`, `ai`,
+`project_io`, `connectors`, `resources`, `versification`; shared helpers in
+`tests/support/` (`paths.py` for repo paths — never `Path(__file__).parents[N]`).
+Markers are registered with `--strict-markers` (`slow`, `subprocess`, `desktop`,
+`resources`, `stage3db`, `external`); directory- and file-level ones are applied
+automatically in `tests/conftest.py`. Selection by module (`scripts/affected_tests.py`)
+is #74 step 3 and not built yet.
 
 Single test file or test: `pytest tests/service/test_bridge_service.py -v` or
 `pytest tests/service/test_bridge_service.py::test_open_real_fixture_project -v`.

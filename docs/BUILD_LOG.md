@@ -6507,3 +6507,88 @@ same summary. Full Python/Greek Room and Rust suites were not rerun this
 session (explicitly deferred, not silently skipped) — the last confirmed
 full-Python run this cycle was 1063 passed / 1 skipped / 0 failed, and nothing
 touched under `engine/` since.
+
+---
+
+## 2026-09-11 — #74 steps 1–2: packaged test suite, markers, xdist; the baseline it was measured against
+
+Context: `docs/TEAM_ARCHITECTURE.md` §9. The test-speed work lands before the
+persistence, identity and hub steps (#75–#81) because every one of those adds its own
+test package. Two commits: `8952fca` (step 1, the move) and the commit carrying this
+entry (step 2, config + parallelism).
+
+### Serial baseline, before any change (isolated git worktree at `ae30e17`)
+
+```
+pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider --durations=0 -rs
+1078 passed, 0 skipped in 3713.57s (1:01:53)      Windows 11, Core 7 150U (10 cores / 12 threads), Python 3.12.10
+```
+
+Caveat on the wall time: the first ~25 minutes overlapped with a 366-test subset run in
+the main checkout, so the true serial figure is lower. The Windows CI runner measured
+41m39s for 1063 tests (`ci.yml`). 0 skipped rather than CI's 1 because real
+`wildebeest-nlp` is installed here.
+
+What the durations actually say — the cost is repeated fixture **setup**, not slow
+tests. 1021 tests recorded ≥ 5 ms; 148 exceeded 5 s; 59 exceeded 20 s; the top
+`setup` entries are 45–63 s each and all rebuild the Stage 5–8 pipeline over the Tamil
+PHP fixture from scratch, once per test:
+
+| file (pre-move path) | total s | tests | > 5 s |
+|---|---:|---:|---:|
+| test_qa_review_service_stage9a.py | 660 | 37 | 33 |
+| test_qa_target_hash_contract_stage8_9b.py | 465 | 9 | 9 |
+| test_meaning_failure_eligibility_stage9b.py | 377 | 72 | 13 |
+| test_source_semantic_inventory_stage5.py | 254 | 16 | 12 |
+| test_ai_explain.py | 203 | 11 | 9 |
+| test_semantic_location_stage6b.py | 195 | 14 | 14 |
+| test_qa_audit_stage8.py | 169 | 30 | 13 |
+| test_correction_stage9b0.py | 151 | 50 | 4 |
+| test_correction_stage9b4.py | 138 | 61 | 2 |
+| test_resource_materializer.py | 129 | 10 | 8 |
+
+Roughly 2,700 of 3,706 measured test-seconds are this pattern. Filed as #82 (share the
+pipeline build at module scope) — it belongs with #74 step 4's `tests/support/`, not
+before it. Parallelism divides this cost by the core count; it does not remove it.
+
+### Step 1 — the move (`8952fca`)
+
+62 test files → `tests/{service,jobs,persistence,semantic,review,correction,alignment,
+ai,project_io,connectors,resources,versification}/`; `fixtures/` and both goldens
+untouched. `--collect-only` = 1078 before and after. The 17 files whose rewrites only
+execute at test time (cross-package imports, the 9B.0 load-by-path, every
+`Path(__file__).parents[N]` site now via `tests/support/paths.py`) ran green: 366
+passed. Two facts the exploration got wrong and the move corrected: `tests/` *was*
+already a package (`tests/__init__.py`), and `scripts/seed_correction_acceptance.py`
+imports two test modules, so it had to move with them.
+
+### Step 2 — config, markers, xdist (this commit)
+
+- `engine/pyproject.toml` `[tool.pytest.ini_options]`: `testpaths`, `pythonpath`
+  (`.`, `..`, `../scripts`), `--strict-markers --durations=25 --durations-min=1.0`,
+  `tmp_path_retention_policy = "failed"`, six registered markers.
+- `tests/conftest.py` applies directory/file markers automatically; `slow` is
+  file-level, on the twelve files above plus the two subprocess files. Split:
+  **220 slow / 858 not slow**.
+- `pytest-xdist>=3.5` in the dev extra, pinned `3.8.0` (+ `execnet==2.1.2`) in
+  `constraints-py312-windows.txt`; `ci.yml` runs `-n auto`.
+
+```
+pytest -q -p no:cacheprovider -n auto -rs            (12 workers, main checkout, otherwise idle)
+1077 passed, 1 failed in 1136.11s (0:18:56)
+```
+
+So ~19 min against a ~42–62 min serial run: about **3×, not 12×**. Individual tests
+slowed 1.5–2.7× under 12 workers (e.g. `test_correction_case_c_production` 49 s → 135 s;
+the 60 s pipeline setups became 75–88 s) — the work is CPU-bound and 12 threads are 10
+cores. This is why #82 is the real lever and xdist is only the first.
+
+The one failure was `tests/jobs/test_analysis_jobs_stage9a4.py::
+test_normal_unseeded_runtime_runs_without_fixture_vectors`: a real Stage 5–8 job with a
+15 s wait, 9.9 s serial, 7.7 s alone, over budget only under 12-way contention. Its wait
+is now 60 s with a comment; nothing it asserts changed. It passed alone before the edit.
+
+Not done yet: step 3 (`scripts/affected_tests.py`, selection on PRs, full suite on
+every push to `main`, nightly) and step 4 (RPC-wiring tests out of the stage files,
+shared builders in `tests/support/`). Not verified: the CI runner's wall time under
+`-n auto` on 4 vCPUs — the first push carrying this entry will show it.

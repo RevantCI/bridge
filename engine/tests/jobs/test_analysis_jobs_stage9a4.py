@@ -498,7 +498,12 @@ def test_normal_unseeded_runtime_runs_without_fixture_vectors(tmp_path) -> None:
         tmp_path, language="en", chapters={"1": {"3": "unrelated target words"}},
     )
     manager = AnalysisJobManager()
-    completed = _wait(manager, _start(manager, runtime)["jobId"], timeout=15)
+    # This is a real (unstubbed) Stage 5-8 run: ~8-10 s alone on a 2026 laptop, and it
+    # scales with CPU contention -- under `pytest -n auto` on 12 workers it exceeded
+    # the previous 15 s budget while every other worker was building the same
+    # pipeline (#74 step 2 baseline). 60 s is a wall-clock tolerance, not a claim
+    # about how long the job should take.
+    completed = _wait(manager, _start(manager, runtime)["jobId"], timeout=60)
     assert completed["overallStatus"] in {"COMPLETED", "COMPLETED_WITH_WARNINGS"}
     assert completed["providerCapability"]["fixtureProvider"] is False
     assert completed["providerCapability"]["multilingualEmbeddingProvider"] == "NOT_CONFIGURED"

@@ -103,6 +103,7 @@ def _real_checker_available() -> bool:
 
 
 @pytest.mark.skipif(not _real_checker_available(), reason="vendored usfm_check.py not present")
+@pytest.mark.subprocess
 def test_real_subprocess_finds_issues_in_broken_usfm():
     usfm = (
         "\\id TIT\n\\h Titus\n\\toc1 The Letter to Titus\n\\c 1\n\\p\n"
@@ -125,6 +126,7 @@ def test_real_subprocess_finds_issues_in_broken_usfm():
 
 
 @pytest.mark.skipif(not _real_checker_available(), reason="vendored usfm_check.py not present")
+@pytest.mark.subprocess
 def test_real_subprocess_finds_nothing_in_clean_usfm():
     usfm = (
         "\\id TIT\n\\h Titus\n\\toc1 The Letter to Titus\n\\c 1\n\\p\n"
@@ -137,6 +139,7 @@ def test_real_subprocess_finds_nothing_in_clean_usfm():
 
 
 @pytest.mark.skipif(not _real_checker_available(), reason="vendored USFM checker dependencies not available")
+@pytest.mark.subprocess
 def test_broken_subprocess_is_an_explicit_failure_not_a_clean_book(monkeypatch):
     from greek_room_engine.adapters import usfm_adapter
 

@@ -204,13 +204,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Stage 3 DB download failed" }
 
       - name: Run the Python suite
-        # Both test roots: greek_room_engine has its own tests/ that plain `pytest`
-        # from engine/ would still collect, but naming them keeps this honest about
-        # what is being gated. -p no:cacheprovider and PYTHONDONTWRITEBYTECODE keep a
-        # stale .pyc in the vendored trees from masking a real change.
+        # Both test roots are named (they are also `testpaths` in pyproject.toml) so
+        # the command says exactly what is gated. PYTHONDONTWRITEBYTECODE keeps a
+        # stale .pyc in the vendored trees from masking a real change; -p
+        # no:cacheprovider keeps .pytest_cache out of a throwaway runner (locally it
+        # is useful -- `pytest --lf` -- so it is not in addopts). -n auto runs the
+        # suite across the runner's cores with pytest-xdist: separate processes,
+        # so the vendored versification GIL hazard does not apply (#74).
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider
+        run: pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider -n auto
 
   # ---------------------------------------------------------------------------
   # Rust / Tauri shell.
