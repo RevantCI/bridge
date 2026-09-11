@@ -85,6 +85,10 @@ jobs:
               - 'tsconfig.json'
               - 'tailwind.config.js'
               - 'postcss.config.js'
+              # A change to the gate itself re-runs every job it defines. Without
+              # this, a PR that edits ci.yml skips everything and merges green having
+              # proved nothing about the workflow it just changed.
+              - '.github/workflows/ci.yml'
             engine:
               - 'engine/**'
               # Not cosmetic. The engine suite reaches out of engine/ for both of
@@ -96,8 +100,16 @@ jobs:
               # editing only a seed script would skip the suite it breaks.
               - 'schemas/**'
               - 'scripts/**'
+              # A change to the gate itself re-runs every job it defines. Without
+              # this, a PR that edits ci.yml skips everything and merges green having
+              # proved nothing about the workflow it just changed.
+              - '.github/workflows/ci.yml'
             rust:
               - 'src-tauri/**'
+              # A change to the gate itself re-runs every job it defines. Without
+              # this, a PR that edits ci.yml skips everything and merges green having
+              # proved nothing about the workflow it just changed.
+              - '.github/workflows/ci.yml'
             goldens:
               # The real location. There is no goldens/ directory and no
               # __snapshots__ anywhere in the repo -- the Stage 5 and Stage 6B
