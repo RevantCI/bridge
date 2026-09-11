@@ -8,10 +8,43 @@
 import { get, writable } from "svelte/store";
 import { bridge } from "./api/bridgeClient";
 import type { QaFinding } from "./types/finding";
+import type { CorrectionApplicationIntent } from "./types/correctionReview";
 import {
   alignmentStatusByVerse, checkStatusByVerse, checkingProgress, findingsByVerse,
   nativeChecksByVerse, aiCheckReviewsByVerse, verseKey, verseTexts,
 } from "./stores";
+
+// Same "BOOK C:V" shape SemanticMappingValidation.svelte's navigate() parses;
+// reused rather than re-invented so both call sites treat verse bridges
+// ("3-4") and lettered segments ("3a") the same way — the group stops before
+// a bridge's trailing "-4" (matching how the rest of the UI keys verses),
+// while letters stay attached to the verse group.
+const DISPLAYED_REFERENCE = /^[A-Z0-9]+\s+([^:]+):([^\s-]+)/i;
+
+/**
+ * A correction application writes the new target verse text on the backend
+ * before the frontend ever hears about it (CorrectionReviewPanel just
+ * receives the outcome) — so once applicationState is COMPLETED, reflect
+ * the backend's own record of what it wrote (resultMetadata.canonicalEdit
+ * .newText) into verseTexts, rather than computing the text client-side.
+ * Returns the verseKey touched, or "" if the response didn't carry a
+ * usable target reference/text (nothing is changed in that case).
+ */
+export function refreshVerseTextFromApplication(
+  application: Pick<CorrectionApplicationIntent, "targetDisplayedReference" | "resultMetadata">,
+): string {
+  const match = application.targetDisplayedReference.match(DISPLAYED_REFERENCE);
+  if (!match) return "";
+  const canonicalEdit = application.resultMetadata?.canonicalEdit;
+  const newText = canonicalEdit && typeof canonicalEdit === "object"
+    ? (canonicalEdit as Record<string, unknown>).newText
+    : undefined;
+  if (typeof newText !== "string") return "";
+  const key = verseKey(match[1], match[2]);
+  verseTexts.update((t) => ({ ...t, [key]: newText }));
+  alignmentStatusByVerse.update((values) => ({ ...values, [key]: "invalid" }));
+  return key;
+}
 
 export const editingChapter = writable("");
 export const editingVerse = writable("");

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
+import { get } from "svelte/store";
+import { alignmentStatusByVerse, verseKey, verseTexts } from "../../stores";
 
 const api = vi.hoisted(() => ({
   eligibility: vi.fn(),
@@ -580,6 +582,79 @@ describe("CorrectionReviewPanel", () => {
       actor: { actorType: "HUMAN", actorId: "Reviewer" },
     })));
     expect(await screen.findByText("Scripture updated. Semantic verification is pending.")).toBeInTheDocument();
+  });
+
+  it("V11-001: reflects the backend-applied correction into the verse editor without a reload", async () => {
+    // Cross-verse on purpose: the finding's source obligation sits at PHP
+    // 1:3, but the correction is written to PHP 1:6 — refreshing must key
+    // off the application's own target reference, never the source one.
+    verseTexts.set({
+      [verseKey("1", "3")]: "source verse, must stay untouched",
+      [verseKey("1", "6")]: "some remembrance of you remains with me",
+    });
+    alignmentStatusByVerse.set({ [verseKey("1", "6")]: "complete" });
+    const reviewed = { ...proposal, reviewStatus: "HUMAN_MODIFIED", revision: 2 };
+    api.list.mockResolvedValue({ findingId: "qa-quantity", proposals: [reviewed] });
+    api.apply.mockResolvedValueOnce({
+      applicationId: "application-1", proposalId: "proposal-1", findingId: "qa-quantity",
+      projectId: "project-1", expectedProposalRevision: 2, expectedFindingRevision: 2,
+      targetDisplayedReference: "PHP 1:6", canonicalReferences: ["PHP 1:6"],
+      sourceProvenanceReferences: ["PHP 1:3"], expectedTargetRevision: "target-revision-5",
+      expectedTargetContentHash: "target-hash-5", expectedStartCodePoint: affectedStart,
+      expectedEndCodePoint: affectedEnd, expectedOriginalText: affectedText,
+      replacementTextSnapshot: "அனைவரும்", intendedFinalVerseHash: "hash",
+      pendingInvalidationId: "pending-1", translationCoreJournalTransactionId: "journal-1",
+      actor: { actorType: "HUMAN", actorId: "Reviewer" }, createdAt: "now", updatedAt: "now",
+      applicationState: "COMPLETED", stateRevision: 5, completedAt: "now", failureCode: "",
+      recoveryMetadata: {},
+      resultMetadata: {
+        canonicalEdit: {
+          oldText: "some remembrance of you remains with me",
+          newText: "all remembrance of you remains with me",
+        },
+      },
+    });
+    render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+    await fireEvent.click(await screen.findByRole("button", { name: "Review application" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm correction application" });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "Apply correction" }));
+    expect(await screen.findByText("Scripture updated. Semantic verification is pending.")).toBeInTheDocument();
+    expect(get(verseTexts)[verseKey("1", "6")]).toBe("all remembrance of you remains with me");
+    expect(get(verseTexts)[verseKey("1", "3")]).toBe("source verse, must stay untouched");
+    expect(get(alignmentStatusByVerse)[verseKey("1", "6")]).toBe("invalid");
+  });
+
+  it("V11-001: does not touch the verse editor when application does not complete", async () => {
+    verseTexts.set({ [verseKey("1", "6")]: "some remembrance of you remains with me" });
+    alignmentStatusByVerse.set({ [verseKey("1", "6")]: "complete" });
+    const reviewed = { ...proposal, reviewStatus: "HUMAN_MODIFIED", revision: 2 };
+    api.list.mockResolvedValue({ findingId: "qa-quantity", proposals: [reviewed] });
+    api.apply.mockResolvedValueOnce({
+      applicationId: "application-1", proposalId: "proposal-1", findingId: "qa-quantity",
+      projectId: "project-1", expectedProposalRevision: 2, expectedFindingRevision: 2,
+      targetDisplayedReference: "PHP 1:6", canonicalReferences: ["PHP 1:6"],
+      sourceProvenanceReferences: ["PHP 1:3"], expectedTargetRevision: "target-revision-5",
+      expectedTargetContentHash: "target-hash-5", expectedStartCodePoint: affectedStart,
+      expectedEndCodePoint: affectedEnd, expectedOriginalText: affectedText,
+      replacementTextSnapshot: "அனைவரும்", intendedFinalVerseHash: "hash",
+      pendingInvalidationId: "pending-1", translationCoreJournalTransactionId: "journal-1",
+      actor: { actorType: "HUMAN", actorId: "Reviewer" }, createdAt: "now", updatedAt: "now",
+      applicationState: "FAILED", stateRevision: 5, completedAt: null,
+      failureCode: "WRITE_FAILED", recoveryMetadata: {},
+      resultMetadata: {
+        canonicalEdit: {
+          oldText: "some remembrance of you remains with me",
+          newText: "all remembrance of you remains with me",
+        },
+      },
+    });
+    render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+    await fireEvent.click(await screen.findByRole("button", { name: "Review application" }));
+    const dialog = screen.getByRole("dialog", { name: "Confirm correction application" });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "Apply correction" }));
+    expect(await screen.findByText("Correction application: FAILED")).toBeInTheDocument();
+    expect(get(verseTexts)[verseKey("1", "6")]).toBe("some remembrance of you remains with me");
+    expect(get(alignmentStatusByVerse)[verseKey("1", "6")]).toBe("complete");
   });
 
   it("opens Review application by pointer with a mixed-build review context", async () => {

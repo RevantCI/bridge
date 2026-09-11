@@ -2,6 +2,7 @@
   import { createEventDispatcher, onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import { applyCorrectionProposal, newCorrectionApplicationId } from "../correctionApplication";
+  import { refreshVerseTextFromApplication } from "../verseEditor";
   import type {
     AffectedTargetSpan,
     CorrectionEligibility,
@@ -489,6 +490,7 @@
       confirmationOpen = false;
       if (application.applicationState === "COMPLETED") {
         notice = "Scripture updated. Semantic verification is pending.";
+        refreshVerseTextFromApplication(application);
         const [nextEligibility, nextContext] = await Promise.all([
           bridge.correctionGetEligibility(findingId),
           bridge.correctionGetReviewContext(findingId),
