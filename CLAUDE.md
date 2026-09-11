@@ -400,6 +400,14 @@ manual-alignment and import subsystems respectively. `docs/QA_TEST_MATRIX.md`
 is the release gate — a feature isn't release-ready because its unit tests
 pass; check the matrix's source/frozen/desktop rows.
 
+`docs/TEAM_ARCHITECTURE.md` (2026-09-11) is the design record for the planned
+direction behind issues #44–#47: a second per-project `bridge-workbench.sqlite3`
+for the Bridge-private stores (the v14 semantic DB is not extended), a named
+user + device on every write, an *optional* team hub that syncs review state,
+and a hub-served dashboard. Until that work lands, the single-user, file-based
+description above is what the code does; when it lands, this file's on-disk
+shape and invariants sections must be updated in the same commit.
+
 ## How to work here
 
 `CONTRIBUTING.md` has the full flow. The short version, and the parts that apply

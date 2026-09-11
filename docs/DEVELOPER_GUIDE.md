@@ -527,3 +527,5 @@ Three rules a new contributor will otherwise get wrong:
 | [`IMPORTS.md`](IMPORTS.md) | Import pipeline design: supported inputs, normalized project schema, duplicate-safety logic, provenance. |
 | [`ALIGNMENT.md`](ALIGNMENT.md) | Manual word-alignment protocol, persistence, completion states. |
 | [`QA_TEST_MATRIX.md`](QA_TEST_MATRIX.md) | Release gate — what's tested, how, and current pass/fail status per release candidate. |
+| [`TEAM_ARCHITECTURE.md`](TEAM_ARCHITECTURE.md) | Planned direction for #44–#47: per-project workbench SQLite, user + device identity, optional sync hub, hub-served dashboard, and the modular test suite that lands first. Design record, not yet what the code does. |
+| [`DECISIONS.md`](DECISIONS.md) | Five-line log of architectural and product decisions, newest first, with what each rules out. |

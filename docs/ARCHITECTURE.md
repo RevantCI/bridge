@@ -194,6 +194,12 @@ terminology/Psalms QA. These are phase-appropriate follow-ups per the table abov
 
 ## What still needs a real decision
 
+- **Decided 2026-09-11, not yet built:** the single-window, single-user, file-based
+  premise described above is being extended — not replaced — by a per-project
+  workbench SQLite for Bridge-private state, a user + device identity on every write,
+  and an optional team hub for syncing review state. See `docs/TEAM_ARCHITECTURE.md`
+  and the three 2026-09-11 entries in `docs/DECISIONS.md`. Offline-first and the
+  translationCore on-disk contract are unchanged by that plan.
 - Exact upstream Greek Room commit to pin (`third_party/greek-room/UPSTREAM_COMMIT.txt`)
 - License inventory before distribution (Greek Room is BSD-3-Clause at the
   repo root but the `greekroom` package classifier says Apache — reconcile

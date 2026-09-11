@@ -19,6 +19,50 @@ to prevent. Rejected ideas belong here too.
 
 ---
 
+## 2026-09-11 — Bridge-private state gets a second per-project SQLite, not v15
+
+**Decision:** The file-based Bridge-private stores (decisions, QA dispositions, audit
+copies, progress, AI review, triage, issue resolutions, alignment history, metrics, team)
+move into a new `bridge-workbench.sqlite3` beside the v14 semantic DB, with an append-only
+`change_log`. translationCore-compatible files stay exactly as they are. A small app-level
+`workspace.sqlite3` holds users, devices, the registry and a per-project rollup cache.
+**Because:** the v14 DB's invariants (`RECORD_DEPENDENCY_TABLES`, `recovery_check`) are about
+analysis records with a lifecycle; forcing decision tables into them weakens the tests that
+protect staleness. A project folder must stay self-contained so a copied or shared project
+keeps its review history, which rules out one app-level store as the primary.
+**Rules out:** extending the semantic schema for non-analysis data; any Bridge feature that
+needs the app-level DB to open a project. Long form: `docs/TEAM_ARCHITECTURE.md`.
+**Revisit when:** the two databases need a cross-file transaction that the transaction
+journal cannot provide.
+
+## 2026-09-11 — Identity is a chosen name plus a device, never a password
+
+**Decision:** Every recorded action carries a `user_id` and `device_id`. Locally a user
+picks a display name at startup. In team mode an admin issues a join code that becomes a
+per-device token. Roles are `project_admin`, `editor`, `reporter`. Historical `"human"`
+rows stay as an explicit `legacy:human` actor and are not backfilled.
+**Because:** the need is "who did it", not account security. Passwords add support cost for
+field teams; username-only on a shared hub lets anyone act as anyone. A join code is the
+smallest thing that makes attribution and roles real.
+**Rules out:** password accounts and reset flows; reassigning past decisions to a named
+user. Narrows #45 to this scope.
+**Revisit when:** Bridge is hosted for people who are not already a known team.
+
+## 2026-09-11 — The team hub is an optional sync peer, not the primary store
+
+**Decision:** Collaboration is an optional `bridge-engine --serve` hub that exchanges
+per-project change-log events with desktops and serves a separate browser dashboard. The
+first slice syncs decisions, findings, progress and assignments only. Scripture text never
+travels through the hub. Hub code lives behind an optional `[server]` extra and is never in
+the desktop sidecar.
+**Because:** offline-first is an invariant (entry below). A device must keep working with
+the hub unreachable, so the desktop's own databases stay authoritative and the hub merges
+events with the existing `expected_revision` check. Keeping Scripture out preserves Stage
+9B.3b as the only Scripture writer.
+**Rules out:** client-server Bridge; the hub as a second Scripture writer; a dashboard the
+desktop exe depends on. Narrows #46 and #47.
+**Revisit when:** a team needs live co-editing of verse text rather than shared review state.
+
 ## 2026-09-11 — Ideas are issues; no proposal stage, no status labels
 
 **Decision:** New ideas go straight to an issue using the Idea template. There is no
