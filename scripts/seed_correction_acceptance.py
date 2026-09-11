@@ -195,6 +195,116 @@ def seed_case_c(root: Path) -> dict[str, object]:
     }
 
 
+# --- V1.1 Case A restaging: real Tamil-negation regression -------------------
+#
+# Reuses, verbatim, the exact source/target text already validated by two
+# automated regression tests added in commit ef49e9e:
+#
+#   test_meaning_analysis_stage7.py::test_tamil_negation_preserves_polarity_with_combining_marks
+#       DeterministicMeaningComparator.compare("οὐ", "இல்லை", "POLARITY", ...)
+#
+#   test_qa_audit_stage8.py::test_tamil_negative_preservation_does_not_emit_false_negation_problem
+#       book PHP, chapter 1 verse 22, language "ta", target text "இல்லை"
+#       (real UGNT PHP 1:22 ends "...οὐ γνωρίζω", so the negation particle
+#       "οὐ" is genuine bundled source text at this reference, not invented)
+#
+# That unit test drives Stage 6B location/Stage 7/Stage 8 directly. This
+# fixture instead runs the real Stage 5->6A->6B->7->8 pipeline through
+# AnalysisJobManager, the same way seed_case_c() does, so the installed app
+# exercises the identical regression end to end.
+NEGATION_SOURCE_TEXT = "οὐ"
+NEGATION_TARGET_TEXT = "இல்லை"
+NEGATION_REFERENCE = {"book": "PHP", "chapter": "1", "verse": "22"}
+
+
+def build_negation_project(root: Path) -> Path:
+    (root / "php").mkdir(parents=True)
+    alignment = root / ".apps" / "translationCore" / "alignmentData" / "php"
+    alignment.mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps({
+        "project": {"id": "php", "name": "Philippians"},
+        "target_language": {"id": "ta", "name": "Tamil", "direction": "ltr"},
+        "resource": {"id": "acceptance"}, "tc_version": "8",
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (root / "php" / "1.json").write_text(
+        json.dumps({"22": NEGATION_TARGET_TEXT}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (alignment / "1.json").write_text(json.dumps(
+        {"22": {"alignments": [], "wordBank": []}}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8")
+    lines = ["\\id PHP", "\\c 1", "\\p", f"\\v 22 {NEGATION_TARGET_TEXT}"]
+    (root / "php.usfm").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return root
+
+
+def seed_case_a_negation(root: Path) -> dict[str, object]:
+    """Restage the ef49e9e Tamil-negation regression through the real pipeline."""
+    build_negation_project(root)
+    project_id = _register(root)
+    runtime = PassageSemanticRuntime(TranslationCoreProject(root), project_id)
+    vectors = {NEGATION_SOURCE_TEXT: [1.0], NEGATION_TARGET_TEXT: [1.0]}
+    runtime.semantic_location = SemanticLocationEngine(
+        runtime, FixtureEmbeddingProvider(vectors))
+    manager = AnalysisJobManager(allow_fixture_provider=True)
+    started = manager.start(runtime, requested_scope={
+        "kind": "SELECTED_RANGE", "startChapter": "1", "startVerse": "22",
+        "endChapter": "1", "endVerse": "22",
+    })
+    budget = float(os.environ.get("BRIDGE_FIXTURE_ANALYSIS_TIMEOUT", "300"))
+    deadline = time.monotonic() + budget
+    job = manager.status(started["jobId"])
+    while time.monotonic() < deadline:
+        job = manager.status(started["jobId"])
+        if job["overallStatus"] in {
+            "COMPLETED", "COMPLETED_WITH_WARNINGS", "FAILED", "CANCELLED",
+        }:
+            break
+        time.sleep(0.02)
+    if job["overallStatus"] not in {"COMPLETED", "COMPLETED_WITH_WARNINGS"}:
+        raise SystemExit(f"Case D (Tamil negation) analysis failed: {job['failures']}")
+
+    audit = runtime.qa_audit.get_range(job["stageStatuses"]["QA"]["runId"])
+    negation_findings = [f for f in audit["findings"] if f["kind"] == "NEGATION_PROBLEM"]
+    if negation_findings:
+        raise SystemExit(
+            "Case D (Tamil negation) emitted a false NEGATION_PROBLEM: "
+            + json.dumps(negation_findings, ensure_ascii=False, indent=2)
+        )
+
+    meaning = runtime.repository.meaning_analysis_run(job["stageStatuses"]["MEANING"]["runId"])
+    polarity_components = [
+        component
+        for assessment in meaning["assessments"]
+        for component in assessment["componentAssessments"]
+        if component["coverageDimension"] == "POLARITY"
+    ]
+    if not polarity_components or any(
+        component["status"] != "PRESERVED" for component in polarity_components
+    ):
+        raise SystemExit(
+            "Case D (Tamil negation) did not report POLARITY PRESERVED: "
+            + json.dumps(polarity_components, ensure_ascii=False, indent=2)
+        )
+
+    _write_identity(root, project_id)
+    return {
+        "case": "D",
+        "kind": "production",
+        "projectId": project_id,
+        "sourceReference": "PHP 1:22",
+        "targetReference": "PHP 1:22",
+        "sourceText": NEGATION_SOURCE_TEXT,
+        "targetText": NEGATION_TARGET_TEXT,
+        "qaRun": audit["id"],
+        "meaningRun": meaning["id"],
+        "analysisJob": job["jobId"],
+        "findings": len(audit["findings"]),
+        "negationProblemFindings": len(negation_findings),
+        "polarityComponents": polarity_components,
+    }
+
+
 # --- Cases A and B: controlled verification fixtures ------------------------
 
 def _seed_controlled(
@@ -272,6 +382,7 @@ def main() -> int:
         ("A-passed-controlled", seed_case_a),
         ("B-failed-controlled", seed_case_b),
         ("C-uncertain-production", seed_case_c),
+        ("D-tamil-negation", seed_case_a_negation),
     ]
     summaries = []
     for name, seed in cases:
