@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import getpass
 import json
 import os
 from ctypes import wintypes
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -220,14 +222,46 @@ class AppSettings:
         self.data['triage_hide_threshold'] = 0 if number <= 0 else max(50, min(100, number))
         self.save_sanitized()
 
+    @staticmethod
+    def _seed_reviewer_name() -> str:
+        """A brand-new profile has never had a reviewer name typed in.
+
+        V11-005: seeding from a product-sounding literal ('AI Bridge
+        Reviewer') let every unattributed action look like Bridge itself
+        did it. Seed from the OS account instead -- still just a starting
+        point, fully editable via Settings -- and fall back to a name that
+        obviously means "not yet set" if the OS account can't be read.
+        """
+        try:
+            name = str(getpass.getuser() or '').strip()
+            if name:
+                return name
+        except Exception:
+            pass
+        return 'Unnamed Reviewer'
+
     @property
     def reviewer_name(self) -> str:
-        return str(self.data.get('reviewer_name') or 'AI Bridge Reviewer')
+        value = str(self.data.get('reviewer_name') or '').strip()
+        if value:
+            return value
+        seeded = self._seed_reviewer_name()
+        self.data['reviewer_name'] = seeded
+        self.save_sanitized()
+        return seeded
 
     @reviewer_name.setter
     def reviewer_name(self, value: str) -> None:
-        self.data['reviewer_name'] = value.strip() or 'AI Bridge Reviewer'
+        self.data['reviewer_name'] = str(value or '').strip() or self._seed_reviewer_name()
+        self.data['reviewer_name_updated_at'] = datetime.now(timezone.utc).isoformat()
         self.save_sanitized()
+
+    @property
+    def reviewer_name_updated_at(self) -> str:
+        """UTC ISO-8601 timestamp of the last Settings-initiated rename, or
+        '' if the reviewer name has never been explicitly changed (the
+        OS-seeded default does not count as a change)."""
+        return str(self.data.get('reviewer_name_updated_at') or '')
 
     @property
     def reviewer_mode(self) -> str:

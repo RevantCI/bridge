@@ -3702,6 +3702,7 @@ class BridgeEngine:
             "apiBaseUrl": self.settings.api_base_url,
             "model": self.settings.model,
             "reviewerName": self.settings.reviewer_name,
+            "reviewerNameUpdatedAt": self.settings.reviewer_name_updated_at,
             "reviewerMode": self.settings.reviewer_mode,
             "paratextUsername": self.settings.paratext_username,
             "paratextNavigation": self.settings.paratext_navigation,
