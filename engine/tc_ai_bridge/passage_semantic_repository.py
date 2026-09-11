@@ -1853,7 +1853,7 @@ class FoundationRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM correction_verifications WHERE application_id=? "
-                "ORDER BY created_at,id", (application_id,),
+                "ORDER BY created_at,rowid", (application_id,),
             ).fetchall()
         return [self._verification_payload(row) for row in rows]
 
@@ -4155,7 +4155,7 @@ class FoundationRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM correction_proposal_events WHERE proposal_id=? "
-                "ORDER BY created_at,id", (proposal_id,),
+                "ORDER BY created_at,rowid", (proposal_id,),
             ).fetchall()
         return [{
             "id": row["id"], "proposalId": row["proposal_id"],
@@ -4561,7 +4561,7 @@ class FoundationRepository:
     def review_records(self, entity_type: str, entity_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM review_records WHERE entity_type=? AND entity_id=? ORDER BY created_at,id",
+                "SELECT * FROM review_records WHERE entity_type=? AND entity_id=? ORDER BY created_at,rowid",
                 (entity_type, entity_id),
             ).fetchall()
         return [

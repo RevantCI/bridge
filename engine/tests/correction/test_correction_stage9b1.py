@@ -830,3 +830,41 @@ def test_review_context_protocol_is_read_only_and_exposes_no_apply_method(tmp_pa
     assert response["success"] is True, response
     assert response["result"]["currentTargets"][0]["text"] == TEXT
     assert runtime.repository.correction_proposals_for_finding("qa-1") == before
+
+
+def test_proposal_history_is_insertion_ordered_when_timestamps_tie(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ledger read order must be write order even inside one clock tick.
+
+    On Python 3.12 for Windows `datetime.now()` advances about every 15 ms, and
+    event ids are uuid4, so `ORDER BY created_at,id` returned events written in
+    the same tick in random order. The fsync behind every commit used to hide
+    this; without it (tests/conftest.py's SQLite opt-out) the history came back
+    scrambled in roughly half the runs. Freezing the clock makes every event tie.
+    """
+    frozen = "2026-09-11T12:00:00+00:00"
+    monkeypatch.setattr(FoundationRepository, "_now", staticmethod(lambda: frozen))
+    runtime = _Runtime(tmp_path / "semantic.sqlite3")
+    service = CorrectionWordingService(runtime)
+    created = service.create_proposal(
+        finding_id="qa-1", intent=_intent(runtime),
+        human_proposed_text="wording 1", actor_id="Reviewer",
+    )
+    revision = 1
+    for step in range(2, 10):
+        service.edit_proposal(
+            created["id"], proposed_text=f"wording {step}", explanation="edited",
+            expected_revision=revision, actor_id="Reviewer",
+        )
+        revision += 1
+    service.reject_proposal(created["id"], expected_revision=revision, actor_id="Reviewer")
+
+    history = runtime.repository.correction_proposal_history(created["id"])
+    assert {event["createdAt"] for event in history} == {frozen}
+    assert [event["eventType"] for event in history] == (
+        ["CREATED"] + ["EDITED"] * 8 + ["REJECTED"]
+    )
+    assert [event["newRevision"] for event in history] == sorted(
+        event["newRevision"] for event in history
+    )
