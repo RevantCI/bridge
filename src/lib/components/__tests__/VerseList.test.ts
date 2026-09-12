@@ -27,6 +27,8 @@ import {
   verseKey,
 } from "../../stores";
 import { alignmentOpen, alignmentKey } from "../../alignmentUi";
+import { editingChapter, editingVerse, editSaving, recheckingKey } from "../../verseEditor";
+import { aiReviewRequest, aiJobActive } from "../../aiReviewUi";
 import type { QaFinding } from "../../types/finding";
 
 /** The store holds full QaFindings; fixtures.ts only builds summaries/details. */
@@ -78,6 +80,12 @@ function seed(text: string, findings: QaFinding[] = []): void {
   });
   alignmentOpen.set(false);
   alignmentKey.set("");
+  editingChapter.set("");
+  editingVerse.set("");
+  editSaving.set(false);
+  recheckingKey.set("");
+  aiReviewRequest.set(null);
+  aiJobActive.set(false);
   vi.clearAllMocks();
   decideVerse.mockResolvedValue(undefined);
   editVerse.mockResolvedValue({ issueResolutionsNeedingRecheck: 0 });
@@ -304,13 +312,13 @@ describe("VerseList footnote handling", () => {
     expect(screen.getByRole("menu", { name: /Actions for Second finding/i })).toBeInTheDocument();
   });
 
-  it("leaves a verse with no underlined finding out of the menu shortcut", async () => {
+  it("opens the general verse menu, not the finding menu, when the shortcut fires with no underlined finding", async () => {
     seed("alpha beta", [finding({ start_offset: null, end_offset: null })]);
     render(VerseList, { props: { onSelect: vi.fn() } });
     const row = verseRow();
-    expect(row).not.toHaveAttribute("aria-keyshortcuts");
     await fireEvent.keyDown(row, { key: "F10", shiftKey: true });
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.getByRole("menu", { name: /Actions for verse 6/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Accept finding" })).toBeNull();
   });
 
   it("advertises the popup on the focusable row rather than the plain mark", () => {
@@ -382,5 +390,80 @@ describe("VerseList alignment glyph (issue #70)", () => {
     await fireEvent.click(glyph());
     expect(onSelect).not.toHaveBeenCalled();
     expect(get(alignmentOpen)).toBe(false);
+  });
+});
+
+describe("VerseList verse context menu (issue #69)", () => {
+  beforeEach(() => seed("alpha beta"));
+
+  it("opens on a plain right-click with AI review and Edit verse", async () => {
+    const onSelect = vi.fn();
+    render(VerseList, { props: { onSelect } });
+    await fireEvent.contextMenu(verseRow());
+    expect(screen.getByRole("menu", { name: /Actions for verse 6/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "AI review" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Edit verse" })).toBeInTheDocument();
+    expect(onSelect).toHaveBeenCalledWith("6");
+  });
+
+  it("does not also open the finding menu when a finding mark is right-clicked", async () => {
+    seed("alpha beta", [finding({
+      start_offset: 0, end_offset: 5, original_text: "alpha", suggested_replacement: null,
+    })]);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector("mark") as HTMLElement);
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    expect(screen.getByRole("menuitem", { name: "Accept finding" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "AI review" })).toBeNull();
+  });
+
+  it("opens the AI review submenu and requests a scope, then closes", async () => {
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(verseRow());
+    await fireEvent.click(screen.getByRole("menuitem", { name: "AI review" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Chapter" }));
+    expect(get(aiReviewRequest)).toEqual({ chapter: "1", verse: "6", scope: "chapter" });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("starts editing the verse from the menu's Edit verse item", async () => {
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(verseRow());
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Edit verse" }));
+    expect(get(editingChapter)).toBe("1");
+    expect(get(editingVerse)).toBe("6");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("disables every action while background checking runs", async () => {
+    checkingProgress.set({
+      running: true, percent: 40, label: "Checking…", jobId: "j1", state: "running", error: "", scope: "chapter",
+    });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(verseRow());
+    expect(screen.getByRole("menuitem", { name: "Edit verse" })).toBeDisabled();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "AI review" }));
+    expect(screen.getByRole("menuitem", { name: "Verse" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Chapter" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Book" })).toBeDisabled();
+  });
+
+  it("disables only the verse scope while an AI review job is already active", async () => {
+    aiJobActive.set(true);
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(verseRow());
+    await fireEvent.click(screen.getByRole("menuitem", { name: "AI review" }));
+    expect(screen.getByRole("menuitem", { name: "Verse" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Chapter" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Book" })).toBeDisabled();
+  });
+
+  it("opens the same verse menu via Shift+F10 and closes it on Escape", async () => {
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    const row = verseRow();
+    await fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    const menu = screen.getByRole("menu", { name: /Actions for verse 6/i });
+    await fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });

@@ -12,12 +12,18 @@
     editError, saveVerseEdit, cancelVerseEdit, startVerseEdit, recheckingKey,
   } from "../verseEditor";
   import { openAlignment } from "../alignmentUi";
+  import { requestAIReview, aiJobActive, type AIReviewScope } from "../aiReviewUi";
 
   export let onSelect: (verse: string) => void;
 
   let openNotes: { kind: VerseNoteKind; notes: VerseNote[]; reference: string } | null = null;
   let contextMenu: { finding: QaFinding; verse: string; x: number; y: number } | null = null;
   let contextBusy = false;
+  // The general verse right-click menu (issue #69) -- a separate menu from
+  // contextMenu above, which only ever opens on a finding span. The two
+  // never open at once: a right-click on a mark stops propagation before it
+  // reaches the row.
+  let verseMenu: { verse: string; x: number; y: number } | null = null;
   // Which underlined finding Left/Right last landed on, scoped to one verse
   // key so switching verses starts at that verse's first finding again.
   let activeFindingVerseKey = "";
@@ -57,6 +63,82 @@
       title: "Leave the verse as it is and move this finding to Ignored in the review panel.",
     },
   ] : [];
+
+  /**
+   * The general verse right-click menu (issue #69): "AI review" opens a
+   * submenu offering the same three scopes ReviewPanel's AI review tab
+   * offers, and "Edit verse" is the same action the double-click/button
+   * routes already trigger. Disabled reasons mirror ReviewPanel's own
+   * buttons exactly (aiJobActive stands in for its local aiJobBusy) so the
+   * menu and the panel never disagree about when an action is available.
+   */
+  $: verseMenuActions = verseMenu ? buildVerseMenuActions(verseMenu.verse) : [];
+
+  function buildVerseMenuActions(verse: string) {
+    const busyTitle = "Wait for background checking, editing or a running AI review to finish";
+    const alreadyEditingThis = $editingChapter === $currentChapter && $editingVerse === verse;
+    const editBlocked = $checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey);
+    const editDisabled = editBlocked || alreadyEditingThis;
+    const verseAiDisabled = editBlocked || $aiJobActive;
+    const scopeAiDisabled = $checkingProgress.running || $aiJobActive;
+    return [
+      {
+        id: "ai-review",
+        label: "AI review",
+        title: "Run an evidence-grounded AI review for this verse, its chapter, or its book",
+        submenu: [
+          {
+            id: "ai-review:verse",
+            label: "Verse",
+            disabled: verseAiDisabled,
+            title: verseAiDisabled ? busyTitle : "Run an evidence-grounded AI review for this verse",
+          },
+          {
+            id: "ai-review:chapter",
+            label: "Chapter",
+            disabled: scopeAiDisabled,
+            title: scopeAiDisabled ? busyTitle : "Run an evidence-grounded AI review across every verse in this chapter",
+          },
+          {
+            id: "ai-review:book",
+            label: "Book",
+            disabled: scopeAiDisabled,
+            title: scopeAiDisabled ? busyTitle : "Run an evidence-grounded AI review across every verse in this book",
+          },
+        ],
+      },
+      {
+        id: "edit-verse",
+        label: "Edit verse",
+        separatorBefore: true,
+        disabled: editDisabled,
+        title: alreadyEditingThis
+          ? "This verse is already being edited."
+          : editBlocked ? "Wait for background checking to finish before editing" : "Edit this verse",
+      },
+    ];
+  }
+
+  function openVerseMenu(event: MouseEvent, verse: string): void {
+    event.preventDefault();
+    event.stopPropagation();
+    selectFromList(verse);
+    verseMenu = { verse, x: event.clientX, y: event.clientY };
+  }
+
+  function onVerseContextAction(event: CustomEvent<{ id: string }>): void {
+    if (!verseMenu) return;
+    const verse = verseMenu.verse;
+    const id = event.detail.id;
+    verseMenu = null;
+    if (id === "edit-verse") {
+      startVerseEdit($currentChapter, verse);
+      return;
+    }
+    const scope: AIReviewScope | null =
+      id === "ai-review:verse" ? "verse" : id === "ai-review:chapter" ? "chapter" : id === "ai-review:book" ? "book" : null;
+    if (scope) requestAIReview($currentChapter, verse, scope);
+  }
 
   const hasProposedFix = (finding: QaFinding): boolean =>
     finding.suggested_replacement !== null
@@ -102,16 +184,19 @@
     verseKeyValue === activeFindingVerseKey && activeFindingIndex < count ? activeFindingIndex : 0;
 
   /**
-   * Keyboard route to the same menu the right-click opens — without it,
-   * "Apply proposed fix" would be reachable by pointer only, since the review
-   * panel has no apply-fix control.
+   * Keyboard route to the same menus their right-click equivalents open —
+   * without it, "Apply proposed fix" and the verse menu (issue #69) would be
+   * reachable by pointer only, since the review panel has no apply-fix
+   * control and (for a verse with no findings) no context-menu equivalent
+   * of its own.
    *
    * The verse row stays the single tab stop, the way QaFindingList's listbox
    * does it: making every underlined span focusable would add one tab stop per
    * finding inside the verse text, so tabbing through a checked chapter would
    * stop on hundreds of words. Left/Right move the active finding within the
-   * row instead, and Shift+F10 (or the Menu key) opens the menu anchored under
-   * that finding's underline.
+   * row instead, and Shift+F10 (or the Menu key) opens a menu: anchored under
+   * the active finding's underline when the verse has one, or under the row
+   * itself -- the general "AI review / Edit verse" menu -- when it doesn't.
    */
   function onVerseKeydown(
     event: KeyboardEvent,
@@ -125,7 +210,16 @@
       onSelect(verse);
       return;
     }
-    if (findingIds.length === 0) return;
+    const isMenuKey = event.key === "ContextMenu" || (event.shiftKey && event.key === "F10");
+    if (findingIds.length === 0) {
+      if (!isMenuKey) return;
+      event.preventDefault();
+      onSelect(verse);
+      const row = event.currentTarget as HTMLElement;
+      const rect = row.getBoundingClientRect();
+      verseMenu = { verse, x: rect.left, y: rect.bottom };
+      return;
+    }
     const index = activeIndexFor(key, findingIds.length);
     if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
       event.preventDefault();
@@ -135,7 +229,7 @@
         (index + (event.key === "ArrowRight" ? 1 : -1) + findingIds.length) % findingIds.length;
       return;
     }
-    if (event.key !== "ContextMenu" && !(event.shiftKey && event.key === "F10")) return;
+    if (!isMenuKey) return;
     event.preventDefault();
     const finding = findings.find((item) => item.id === findingIds[index]);
     if (!finding) return;
@@ -305,17 +399,25 @@
       class:check-failed={checkStatus === "failed" || checkStatus === "cancelled"}
       role="button"
       tabindex="0"
-      aria-haspopup={menuFindingIds.length ? "menu" : undefined}
-      aria-keyshortcuts={menuFindingIds.length ? "Shift+F10" : undefined}
+      aria-haspopup="menu"
+      aria-keyshortcuts="Shift+F10"
       on:click={() => selectFromList(v)}
       on:dblclick={() => beginEditFromList(v)}
       on:keydown={(e) => onVerseKeydown(e, v, key, menuFindingIds, findings)}
+      on:contextmenu={(e) => openVerseMenu(e, v)}
     >
       <div class="vnum">
         {v}{#if checkStatus === "succeeded" && openCount === 0}&nbsp;✓{:else if checkStatus === "failed" || checkStatus === "cancelled"}&nbsp;⚠{/if}
       </div>
       {#if isEditingThis}
-        <div class="vedit" on:click|stopPropagation on:dblclick|stopPropagation on:keydown|stopPropagation role="presentation">
+        <div
+          class="vedit"
+          on:click|stopPropagation
+          on:dblclick|stopPropagation
+          on:keydown|stopPropagation
+          on:contextmenu|stopPropagation
+          role="presentation"
+        >
           <div class="vedit-row">
             <textarea use:autosize bind:value={$editText} disabled={$editSaving} />
             <div class="edit-actions">
@@ -381,6 +483,17 @@
     actions={contextActions}
     on:action={onContextAction}
     on:close={() => (contextMenu = null)}
+  />
+{/if}
+
+{#if verseMenu}
+  <FindingContextMenu
+    x={verseMenu.x}
+    y={verseMenu.y}
+    findingLabel="Actions for verse {verseMenu.verse}"
+    actions={verseMenuActions}
+    on:action={onVerseContextAction}
+    on:close={() => (verseMenu = null)}
   />
 {/if}
 

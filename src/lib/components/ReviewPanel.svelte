@@ -17,6 +17,7 @@
     setPendingAcceptFinding,
   } from "../verseEditor";
   import { alignmentOpen, alignmentKey, openAlignment } from "../alignmentUi";
+  import { aiReviewRequest, aiJobActive } from "../aiReviewUi";
   import type { AiExplainResult, AIReviewJobSnapshot, FindingStatus } from "../types/finding";
 
   let greekRoomChecking = false;
@@ -103,6 +104,7 @@
 
   $: currentReviewReference = `${$project?.path ?? ""}::${$selectedVerse ? verseKey($currentChapter, $selectedVerse) : ""}`;
   $: aiJobBusy = isAIReviewJobActive(aiJob);
+  $: aiJobActive.set(aiJobBusy);
   // Mirrors exactly what .panel-pinned renders. Without it the block shows
   // as an empty padded strip with a rule under it whenever the verse is
   // idle, which is most of the time now the AI status has moved to its tab.
@@ -263,6 +265,15 @@
       aiExplainErrorJobId = "";
       aiExplainErrorReference = requestedReference;
     }
+  }
+
+  // The verse-row context menu (issue #69) requests a scope this way instead
+  // of calling startAIReview directly, since it lives outside this
+  // component and has no reason to duplicate the job/polling state above.
+  $: if ($aiReviewRequest) {
+    const { chapter, verse, scope } = $aiReviewRequest;
+    aiReviewRequest.set(null);
+    void startAIReview(scope, chapter, verse);
   }
 
   async function cancelAIReview(): Promise<void> {
