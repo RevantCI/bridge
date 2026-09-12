@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+  import { bridge, type EngineInfo } from "../api/bridgeClient";
   import { project, currentChapter, navigationStatus } from "../stores";
 
   export let screen: "home" | "dashboard" | "validation" | "review" | "editor" | "report";
@@ -17,6 +19,17 @@
   export let bookSwitching = false;
 
   let gotoValue = "";
+  // Best-effort: same call SettingsModal already makes; a slow or failed
+  // lookup should never hold up the top bar, so failure just leaves the
+  // version off rather than showing an error here.
+  let engineInfo: EngineInfo | null = null;
+  onMount(async () => {
+    try {
+      engineInfo = await bridge.engineInfo();
+    } catch (e) {
+      console.error("failed to load engine info", e);
+    }
+  });
 
   function handleBookSelect(e: Event) {
     const value = (e.target as HTMLSelectElement).value;
@@ -40,7 +53,10 @@
 </script>
 
 <div class="topbar no-print">
-  <div class="brand"><div class="mark" /> Bridge</div>
+  <div class="brand">
+    <div class="mark" /> Bridge
+    {#if engineInfo}<span class="version" title="Schema v{engineInfo.companionSchemaVersion}">{engineInfo.bridgeVersion}</span>{/if}
+  </div>
   <div class="divider" />
 
   <nav class="breadcrumb" aria-label="Navigation">
@@ -121,6 +137,7 @@
   .topbar { height: 52px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 16px; gap: 14px; flex-shrink: 0; }
   .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-md); color: var(--text); white-space: nowrap; }
   .mark { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), var(--pass)); flex-shrink: 0; }
+  .version { font-size: var(--fs-3xs); font-weight: 600; color: var(--text-3); }
   .divider { width: 1px; height: 24px; background: var(--border); flex-shrink: 0; }
   .breadcrumb { display: flex; align-items: center; gap: 4px; min-width: 0; flex-shrink: 1; overflow: hidden; }
   .crumb { border: 0; background: transparent; color: var(--text-2); font-size: var(--fs-sm); font-weight: 600; padding: 4px 6px; border-radius: 6px; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
