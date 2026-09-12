@@ -6736,3 +6736,115 @@ individually in isolation. Filed as #85 rather than fixed here.
 Not measured: CI, since `-n auto` is not the gate there. Not done: any #76/#77 store
 migration, or wiring `WorkspaceRepository`'s path into `bridge_service.py` — both out
 of scope for this issue.
+
+## Verse right-click menu (#69), clickable alignment glyph (#70), and the V1.1
+acceptance 01 build (2026-09-12)
+
+Both issues were filed from the same 2026-09-11 stakeholder wireframe
+(`ContextMenu`/`Main`/`GlyphStates` artboards) and landed in this order.
+
+**#70 — the alignment glyph became a real control.** `VerseList.svelte`'s
+per-row indicator was a plain `<span>` cycling `● ◐ ! ○` by completion state,
+with no click handler — the only way to open Align Words was
+`ReviewPanel.svelte`'s separate "⇄ Align words" button, scoped to whichever
+verse the side panel already had selected. Per the maintainer's own comment
+on the issue ("Use this icon ⇄"), the glyph is now a single `⇄` character
+for every state, colored the same way the four states already were
+(`--success`/`--warning`/`--danger`/`--text-3`), wired as a real `<button>`.
+Opening the modal needed the same open/verse-key state in two components
+without either reaching into the other's internals, so it moved into a new
+`src/lib/alignmentUi.ts` (`alignmentOpen`, `alignmentKey`, `openAlignment()`)
+— same shape as the pre-existing `verseEditor.ts` split for the inline edit
+textarea. The row's guard order matters: `openAlignmentFromList()` calls
+`openAlignment()` first and only then selects the verse, not the other way
+around, because a disabled `<button>` can still receive a synthetic click in
+tests (and, it turns out, in some real input-dispatch paths) — select-first
+would have changed `$selectedVerse` even when the guard correctly refused to
+open the modal.
+
+**#69 — a verse with no findings finally has something to right-click.**
+`FindingContextMenu.svelte` (the #38 component, reused rather than
+duplicated per this issue's own text) gained exactly one level of flyout
+submenu: an action can carry a `submenu` array, in which case clicking it
+opens a second `.finding-menu` positioned off the first (flips to the left
+of the parent when it wouldn't fit on the right) instead of dispatching
+`action`; a leaf inside it dispatches `action` exactly like a top-level item,
+so no caller needs to know which level an id came from. Keyboard: ArrowRight
+opens a submenu-capable focused item and moves focus in, ArrowLeft closes it
+and returns focus to the parent, Escape closes only the innermost open
+level. `VerseList.svelte` adds a second menu instance (`verseMenu`, separate
+from the existing finding-only `contextMenu` — a right-click on a `<mark>`
+still `stopPropagation`s before it reaches the row) offering **AI review ▸
+Verse/Chapter/Book** and **Edit verse**. Shift+F10 on a verse with no
+findings used to simply return; it now opens this menu at the row instead
+(`onVerseKeydown`'s `findingIds.length === 0` branch), and the row's
+`aria-haspopup`/`aria-keyshortcuts` are unconditional now for the same
+reason. "Edit verse" calls `startVerseEdit()` directly — already shared via
+`verseEditor.ts`. AI review needed the same cross-component problem #70 just
+solved, but `ReviewPanel.svelte`'s `startAIReview()` carries real job/polling
+state (`aiJob`, `aiPollTimer`, `processedAIResults`, …) that has no reason to
+move, so the new `src/lib/aiReviewUi.ts` is a request, not a state move:
+`requestAIReview(chapter, verse, scope)` sets `aiReviewRequest`, which
+`ReviewPanel` consumes with `$: if ($aiReviewRequest) { ...; void
+startAIReview(...) }`, and mirrors its own `aiJobBusy` out through
+`aiJobActive` so the menu can disable its scopes without reaching into
+`ReviewPanel`'s internals either. Every menu item disables under exactly the
+same conditions as the review panel's own buttons (`checkingProgress`,
+`editSaving`, `recheckingKey`, `aiJobActive`, plus "already editing this
+verse" for Edit verse) — deliberately, so the menu and the panel can never
+disagree about when an action is available.
+
+**Caught while building the visual reference, not while implementing.**
+Producing a code-accurate recreation of the open submenu for the issue's
+closing comment (no GUI automation is available to actually screenshot the
+desktop app in this environment) showed the "AI review" parent item going
+visually unremarkable the instant its submenu opened — focus moves into the
+submenu immediately, so nothing was left to indicate "this is the expanded
+one." Fixed in the same commit: `button[aria-expanded="true"]` in
+`FindingContextMenu.svelte` keeps the accent background.
+
+**Frontend gates:** `svelte-check` 0 errors/0 warnings; Vitest 335 passed /
+24 files (16 new: 7 in `VerseList.test.ts` for the alignment glyph, 8 more
+in `VerseList.test.ts` plus 5 in `FindingContextMenu.test.ts` for the verse
+menu and its submenu mechanics — open/close, disabled states, keyboard
+navigation, and the finding-menu-still-wins-on-a-mark regression check);
+production build passed. Two commits: `9baac8c` (#70), `d354b23` (#69), both
+pushed directly to `main` per the project's own no-branch-protection
+workflow.
+
+**V1.1 acceptance 01 — installed build.** Rebuilt both sidecars
+(`.\scripts\build-sidecars.ps1`, real Wildebeest 0.9.2) and ran
+`npm run tauri build` from `d354b23` — a first release compile (no prior
+`target/release`), 6m40s. App version stayed `0.9.6`, unchanged, same
+convention as the prior `docs/V1_1_UNICODE_ACCEPTANCE.md` build; there was
+no pre-existing release artifact in this local `target/` to protect this
+time, so the NSIS output was simply copied to a second, distinctly-named
+file rather than needing the backup/restore dance that build required.
+Installer: `Bridge_V1.1-acceptance-01_x64-setup.exe`, 57,662,277 bytes,
+SHA-256 `6808c0f6a40bffc3ee3362364fa274b7c5b111695a11222f76c5a6531ee1d3eb`.
+Full regression gate at this checkpoint: engine + Greek Room `pytest`
+(serial — `pytest-xdist` is not installed in this local `.venv`; CI itself
+runs serial too) **1112 passed, 0 failed, 0 skipped**, 19m10s; `cargo test`
+**12 passed**. `smoke_sidecars.py` against the freshly frozen
+`bridge-engine.exe` reproduced the same known, pre-existing
+`possibleDuplicate`-instead-of-`exactDuplicate` `project.inspectImport`
+mismatch the V1.1 Unicode acceptance build already disclosed — confirmed via
+`git show --stat` that neither `9baac8c` nor `d354b23` touches
+`project_registry.py`/`project_import.py`, so this is not a new regression.
+Full checkpoint metadata is in `docs/V1_1_ACCEPTANCE_01.md`.
+
+**Installed acceptance, same day.** The reviewer ran the checklist above
+against this installer and recorded PASS for both #69 and #70, plus six
+already-shipped V11 fixes verified in the same pass for the first time
+against a real installed build: V11-011 (in-app version display), V11-002/
+V11-005 (reviewer identity seeded from the OS account), V11-010 (verse
+edits — both direct and correction-application — journal the real
+reviewer), V11-001 (editor refresh after a correction applies, fixed
+2026-09-11 above, now installed-confirmed), and V11-002/V11-006 (history
+actor attribution, and the `providerMetadata` truthiness defect that
+produced literal `undefined · undefined` rows). Full detail is in
+`docs/V1_1_ACCEPTANCE_01.md`. Still outstanding: the
+`docs/V1_1_UNICODE_ACCEPTANCE.md` Cases A–D walkthrough, blocked behind #54
+(Stage 6B does not consult completed Word Alignment for cross-language
+location) — not attempted in this pass, and #57/#58/#61/#62/#63 remain open
+from the same round.

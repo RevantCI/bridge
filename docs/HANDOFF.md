@@ -3702,3 +3702,26 @@ unchanged (`v14`, `correction-verification-policy-v2`, `0.9.6`).
 
 Not yet done: the human-driven installed GUI walkthrough of
 `docs/V1_1_UNICODE_ACCEPTANCE.md`'s Cases A-D, and any V1.2 scoping.
+
+## 44.11 V1.1 acceptance 01: #69/#70 and six V11 fixes installed-verified (2026-09-12)
+
+`Bridge_V1.1-acceptance-01_x64-setup.exe` (sha256
+`6808c0f6a40bffc3ee3362364fa274b7c5b111695a11222f76c5a6531ee1d3eb`, embedded
+version still `0.9.6`, built from `d354b23`) carries two new frontend
+features — the clickable/colored alignment glyph (#70) and the verse
+right-click menu for AI review/Edit verse (#69) — plus everything already on
+`main` since the v0.9.6 baseline. The reviewer installed it and recorded
+PASS for both new features and for six already-shipped V11 fixes never
+before confirmed in an installed build: V11-011 (in-app version display),
+V11-002/V11-005 (reviewer identity), V11-010 (verse-edit journaling,
+including through correction application), V11-001 (editor refresh after a
+correction applies, §44.10 above), and V11-002/V11-006 (history actor
+attribution, including the `providerMetadata` truthiness defect that
+produced literal `undefined` rows). Full evidence and per-row detail:
+`docs/V1_1_ACCEPTANCE_01.md`.
+
+**Still PENDING, not touched by this pass:** the `docs/V1_1_UNICODE_ACCEPTANCE.md`
+Cases A-D human walkthrough remains blocked behind #54 (Stage 6B does not
+consult completed Word Alignment for cross-language location). #57, #58,
+#61, #62, and #63 also remain open from the same V11 round — none of the
+six are resolved by this entry.

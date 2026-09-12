@@ -473,26 +473,48 @@ failure than leaving a false positive on screen.
 
 ---
 
-## 6. Finding context menu — one component, two surfaces
+## 6. Finding context menu — one component, three menus
 
 `src/lib/components/FindingContextMenu.svelte` is presentation only: it takes
 `x`/`y`, a `findingLabel` and an `actions` array, and dispatches `action` and
 `close`. It owns Escape/Tab/outside-click dismissal, roving arrow-key focus,
 focus restore, and viewport clamping (`positionInsideViewport`, `EDGE_GAP = 8`).
-Two very different surfaces mount it, and **neither owns it** — put dismissal
+Three different menus mount it, and **none of them owns it** — put dismissal
 or positioning behaviour in the component, and only the action list in a caller:
 
 | Caller | Findings from | Menu offers | Decisions written as |
 |---|---|---|---|
-| `VerseList.svelte` (verse editor) | `findingsByVerse` store — engine `QaFinding`s | **Accept finding** (applies the proposed correction, then files the accept) / **Ignore** | `FindingStatus` via `decideLocalFinding`, shared with `ReviewPanel.svelte` |
+| `VerseList.svelte`, on a finding span (`contextMenu` state) | `findingsByVerse` store — engine `QaFinding`s | **Accept finding** (applies the proposed correction, then files the accept) / **Ignore** | `FindingStatus` via `decideLocalFinding`, shared with `ReviewPanel.svelte` |
 | `AlignmentQaMode.svelte` (QA review queue) | `QaFindingList.svelte` rows, which dispatch `contextmenu` upward | **Apply proposed fix** plus the four `REVIEWER_ACTIONS` | `QaDisposition` via `decideFinding`, labels from `REVIEWER_ACTIONS` |
+| `VerseList.svelte`, on the verse row itself (`verseMenu` state, issue #69) | Not finding-scoped — this is the fallback for a verse with nothing to right-click | **AI review ▸ Verse/Chapter/Book** (one level of flyout) / **Edit verse** | Not a decision — triggers `startVerseEdit()` (shared, `verseEditor.ts`) or `requestAIReview()` (new, `aiReviewUi.ts`) directly |
+
+An action can carry a `submenu: FindingMenuAction[]` (added for #69, installed-
+acceptance-verified 2026-09-12 — `docs/V1_1_ACCEPTANCE_01.md`): clicking it
+opens a second `.finding-menu` instead of dispatching `action`, positioned off
+the parent item (flips to its left if it wouldn't fit on the right); a leaf
+inside dispatches `action` exactly like a top-level item, so a caller never
+needs to know which level an id came from. `button[aria-expanded="true"]`
+keeps the parent visibly highlighted while its flyout is open — focus moves
+into the submenu the instant it opens, so without that rule the parent looked
+unremarkable while it was the one thing on screen with an open flyout.
+
+The verse-row menu's two actions each needed state shared with `ReviewPanel.svelte`
+without either component reaching into the other's internals — the same
+problem #70's alignment glyph solved for the Align Words modal
+(`alignmentUi.ts`). AI review couldn't use that exact shape: `startAIReview()`
+carries real job/polling state (`aiJob`, `aiPollTimer`, …) that has no reason
+to move out of `ReviewPanel`. `aiReviewUi.ts` is a request, not a state move:
+`requestAIReview(chapter, verse, scope)` sets a store `ReviewPanel` consumes
+reactively, and mirrors `ReviewPanel`'s own `aiJobBusy` back out as
+`aiJobActive` so the menu can disable its scopes to match.
 
 Three rules a new contributor will otherwise get wrong:
 
 1. **The menu is never the only route to an action** — that is an
-   accessibility defect, and it is what issue #38 was reopened for. Both
-   surfaces must respond to `ContextMenu` and `Shift+F10` and advertise
-   `aria-keyshortcuts`.
+   accessibility defect, and it is what issue #38 was reopened for. All
+   three menus must respond to `ContextMenu` and `Shift+F10` and advertise
+   `aria-keyshortcuts` — including the verse-row menu on a verse with no
+   findings, where Shift+F10 used to simply do nothing before #69.
 2. **One tab stop per list, not per finding.** `QaFindingList`'s listbox
    viewport and `VerseList`'s verse row are each a single tab stop, with arrow
    keys moving the active item inside them. Making every row or every
