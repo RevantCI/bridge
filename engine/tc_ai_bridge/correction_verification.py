@@ -43,7 +43,7 @@ from .passage_semantic_models import (
     VerificationStatus,
 )
 from .qa_audit import QA_ENGINE_VERSION, QA_POLICY_VERSION
-from .semantic_location import LOCATION_ENGINE_VERSION
+from .semantic_location import ALIGNMENT_EVIDENCE_VERSION, LOCATION_ENGINE_VERSION
 from .passage_semantic_repository import FoundationConflict, FoundationValidationError
 
 
@@ -429,6 +429,7 @@ class CorrectionVerificationService:
             "engine": VERIFICATION_ENGINE_VERSION,
             "policy": self.policy.version,
             "location": LOCATION_ENGINE_VERSION,
+            "alignmentEvidence": ALIGNMENT_EVIDENCE_VERSION,
             "meaning": MEANING_ENGINE_VERSION,
             "meaningPolicy": MEANING_POLICY_VERSION,
             "comparisonNormalization": COMPARISON_NORMALIZATION_VERSION,

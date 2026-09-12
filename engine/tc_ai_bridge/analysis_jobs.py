@@ -37,6 +37,7 @@ from .qa_audit import (
     QA_POLICY_VERSION,
 )
 from .semantic_location import (
+    ALIGNMENT_EVIDENCE_VERSION,
     LOCATION_CALIBRATION_VERSION,
     LOCATION_CONFIDENCE_POLICY_VERSION,
     LOCATION_ENGINE_VERSION,
@@ -172,6 +173,7 @@ class AnalysisJobManager:
             ),
             "locationConfidencePolicyVersion": LOCATION_CONFIDENCE_POLICY_VERSION,
             "locationCalibrationVersion": LOCATION_CALIBRATION_VERSION,
+            "alignmentEvidenceVersion": ALIGNMENT_EVIDENCE_VERSION,
             "meaningEngineVersion": MEANING_ENGINE_VERSION,
             "comparisonNormalizationVersion": COMPARISON_NORMALIZATION_VERSION,
             "meaningPolicyVersion": str(

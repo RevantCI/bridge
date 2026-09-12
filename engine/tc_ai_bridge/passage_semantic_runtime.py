@@ -468,6 +468,64 @@ def _canonical_reference(
     }
 
 
+def alignment_directory_digest(project: Any) -> str:
+    """Content digest over every tC alignmentData chapter file for this book.
+
+    Pulled out of `_scan_native_alignment_compatibility` so Stage 6B's word
+    alignment evidence (word_alignment_evidence.py) can put the exact same
+    digest into its run fingerprint without a second directory walk -- any
+    alignment change anywhere in the book changes this, which is deliberately
+    coarser than per-verse but matches the compatibility scan's own
+    memoization key exactly.
+    """
+    digest_builder = hashlib.sha256()
+    for path in sorted(project.alignment_dir.glob("*.json")):
+        digest_builder.update(path.name.encode("utf-8"))
+        digest_builder.update(path.read_bytes())
+    return digest_builder.hexdigest()
+
+
+def alignment_state_digest(project: Any) -> str:
+    """Content digest over alignment content AND completion/invalid markers.
+
+    Distinct from `alignment_directory_digest` (content only): completing or
+    invalidating an alignment (tools/wordAlignment/completed|invalid/<ch>/
+    <v>.json) changes what Stage 6B word-alignment evidence should find
+    without necessarily changing a single alignmentData byte -- Bridge
+    auto-completes the moment every word is grouped, often in the same
+    mutation that changed the content, but `complete_alignment()` can also
+    flip completion state on its own. Whatever decides to stale downstream
+    Stage 6B/7/8 records must be sensitive to completion state too.
+    """
+    digest_builder = hashlib.sha256()
+    digest_builder.update(alignment_directory_digest(project).encode("utf-8"))
+    tools_dir = project.tc_dir / "tools" / "wordAlignment"
+    for path in sorted(tools_dir.glob("*/*/*.json")):
+        digest_builder.update(str(path.relative_to(tools_dir)).encode("utf-8"))
+        digest_builder.update(path.read_bytes())
+    return digest_builder.hexdigest()
+
+
+def target_token_identity(
+    project_id: str, book: str, displayed_reference: str, text_revision: str,
+    profile: str, token: dict[str, Any],
+) -> tuple[str, str, str]:
+    """Mint the same (lineage_id, instance_id, identity) `_ensure_target_tokens` would.
+
+    Pulled out so a resolver matching a translationCore `bottomWord` back onto
+    a freshly retokenized current verse (word_alignment_evidence.py) computes
+    the identity that token is already stored under, rather than re-deriving
+    the hash formula in a second place.
+    """
+    identity = "␟".join((
+        project_id, book, displayed_reference, text_revision,
+        profile, str(token["index"]), token["raw"],
+    ))
+    lineage_id = "target-lineage-" + _sha256_text("lineage␟" + identity)[:32]
+    instance_id = "target-token-" + _sha256_text("instance␟" + identity)[:32]
+    return lineage_id, instance_id, identity
+
+
 def tokenize_target_text(text: str, profile: str = DEFAULT_TOKENIZER) -> list[dict[str, Any]]:
     if profile == TC_COMPATIBILITY_TOKENIZER:
         matches = list(regex.finditer(r"\S+", text))
@@ -838,12 +896,10 @@ class PassageSemanticRuntime:
             lineages: list[TokenLineage] = []
             instances: list[TokenInstance] = []
             for token in tokenize_target_text(text, profile):
-                identity = "\u241f".join((
+                lineage_id, instance_id, identity = target_token_identity(
                     self.project_id, self.book, displayed_reference, text_revision,
-                    profile, str(token["index"]), token["raw"],
-                ))
-                lineage_id = "target-lineage-" + _sha256_text("lineage\u241f" + identity)[:32]
-                instance_id = "target-token-" + _sha256_text("instance\u241f" + identity)[:32]
+                    profile, token,
+                )
                 span = CharacterSpan(
                     start_code_point=token["start"], end_code_point=token["end"],
                     start_grapheme=token["startGrapheme"], end_grapheme=token["endGrapheme"],
@@ -1081,7 +1137,7 @@ class PassageSemanticRuntime:
             sources.extend((path, "bridge.ai_review.legacy") for path in ai_root.rglob("*.json"))
         for path, schema in sources:
             self._import_legacy_file(path, schema)
-        self._scan_native_alignment_compatibility()
+        self.synchronize_alignment_state()
 
     @staticmethod
     def _legacy_token_signature(token: Any) -> tuple[str, int, int] | None:
@@ -1097,17 +1153,47 @@ class PassageSemanticRuntime:
             return None
         return word, occurrence, occurrences
 
-    def _scan_native_alignment_compatibility(self) -> None:
-        """Read-only scan; native tC groups are never imported or repaired here."""
+    def synchronize_alignment_state(self) -> dict[str, Any]:
+        """Read-only compatibility scan, plus V11-000a's alignment invalidation.
+
+        Two independent content-addressed checks share this one call, each
+        against the digest it actually needs to be sensitive to, tracked as
+        separate `migration_run` rows so a redundant call is always cheap
+        and neither degrades the other's own memoization:
+
+        - Staling (below) keys on `alignment_state_digest`, which covers the
+          tools/wordAlignment/completed|invalid markers as well as content --
+          `complete_alignment()` can flip completion state with no content
+          byte changing, and that alone changes what evidence Stage 6B
+          should find.
+        - The legacy-compatibility scan keys on `alignment_directory_digest`
+          (content only, unchanged from before this existed) exactly as it
+          always has, so calling this twice in one session (both at project
+          open and again right after `bridge_service` finishes an alignment
+          mutation) never re-quarantines the same already-recorded issue.
+
+        Crash-safety follows from both being plain content-addressed
+        idempotency checks: a crash between staling and its own save just
+        leaves that digest reading as unprocessed next time, which redoes it
+        safely (staling something already STALE is a no-op in effect).
+        """
+        state_digest = alignment_state_digest(self.project)
+        state_key = f"{self.project.alignment_dir}::state"
+        staled = 0
+        if self.repository.migration_run_for(self.project_id, state_key, state_digest) is None:
+            staled = self.repository.apply_alignment_invalidation(self.project_id, self.book)
+            self.repository.save_migration_run(
+                run_id=str(uuid.uuid4()), project_id=self.project_id,
+                source_path=state_key, source_hash=state_digest,
+                source_schema="translationCore.alignmentData.invalidation-state.v1",
+                status="IMPORTED", started_at=_now(), report={"staled": staled},
+            )
+
         paths = sorted(self.project.alignment_dir.glob("*.json"))
-        digest_builder = hashlib.sha256()
-        for path in paths:
-            digest_builder.update(path.name.encode("utf-8"))
-            digest_builder.update(path.read_bytes())
-        digest = digest_builder.hexdigest()
+        digest = alignment_directory_digest(self.project)
         source_path = str(self.project.alignment_dir)
         if self.repository.migration_run_for(self.project_id, source_path, digest) is not None:
-            return
+            return {"changed": staled > 0, "staled": staled}
         started = _now()
         report = {
             "filesScanned": len(paths), "groupsScanned": 0, "quarantined": 0,
@@ -1191,6 +1277,7 @@ class PassageSemanticRuntime:
             source_schema="translationCore.alignmentData.compatibility-scan.v1",
             status="IMPORTED", started_at=started, report=report,
         )
+        return {"changed": True, "staled": staled, "report": report}
 
     def status(self) -> dict[str, Any]:
         recovery = self.repository.recovery_check()

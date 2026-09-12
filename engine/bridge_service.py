@@ -1684,6 +1684,13 @@ class BridgeEngine:
                 chapter, verse, username=self.settings.reviewer_name or "Bridge Reviewer",
             )
             context = self._alignment_context(chapter, verse)
+        # V11-000a: the alignment content is already written by this point
+        # (save_verse_alignment / restore_verse_alignment_history ran before
+        # this shared tail), so this picks up the fresh book-wide digest and
+        # stales any Stage 6B/7/8 record that depends on it -- in this same
+        # session, not only after a restart.
+        if self.passage_semantic_runtime is not None:
+            self.passage_semantic_runtime.synchronize_alignment_state()
         return context
 
     def _save_alignment(

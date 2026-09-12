@@ -627,7 +627,7 @@ export interface TargetSemanticInventory {
 export type LocationOutcome = "LOCATED" | "AMBIGUOUS" | "NOT_LOCATED" | "SEARCH_INCOMPLETE" | "UNSUPPORTED_ANALYSIS";
 export type LocationRunStatus = "RUNNING" | "COMPLETE" | "FAILED";
 export type LocationCalibrationStatus = "CALIBRATED" | "UNCALIBRATED_INTERNAL";
-export type LocationEvidenceKind = "SEMANTIC_SIMILARITY" | "LEXICAL" | "CONCEPT" | "MORPHOLOGY" | "STRUCTURAL_PROXIMITY" | "PASSAGE_COHERENCE" | "PARTICIPANT" | "HUMAN_PRECEDENT" | "RESOURCE" | "EXACT_SPAN" | "CANDIDATE_COMPETITION";
+export type LocationEvidenceKind = "SEMANTIC_SIMILARITY" | "LEXICAL" | "CONCEPT" | "MORPHOLOGY" | "STRUCTURAL_PROXIMITY" | "PASSAGE_COHERENCE" | "PARTICIPANT" | "HUMAN_PRECEDENT" | "WORD_ALIGNMENT" | "RESOURCE" | "EXACT_SPAN" | "CANDIDATE_COMPETITION";
 
 export interface SemanticEmbeddingDescriptor {
   providerId: string;

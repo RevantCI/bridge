@@ -6848,3 +6848,158 @@ produced literal `undefined · undefined` rows). Full detail is in
 (Stage 6B does not consult completed Word Alignment for cross-language
 location) — not attempted in this pass, and #57/#58/#61/#62/#63 remain open
 from the same round.
+
+## V11-000a: Stage 6B consults completed Word Alignment as location evidence
+(2026-09-12)
+
+Implements `docs/V11-000_STAGE6B_ALIGNMENT_SPIKE.md`'s Part B against
+same-verse source→target links only (cross-verse — the harder half, needing
+the embedding-provider direction — stays on #54). No weight or threshold was
+retuned: the pre-existing `HUMAN_PRECEDENT` component already proved 0.65 is
+enough to dominate `located_minimum`/`ambiguity_margin`, and the new
+component reuses that exact number.
+
+**New module, `tc_ai_bridge/word_alignment_evidence.py`.** Two resolvers plus
+a projection:
+
+- `resolve_source_token_id` matches a tC `topWord` onto the pinned UHB/UGNT
+  pack's own token identity — exact NFC word+occurrence required,
+  lemma/Strong's/morph only reinforce a candidate that already passes that
+  filter (`normalize_strong`, promoted from `lexicon_resources._normalize_strong`,
+  handles the five-digit-UGNT-variant-vs-classic-dictionary difference).
+  Hashes the *pack's own* raw token fields, never `topWord`'s, so an
+  NFD-normalized tC entry can't mint a different id than Stage 5 already
+  stored — `source_token_identity` was pulled out of
+  `SourceSemanticInventory._ensure_token` as a pure function so both call
+  sites share one formula.
+- `resolve_target_token_id` matches a `bottomWord` onto a fresh
+  `bridge-unicode-word-v1` retokenization of the *current* verse text.
+  tC's own tokenization and Bridge's genuinely disagree (whitespace +
+  edge-trimmed punctuation vs. Unicode-word regex with punctuation as its
+  own token) — confirmed empirically, not assumed, against the real
+  tokenizers before writing a single assertion: "3:16" splits three ways
+  under Bridge but stays one token under tC; quoted words attach the quote
+  mark differently; a repeated word with interleaving punctuation gets a
+  different `occurrences` total under each. Every one of those is a real
+  test (`tests/semantic/test_word_alignment_evidence.py`), matched against
+  the tokenizers directly rather than guessed at from the disagreement
+  description alone — which is also why the hyphenated/apostrophised-word
+  cases in the prompt turned out to be *agreement* tests, not disagreement
+  ones, once actually run. Anything but exactly one match on
+  (normalized form, occurrence, occurrences) — including an occurrences-total
+  mismatch alone — returns unresolved; a dropped group costs a NOT_LOCATED
+  (today's status quo without this evidence), never a guess.
+  `target_token_identity` was pulled out of
+  `PassageSemanticRuntime._ensure_target_tokens` the same way, for the same
+  reason.
+- `alignment_precedents_for_range` walks the target range's displayed
+  references, keeps only verses `word_alignment_state(...) == "completed"`,
+  excludes any group with a within-verse duplicated top/bottom signature
+  (the same `Counter` check `local_checks.alignment_integrity_checks`
+  already runs for `ALIGN_DUP_TOP`/`ALIGN_DUP_BOTTOM`, not re-walked from the
+  compatibility-scan's quarantine records), and emits
+  `{"sourceTokenInstanceIds": [...], "targetTokenInstanceIds": [...]}` in the
+  exact shape `human_approved_lexical_precedents()` already returns. A
+  verse-bridge alignment key ("3-4") is out of scope for this pass — deciding
+  which individual verse each token belongs to is itself an unresolved-or-guess
+  problem, so those verses simply contribute nothing rather than being split
+  heuristically. Never raises for a verse-scoped data problem (a malformed
+  legacy file, a missing revision row): like `HUMAN_PRECEDENT`, this is
+  optional evidence, so a problem with it costs that verse's contribution,
+  not `SEARCH_INCOMPLETE` for the whole run.
+
+**Identity.** A new `LocationEvidenceKind.WORD_ALIGNMENT` component (weight
+0.65, alongside `HUMAN_PRECEDENT`, per the same source→target-token-set
+intersection test) — a separate kind rather than reusing `HUMAN_PRECEDENT`,
+since the two are different provenances with different staleness behaviour
+and a reviewer asking *why* a finding located where it did should be able to
+tell them apart. `LOCATION_ENGINE_VERSION` bumped `-v1` → `-v2` (a real
+capability change, not tuning); new `ALIGNMENT_EVIDENCE_VERSION =
+"tc-word-alignment-v1"` threaded into the Stage 6B run fingerprint (alongside
+a book-wide alignment digest — see below), `analysis_jobs.policy_versions()`
+(auto-stales every existing analysis job via its existing exact-dict-equality
+check, no extra code), and the Stage 9B.4 verifier fingerprint
+(`correction_verification.py`). Also added `WORD_ALIGNMENT` to the
+`LocationEvidenceKind` enum in `passage_semantic_models.py` — and, caught
+only by the full suite, not by reasoning about it in advance, its two other
+copies: `schemas/bridge-passage-semantic-v1.schema.json` and
+`src/lib/types/passageSemanticV1.ts` are asserted byte-for-byte against the
+Python enum by
+`test_python_and_typescript_controlled_enums_match_canonical_schema`, and
+`src-tauri/src/passage_semantic_wire.rs`'s own `wire_enum!` copy has no such
+test but would have silently failed to deserialize a real
+`"WORD_ALIGNMENT"` payload from the sidecar if left out. All three are
+updated now.
+
+**Invalidation — no schema bump.** `RECORD_DEPENDENCY_ANCHOR_TYPES` gained a
+third anchor, `WORD_ALIGNMENT` (book-scoped, not per-verse: one
+`alignment_dependency_id(project_id, book)` per book, matching the book-wide
+digest the evidence above and the pre-existing compatibility scan both key
+off — over-invalidating a run whose range didn't touch the changed verse is
+safe, under-invalidating is not). Every `LOCATION_RUN` registers a dependency
+edge on it unconditionally, even with zero alignment evidence found that
+run, since a *future* completed alignment could still change the outcome.
+`apply_alignment_invalidation` walks it forward through the existing generic
+`_stale_generic_dependencies` BFS — the exact same propagation
+`apply_target_invalidation` already uses for Scripture edits, so `MEANING_RUN`
+and `QA_RUN` records downstream of a staled `LOCATION_RUN` go stale too, for
+free.
+
+Rather than a new `pending_invalidations`-shaped prepared-intent/CAS table
+(which is specifically shaped around a two-phase edit spanning a
+request/response boundary — an alignment mutation is a single synchronous
+server-side operation, already durable through `tc_project`'s own journal by
+the time invalidation needs to run), `PassageSemanticRuntime
+.synchronize_alignment_state()` reuses the existing `migration_run` tracking
+the compatibility scan already had: content-addressed against
+`alignment_state_digest` (book-wide alignment content *and*
+`tools/wordAlignment/completed|invalid` markers combined — a completion-only
+change, with no content byte different, still has to stale, since
+`complete_alignment()` can flip that with no `save_verse_alignment` call at
+all), tracked as its own `migration_run` row under a distinct source-path
+suffix so it never collides with the legacy compatibility scan's own
+content-only tracking (unchanged, so calling both in one session never
+double-quarantines the same legacy issue). Crash-safe by construction: a
+crash between staling and its own save just leaves that digest reading as
+unprocessed next time, which redoes it safely (staling something already
+STALE is a no-op in effect). Called both at `PassageSemanticRuntime`
+construction (an external edit made outside a session) and immediately from
+`bridge_service._finish_alignment_mutation` (the shared tail for
+realign/unalign/save/undo/AI-align) — in the same session, not only after a
+restart.
+
+**A real bug the fixture-driven tests caught.** The first version of this
+fingerprinted Stage 6B runs against content-only
+(`alignment_directory_digest`) while staling against content+completion
+(`alignment_state_digest`) — a completion-only change (same alignment
+content, freshly marked complete) correctly staled the old run but produced
+an *identical* fingerprint for the fresh one, colliding on the
+`(project, book, range, fingerprint)` unique constraint on re-insert
+(`sqlite3.IntegrityError`). Fixed by fingerprinting on
+`alignment_state_digest` too, so anything that can change what the evidence
+finds also changes what a run is keyed by. Caught by
+`test_completion_state_alone_stales_even_with_identical_alignment_content`,
+written because the task's own definition of done named this exact scenario
+("completing an alignment... without a content byte changing") — not found
+by reading the code, found by running it.
+
+**Verified.** New tests: 20 in `tests/semantic/test_word_alignment_evidence.py`
+(both resolvers against real bundled PHP UGNT tokens and the real
+tokenizers; precedent projection against a real completed alignment; a
+same-verse alignment reaching `LOCATED` with Stage 7 running cleanly against
+it) and 4 in `tests/semantic/test_word_alignment_invalidation.py`
+(same-session staling, completion-only staling, the crash-safe no-op
+re-check, the unconditional dependency edge). Full engine + Greek Room
+suite: **1132 passed, 0 failed** (up from 1112 before this issue). `cargo
+check` + `cargo test`: 12/12. `svelte-check`: 0/0. Vitest: 335/335.
+Production build: passed. Schema stayed **v14** — no migration, per the
+"prefer a design that does not need a schema bump" instruction. The Stage 6B
+golden (`stage6b-location-golden-v1.json`) was **not** re-baselined: its own
+test still passes unchanged, because none of its fixture verses have
+completed alignment data, so this evidence source contributes exactly 0
+there — confirmed by running it, not assumed.
+
+Not done, on purpose: cross-verse alignment (stays on #54), a `#54` split
+into a separate implementable issue for this same-verse slice (the spike
+doc's own recommendation — filing that is a maintainer call, not made
+here), and any embedding-provider work.

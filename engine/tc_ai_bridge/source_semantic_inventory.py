@@ -95,6 +95,37 @@ def _language_id(resource: OriginalLanguageResource, morphology: str) -> str:
     return "arc" if morphology.startswith("Ar,") else resource.language_id
 
 
+def source_token_identity(
+    resource: OriginalLanguageResource, book: str, chapter: str, verse: str,
+    index: int, raw: dict[str, Any],
+) -> tuple[str, str, str]:
+    """Mint the same (lineage_id, instance_id) `_ensure_token` would for `raw`.
+
+    Pulled out so a resolver matching a translationCore `topWord` back onto
+    this pinned pack (word_alignment_evidence.py) can compute the identity a
+    hit is already stored under, without re-deriving the hash formula in a
+    second place. `raw` must be the pack's own token dict -- never a tC
+    topWord's fields directly, since an NFD-normalized tC entry would hash to
+    a different id than the pack's NFC bytes.
+    """
+    displayed = f"{book} {chapter}:{verse}"
+    canonical = displayed
+    morphology = str(raw.get("morph") or "")
+    upstream = "/".join((
+        resource.resource_id, resource.version, book,
+        f"{chapter}:{verse}", str(index), str(raw.get("occurrence") or 1),
+    ))
+    lineage_id = "source-lineage-" + _sha("␟".join((
+        resource.resource_id, resource.version, resource.provenance_sha256,
+        book, canonical, upstream, TokenLayer.ORTHOGRAPHIC.value,
+    )))[:32]
+    instance_id = "source-token-" + _sha("␟".join((
+        lineage_id, str(raw.get("word") or ""), str(raw.get("lemma") or ""),
+        str(raw.get("strong") or ""), morphology, SOURCE_TOKENIZATION_VERSION,
+    )))[:32]
+    return lineage_id, instance_id, upstream
+
+
 def _is_verb(morphology: str) -> bool:
     tail = morphology.split(",", 1)[-1]
     return bool(re.search(r"(?:^|:)V", tail)) or morphology.startswith("Gr,V")
@@ -186,18 +217,9 @@ class SourceSemanticInventory:
         canonical = displayed
         morphology = str(raw.get("morph") or "")
         language = _language_id(self.resource, morphology)
-        upstream = "/".join((
-            self.resource.resource_id, self.resource.version, self.book,
-            f"{chapter}:{verse}", str(index), str(raw.get("occurrence") or 1),
-        ))
-        lineage_id = "source-lineage-" + _sha("\u241f".join((
-            self.resource.resource_id, self.resource.version, self.resource.provenance_sha256,
-            self.book, canonical, upstream, TokenLayer.ORTHOGRAPHIC.value,
-        )))[:32]
-        instance_id = "source-token-" + _sha("\u241f".join((
-            lineage_id, str(raw.get("word") or ""), str(raw.get("lemma") or ""),
-            str(raw.get("strong") or ""), morphology, SOURCE_TOKENIZATION_VERSION,
-        )))[:32]
+        lineage_id, instance_id, upstream = source_token_identity(
+            self.resource, self.book, chapter, verse, index, raw,
+        )
         try:
             self.repository.token_instance(instance_id)
         except FoundationValidationError:

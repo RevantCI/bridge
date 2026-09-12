@@ -19,9 +19,18 @@ from .passage_semantic_models import (
     LocationRunStatus, Realization, RelationshipProperty,
 )
 from .passage_semantic_repository import FoundationValidationError
+from .word_alignment_evidence import (
+    ALIGNMENT_EVIDENCE_VERSION, alignment_evidence_digest, alignment_precedents_for_range,
+)
 
 
-LOCATION_ENGINE_VERSION = "bridge-semantic-location-v1"
+# V11-000a (docs/V11-000_STAGE6B_ALIGNMENT_SPIKE.md): consulting completed
+# translationCore Word Alignment as location evidence changes what a LOCATED
+# outcome can be based on, so this is a real engine version bump, not a
+# tuning change -- it auto-stales every existing analysis job and Stage 9B.4
+# verification through policy_versions()/the verifier fingerprint, exactly
+# like the V1.1 Unicode comparison bump before it.
+LOCATION_ENGINE_VERSION = "bridge-semantic-location-v2"
 LOCATION_CONFIDENCE_POLICY_VERSION = "location-confidence-v1"
 LOCATION_CALIBRATION_VERSION = "location-uncalibrated-v1"
 LOCATION_SEARCH_POLICY_VERSION = "progressive-passage-search-v1"
@@ -252,6 +261,7 @@ class SemanticLocationEngine:
         self, source_unit: dict[str, Any], span: dict[str, Any],
         target_units: list[dict[str, Any]], source_vector: list[float] | None,
         target_vector: list[float] | None, precedents: list[dict[str, Any]],
+        alignment_precedents: list[dict[str, Any]],
     ) -> tuple[float, list[dict[str, Any]]]:
         source_text = self._source_text(source_unit)
         lexical = self._lexical_score(source_text, span["quote"])
@@ -273,6 +283,13 @@ class SemanticLocationEngine:
             ):
                 human = 1.0
                 break
+        alignment_evidence = 0.0
+        for precedent in alignment_precedents:
+            if source_tokens & set(precedent.get("sourceTokenInstanceIds") or ()) and (
+                target_tokens & set(precedent.get("targetTokenInstanceIds") or ())
+            ):
+                alignment_evidence = 1.0
+                break
         components = [
             (LocationEvidenceKind.SEMANTIC_SIMILARITY, semantic, 0.42,
              self.embedding_provider.provider_id if semantic else "unavailable"),
@@ -283,6 +300,8 @@ class SemanticLocationEngine:
              f"progressive-passage-v1:{search_scope}"),
             (LocationEvidenceKind.HUMAN_PRECEDENT, human, 0.65,
              "project-local-human-v1"),
+            (LocationEvidenceKind.WORD_ALIGNMENT, alignment_evidence, 0.65,
+             ALIGNMENT_EVIDENCE_VERSION),
             (LocationEvidenceKind.EXACT_SPAN, 1.0, 0.01, "exact-current-span-v1"),
         ]
         raw = min(1.0, sum(value * weight for _, value, weight, _ in components))
@@ -539,6 +558,7 @@ class SemanticLocationEngine:
         range_key = source_inventory["rangeKey"]
         budget = max_candidate_evaluations or self.policy.max_candidate_evaluations
         provider_descriptor = self.embedding_provider.descriptor()
+        alignment_digest = alignment_evidence_digest(self.runtime)
         fingerprint = _json_hash({
             "sourceInventory": source_inventory["fingerprint"],
             "targetInventory": target_inventory["fingerprint"],
@@ -550,6 +570,8 @@ class SemanticLocationEngine:
             "calibration": LOCATION_CALIBRATION_VERSION,
             "searchPolicy": self.policy.version,
             "budget": budget,
+            "alignmentEvidence": ALIGNMENT_EVIDENCE_VERSION,
+            "alignmentDigest": alignment_digest,
         })
         cached = self.repository.semantic_location_for_fingerprint(
             self.project_id, self.book, range_key, fingerprint,
@@ -594,6 +616,9 @@ class SemanticLocationEngine:
         vectors = self._embedding_map([*source_texts, *target_texts])
         embedding_seconds = time.perf_counter() - embedding_started
         precedents = self.repository.human_approved_lexical_precedents(self.project_id)
+        alignment_precedents = alignment_precedents_for_range(
+            self.runtime, chapter, verse, end_chapter, end_verse,
+        )
 
         evaluated = 0
         scope_evaluations: Counter[str] = Counter()
@@ -635,6 +660,7 @@ class SemanticLocationEngine:
                     raw, components = self._score_candidate(
                         source_unit, span, span_units, vectors.get(source_text),
                         vectors.get(_normalized(span["quote"])), precedents,
+                        alignment_precedents,
                     )
                     if raw < self.policy.credible_minimum / 2:
                         continue
@@ -683,6 +709,7 @@ class SemanticLocationEngine:
                         raw, components = self._score_candidate(
                             source_unit, pseudo, combined_units, vectors.get(source_text),
                             combined_vectors.get(_normalized(combined_text)), precedents,
+                            alignment_precedents,
                         )
                         if raw >= self.policy.credible_minimum:
                             unit_candidates.append(self._candidate(
@@ -800,6 +827,14 @@ class SemanticLocationEngine:
             target_inventory_id=target_inventory["id"],
             run_status=LocationRunStatus.COMPLETE.value, payload=payload,
             candidates=all_candidates, relationships=relationships,
+        )
+        # Registered unconditionally, even when no alignment evidence was
+        # found this run: a *future* completed alignment for a verse in this
+        # range could change the outcome, so this run depends on the book's
+        # current alignment state either way.
+        self.repository.add_record_dependency(
+            "LOCATION_RUN", run_id, "WORD_ALIGNMENT",
+            self.repository.alignment_dependency_id(self.project_id, self.book),
         )
         return payload
 

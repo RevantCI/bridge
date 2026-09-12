@@ -1116,6 +1116,7 @@ wire_enum!(LocationEvidenceKind {
     PassageCoherence,
     Participant,
     HumanPrecedent,
+    WordAlignment,
     Resource,
     ExactSpan,
     CandidateCompetition

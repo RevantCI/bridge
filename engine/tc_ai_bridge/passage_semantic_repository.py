@@ -86,9 +86,10 @@ RECORD_DEPENDENCY_TABLES: dict[str, str] = {
 # values with no record table of their own -- a target reference is a
 # coordinate and a source resource is a content hash, not stored records -- so
 # recovery must not report them as unknown, and stale propagation has nothing
-# to walk past them. Their ids come from target_dependency_id() and
-# source_dependency_id(); anything else appearing upstream is real drift.
-RECORD_DEPENDENCY_ANCHOR_TYPES = frozenset({"TARGET_REFERENCE", "SOURCE_RESOURCE"})
+# to walk past them. Their ids come from target_dependency_id(),
+# source_dependency_id() and alignment_dependency_id(); anything else
+# appearing upstream is real drift.
+RECORD_DEPENDENCY_ANCHOR_TYPES = frozenset({"TARGET_REFERENCE", "SOURCE_RESOURCE", "WORD_ALIGNMENT"})
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> frozenset[str]:
@@ -2062,6 +2063,35 @@ class FoundationRepository:
     @staticmethod
     def source_dependency_id(project_id: str, book: str, resource_hash: str) -> str:
         return "\u241f".join((project_id, book.upper(), resource_hash))
+
+    @staticmethod
+    def alignment_dependency_id(project_id: str, book: str) -> str:
+        """Stable anchor for this book's tC Word Alignment as a whole.
+
+        Deliberately stable (no content hash embedded, unlike
+        source_dependency_id) so a LOCATION_RUN's dependency edge keeps
+        pointing at the same coordinate across alignment changes -- staling
+        is triggered explicitly by apply_alignment_invalidation walking
+        forward from this id, the same shape target_dependency_id/
+        apply_target_invalidation already use for Scripture edits.
+        """
+        return "\u241f".join((project_id, book.upper(), "WORD_ALIGNMENT"))
+
+    def apply_alignment_invalidation(self, project_id: str, book: str) -> int:
+        """Stale everything depending on this book's Word Alignment anchor.
+
+        Coarser than target-text invalidation on purpose: one anchor per
+        book, not per verse, matching the book-wide directory digest
+        word_alignment_evidence.py's evidence and PassageSemanticRuntime's
+        compatibility scan both key off. Over-invalidating a run whose range
+        didn't touch the changed verse is safe; under-invalidating is not.
+        """
+        dependency_id = self.alignment_dependency_id(project_id, book)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            staled = self._stale_generic_dependencies(conn, "WORD_ALIGNMENT", dependency_id)
+            conn.commit()
+        return staled
 
     def save_passage_references(
         self, passage_id: str, references: list[dict[str, Any]],

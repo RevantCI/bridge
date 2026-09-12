@@ -3725,3 +3725,30 @@ Cases A-D human walkthrough remains blocked behind #54 (Stage 6B does not
 consult completed Word Alignment for cross-language location). #57, #58,
 #61, #62, and #63 also remain open from the same V11 round — none of the
 six are resolved by this entry.
+
+## 44.12 V11-000a: Stage 6B consults completed Word Alignment (2026-09-12)
+
+Same-verse source->target links from a completed tC alignment now feed Stage
+6B as a `WORD_ALIGNMENT` location-evidence component (weight 0.65, same
+number as the pre-existing `HUMAN_PRECEDENT`) -- the tractable half of #54,
+per `docs/V11-000_STAGE6B_ALIGNMENT_SPIKE.md`'s own split recommendation.
+Cross-verse location (the harder half, needing the embedding-provider
+direction) is explicitly untouched and stays on #54. New module
+`tc_ai_bridge/word_alignment_evidence.py`: source/target token resolvers
+(conservative -- ambiguous or disagreeing tokenizations resolve to
+`unresolved`, never guessed) plus precedent projection. `LOCATION_ENGINE_VERSION`
+bumped `-v1` -> `-v2`, threaded through `policy_versions()` and the Stage
+9B.4 verifier fingerprint so every existing analysis job and verification
+goes stale on next open. Invalidation reuses the existing `migration_run`
+tracking rather than a new table -- schema stayed **v14**, no migration.
+The Stage 6B golden was not re-baselined (confirmed unchanged: no existing
+fixture has completed alignment data). Full engine + Greek Room suite:
+**1132 passed, 0 failed**; `cargo test` 12/12; `svelte-check`/Vitest/build
+all clean. One cross-language contract gap was caught and fixed in the same
+pass: the new enum member had to be added to
+`schemas/bridge-passage-semantic-v1.schema.json`,
+`src/lib/types/passageSemanticV1.ts`, and `src-tauri/src/passage_semantic_wire.rs`
+alongside the Python enum. Full detail: `docs/BUILD_LOG.md`'s same-dated
+entry.
+
+Not committed as of this entry -- pending explicit go-ahead.

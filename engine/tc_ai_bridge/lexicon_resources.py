@@ -164,13 +164,13 @@ def lexicon_entry_for_strong(
     entries = _entries_for_language(language_id, resources_root)
     if not entries:
         return None
-    normalized = _normalize_strong(strong, language_id)
+    normalized = normalize_strong(strong, language_id)
     if normalized is None:
         return None
     return entries.get(normalized)
 
 
-def _normalize_strong(strong: str, language_id: str) -> str | None:
+def normalize_strong(strong: str, language_id: str) -> str | None:
     """Map a token's raw strong value onto the classic Strong's dictionary key.
 
     Confirmed against real vendored data (not guessed): UHB numbers are

@@ -89,7 +89,7 @@
     "LocationRunStatus": { "type": "string", "enum": ["RUNNING", "COMPLETE", "FAILED"] },
     "LocationCalibrationStatus": { "type": "string", "enum": ["CALIBRATED", "UNCALIBRATED_INTERNAL"] },
     "EmbeddingRole": { "type": "string", "enum": ["CANDIDATE_RETRIEVAL_ONLY"] },
-    "LocationEvidenceKind": { "type": "string", "enum": ["SEMANTIC_SIMILARITY", "LEXICAL", "CONCEPT", "MORPHOLOGY", "STRUCTURAL_PROXIMITY", "PASSAGE_COHERENCE", "PARTICIPANT", "HUMAN_PRECEDENT", "RESOURCE", "EXACT_SPAN", "CANDIDATE_COMPETITION"] },
+    "LocationEvidenceKind": { "type": "string", "enum": ["SEMANTIC_SIMILARITY", "LEXICAL", "CONCEPT", "MORPHOLOGY", "STRUCTURAL_PROXIMITY", "PASSAGE_COHERENCE", "PARTICIPANT", "HUMAN_PRECEDENT", "WORD_ALIGNMENT", "RESOURCE", "EXACT_SPAN", "CANDIDATE_COMPETITION"] },
     "PolicyBinding": {
       "type": "object",
       "additionalProperties": false,
