@@ -93,6 +93,34 @@ def test_fresh_profile_falls_back_to_neutral_name_when_os_account_unreadable(
     assert "AI" not in settings.reviewer_name
 
 
+def test_stale_pre_v11_005_profile_reseeds_from_os_account(tmp_path: Path, monkeypatch) -> None:
+    """A settings.json written before V11-005 landed has the old literal
+    'AI Bridge Reviewer' persisted as data, not merely defaulted -- so the
+    plain "reseed if empty" check never fires for it. It must still heal
+    on next read, same as a brand-new profile."""
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"reviewer_name": "AI Bridge Reviewer"}), encoding="utf-8")
+    monkeypatch.setattr(secret_store.getpass, "getuser", lambda: "benz")
+
+    settings = AppSettings(path)
+
+    assert settings.reviewer_name == "benz"
+    on_disk = json.loads(path.read_text(encoding="utf-8"))
+    assert on_disk["reviewer_name"] == "benz"
+
+
+def test_explicit_rename_to_ai_bridge_reviewer_literal_is_respected(tmp_path: Path, monkeypatch) -> None:
+    """Unlike the stale-profile case above, a real Settings-initiated rename
+    always stamps reviewer_name_updated_at -- that's what distinguishes a
+    deliberate (if unusual) choice from the old un-stamped default."""
+    monkeypatch.setattr(secret_store.getpass, "getuser", lambda: "benz")
+    settings = AppSettings(tmp_path / "settings.json")
+
+    settings.reviewer_name = "AI Bridge Reviewer"
+
+    assert settings.reviewer_name == "AI Bridge Reviewer"
+
+
 def test_reviewer_name_setter_records_a_parseable_utc_timestamp(tmp_path: Path) -> None:
     settings = AppSettings(tmp_path / "settings.json")
     assert settings.reviewer_name_updated_at == ""

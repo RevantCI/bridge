@@ -243,7 +243,15 @@ class AppSettings:
     @property
     def reviewer_name(self) -> str:
         value = str(self.data.get('reviewer_name') or '').strip()
-        if value:
+        updated_at = str(self.data.get('reviewer_name_updated_at') or '').strip()
+        # A profile written before V11-005 landed has 'AI Bridge Reviewer'
+        # persisted as data, so the "reseed if empty" check below never
+        # fires for it -- it looks identical to someone who deliberately
+        # renamed themselves to that string. The tell is
+        # reviewer_name_updated_at: a real Settings-initiated rename always
+        # stamps it (see the setter), while the old literal default never
+        # did. Treat that combination as still unset and reseed.
+        if value and not (value == 'AI Bridge Reviewer' and not updated_at):
             return value
         seeded = self._seed_reviewer_name()
         self.data['reviewer_name'] = seeded
