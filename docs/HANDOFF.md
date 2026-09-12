@@ -3762,3 +3762,38 @@ on the next reopen -- all fixed, plus a required
 `ALIGNMENT_EVIDENCE_VERSION` bump to `v2`; full detail in `docs/BUILD_LOG.md`'s
 same-dated "review fixes" entry. Committed locally; not pushed, per
 standing instruction to leave it for review.
+
+## 44.13 V11-003 / #57: a human-authored proposal needs no Edit->Save
+round-trip (2026-09-12)
+
+A manually written correction proposal now defaults to `HUMAN_APPROVED`
+(`correction_wording.py`'s `_build_proposal`) instead of `UNREVIEWED` --
+Edit->Save was a pointless ceremony, since nothing already checked that the
+editor and the author differ (`docs/V11-003_ISSUE57_PROMPT.md` Part A).
+Existing `UNREVIEWED` + `HUMAN_AUTHORED` proposals are lazily, idempotently
+reseeded to `HUMAN_APPROVED` the next time they're read
+(`FoundationRepository.correction_proposal` /
+`correction_proposals_for_finding`), attributed to `ActorType.MIGRATION`
+and audited with a new `REVIEW_STATUS_BACKFILLED` event -- **without**
+bumping the proposal's `revision`, so the review panel's cached
+optimistic-concurrency value never goes stale out from under it.
+
+**Schema bump to v15** (verified needed, not assumed): the new event type
+is a genuine third pinning point past the two the implementation prompt
+named (JSON schema, Rust wire enum, confirmed clean by grep) --
+`correction_proposal_events.event_type`'s own `CHECK` constraint, unchanged
+since v12, enumerates exactly the six prior literals and rejects anything
+else with a real `sqlite3.IntegrityError` (confirmed empirically before
+building around it). Per this repo's own schema-migration discipline, that
+is a schema change like any other: v15 rebuilds the table (rename, recreate
+with the widened constraint, copy every row across, drop the old table --
+the same shape v13 used for `correction_application_intents`), with its own
+`test_v14_to_v15_migration_is_additive_and_keeps_v14_data_readable`. No
+other version moved. Every prior "build an old database, migrate forward,
+assert `schema_version() == DATABASE_SCHEMA_VERSION`" test had its
+hardcoded literal bumped `14` -> `15` alongside it (an expected, mechanical
+part of any schema bump in this codebase, not special to this one).
+
+Full detail, including the whitespace-only-proposal edge case the reseed's
+eligibility check has to guard against: `docs/BUILD_LOG.md`'s same-dated
+entry.

@@ -504,6 +504,30 @@ describe("CorrectionReviewPanel", () => {
     expect(within(historySection).getByText(/Unknown actor/)).toBeInTheDocument();
   });
 
+  it("V11-003: a human-authored proposal reaches Review application with no edit round-trip", async () => {
+    // Assert against the same mayApply conditions the panel computes
+    // (CorrectionReviewPanel.svelte:107-108: proposalCurrent && proposalReviewed
+    // && verificationStatus === "NOT_RUN"), not a rendering snapshot -- and
+    // never call api.edit, proving this reaches HUMAN_APPROVED straight from
+    // creation rather than through an Edit->Save round-trip.
+    const humanAuthored = {
+      ...proposal,
+      creationMode: "HUMAN_AUTHORED",
+      reviewStatus: "HUMAN_APPROVED",
+      providerMetadata: null,
+      originalSuggestedText: null,
+      alternatives: [],
+    };
+    api.list.mockResolvedValue({ findingId: "qa-quantity", proposals: [humanAuthored] });
+    render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });
+
+    const button = await screen.findByRole("button", { name: "Review application" });
+    expect(button).toBeEnabled();
+    await fireEvent.click(button);
+    expect(await screen.findByRole("dialog", { name: "Confirm correction application" })).toBeInTheDocument();
+    expect(api.edit).not.toHaveBeenCalled();
+  });
+
   it("makes stale state obvious and disables current actions", async () => {
     api.list.mockResolvedValue({ findingId: "qa-quantity", proposals: [{ ...proposal, lifecycleStatus: "STALE" }] });
     render(CorrectionReviewPanel, { props: { findingId: "qa-quantity" } });

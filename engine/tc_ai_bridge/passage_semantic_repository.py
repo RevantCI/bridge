@@ -24,6 +24,7 @@ from .passage_semantic_models import (
     Cardinality,
     CorrectionApplicationIntent,
     CorrectionApplicationState,
+    CorrectionCreationMode,
     CorrectionProposal,
     CorrectionProposalV2,
     VerificationStatus,
@@ -50,7 +51,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 14
+DATABASE_SCHEMA_VERSION = 15
 
 # The one authoritative record_type -> table map for the dependency graph.
 #
@@ -1060,6 +1061,48 @@ ON correction_verifications(finding_id, created_at);
 """
 
 
+# V11-003 (#57): a human-authored correction proposal is now approved by
+# default when created -- no AI wording, no separate Edit->Save round-trip
+# needed just to earn "Review application" (see
+# docs/V11-003_ISSUE57_PROMPT.md). An existing UNREVIEWED + HUMAN_AUTHORED
+# proposal is lazily reseeded to HUMAN_APPROVED the next time it is read
+# (FoundationRepository.correction_proposal /
+# correction_proposals_for_finding), and that reseed is audited with its own
+# event type, REVIEW_STATUS_BACKFILLED, attributed to ActorType.MIGRATION.
+# SQLite cannot widen a CHECK constraint in place, so the table is rebuilt
+# the same way v13 rebuilt correction_application_intents: rename, recreate
+# with the wider constraint, copy every row across unchanged, drop the old
+# table. No column, index, or row changes -- purely admitting one more
+# event_type literal.
+_MIGRATION_V15 = r"""
+ALTER TABLE correction_proposal_events RENAME TO correction_proposal_events_v14;
+DROP INDEX IF EXISTS ix_correction_proposal_events;
+CREATE TABLE correction_proposal_events (
+    id TEXT PRIMARY KEY,
+    proposal_id TEXT NOT NULL REFERENCES correction_proposals(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL CHECK(event_type IN (
+        'CREATED','SUGGESTED','EDITED','REJECTED','SUPERSEDED','STALE',
+        'REVIEW_STATUS_BACKFILLED'
+    )),
+    actor_type TEXT NOT NULL CHECK(actor_type IN ('HUMAN','AI','SYSTEM','MIGRATION')),
+    actor_id TEXT NOT NULL,
+    base_revision INTEGER NOT NULL CHECK(base_revision >= 0),
+    new_revision INTEGER NOT NULL CHECK(new_revision >= 1),
+    reason TEXT NOT NULL DEFAULT '',
+    provider_metadata_json TEXT NOT NULL DEFAULT '{}',
+    proposal_snapshot_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+INSERT INTO correction_proposal_events
+SELECT id,proposal_id,event_type,actor_type,actor_id,base_revision,new_revision,
+       reason,provider_metadata_json,proposal_snapshot_json,created_at
+FROM correction_proposal_events_v14;
+DROP TABLE correction_proposal_events_v14;
+CREATE INDEX ix_correction_proposal_events
+ON correction_proposal_events(proposal_id,created_at,id);
+"""
+
+
 class FoundationRepository:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -1148,6 +1191,10 @@ class FoundationRepository:
             if current < 14:
                 self._backup_before_migration(conn, current, 14)
                 self._apply_migration(conn, 14, _MIGRATION_V14)
+                current = 14
+            if current < 15:
+                self._backup_before_migration(conn, current, 15)
+                self._apply_migration(conn, 15, _MIGRATION_V15)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -4224,7 +4271,7 @@ class FoundationRepository:
         payload["proposalSchemaVersion"] = int(row["proposal_schema_version"])
         payload["verificationStatus"] = row["verification_status"]
         payload["applicable"] = bool(row["applicable"])
-        return payload
+        return self._reseed_review_status_if_needed(payload)
 
     def correction_proposals_for_finding(self, finding_id: str) -> list[dict[str, Any]]:
         """Every proposal against one finding, newest revision last.
@@ -4245,8 +4292,97 @@ class FoundationRepository:
             payload["proposalSchemaVersion"] = int(row["proposal_schema_version"])
             payload["verificationStatus"] = row["verification_status"]
             payload["applicable"] = bool(row["applicable"])
-            out.append(payload)
+            out.append(self._reseed_review_status_if_needed(payload))
         return out
+
+    @staticmethod
+    def _looks_reseedable(payload: dict[str, Any]) -> bool:
+        """Cheap in-memory pre-filter, checked before ever opening a write
+        connection -- both proposal read paths call this on every row, so the
+        common case (already reviewed, one way or another) must stay a plain
+        dict-get away from a no-op.
+
+        The `proposedText.strip()` check matters: a HUMAN_AUTHORED,
+        UNREVIEWED proposal with no real wording (only whitespace) is not a
+        pre-fix leftover -- it is W1's own new default correctly leaving it
+        UNREVIEWED ("nobody has written anything to review"), and it must
+        stay that way on every future read too, not just at creation.
+        Without this, the very read that returns a freshly created
+        whitespace-only proposal would immediately reseed it, since nothing
+        else in its shape distinguishes "genuinely nothing to review" from
+        "real wording written before this fix landed."
+        """
+        return (
+            str(payload.get("reviewStatus") or "") == ReviewStatus.UNREVIEWED.value
+            and str(payload.get("creationMode") or "") == CorrectionCreationMode.HUMAN_AUTHORED.value
+            and str(payload.get("lifecycleStatus") or "") == LifecycleStatus.ACTIVE.value
+            and not payload.get("providerMetadata")
+            and not payload.get("originalSuggestedText")
+            and str(payload.get("proposedText") or "").strip()
+        )
+
+    def _reseed_review_status_if_needed(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """V11-003 (#57): a manually authored proposal created before this fix
+        landed is stuck UNREVIEWED, so "Review application" never appears even
+        though this is already self-review by the proposal's own author --
+        see docs/V11-003_ISSUE57_PROMPT.md. Lazily reseed it to HUMAN_APPROVED
+        the first time it is read through either `correction_proposal` or
+        `correction_proposals_for_finding` -- both call this one choke point,
+        so a proposal can never be reachable reseeded through one and
+        unreseeded through the other.
+
+        review_status / payload["reviewStatus"] are updated in place --
+        deliberately NOT a CAS-guarded revision bump. This is a data-repair
+        backfill, not a human edit, and it must stay invisible to the
+        review panel's optimistic-concurrency revision check: the panel
+        caches `revision` from whatever it last read and sends it back on
+        edit/reject/apply, so a reseed that bumped it would turn a silent
+        bug into a confusing REVISION_CONFLICT on the user's very next
+        action (see Part A's "concurrency hazard" section).
+        """
+        if not self._looks_reseedable(payload):
+            return payload
+        # Never write on a read while the database is read-only/in recovery
+        # (recovery_check() sets this) -- a reseed that raised here would
+        # break project open, and the row simply stays unreseeded until the
+        # database is healthy again.
+        if self.read_only:
+            return payload
+        proposal_id = str(payload["id"])
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT revision,payload_json FROM correction_proposals WHERE id=?",
+                (proposal_id,),
+            ).fetchone()
+            if row is None:
+                conn.rollback()
+                return payload
+            current = json.loads(row["payload_json"])
+            if not self._looks_reseedable(current):
+                # Re-checked against a fresh read inside the write transaction:
+                # something changed this proposal between the outer read and
+                # here (a reject, an edit, ...). Idempotent by construction --
+                # no write, no event, whatever is current wins.
+                conn.rollback()
+                return payload
+            revision = int(row["revision"])
+            current["reviewStatus"] = ReviewStatus.HUMAN_APPROVED.value
+            conn.execute(
+                "UPDATE correction_proposals SET review_status=?,payload_json=? WHERE id=?",
+                (ReviewStatus.HUMAN_APPROVED.value, json.dumps(current, ensure_ascii=False), proposal_id),
+            )
+            self._append_correction_event(
+                conn, proposal=current, event_type="REVIEW_STATUS_BACKFILLED",
+                actor_type=ActorType.MIGRATION, actor_id="review-status-backfill-v11-003",
+                base_revision=revision,
+                reason="Human-authored proposal predates the V11-003 default; "
+                       "reseeded to HUMAN_APPROVED on read (#57).",
+            )
+            conn.commit()
+        payload = dict(payload)
+        payload["reviewStatus"] = ReviewStatus.HUMAN_APPROVED.value
+        return payload
 
     def record_correction_application_metadata(
         self, proposal_id: str, *, actor_type: str | ActorType, applied_target_revision: str,

@@ -1523,7 +1523,7 @@ def test_v13_to_v14_migration_is_additive_and_keeps_v13_data_readable(
 
     repo = FoundationRepository(database)
 
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 14
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 15
     # Every v13 record survives, unmodified.
     finding = repo.qa_finding("legacy-finding")
     assert finding["qaDisposition"] == "CONFIRMED_TRANSLATION_ERROR"
@@ -1559,6 +1559,95 @@ def test_v13_to_v14_migration_is_additive_and_keeps_v13_data_readable(
     # error and never as a verdict.
     assert repo.current_correction_verification("legacy-application") is None
     assert repo.correction_verification_history("legacy-application") == []
+
+
+def test_v14_to_v15_migration_is_additive_and_keeps_v14_data_readable(
+    tmp_path: Path,
+) -> None:
+    """V11-003 (#57): v15 widens correction_proposal_events.event_type's CHECK
+    constraint to admit REVIEW_STATUS_BACKFILLED, by rebuilding the table --
+    SQLite cannot ALTER a CHECK constraint in place. A real v14 database
+    upgrades without losing or rewriting anything, and the widened
+    constraint actually accepts the new literal afterward (not just assumed
+    from reading the migration script).
+    """
+    database = tmp_path / "semantic.sqlite3"
+    conn = sqlite3.connect(database)
+    for version in range(1, 15):
+        conn.executescript(getattr(repository_module, f"_MIGRATION_V{version}"))
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations("
+            "version INTEGER PRIMARY KEY,schema_id TEXT NOT NULL,applied_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO schema_migrations VALUES(?,?,?)",
+            (version, repository_module.SCHEMA_ID, "2026-09-12T00:00:00Z"),
+        )
+    policy_id = "legacy-policy"
+    conn.execute(
+        "INSERT INTO policy_bindings VALUES(?,?,?,?)",
+        (policy_id, "confidence-v1", "calibration-v1", "audit-v1"),
+    )
+    finding_payload = {
+        "id": "legacy-finding", "projectId": "project-1",
+        "qaDisposition": "CONFIRMED_TRANSLATION_ERROR",
+        "reviewStatus": "HUMAN_APPROVED", "lifecycleStatus": "ACTIVE", "revision": 1,
+    }
+    conn.execute(
+        "INSERT INTO qa_findings"
+        "(id,project_id,qa_disposition,policy_binding_id,review_status,lifecycle_status,"
+        "revision,payload_json) VALUES(?,?,?,?,?,?,?,?)",
+        ("legacy-finding", "project-1", "CONFIRMED_TRANSLATION_ERROR", policy_id,
+         "HUMAN_APPROVED", "ACTIVE", 1, json.dumps(finding_payload)),
+    )
+    proposal_payload = {
+        "id": "legacy-proposal", "qaFindingId": "legacy-finding", "projectId": "project-1",
+        "proposedText": "unreviewed wording", "creationMode": "HUMAN_AUTHORED",
+        "affectedReferences": ["PHP 1:6"],
+        "intent": {"affectedTargetSpan": {
+            "displayedReference": "PHP 1:6", "canonicalReferences": ["PHP 1:6"],
+            "startCodePoint": 0, "endCodePoint": 1, "targetContentHash": "before-hash",
+        }},
+        "reviewStatus": "UNREVIEWED", "lifecycleStatus": "ACTIVE", "revision": 1,
+    }
+    conn.execute(
+        "INSERT INTO correction_proposals VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("legacy-proposal", "project-1", "legacy-finding", "target-r1", "target-r2",
+         policy_id, "UNREVIEWED", "ACTIVE", 1, json.dumps(proposal_payload),
+         2, "PENDING", 1),
+    )
+    conn.execute(
+        "INSERT INTO correction_proposal_events(id,proposal_id,event_type,actor_type,"
+        "actor_id,base_revision,new_revision,reason,provider_metadata_json,"
+        "proposal_snapshot_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ("legacy-event", "legacy-proposal", "CREATED", "HUMAN", "Reviewer", 0, 1,
+         "created before V11-003", "{}", json.dumps(proposal_payload), "2026-09-12T00:00:00Z"),
+    )
+    conn.commit()
+    conn.close()
+
+    repo = FoundationRepository(database)
+
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 15
+    # The pre-existing row and its event survive, unmodified by the rebuild.
+    with sqlite3.connect(database) as migrated:
+        migrated.row_factory = sqlite3.Row
+        assert migrated.execute(
+            "SELECT COUNT(*) FROM correction_proposal_events").fetchone()[0] == 1
+        legacy_event = migrated.execute(
+            "SELECT * FROM correction_proposal_events WHERE id='legacy-event'").fetchone()
+        assert legacy_event["event_type"] == "CREATED"
+        assert legacy_event["actor_type"] == "HUMAN"
+    # The widened constraint actually accepts the new literal now -- proven
+    # by reading this UNREVIEWED + HUMAN_AUTHORED row (never touched above),
+    # which the running repository reseeds on read.
+    read = repo.correction_proposal("legacy-proposal")
+    assert read["reviewStatus"] == "HUMAN_APPROVED"
+    assert read["revision"] == 1
+    history = repo.correction_proposal_history("legacy-proposal")
+    assert [item["eventType"] for item in history] == ["CREATED", "REVIEW_STATUS_BACKFILLED"]
+    assert history[-1]["actorType"] == "MIGRATION"
+    assert (tmp_path / "backups").is_dir()
 
 
 def test_the_verification_identity_is_unique_in_the_database(tmp_path: Path) -> None:

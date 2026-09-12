@@ -572,7 +572,9 @@ class CorrectionWordingService:
             created_by=actor_id, created_at=self._now(), creation_mode=mode,
             policy_binding=policy_binding,
             review_status=(
-                ReviewStatus.AI_PROPOSED if result is not None else ReviewStatus.UNREVIEWED
+                ReviewStatus.AI_PROPOSED if result is not None
+                else ReviewStatus.HUMAN_APPROVED if human_proposed_text.strip()
+                else ReviewStatus.UNREVIEWED
             ),
             lifecycle_status=LifecycleStatus.ACTIVE,
             alternatives=alternatives, provider_metadata=provider_metadata,

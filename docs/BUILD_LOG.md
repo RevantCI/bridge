@@ -7133,3 +7133,131 @@ suite: **1144 passed, 0 failed** (up from 1132). `cargo check` clean,
 passed. Schema stayed v14; the Stage 6B golden stayed byte-identical. O1/O2
 (the two optional fixes the review also named) were not attempted —
 deferred to their own commits, only after these land.
+
+## V11-003 / #57: a human-authored proposal needs no Edit->Save round-trip
+(2026-09-12)
+
+Implements `docs/V11-003_ISSUE57_PROMPT.md`'s Part B. `mayApply` in
+`CorrectionReviewPanel.svelte` was already correctly gated on
+`proposalReviewed` (`reviewStatus` is `HUMAN_MODIFIED` or `HUMAN_APPROVED`);
+the bug was that a brand-new human-authored proposal landed `UNREVIEWED`
+(`correction_wording.py`'s `_build_proposal`), so "Review application"
+never appeared until a pointless Edit→Save round-trip — pointless because
+`update_correction_proposal_wording` already accepts that call with no
+check on who performs it, i.e. today's workaround is already self-review by
+the proposal's own author. The frontend gate itself is untouched; both
+fixes are backend, per Part A's decision.
+
+**W1 — new default.** `_build_proposal`'s `review_status` now reads
+`AI_PROPOSED` (unchanged) if an AI result exists, else `HUMAN_APPROVED` if
+`human_proposed_text.strip()` is non-empty, else `UNREVIEWED`. No new
+history event: the `CREATED` event already snapshots the whole payload,
+`reviewStatus` included. Renamed the one existing test this flips
+(`test_human_authored_proposal_works_offline_and_remains_unapproved` →
+`..._and_defaults_to_approved`) and added a companion proving the
+`else`-`else` path: a proposal with *only* whitespace wording (the sole way
+to reach it — a wholly empty `proposed_text` is rejected earlier) stays
+`UNREVIEWED`, because nobody has written anything to review yet. The AI
+path's own existing test already asserted `AI_PROPOSED` unmodified.
+
+**W2 — lazy reseed.** An existing `UNREVIEWED` + `HUMAN_AUTHORED` proposal
+is reseeded to `HUMAN_APPROVED` the first time it is read through either
+`FoundationRepository.correction_proposal` or
+`correction_proposals_for_finding` — both call one new choke point,
+`_reseed_review_status_if_needed`, so a proposal can never come back
+reseeded through one path and not the other. Eligibility (all must hold):
+`reviewStatus == UNREVIEWED`, `creationMode == HUMAN_AUTHORED`,
+`lifecycleStatus == ACTIVE`, no AI provenance (`providerMetadata` and
+`originalSuggestedText` both empty/absent), **and** `proposedText.strip()`
+non-empty. That last condition isn't in the spec's own eligibility list —
+found by running the tests, not by reading: a whitespace-only proposal
+freshly created under W1's own new default is `UNREVIEWED` +
+`HUMAN_AUTHORED` + `ACTIVE` + no AI provenance, identical in shape to a
+genuine pre-fix leftover, and the very read that returns it from
+`create_proposal` would otherwise reseed it to `HUMAN_APPROVED` immediately
+— wrong, since W1 itself says that proposal should stay `UNREVIEWED`
+forever, not just at creation. Checking the actual wording distinguishes
+"nothing to review" from "real wording written before this fix landed."
+
+A cheap in-memory pre-filter (`_looks_reseedable`) runs on every read
+before any write connection opens; only a plausible row triggers a fresh
+`BEGIN IMMEDIATE` re-check against the current disk state (never trusting
+the outer, possibly-stale read) before writing. **`revision` is never
+bumped** — `review_status` and payload `reviewStatus` are updated in place,
+which Part A calls out as a deliberate, documented exception to CAS
+discipline: the review panel caches `revision` and sends it back on
+edit/reject/apply, so a reseed that bumped it would turn a silent bug into
+a confusing `REVISION_CONFLICT` on the user's very next action. Attributed
+to `ActorType.MIGRATION` (never `HUMAN` — automatic events must never claim
+the named reviewer did this), audited with one new event type,
+`REVIEW_STATUS_BACKFILLED`, `base_revision` equal to the unchanged
+revision. Guarded on `self.read_only`: a reseed attempted during
+`recovery_check`'s read-only/recovery mode is skipped rather than raised,
+so it can never break project open.
+
+**Verified before building, not assumed:** grepped
+`correction_verification.py`, `analysis_jobs.py`, and `semantic_location.py`
+for `reviewStatus`/`review_status` — it feeds no engine fingerprint or
+policy identity, so this change needed no `LOCATION_ENGINE_VERSION` or
+policy-version bump.
+
+**A real, unanticipated schema conflict, found and resolved before writing
+the reseed.** The implementation prompt asked to verify the new event type
+wasn't pinned in the JSON schema or the Rust wire enum (confirmed clean by
+grep, exactly as it predicted) — but missed a third pinning point:
+`correction_proposal_events.event_type` carries its own SQLite `CHECK`
+constraint, unchanged since v12, enumerating exactly the prior six
+literals. Confirmed empirically (a minimal reproduction) that SQLite
+enforces it: `REVIEW_STATUS_BACKFILLED` would raise a real
+`sqlite3.IntegrityError` on the very first reseed. Per this repo's
+schema-migration discipline, widening a `CHECK` constraint is a schema
+change like any other, conflicting with the task's own "no version bump"
+scope — flagged and resolved with the maintainer before writing any reseed
+code, who chose the schema bump over silently reusing an existing event
+type (which would have mislabeled the audit trail) or dropping the event
+entirely (which would have abandoned the spec's own auditability
+requirement).
+
+**Schema v15.** `correction_proposal_events` rebuilt (rename, recreate with
+the widened `CHECK`, copy every row across, drop the old table) — the same
+shape v13 used for `correction_application_intents`. No column, index, or
+row semantics changed; purely one more admitted `event_type` literal. New
+`test_v14_to_v15_migration_is_additive_and_keeps_v14_data_readable` (build a
+v14 database directly from the migration blocks, insert a pre-fix
+`UNREVIEWED`/`HUMAN_AUTHORED` proposal and a legacy event under the old
+constraint, migrate forward, confirm both survive unmodified, then confirm
+the *running* repository's reseed on read both succeeds and actually uses
+the widened constraint — not just that the migration script looks right).
+Every other "build an old database, migrate forward, assert
+`schema_version() == DATABASE_SCHEMA_VERSION`" test across the suite needed
+its hardcoded version literal bumped `14` → `15` alongside it — a
+mechanical, expected part of any schema bump in this codebase (the same
+tests already carried a `13` → `14` bump when v14 landed), not specific to
+this change.
+
+**New TypeScript member.** `CorrectionEventType`
+(`src/lib/types/correctionReview.ts`) gained
+`"REVIEW_STATUS_BACKFILLED"` — a one-line addition, not a three-surface
+update, since (confirmed by grep) no JSON schema or Rust wire enum mirrors
+this specific type.
+
+**Verified.** New tests: `test_human_authored_proposal_with_only_whitespace_wording_stays_unreviewed`
+and the renamed default test (`test_correction_stage9b1.py`); a new
+dedicated file, `tests/correction/test_review_status_backfill_v11_003.py`
+(9 tests: reseed + one event, idempotence on a second read, AI-proposed
+left alone, human-rejected left alone, non-ACTIVE-but-UNREVIEWED left
+alone, UNREVIEWED-with-providerMetadata left alone, both read paths
+identical, the concurrency regression, and the read-only guard); the v15
+migration test above; and one Vitest case
+(`CorrectionReviewPanel.test.ts`) asserting a `HUMAN_APPROVED` +
+`HUMAN_AUTHORED` proposal reaches "Review application" and opens the
+application-review dialog with `api.edit` never called. The concurrency
+regression captures the proposal's revision from the database column
+*before* the reseed-triggering read (not from that read's own return
+value), so it fails even against a "fix" that bumps `revision` and
+correctly reflects the bump in what it returns — not just a naively broken
+one. Full engine + Greek Room suite: **1155 passed, 0 failed** (up from
+1144). `cargo check` clean, `cargo test` 12/12. `svelte-check` 0/0. Vitest
+336/336 (up from 335). Production build passed. Schema now **v15**; no
+engine or policy version changed. `docs/QA_TEST_MATRIX.md` has no existing
+row for this manual-write path, so none was updated (not fabricated new).

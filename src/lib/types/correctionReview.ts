@@ -195,7 +195,8 @@ export interface CorrectionProposal {
   supersedesProposalId: string | null;
 }
 
-export type CorrectionEventType = "CREATED" | "SUGGESTED" | "EDITED" | "REJECTED" | "SUPERSEDED" | "STALE";
+export type CorrectionEventType =
+  "CREATED" | "SUGGESTED" | "EDITED" | "REJECTED" | "SUPERSEDED" | "STALE" | "REVIEW_STATUS_BACKFILLED";
 
 export interface CorrectionProposalEvent {
   id: string;

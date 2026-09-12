@@ -219,7 +219,10 @@ def _intent(runtime: _Runtime) -> CorrectionIntent:
     )
 
 
-def test_human_authored_proposal_works_offline_and_remains_unapproved(tmp_path: Path) -> None:
+def test_human_authored_proposal_works_offline_and_defaults_to_approved(tmp_path: Path) -> None:
+    """V11-003 (#57): a human-authored proposal needs no Edit->Save round-trip
+    to become reviewed -- it is already self-review by its own author (see
+    docs/V11-003_ISSUE57_PROMPT.md Part A)."""
     runtime = _Runtime(tmp_path / "semantic.sqlite3")
     service = CorrectionWordingService(runtime, NoCorrectionSuggestionProvider())
     before = TEXT
@@ -232,11 +235,35 @@ def test_human_authored_proposal_works_offline_and_remains_unapproved(tmp_path: 
 
     assert proposal["proposedText"] == "என் தேவனுக்கு"
     assert proposal["creationMode"] == CorrectionCreationMode.HUMAN_AUTHORED.value
-    assert proposal["reviewStatus"] == ReviewStatus.UNREVIEWED.value
+    assert proposal["reviewStatus"] == ReviewStatus.HUMAN_APPROVED.value
     assert proposal["lifecycleStatus"] == LifecycleStatus.ACTIVE.value
     assert runtime.correction_eligibility.calls == [("qa-1", ()), ("qa-1", ())]
     assert runtime.repository.qa_finding("qa-1")["qaDisposition"] == QaDisposition.UNRESOLVED.value
     assert TEXT == before
+    # The CREATED event already snapshots reviewStatus == HUMAN_APPROVED --
+    # no second event is appended just for the default (W1 requirement).
+    history = runtime.repository.correction_proposal_history(proposal["id"])
+    assert [event["eventType"] for event in history] == ["CREATED"]
+    assert history[0]["proposalSnapshot"]["reviewStatus"] == ReviewStatus.HUMAN_APPROVED.value
+
+
+def test_human_authored_proposal_with_only_whitespace_wording_stays_unreviewed(
+    tmp_path: Path,
+) -> None:
+    """Nobody has written anything to review yet -- whitespace is not text.
+    (Also the only way to reach _build_proposal's `else` branch: a fully
+    empty proposed_text is rejected before review_status is even computed.)"""
+    runtime = _Runtime(tmp_path / "semantic.sqlite3")
+    service = CorrectionWordingService(runtime, NoCorrectionSuggestionProvider())
+
+    proposal = service.create_proposal(
+        finding_id="qa-1", intent=_intent(runtime),
+        human_proposed_text="   ", explanation="",
+        actor_id="Reviewer",
+    )
+
+    assert proposal["creationMode"] == CorrectionCreationMode.HUMAN_AUTHORED.value
+    assert proposal["reviewStatus"] == ReviewStatus.UNREVIEWED.value
 
 
 def test_new_cross_verse_proposal_keeps_source_and_target_references_distinct(
@@ -732,7 +759,7 @@ def test_correction_wording_module_contains_no_scripture_writer() -> None:
 
 def test_fresh_database_has_stage9b1_history_migration(tmp_path: Path) -> None:
     repo = FoundationRepository(tmp_path / "semantic.sqlite3")
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 14
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 15
     assert repo.recovery_check()["ok"] is True
 
 

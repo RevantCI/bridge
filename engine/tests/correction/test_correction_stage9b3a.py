@@ -186,7 +186,7 @@ def test_v12_to_v13_migration_preserves_database_and_adds_exact_attempt_columns(
     )
     conn.commit(); conn.close()
     repo = FoundationRepository(database)
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 14
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 15
     with sqlite3.connect(database) as migrated:
         columns = {row[1] for row in migrated.execute("PRAGMA table_info(correction_application_intents)")}
         assert {
