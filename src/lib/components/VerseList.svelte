@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, currentChapter, showSource, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse } from "../stores";
+  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, currentChapter, showSource, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress } from "../stores";
   import { buildSegments } from "../utils/highlight";
   import { parseVerseNotes, withNoteMarkers, type ParsedVerse, type VerseNote, type VerseNoteKind } from "../utils/usfmNotes";
   import VerseNotesPopup from "./VerseNotesPopup.svelte";
@@ -9,8 +9,9 @@
   import type { QaFinding } from "../types/finding";
   import {
     applySuggestedFindingFix, editingChapter, editingVerse, editText, editSaving,
-    editError, saveVerseEdit, cancelVerseEdit, startVerseEdit,
+    editError, saveVerseEdit, cancelVerseEdit, startVerseEdit, recheckingKey,
   } from "../verseEditor";
+  import { openAlignment } from "../alignmentUi";
 
   export let onSelect: (verse: string) => void;
 
@@ -250,6 +251,18 @@
     startVerseEdit($currentChapter, verse);
   }
 
+  /** The per-row alignment glyph (issue #70): open the same Align Words modal
+   * ReviewPanel's "⇄ Align words" button opens, so the row itself is a
+   * second entry point rather than a separate control. openAlignment's own
+   * guard runs first -- while background checking/saving is in flight the
+   * disabled attribute normally stops the click, but a disabled button can
+   * still receive a synthetic click, so the verse must not get selected
+   * either in that case. */
+  function openAlignmentFromList(verse: string): void {
+    if (!openAlignment($currentChapter, verse)) return;
+    selectFromList(verse);
+  }
+
   // Grows the edit textarea to fit its full content (1, 2, or more lines)
   // with no scrollbar, plus one blank line of buffer at the bottom — rather
   // than a fixed rows="2" that scrolls for longer verses and wastes space
@@ -336,9 +349,17 @@
               >{piece.seg.text}</mark>{#if piece.seg.numbers.length}<sup class="finding-num">{piece.seg.numbers.join(",")}</sup>{/if}{:else}{piece.seg.text}{/if}
           {/each}
         </div>
-        <span class="alignment-state {alignmentStatus}" title={`Alignment: ${alignmentStatus}`}>
-          {alignmentStatus === "complete" ? "●" : alignmentStatus === "partial" ? "◐" : alignmentStatus === "invalid" ? "!" : "○"}
-        </span>
+        <button
+          type="button"
+          class="alignment-state {alignmentStatus}"
+          disabled={$checkingProgress.running || $editSaving || Boolean($recheckingKey)}
+          title={$checkingProgress.running || $editSaving || $recheckingKey
+            ? "Wait for background checking to finish before aligning"
+            : `Alignment: ${alignmentStatus} — click to open Align Words`}
+          aria-label={`Alignment ${alignmentStatus} for verse ${v}. Open Align Words.`}
+          on:click|stopPropagation={() => openAlignmentFromList(v)}
+          on:dblclick|stopPropagation
+        >⇄</button>
       {/if}
     </div>
   {/each}
@@ -399,7 +420,14 @@
   }
   .note-btn:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
   .note-btn.xref { color: var(--accent); }
-  .alignment-state { margin-left: auto; flex-shrink: 0; padding-top: 3px; font-size: var(--fs-xs); color: var(--text-3); }
+  .alignment-state {
+    margin-left: auto; flex-shrink: 0; align-self: flex-start; margin-top: 3px;
+    font: inherit; font-size: var(--fs-md); line-height: 1; color: var(--text-3);
+    background: transparent; border: 1px solid transparent; border-radius: 5px;
+    padding: 1px 4px; cursor: pointer;
+  }
+  .alignment-state:hover, .alignment-state:focus-visible { background: var(--surface-2); border-color: var(--border-strong); outline: none; }
+  .alignment-state:disabled { opacity: .55; cursor: not-allowed; }
   .alignment-state.complete { color: var(--success); }
   .alignment-state.partial { color: var(--warning); }
   .alignment-state.invalid { color: var(--danger); font-weight: 800; }

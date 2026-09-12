@@ -16,6 +16,7 @@
     recheckingKey, recheckedKey, startVerseEdit, cancelVerseEdit, setVerseEditSavedHook,
     setPendingAcceptFinding,
   } from "../verseEditor";
+  import { alignmentOpen, alignmentKey, openAlignment } from "../alignmentUi";
   import type { AiExplainResult, AIReviewJobSnapshot, FindingStatus } from "../types/finding";
 
   let greekRoomChecking = false;
@@ -82,8 +83,6 @@
     }
   }
 
-  let alignmentOpen = false;
-  let alignmentKey = "";
   let aiExplainError = "";
   let aiExplainErrorJobId = "";
   let aiExplainErrorReference = "";
@@ -315,16 +314,10 @@
   });
 
   $: if (
-    alignmentOpen && $selectedVerse &&
-    verseKey($currentChapter, $selectedVerse) !== alignmentKey
+    $alignmentOpen && $selectedVerse &&
+    verseKey($currentChapter, $selectedVerse) !== $alignmentKey
   ) {
-    alignmentOpen = false;
-  }
-
-  function openAlignment() {
-    if (!$selectedVerse || $checkingProgress.running || $editSaving || $recheckingKey) return;
-    alignmentKey = verseKey($currentChapter, $selectedVerse);
-    alignmentOpen = true;
+    alignmentOpen.set(false);
   }
 
   function startEdit() {
@@ -416,7 +409,7 @@
       <div class="verse-actions">
         <button
           class="align-btn"
-          on:click={openAlignment}
+          on:click={() => openAlignment($currentChapter, $selectedVerse ?? "")}
           disabled={$checkingProgress.running || Boolean($editingChapter) || $editSaving || Boolean($recheckingKey)}
           title={$checkingProgress.running ? "Wait for background checking to finish before aligning" : "Review word alignment"}
         >⇄ Align words</button>
@@ -736,8 +729,8 @@
   {/if}
 </div>
 
-{#if alignmentOpen && $selectedVerse}
-  <AlignmentModal chapter={$currentChapter} verse={$selectedVerse} onClose={() => (alignmentOpen = false)} />
+{#if $alignmentOpen && $selectedVerse}
+  <AlignmentModal chapter={$currentChapter} verse={$selectedVerse} onClose={() => alignmentOpen.set(false)} />
 {/if}
 
 <style>

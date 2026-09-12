@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/svelte";
+import { get } from "svelte/store";
 
 const { decideVerse, editVerse, runVerseChecks } = vi.hoisted(() => ({
   decideVerse: vi.fn(),
@@ -25,6 +26,7 @@ import {
   selectedVerse,
   verseKey,
 } from "../../stores";
+import { alignmentOpen, alignmentKey } from "../../alignmentUi";
 import type { QaFinding } from "../../types/finding";
 
 /** The store holds full QaFindings; fixtures.ts only builds summaries/details. */
@@ -74,6 +76,8 @@ function seed(text: string, findings: QaFinding[] = []): void {
   checkingProgress.set({
     running: false, percent: 0, label: "", jobId: "", state: "idle", error: "", scope: "chapter",
   });
+  alignmentOpen.set(false);
+  alignmentKey.set("");
   vi.clearAllMocks();
   decideVerse.mockResolvedValue(undefined);
   editVerse.mockResolvedValue({ issueResolutionsNeedingRecheck: 0 });
@@ -314,5 +318,69 @@ describe("VerseList footnote handling", () => {
     render(VerseList, { props: { onSelect: vi.fn() } });
     expect(verseRow()).toHaveAttribute("aria-haspopup", "menu");
     expect(document.querySelector("mark")).not.toHaveAttribute("aria-haspopup");
+  });
+});
+
+describe("VerseList alignment glyph (issue #70)", () => {
+  beforeEach(() => seed(PHP_1_6));
+
+  function glyph(): HTMLElement {
+    return screen.getByLabelText(/Open Align Words/) as HTMLElement;
+  }
+
+  it("always renders the ⇄ arrow, colored by completion status", () => {
+    alignmentStatusByVerse.set({ [verseKey("1", "6")]: "complete" });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(glyph()).toHaveTextContent("⇄");
+    expect(glyph()).toHaveClass("complete");
+  });
+
+  it("colors the arrow for partial, invalid and untouched alignment too", () => {
+    alignmentStatusByVerse.set({ [verseKey("1", "6")]: "partial" });
+    const { unmount } = render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(glyph()).toHaveTextContent("⇄");
+    expect(glyph()).toHaveClass("partial");
+    unmount();
+
+    alignmentStatusByVerse.set({ [verseKey("1", "6")]: "invalid" });
+    const rendered2 = render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(glyph()).toHaveTextContent("⇄");
+    expect(glyph()).toHaveClass("invalid");
+    rendered2.unmount();
+
+    alignmentStatusByVerse.set({});
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(glyph()).toHaveTextContent("⇄");
+    expect(glyph()).toHaveClass("untouched");
+  });
+
+  it("selects the verse and opens the Align Words modal when clicked", async () => {
+    const onSelect = vi.fn();
+    render(VerseList, { props: { onSelect } });
+    await fireEvent.click(glyph());
+    expect(onSelect).toHaveBeenCalledWith("6");
+    expect(get(alignmentOpen)).toBe(true);
+    expect(get(alignmentKey)).toBe(verseKey("1", "6"));
+  });
+
+  it("does not also trigger the row's own select/edit handlers", async () => {
+    const onSelect = vi.fn();
+    render(VerseList, { props: { onSelect } });
+    await fireEvent.click(glyph());
+    // selectFromList runs exactly once (from the glyph handler itself, not
+    // once more via the row's on:click) -- stopPropagation is load-bearing.
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the glyph and refuses to open while background checking runs", async () => {
+    checkingProgress.set({
+      running: true, percent: 40, label: "Checking…", jobId: "j1", state: "running", error: "", scope: "chapter",
+    });
+    const onSelect = vi.fn();
+    render(VerseList, { props: { onSelect } });
+    expect(glyph()).toBeDisabled();
+    await fireEvent.click(glyph());
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(get(alignmentOpen)).toBe(false);
   });
 });
