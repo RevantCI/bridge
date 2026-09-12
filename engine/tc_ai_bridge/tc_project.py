@@ -2115,6 +2115,23 @@ class TranslationCoreProject:
         commit_metadata = {'operation':'scriptureEdit','chapter':str(chapter),'verse':str(verse)}
         commit_metadata.update(journal_metadata or {})
         self.journal.commit(journal_tx, commit_metadata)
+        # V11-000a review fix (F6): the invalid marker written above (and,
+        # for the editor-edit route below, whatever complete_target_edit
+        # does to Stage 6B/7/8 records) changes what Stage 6B's
+        # WORD_ALIGNMENT evidence should find, so the alignment
+        # invalidation memo must be refreshed in the same call that wrote
+        # it -- not left for the next project reopen to notice. Placed
+        # here, after the commit, because it is the one point both the
+        # editor-edit route (strict_context is None) and the
+        # correction-application route (strict_context is not None)
+        # unconditionally reach. Without this, a location run published
+        # later in the same session already reflects the post-edit
+        # alignment state, but a subsequent reopen's fresh
+        # PassageSemanticRuntime -- comparing current disk state against a
+        # memo that never advanced -- incorrectly stales it (see
+        # docs/V11-000a_REVIEW_FIX_PROMPT.md F6).
+        if self.passage_semantic_runtime is not None:
+            self.passage_semantic_runtime.synchronize_alignment_state()
         semantic_invalidation: dict[str, Any] = {}
         if strict_context is None and semantic_intent and self.passage_semantic_runtime is not None:
             try:

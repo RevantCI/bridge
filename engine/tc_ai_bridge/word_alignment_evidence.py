@@ -24,6 +24,7 @@ evidence rather than being split heuristically.
 """
 from __future__ import annotations
 
+import re
 import unicodedata
 from typing import Any
 
@@ -32,10 +33,32 @@ from .models import TokenRef, VerseAlignment
 from .original_language_resources import OriginalLanguageResource, source_tokens_for_verse
 from .source_semantic_inventory import source_token_identity
 
-ALIGNMENT_EVIDENCE_VERSION = "tc-word-alignment-v1"
+# V11-000a review fix (F1, R1's exact-NFC matching) changed what this
+# evidence finds relative to the v1 that shipped in e3ff0de: a project
+# analysed under v1 holds LOCATION_RUN fingerprints/policyVersions carrying
+# that string, and without a bump the post-fix engine would serve those
+# evidence-dropped runs as cache hits -- same rule
+# correction_verification.py's fingerprint() docstring states for Stage 6B
+# changes generally.
+ALIGNMENT_EVIDENCE_VERSION = "tc-word-alignment-v2"
+
+# Same "verse bridge" recognition rule as
+# original_language_resources.source_tokens_for_verse (e.g. "2-3").
+_VERSE_BRIDGE = re.compile(r"\d+-\d+")
 
 
 def _norm(value: str) -> str:
+    """Casefolded NFC -- for the lemma reinforcement score only.
+
+    Never for a word/occurrence comparison: `tokenize_target_text` and tC's
+    aligner both count `occurrence`/`occurrences` over the exact NFC string,
+    case included, so a casefolded word comparison matches tokens that were
+    counted separately upstream, produces a spurious tie, and drops the
+    group (found in review; see docs/V11-000a_REVIEW_FIX_PROMPT.md F1).
+    Lemma is not part of that (word, occurrence) join -- it only adds to the
+    reinforcement score among candidates that already passed it -- so
+    casefolding it is safe.
+    """
     return unicodedata.normalize("NFC", str(value or "")).casefold().strip()
 
 
@@ -46,22 +69,26 @@ def resolve_source_token_id(
 
     Matching is conservative, following
     `semantic_alignment_guard.alignment_top_ids_for_canonical_tokens`: exact
-    NFC word + occurrence is required, lemma/Strong's/morph only reinforce a
-    tie among candidates that already satisfy it. `raw` tokens come from the
-    pack itself, never from `ref` -- an NFD-normalized tC entry must not be
-    fed into the identity hash directly, or it mints a different id than the
-    one Stage 5 already stored.
+    NFC word (case-sensitive -- see `_norm`'s docstring) + occurrence is
+    required, lemma/Strong's/morph only reinforce a tie among candidates that
+    already satisfy it. `raw` tokens come from the pack itself, never from
+    `ref` -- an NFD-normalized tC entry must not be fed into the identity
+    hash directly, or it mints a different id than the one Stage 5 already
+    stored. No casefold fallback: a tC word whose case differs from the pack
+    means the text changed under the alignment (ALIGN_TARGET_MISMATCH,
+    `local_checks.py:36-40`), and that must stay unresolved, not be papered
+    over.
     """
     raw_tokens = source_tokens_for_verse(book, chapter, verse)
     if not raw_tokens:
         return None
-    target_word = _norm(ref.word)
+    target_word = unicodedata.normalize("NFC", ref.word)
     target_occurrence = int(ref.occurrence or 1)
     if not target_word:
         return None
     candidates: list[tuple[int, int]] = []
     for index, raw in enumerate(raw_tokens):
-        if _norm(str(raw.get("word") or "")) != target_word:
+        if unicodedata.normalize("NFC", str(raw.get("word") or "")) != target_word:
             continue
         if int(raw.get("occurrence") or 1) != target_occurrence:
             continue
@@ -100,16 +127,25 @@ def resolve_target_token_id(
     `text_revision`, never an identity. Anything but exactly one match --
     including an occurrences-total mismatch, which signals the two
     tokenizations disagree about this verse -- returns unresolved.
+
+    Case-sensitive, deliberately: `token["normalized"]` is NFC without
+    casefold (`tokenize_target_text`, `passage_semantic_runtime.py`), and
+    that is exactly the space `occurrence`/`occurrences` were counted in, so
+    matching case-insensitively would tie together tokens the counting
+    already told apart and drop the group (F1,
+    docs/V11-000a_REVIEW_FIX_PROMPT.md). No casefold fallback: a tC word
+    whose case differs from the current text is `ALIGN_TARGET_MISMATCH`
+    (`local_checks.py:36-40`), not a case Bridge should resolve anyway.
     """
     from .passage_semantic_runtime import target_token_identity, tokenize_target_text
 
-    target_word = _norm(ref.word)
+    target_word = unicodedata.normalize("NFC", ref.word)
     if not target_word:
         return None
     tokens = tokenize_target_text(current_text, profile)
     exact = [
         token for token in tokens
-        if _norm(token["normalized"]) == target_word
+        if token["normalized"] == target_word
         and token["occurrence"] == int(ref.occurrence or 1)
         and token["occurrences"] == int(ref.occurrences or 1)
     ]
@@ -196,6 +232,16 @@ def alignment_precedents_for_range(
         if parsed is None:
             continue
         ref_chapter, ref_verse = parsed
+        if _VERSE_BRIDGE.fullmatch(ref_verse):
+            # V11-000a review fix (F3): out of scope per the module
+            # docstring above -- a bridged tC alignment group covers
+            # multiple verses, and deciding which of this bridge's tokens
+            # belongs to which individual verse is itself an
+            # unresolved-or-guess problem, so it contributes nothing rather
+            # than being split heuristically. Confirmed empirically that a
+            # bridge's displayed reference reaches here as e.g. "PHP 1:2-3"
+            # (rebuild_current_passage, not assumed).
+            continue
         try:
             if project.word_alignment_state(ref_chapter, ref_verse) != "completed":
                 continue

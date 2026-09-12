@@ -206,6 +206,7 @@ def _publish_evidence(
             "relationships": [relationship], "candidates": [candidate], "diagnostics": {},
         },
         candidates=[], relationships=[],
+        alignment_dependency_id=repository.alignment_dependency_id(runtime.project_id, runtime.book),
     )
 
     component = {
@@ -1333,6 +1334,15 @@ def test_protocol_verify_acknowledge_and_restart_on_the_managed_project(
         "createdAt": "2026-09-07T00:00:00Z",
     }), encoding="utf-8")
     application = _apply(application_service)
+    # Applying a correction edits the verse (tc_project.py's apply_scripture_edit),
+    # which -- independently of V11-000a -- also writes the word-alignment
+    # "invalid" marker for it (same mutually-exclusive state observed in the
+    # real tC backend). Since the V11-000a review fix F6,
+    # apply_scripture_edit refreshes the alignment invalidation memo itself
+    # as part of that same call, so no manual synchronize_alignment_state()
+    # is needed here -- see docs/V11-000a_REVIEW_FIX_PROMPT.md F6 for why an
+    # earlier version of this test that called it by hand was masking a real
+    # over-invalidation bug rather than reflecting realistic sequencing.
     runs = _publish_evidence(
         runtime, source_text="τῷ θεῷ μου", target_text="என் தேவனையே",
         component_status="PRESERVED", coverage_status="COVERED",

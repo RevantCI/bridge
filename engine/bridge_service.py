@@ -1760,6 +1760,13 @@ class BridgeEngine:
         self.project.mark_word_alignment_completed(
             chapter, verse, username=self.settings.reviewer_name or "Bridge Reviewer",
         )
+        # V11-000a review fix (F6): unlike realign/unalign/save/undo, this RPC
+        # does not go through _finish_alignment_mutation, so it must refresh
+        # the alignment invalidation memo itself -- otherwise a location run
+        # published after this call is over-invalidated the next time the
+        # project is reopened (docs/V11-000a_REVIEW_FIX_PROMPT.md F6).
+        if self.passage_semantic_runtime is not None:
+            self.passage_semantic_runtime.synchronize_alignment_state()
         self._corpus_stats_by_book.pop(str(self.project.path), None)
         self._consistency_findings_by_book.pop(str(self.project.path), None)
         return self._alignment_context(chapter, verse)

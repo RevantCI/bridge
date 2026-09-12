@@ -7003,3 +7003,133 @@ Not done, on purpose: cross-verse alignment (stays on #54), a `#54` split
 into a separate implementable issue for this same-verse slice (the spike
 doc's own recommendation — filing that is a maintainer call, not made
 here), and any embedding-provider work.
+
+## V11-000a review fixes: exact-NFC matching, atomic WORD_ALIGNMENT edge,
+verse-bridge guard, alignment-memo refresh (2026-09-12)
+
+Review of `e3ff0de` (`docs/V11-000a_REVIEW_FIX_PROMPT.md` Part A) found the
+design sound but flagged three real defects (F1-F3), fixed in a first pass.
+A second review pass of that fix, before it was ever pushed, found one more
+(F6) — this entry covers all four. No weight, threshold,
+`tokenize_target_text`, or the pack changed; the golden stayed
+byte-identical (confirmed unchanged, not assumed).
+
+**F1 — casefolding tied together tokens the counting told apart.** Both
+resolvers' word-identity comparison went through `_norm()`, which casefolds.
+But `tokenize_target_text` and tC's own aligner both count
+`occurrence`/`occurrences` over the exact NFC string, case included — so
+"Grace" and "grace" each get `occurrence=1` independently, and a casefolded
+comparison in the resolver merged them back into a spurious `len()==2`
+ambiguity, silently dropping the whole alignment group. Fixed by comparing
+via bare `unicodedata.normalize("NFC", ...)` for word/occurrence identity in
+both `resolve_source_token_id` and `resolve_target_token_id`, with no
+casefold fallback — a case mismatch is `ALIGN_TARGET_MISMATCH`
+(`local_checks.py:36-40`), not something to resolve through. `_norm()`
+(casefold) is now restricted to the lemma reinforcement score only, which
+sits outside the (word, occurrence) join and stays safe to casefold.
+Verified against constructed English fixtures (a same-verse cased pair, a
+sentence-initial-capital case, a capitalized-article case), a monkeypatched
+source-side Greek pair (Χάρις/χάρις), and real UGNT data — 1CO 2:11's
+πνεῦμα/Πνεῦμα pair (strong G4151), found by scanning every NT book's pack for
+a (lemma, strong) key with two case-differing word forms rather than
+constructed. Each new test asserts a specific resolved id and that the two
+cased forms resolve to *different* ids, not just "not None." All prior
+controls (the Tamil fixtures, `test_target_resolution_matches_a_plain_word`,
+all six tokenization-disagreement tests) still pass unmodified.
+
+**F2 — the WORD_ALIGNMENT dependency edge was one commit, not zero.** It was
+previously registered via a separate post-commit `add_record_dependency()`
+call, on its own connection, after `save_semantic_location_run`'s own
+transaction had already committed — a crash between the two commits could
+leave an `ACTIVE` `LOCATION_RUN` permanently immune to invalidation. Fixed
+by adding a new `alignment_dependency_id` parameter to
+`save_semantic_location_run` and writing that edge in the *same*
+`executemany` insert as the run's other dependency edges, inside the same
+transaction; the call site in `semantic_location.py` now passes it in rather
+than making a trailing call. Verified with a real atomicity test: a
+`sqlite3.connect` patch (the C-typed `Connection` itself can't have a method
+monkeypatched, so the patch wraps the real connection in a proxy that fails
+only the `record_dependencies` `executemany`) forces the edge write to fail,
+and the test then confirms — using the real connection again — that no
+`semantic_location_runs` row exists for that run id. Fixing this correctly
+surfaced a genuine, pre-existing interaction, not a new bug: applying a
+correction invalidates word alignment as a side effect
+(`tc_project.py:2090-2091`), and now that the edge is reliably registered, a
+freshly reopened runtime correctly stales a hand-published test fixture's
+location run unless the test settles alignment state first — one
+`test_correction_stage9b4.py` fixture was updated to call
+`runtime.synchronize_alignment_state()` at the right point to reflect that
+realistic sequencing.
+
+**F3 — the verse-bridge exclusion was promised, not enforced.** The module
+docstring already said a bridged tC alignment group ("PHP 1:2-3") is out of
+scope, but nothing actually skipped one before attempting to load and
+resolve it. Confirmed empirically (via `rebuild_current_passage`, not
+assumed) that a bridge's displayed reference reaches
+`alignment_precedents_for_range` as e.g. `"PHP 1:2-3"`, then added a
+`_VERSE_BRIDGE = re.compile(r"\d+-\d+")` guard — the same pattern
+`original_language_resources.py` already uses to recognize a bridge — that
+skips the reference before any load or resolve attempt. Verified with a
+fixture project holding a completed alignment stored under a bridge key:
+zero precedents, no exception, and (patched and counted)
+`resolve_source_token_id` is never called.
+
+**Version bump.** `ALIGNMENT_EVIDENCE_VERSION` moved `"tc-word-alignment-v1"`
+→ `"tc-word-alignment-v2"`: v1 is now public on `main`, and F1 changes what
+evidence is found, so without a bump a project analyzed under v1 would have
+its evidence-dropped runs served as current cache hits post-fix. No other
+version moved — `LOCATION_ENGINE_VERSION` stays `-v2`, schema stays v14.
+Pinned by three tests: the literal itself, its presence in
+`AnalysisJobManager.policy_versions()`'s output, and — the way
+`test_analysis_jobs_stage9a4.py:332-335` pins the Unicode comparison
+version — that it's a real input to the Stage 9B.4 verifier fingerprint
+(reconstructed manually with both v1 and v2 strings; the real fingerprint
+matches only the v2 reconstruction).
+
+**F6 — the memo could still lag disk on two more paths, and the 9B.4 test's
+own fix hid it.** Found in a second review pass of this same fix, before it
+was ever pushed. `apply_scripture_edit` (both the manual-edit and the
+correction-application route) and `complete_alignment` (the RPC) each
+change what Stage 6B's `WORD_ALIGNMENT` evidence should find — a fresh
+`invalid` marker, a fresh `completed` marker — but neither called
+`synchronize_alignment_state()` to refresh the memo that decides whether a
+downstream `LOCATION_RUN` is stale. A location run published right after
+either call already reflects the post-change alignment state and carries a
+correct `WORD_ALIGNMENT` edge (per F2), but the next project reopen
+compares current disk state against a memo that never advanced, finds a
+mismatch, and over-invalidates that (actually-current) run along with
+everything downstream of it: apply a correction, re-analyze, verify, close,
+reopen — the whole book's analysis goes stale again for no real reason.
+F2's own fix in this same commit is what made this visible: the
+`test_correction_stage9b4.py` fixture had papered over it with a manual
+`runtime.synchronize_alignment_state()` call and a comment claiming the
+reopen "correctly" staled the run — it does not, and that call is reverted
+here. Fixed at both call sites instead of in the test: `apply_scripture_edit`
+now calls `synchronize_alignment_state()` right after
+`self.journal.commit(...)` — the one point both the editor-edit and
+correction-application routes reach unconditionally (`tc_project.py`) — and
+`complete_alignment` calls it right after `mark_word_alignment_completed`
+(`bridge_service.py`), since unlike `realign`/`unalign`/`save`/`undo` this
+RPC does not go through the shared `_finish_alignment_mutation` tail that
+already did this. Verified by two new regression tests in
+`test_word_alignment_invalidation.py`, one per path: publish a real `ACTIVE`
+location run, mutate alignment state through the real call
+(`apply_scripture_edit` / `complete_alignment`), publish another real run,
+construct a **fresh** `PassageSemanticRuntime` on the same on-disk project
+exactly as `project.open` does, and assert the just-published run is still
+`ACTIVE` and the fresh runtime's own `synchronize_alignment_state()` returns
+`{"changed": False, "staled": 0}`. Both were confirmed to fail against the
+unfixed code first — `git stash` of just the two source files reproduced
+`STALE` where `ACTIVE` was expected on both — then pass with the fix
+restored.
+
+**Verified.** `tests/semantic/test_word_alignment_evidence.py`: 25 tests (up
+from 20). `tests/semantic/test_word_alignment_invalidation.py`: 7 tests (up
+from 4: the F2 atomicity test plus the two F6 regressions). All prior tests
+in both files, and in `test_correction_stage9b4.py`, pass unmodified except
+the one fixture edit named under F2/F6 above. Full engine + Greek Room
+suite: **1144 passed, 0 failed** (up from 1132). `cargo check` clean,
+`cargo test` 12/12. `svelte-check` 0/0. Vitest 335/335. Production build
+passed. Schema stayed v14; the Stage 6B golden stayed byte-identical. O1/O2
+(the two optional fixes the review also named) were not attempted —
+deferred to their own commits, only after these land.

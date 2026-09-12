@@ -3751,4 +3751,14 @@ pass: the new enum member had to be added to
 alongside the Python enum. Full detail: `docs/BUILD_LOG.md`'s same-dated
 entry.
 
-Not committed as of this entry -- pending explicit go-ahead.
+**Update, same day:** review (`docs/V11-000a_REVIEW_FIX_PROMPT.md`) found the
+design sound but four real defects across two passes -- a casefolding bug
+that dropped evidence for any cased pair, a non-atomic dependency-edge
+write, an unenforced verse-bridge exclusion, and (found reviewing that same
+fix before it was pushed) two more call sites -- `apply_scripture_edit` and
+`complete_alignment` -- that changed alignment state on disk without
+refreshing the invalidation memo, over-invalidating a current location run
+on the next reopen -- all fixed, plus a required
+`ALIGNMENT_EVIDENCE_VERSION` bump to `v2`; full detail in `docs/BUILD_LOG.md`'s
+same-dated "review fixes" entry. Committed locally; not pushed, per
+standing instruction to leave it for review.

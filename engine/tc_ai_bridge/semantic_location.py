@@ -827,14 +827,9 @@ class SemanticLocationEngine:
             target_inventory_id=target_inventory["id"],
             run_status=LocationRunStatus.COMPLETE.value, payload=payload,
             candidates=all_candidates, relationships=relationships,
-        )
-        # Registered unconditionally, even when no alignment evidence was
-        # found this run: a *future* completed alignment for a verse in this
-        # range could change the outcome, so this run depends on the book's
-        # current alignment state either way.
-        self.repository.add_record_dependency(
-            "LOCATION_RUN", run_id, "WORD_ALIGNMENT",
-            self.repository.alignment_dependency_id(self.project_id, self.book),
+            alignment_dependency_id=self.repository.alignment_dependency_id(
+                self.project_id, self.book,
+            ),
         )
         return payload
 

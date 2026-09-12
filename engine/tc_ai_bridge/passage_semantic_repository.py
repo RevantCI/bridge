@@ -2748,7 +2748,7 @@ class FoundationRepository:
         self, *, run_id: str, project_id: str, book: str, range_key: str,
         fingerprint: str, source_inventory_id: str, target_inventory_id: str,
         run_status: str, payload: dict[str, Any], candidates: list[dict[str, Any]],
-        relationships: list[dict[str, Any]],
+        relationships: list[dict[str, Any]], alignment_dependency_id: str,
     ) -> None:
         """Atomically publish an immutable source-to-target location run."""
         with self._connect() as conn:
@@ -2794,6 +2794,17 @@ class FoundationRepository:
                 [
                     ("LOCATION_RUN", run_id, "SOURCE_INVENTORY", source_inventory_id),
                     ("LOCATION_RUN", run_id, "TARGET_INVENTORY", target_inventory_id),
+                    # V11-000a review fix (F2): registered here, inside the same
+                    # publish transaction as the run row itself, not via a
+                    # separate add_record_dependency() call after commit -- a
+                    # crash between the two would leave an ACTIVE LOCATION_RUN
+                    # with no WORD_ALIGNMENT edge, permanently immune to
+                    # apply_alignment_invalidation. Unconditional, even when no
+                    # alignment evidence was found this run: a *future*
+                    # completed alignment for a verse in this range could still
+                    # change the outcome, so this run depends on the book's
+                    # current alignment state either way.
+                    ("LOCATION_RUN", run_id, "WORD_ALIGNMENT", alignment_dependency_id),
                     # Each relationship depends on the run that produced it.
                     # Without this edge a re-run staled the run but left every
                     # individual location relationship looking current, so
