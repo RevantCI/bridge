@@ -224,6 +224,99 @@ def repo_is_empty(repo) -> bool:
 # workbench write, not of migration.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# The query API (#76). The file stores were directory trees, so every read was
+# "give me what is under this prefix" -- per verse, per chapter, per book. These
+# cover exactly that and nothing wider.
+# ---------------------------------------------------------------------------
+
+def _decision(repo, row_id, *, chapter, verse, key, payload, book_id="rut"):
+    return _write(
+        repo, "human_decisions", row_id, book_id=book_id, payload=payload,
+        extra_columns={"kind": "check", "chapter": chapter, "verse": verse,
+                       "key": key, "decision": "accepted"},
+    )
+
+
+def test_rows_filters_to_one_verse(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "bridge-workbench.sqlite3")
+    _decision(repo, "a", chapter="1", verse="1", key="k1", payload={"n": 1})
+    _decision(repo, "b", chapter="1", verse="2", key="k2", payload={"n": 2})
+
+    found = repo.rows("human_decisions", project_id="proj-1", book_id="rut",
+                      equals={"chapter": "1", "verse": "1"})
+
+    assert [row["id"] for row in found] == ["a"]
+
+
+def test_rows_scopes_by_book(tmp_path):
+    """Bridge imports one project per book; a Ruth read must not see Titus."""
+    repo = WorkbenchRepository(tmp_path / "bridge-workbench.sqlite3")
+    _decision(repo, "a", chapter="1", verse="1", key="k", payload={}, book_id="rut")
+    _decision(repo, "b", chapter="1", verse="1", key="k", payload={}, book_id="tit")
+
+    found = repo.rows("human_decisions", project_id="proj-1", book_id="rut")
+
+    assert [row["id"] for row in found] == ["a"]
+
+
+def test_rows_without_a_book_spans_books_rather_than_matching_null(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "bridge-workbench.sqlite3")
+    _decision(repo, "a", chapter="1", verse="1", key="k", payload={}, book_id="rut")
+    _decision(repo, "b", chapter="1", verse="1", key="k", payload={}, book_id="tit")
+
+    found = repo.rows("human_decisions", project_id="proj-1")
+
+    assert {row["id"] for row in found} == {"a", "b"}
+
+
+def test_rows_never_leak_across_projects(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "bridge-workbench.sqlite3")
+    _decision(repo, "a", chapter="1", verse="1", key="k", payload={})
+    _write(repo, "human_decisions", "b", project_id="other-project",
+           payload={}, extra_columns={"kind": "check", "chapter": "1",
+                                      "verse": "1", "key": "k", "decision": "x"})
+
+    found = repo.rows("human_decisions", project_id="proj-1")
+
+    assert [row["id"] for row in found] == ["a"]
+
+
+def test_payloads_returns_what_the_file_reader_used_to_parse(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "bridge-workbench.sqlite3")
+    original = {"bookId": "rut", "chapter": "1", "verse": "1", "decision": "accepted",
+                "selectionText": ["a", "b"], "schemaVersion": 1}
+    _decision(repo, "a", chapter="1", verse="1", key="k", payload=original)
+
+    assert repo.payloads("human_decisions", project_id="proj-1", book_id="rut") == [original]
+
+
+def test_payloads_skips_an_undecodable_row_rather_than_raising(tmp_path):
+    """A corrupt file used to read as absent; one bad row must not take out a verse."""
+    repo = WorkbenchRepository(tmp_path / "bridge-workbench.sqlite3")
+    _decision(repo, "good", chapter="1", verse="1", key="k1", payload={"n": 1})
+    _decision(repo, "bad", chapter="1", verse="1", key="k2", payload={"n": 2})
+    with repo._connect() as conn:
+        conn.execute("UPDATE human_decisions SET payload_json='{not json' WHERE id='bad'")
+        conn.commit()
+
+    assert repo.payloads("human_decisions", project_id="proj-1", book_id="rut") == [{"n": 1}]
+
+
+def test_a_query_column_must_be_a_plain_identifier(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "bridge-workbench.sqlite3")
+    with pytest.raises(WorkbenchValidationError):
+        repo.rows("human_decisions", project_id="p", equals={"chapter=1 OR 1": "x"})
+    with pytest.raises(WorkbenchValidationError):
+        repo.rows("human_decisions", project_id="p", order_by="created_at; DROP TABLE x")
+
+
+def test_a_query_table_must_be_workbench_mutable(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "bridge-workbench.sqlite3")
+    with pytest.raises(WorkbenchValidationError):
+        repo.rows("change_log", project_id="p")
+
+
 def test_natural_row_id_is_stable_for_the_same_key():
     assert natural_row_id("proj", "php", "1", "4") == natural_row_id("proj", "php", "1", "4")
 

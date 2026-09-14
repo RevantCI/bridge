@@ -533,6 +533,83 @@ class WorkbenchRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def rows(
+        self,
+        table: str,
+        *,
+        project_id: str,
+        book_id: str | None = None,
+        equals: dict[str, Any] | None = None,
+        order_by: str = "created_at",
+    ) -> list[dict[str, Any]]:
+        """Every row in one table matching an exact-match filter.
+
+        The stores this replaces were directory trees, so every read they did
+        was "give me the files under this prefix" -- per verse, per chapter, per
+        book. That is an equality filter on the lifted columns and nothing more,
+        so this deliberately offers no ranges, no LIKE and no joins: a reader
+        that needs those wants a purpose-built method on the repository, not a
+        general query language leaking into `tc_project`.
+
+        ``book_id=None`` means "any book", not "rows whose book_id is NULL" --
+        every caller here is book-scoped, and a NULL-matching filter has no use
+        that is not better served by passing the column in ``equals``.
+
+        Column names are validated rather than escaped: they reach SQL by string
+        interpolation because SQLite cannot parameterise an identifier, so
+        anything not matching a plain lowercase identifier is refused outright.
+        """
+        self._require_mutable_table(table)
+        equals = dict(equals or {})
+        for column in (*equals.keys(), order_by):
+            if not _IDENTIFIER_RE.match(column):
+                raise WorkbenchValidationError(f"Unsafe column name: {column!r}")
+
+        clauses = ["project_id=?"]
+        values: list[Any] = [project_id]
+        if book_id is not None:
+            clauses.append("book_id=?")
+            values.append(book_id)
+        for column, value in equals.items():
+            clauses.append(f"{column}=?")
+            values.append(value)
+
+        with self._connect() as conn:
+            found = conn.execute(
+                f"SELECT * FROM {table} WHERE {' AND '.join(clauses)} ORDER BY {order_by}, id",
+                values,
+            ).fetchall()
+            return [dict(row) for row in found]
+
+    def payloads(
+        self,
+        table: str,
+        *,
+        project_id: str,
+        book_id: str | None = None,
+        equals: dict[str, Any] | None = None,
+        order_by: str = "created_at",
+    ) -> list[dict[str, Any]]:
+        """:meth:`rows`, decoded to the payloads the file stores used to hold.
+
+        `payload_json` keeps each record's original JSON shape verbatim, so a
+        reader that used to parse a file gets back exactly what it parsed
+        before. A row whose payload will not decode is skipped rather than
+        raising: the file readers behaved that way (a corrupt file was treated
+        as absent), and one bad row must not take out a whole verse's history.
+        """
+        decoded: list[dict[str, Any]] = []
+        for row in self.rows(
+            table, project_id=project_id, book_id=book_id, equals=equals, order_by=order_by,
+        ):
+            try:
+                payload = json.loads(row["payload_json"])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(payload, dict):
+                decoded.append(payload)
+        return decoded
+
     @staticmethod
     def _require_mutable_table(table: str) -> None:
         if table not in MUTABLE_TABLES:
