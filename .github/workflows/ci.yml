@@ -47,13 +47,26 @@ on:
     branches: [main]
 
 concurrency:
-  # A new push to a PR cancels the previous run for that PR. On `push`,
-  # `github.ref` is `refs/heads/main` for every commit, so without the
-  # event_name guard a push to main cancels the PREVIOUS commit's still-running
-  # gate instead of its own -- and work here goes straight onto main, so two
-  # pushes a few minutes apart is the normal case, not the exception (#83).
+  # Nothing is ever cancelled here: every commit gets its own gate, and runs
+  # in the same group wait their turn in FIFO order (#83).
+  #
+  # `cancel-in-progress` was only ever half the story. A *pending* run is
+  # evicted whenever a newer run joins the group, regardless of that setting --
+  # the default `queue: single` means "at most one run may be pending, and a
+  # new one replaces it". That is what silently dropped a commit's gate on
+  # 2026-09-14: three pushes to main inside twenty minutes, and the middle
+  # one's run was discarded while still queued behind a 17-minute run. The
+  # replacement run then skipped the jobs the evicted one would have run,
+  # because its own path filter only sees its own diff -- so the engine
+  # changes in that commit reached main having never been tested.
+  #
+  # `queue: max` allows up to 100 pending runs instead of one. It cannot be
+  # combined with `cancel-in-progress: true` (workflow validation error), which
+  # is fine: cancelling superseded PR runs is not worth losing a gate over.
+  # release.yml deliberately keeps its own cancel-in-progress -- two triggers
+  # fire for one tag there and the job is idempotent.
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  queue: max
 
 permissions:
   contents: read
