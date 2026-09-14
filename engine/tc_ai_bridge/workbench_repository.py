@@ -533,6 +533,67 @@ class WorkbenchRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def append_event(
+        self,
+        table: str,
+        row_key: str,
+        *,
+        project_id: str,
+        book_id: str | None,
+        op: str,
+        payload: dict[str, Any],
+        actor_id: str,
+        device_id: str,
+        journal_tx_id: str | None = None,
+    ) -> str:
+        """Append a domain event to ``change_log`` without changing a row.
+
+        Some records compact their own in-record history -- an issue resolution
+        keeps only its last hundred entries -- while the lifecycle events behind
+        them must survive forever. On disk that was a second, append-only file
+        per event beside the record. Here it is a ``change_log`` row, which is
+        the same thing with the immutability actually enforced rather than
+        merely intended: CLAUDE.md's rule that compacting a record must not
+        compact its lifecycle events.
+
+        This is the one write that does not go through ``_write``, because there
+        is no row change to make -- the event describes something that happened
+        to a row, not a new version of it. ``base_revision``/``new_revision``
+        are therefore left NULL, which is what distinguishes an event row from a
+        row-image row when reading the log back.
+        """
+        self._require_mutable_table(table)
+        event_id = str(uuid.uuid4())
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "INSERT INTO change_log(event_id,project_id,book_id,table_name,row_key,op,"
+                "base_revision,new_revision,actor_id,device_id,created_at,payload_json,journal_tx_id) "
+                "VALUES(?,?,?,?,?,?,NULL,NULL,?,?,?,?,?)",
+                (
+                    event_id, project_id, book_id, table, row_key, op,
+                    actor_id, device_id, self._now(),
+                    json.dumps(payload, ensure_ascii=False), journal_tx_id,
+                ),
+            )
+            conn.commit()
+        return event_id
+
+    def events_for_row(
+        self, table: str, row_key: str, *, project_id: str,
+    ) -> list[dict[str, Any]]:
+        """Every change_log entry for one row, oldest first -- row images and
+        domain events alike. This is what makes a compacted record's full
+        lifecycle recoverable."""
+        self._require_mutable_table(table)
+        with self._connect() as conn:
+            found = conn.execute(
+                "SELECT * FROM change_log WHERE project_id=? AND table_name=? AND row_key=? "
+                "ORDER BY seq",
+                (project_id, table, row_key),
+            ).fetchall()
+            return [dict(row) for row in found]
+
     def rows(
         self,
         table: str,

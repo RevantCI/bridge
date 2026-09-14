@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import SimpleNamespace
@@ -122,10 +123,12 @@ def test_unavailable_connector_keeps_one_idempotent_note_safely_queued(
     assert second["result"]["handoff"]["status"] == "queued"
     assert second["result"]["handoff"]["attempts"] == 2
     assert "offline" in second["result"]["handoff"]["lastError"]
+    # The notes XML stays a file in Paratext's own format (TEAM_ARCHITECTURE
+    # ss3.4); only the small sync-state record moved into the database (#76),
+    # so that half is read through the project instead of off disk.
     notes = resolution_project / ".apps" / "translationCoreAI" / "paratextNotes" / "Notes_AI_Suggestion.xml"
     assert len(ET.parse(notes).getroot().findall("thread")) == 1
-    state = json.loads((notes.parent / "live_sync_state.json").read_text(encoding="utf-8"))
-    assert len(state["items"]) == 1
+    assert len(engine.project.load_paratext_note_sync_state()["items"]) == 1
 
 
 def test_confirmed_matching_project_sends_once_and_preserves_message_identity(
@@ -276,13 +279,59 @@ def test_problem_reflags_and_failed_retry_never_restores_a_previous_pass(
     assert failed["status"] == "open"
     assert failed["recheck"]["status"] == "failed"
     assert failed["recheck"]["error"] == "Provider unavailable"
-    audit_root = resolution_project / ".apps" / "translationCoreAI" / "audit" / "tit" / "1" / "1"
+    # The lifecycle trail used to be one append-only file per event beside the
+    # record. #76 moved it into change_log, where append-only is enforced by
+    # triggers rather than by convention -- same invariant, stronger guarantee:
+    # a resolution's `history` is capped at 100 entries, and these events must
+    # survive that compaction (CLAUDE.md).
+    project = engine.project
+    log = project.workbench.events_for_row(
+        "issue_resolutions", failed["resolutionId"],
+        project_id=project.workbench_identity.project_id,
+    )
     events = [
-        json.loads(path.read_text(encoding="utf-8"))["event"]
-        for path in audit_root.glob("*_recheck_*.json")
+        json.loads(entry["payload_json"])["event"]
+        for entry in log
+        if str(entry["op"]).startswith("lifecycle:")
     ]
     assert "recheck_reflagged" in events
     assert "recheck_failed" in events
+
+
+def test_lifecycle_events_outlive_the_compacted_record_history(
+    resolution_project, tmp_path,
+):
+    """CLAUDE.md: compacting a record must not compact its lifecycle events.
+
+    `record['history']` keeps only its last hundred entries, so a resolution
+    that is rechecked often loses its early history from the record itself.
+    The change_log trail is what makes that history still recoverable, and it
+    is the reason the events are written separately rather than being read back
+    out of the record.
+    """
+    engine = _engine(tmp_path, resolution_project)
+    saved = _save(engine, _check(engine))
+    project = engine.project
+
+    # Enough cycles to push the earliest events past the 100-entry cap.
+    for _ in range(60):
+        project.mark_issue_resolutions_recheck("1", "1", "running")
+        project.mark_issue_resolutions_recheck("1", "1", "failed", error="nope")
+
+    record = project.load_issue_resolution("1", "1", saved["resolutionId"])
+    assert len(record["history"]) == 100, "the record itself is still compacted"
+
+    log = project.workbench.events_for_row(
+        "issue_resolutions", saved["resolutionId"],
+        project_id=project.workbench_identity.project_id,
+    )
+    lifecycle = [e for e in log if str(e["op"]).startswith("lifecycle:")]
+    assert len(lifecycle) == 120, "every lifecycle event survives, uncompacted"
+
+    # And they are genuinely immutable, not merely retained.
+    with project.workbench._connect() as conn:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("DELETE FROM change_log WHERE op LIKE 'lifecycle:%'")
 
 
 def test_ungrounded_or_low_confidence_pass_cannot_close_a_resolution(

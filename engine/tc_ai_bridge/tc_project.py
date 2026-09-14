@@ -61,6 +61,9 @@ class ProjectSummary:
         return f'{self.book_name} ({self.book_id}) — {self.target_language}'
 
 
+_PARATEXT_SYNC_STATE_KEY = 'paratext_live_sync_state'
+
+
 class TranslationCoreProject:
     def __init__(self, project_path: str | Path, *, identity: WorkbenchIdentity | None = None):
         self.path = Path(project_path).resolve()
@@ -714,13 +717,14 @@ class TranslationCoreProject:
         return self.companion_dir() / 'paratextNotes' / 'live_sync_state.json'
 
     def load_paratext_note_sync_state(self) -> dict[str, Any]:
-        path = self.paratext_note_sync_state_path()
-        if not path.exists():
-            return {'version': 1, 'items': {}}
-        try:
-            data = _read_json(path)
-        except Exception:
-            return {'version': 1, 'items': {}}
+        # `paratext_note_sync_state_path()` is kept: the *notes XML* beside it
+        # stays on disk in Paratext's own format (TEAM_ARCHITECTURE ss3.4), and
+        # callers still use that directory. Only this small state record moved.
+        found = self.workbench.payloads(
+            'project_state', project_id=self.workbench_identity.project_id,
+            book_id=self.book_id, equals={'key': _PARATEXT_SYNC_STATE_KEY},
+        )
+        data = found[0] if found else None
         if not isinstance(data, dict):
             return {'version': 1, 'items': {}}
         items = data.get('items')
@@ -728,17 +732,31 @@ class TranslationCoreProject:
             items = {}
         return {'version': 1, 'items': dict(items)}
 
-    def save_paratext_note_sync_state(self, data: dict[str, Any]) -> Path:
-        path = self.paratext_note_sync_state_path()
+    def save_paratext_note_sync_state(self, data: dict[str, Any]) -> str:
         payload = {'version': 1, 'items': dict((data or {}).get('items') or {})}
-        _write_json_atomic(path, payload)
-        return path
+        identity = self.workbench_identity
+        row_id = natural_row_id(
+            identity.project_id, self.book_id, _PARATEXT_SYNC_STATE_KEY,
+        )
+        self.workbench._write(
+            'project_state', row_id,
+            project_id=identity.project_id, book_id=self.book_id, payload=payload,
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None,
+            extra_columns={'key': _PARATEXT_SYNC_STATE_KEY},
+        )
+        return row_id
 
-    def _issue_resolution_path(self, chapter: str | int, verse: str | int, resolution_id: str) -> Path:
+    @staticmethod
+    def _validate_issue_resolution_id(resolution_id: str) -> str:
+        """The id came from a filename, so it was validated to stop a caller
+        escaping the directory. It is a row key now and cannot traverse
+        anything, but the check stays: it is also what stops a malformed id
+        being silently stored as a new record rather than rejected."""
         rid = str(resolution_id or '').strip().lower()
         if len(rid) != 32 or any(ch not in '0123456789abcdef' for ch in rid):
             raise ProjectError('Invalid issue resolution ID.')
-        return self.companion_dir() / 'issueResolutions' / self.book_id / str(chapter) / str(verse) / f'{rid}.json'
+        return rid
 
     def _issue_resolution_id(
         self, chapter: str | int, verse: str | int, tool: str, group_id: str, check_id: str,
@@ -749,26 +767,27 @@ class TranslationCoreProject:
     def load_issue_resolution(
         self, chapter: str | int, verse: str | int, resolution_id: str,
     ) -> dict[str, Any]:
-        path = self._issue_resolution_path(chapter, verse, resolution_id)
-        if not path.exists():
-            raise ProjectError('Issue resolution was not found for this verse.')
-        data = _read_json(path)
-        if not isinstance(data, dict) or str(data.get('resolutionId') or '') != str(resolution_id):
-            raise ProjectError('Issue resolution data is invalid.')
-        return data
+        self._validate_issue_resolution_id(resolution_id)
+        for data in self.list_issue_resolutions(chapter, verse):
+            if str(data.get('resolutionId') or '') == str(resolution_id):
+                return data
+        raise ProjectError('Issue resolution was not found for this verse.')
 
     def list_issue_resolutions(self, chapter: str | int, verse: str | int) -> list[dict[str, Any]]:
-        root = self.companion_dir() / 'issueResolutions' / self.book_id / str(chapter) / str(verse)
-        if not root.exists():
-            return []
-        out: list[dict[str, Any]] = []
-        for path in sorted(root.glob('*.json')):
-            try:
-                data = _read_json(path)
-            except Exception:
-                continue
-            if isinstance(data, dict):
-                out.append(data)
+        # `issue_resolutions` deliberately lifts only status columns
+        # (TEAM_ARCHITECTURE ss3.1), not chapter/verse, so the verse filter is
+        # applied here rather than in SQL. These are human-created and there are
+        # a handful per book, so scanning the book costs nothing worth a schema
+        # change; if that ever stops being true, lift the columns rather than
+        # adding an index to a query that cannot use one.
+        out = [
+            payload for payload in self.workbench.payloads(
+                'issue_resolutions', project_id=self.workbench_identity.project_id,
+                book_id=self.book_id,
+            )
+            if str(payload.get('chapter') or '') == str(chapter)
+            and str(payload.get('verse') or '') == str(verse)
+        ]
         return sorted(out, key=lambda item: str(item.get('updatedAt') or ''), reverse=True)
 
     def save_issue_resolution(
@@ -808,12 +827,10 @@ class TranslationCoreProject:
             elif str(item or '').strip():
                 clean_evidence.append(str(item).strip())
         resolution_id = self._issue_resolution_id(chapter, verse, tool, group_id, check_id)
-        path = self._issue_resolution_path(chapter, verse, resolution_id)
-        existing: dict[str, Any] = {}
-        if path.exists():
-            value = _read_json(path)
-            if isinstance(value, dict):
-                existing = value
+        try:
+            existing = self.load_issue_resolution(chapter, verse, resolution_id)
+        except ProjectError:
+            existing = {}
         now, _ = self._timestamp()
         history = list(existing.get('history') or [])
         history.append({
@@ -859,44 +876,71 @@ class TranslationCoreProject:
             'updatedAt': now,
             'history': history[-100:],
         }
-        _write_json_atomic(path, record)
+        self._save_issue_resolution_row(record, op='updated' if existing else 'created')
         return record
+
+    def _save_issue_resolution_row(self, record: dict[str, Any], *, op: str) -> str:
+        identity = self.workbench_identity
+        resolution_id = self._validate_issue_resolution_id(str(record.get('resolutionId') or ''))
+        row_id = natural_row_id(
+            identity.project_id, self.book_id, 'issue_resolution', resolution_id,
+        )
+        paratext = record.get('paratext') if isinstance(record.get('paratext'), dict) else {}
+        recheck = record.get('recheck') if isinstance(record.get('recheck'), dict) else {}
+        self.workbench._write(
+            'issue_resolutions', row_id,
+            project_id=identity.project_id, book_id=self.book_id, payload=record,
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None, op=op,
+            extra_columns={
+                'status': str(record.get('status') or ''),
+                'recheck_status': str(recheck.get('status') or ''),
+                'paratext_status': str(paratext.get('status') or ''),
+            },
+        )
+        return row_id
 
     def update_issue_resolution_paratext(
         self, chapter: str | int, verse: str | int, resolution_id: str,
         handoff: dict[str, Any], event: str,
     ) -> dict[str, Any]:
-        path = self._issue_resolution_path(chapter, verse, resolution_id)
         record = self.load_issue_resolution(chapter, verse, resolution_id)
         now, _ = self._timestamp()
         record['paratext'] = copy.deepcopy(handoff)
         record['updatedAt'] = now
+        lifecycle = {'event': str(event), 'at': now, 'messageId': str(handoff.get('messageId') or '')}
         history = list(record.get('history') or [])
-        history.append({'event': str(event), 'at': now, 'messageId': str(handoff.get('messageId') or '')})
+        history.append(copy.deepcopy(lifecycle))
         record['history'] = history[-100:]
-        _write_json_atomic(path, record)
+        self._save_issue_resolution_row(record, op=str(event))
+        self._record_issue_resolution_lifecycle_audit(record, lifecycle)
         return record
 
     def _record_issue_resolution_lifecycle_audit(
         self, record: dict[str, Any], event: dict[str, Any],
     ) -> None:
-        """Keep lifecycle events append-only even when the record history is compacted."""
-        _, safe = self._timestamp()
-        event_name = ''.join(
-            ch if ch.isalnum() or ch in ('-', '_') else '_'
-            for ch in str(event.get('event') or 'recheck')
-        )[:60]
-        audit = (
-            self.companion_dir() / 'audit' / self.book_id
-            / str(record.get('chapter') or '') / str(record.get('verse') or '')
-            / f"{safe}_{record.get('resolutionId', 'resolution')}_{event_name}.json"
+        """Keep lifecycle events append-only even when the record history is compacted.
+
+        `record['history']` is capped at the last hundred entries, so the events
+        behind a long-lived resolution would otherwise fall off the end. This
+        used to be a second, append-only file per event beside the record; it is
+        a change_log row now, which is the same guarantee with the immutability
+        actually enforced by triggers rather than by convention.
+        """
+        identity = self.workbench_identity
+        event_name = str(event.get('event') or 'recheck')
+        self.workbench.append_event(
+            'issue_resolutions', str(record.get('resolutionId') or ''),
+            project_id=identity.project_id, book_id=self.book_id,
+            op='lifecycle:' + event_name,
+            payload={
+                'schemaVersion': 1,
+                'resolutionId': record.get('resolutionId'),
+                'reference': record.get('reference'),
+                **copy.deepcopy(event),
+            },
+            actor_id=identity.actor_id, device_id=identity.device_id,
         )
-        _write_json_atomic(audit, {
-            'schemaVersion': 1,
-            'resolutionId': record.get('resolutionId'),
-            'reference': record.get('reference'),
-            **copy.deepcopy(event),
-        })
 
     def mark_issue_resolutions_recheck(
         self, chapter: str | int, verse: str | int, state: str, *,
@@ -946,9 +990,7 @@ class TranslationCoreProject:
             history = list(record.get('history') or [])
             history.append(copy.deepcopy(event))
             record['history'] = history[-100:]
-            _write_json_atomic(
-                self._issue_resolution_path(chapter, verse, str(record['resolutionId'])), record,
-            )
+            self._save_issue_resolution_row(record, op='recheck_' + normalized)
             self._record_issue_resolution_lifecycle_audit(record, event)
             updated.append(record)
         return updated
@@ -1017,9 +1059,7 @@ class TranslationCoreProject:
             history = list(record.get('history') or [])
             history.append(copy.deepcopy(event))
             record['history'] = history[-100:]
-            _write_json_atomic(
-                self._issue_resolution_path(chapter, verse, str(record['resolutionId'])), record,
-            )
+            self._save_issue_resolution_row(record, op=event_name)
             self._record_issue_resolution_lifecycle_audit(record, event)
             updated.append(record)
         return updated
