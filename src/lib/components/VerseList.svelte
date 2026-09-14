@@ -335,14 +335,17 @@
     onSelect(verse);
   }
 
-  /** Double-click is a second route to Edit verse, for readers who never look
-   *  at the review panel's button. startVerseEdit carries its own guards --
-   *  it returns false while a check, save or recheck is in flight -- so there
-   *  is nothing to re-check here. */
+  /** Double-click is a second route to Edit verse, and so is the row's edit
+   *  pencil (issue #73). startVerseEdit carries its own guards -- it returns
+   *  false while a check, save or recheck is in flight -- and the verse must
+   *  not get selected when it refuses: a disabled button can still receive a
+   *  synthetic click, and a double-click is not gated at all, so selecting
+   *  first moved the reader's selection for an edit that never opened. Same
+   *  ordering as openAlignmentFromList below, for the same reason. */
   function beginEditFromList(verse: string): void {
     if ($editingChapter === $currentChapter && $editingVerse === verse) return;
+    if (!startVerseEdit($currentChapter, verse)) return;
     selectFromList(verse);
-    startVerseEdit($currentChapter, verse);
   }
 
   /** The per-row alignment glyph (issue #70): open the same Align Words modal
@@ -451,17 +454,30 @@
               >{piece.seg.text}</mark>{#if piece.seg.numbers.length}<sup class="finding-num">{piece.seg.numbers.join(",")}</sup>{/if}{:else}{piece.seg.text}{/if}
           {/each}
         </div>
-        <button
-          type="button"
-          class="alignment-state {alignmentStatus}"
-          disabled={$checkingProgress.running || $editSaving || Boolean($recheckingKey)}
-          title={$checkingProgress.running || $editSaving || $recheckingKey
-            ? "Wait for background checking to finish before aligning"
-            : `Alignment: ${alignmentStatus} — click to open Align Words`}
-          aria-label={`Alignment ${alignmentStatus} for verse ${v}. Open Align Words.`}
-          on:click|stopPropagation={() => openAlignmentFromList(v)}
-          on:dblclick|stopPropagation
-        >⇄</button>
+        <div class="row-actions">
+          <button
+            type="button"
+            class="edit-pencil"
+            disabled={$checkingProgress.running || $editSaving || Boolean($recheckingKey)}
+            title={$checkingProgress.running || $editSaving || $recheckingKey
+              ? "Wait for background checking to finish before editing"
+              : "Edit verse"}
+            aria-label={`Edit verse ${v}`}
+            on:click|stopPropagation={() => beginEditFromList(v)}
+            on:dblclick|stopPropagation
+          >✎</button>
+          <button
+            type="button"
+            class="alignment-state {alignmentStatus}"
+            disabled={$checkingProgress.running || $editSaving || Boolean($recheckingKey)}
+            title={$checkingProgress.running || $editSaving || $recheckingKey
+              ? "Wait for background checking to finish before aligning"
+              : `Alignment: ${alignmentStatus} — click to open Align Words`}
+            aria-label={`Alignment ${alignmentStatus} for verse ${v}. Open Align Words.`}
+            on:click|stopPropagation={() => openAlignmentFromList(v)}
+            on:dblclick|stopPropagation
+          >⇄</button>
+        </div>
       {/if}
     </div>
   {/each}
@@ -533,14 +549,23 @@
   }
   .note-btn:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
   .note-btn.xref { color: var(--accent); }
-  .alignment-state {
+  /* Edit pencil stacked above the alignment arrow (issue #73), so a reviewer
+     working from the alignment control has an edit entry point without
+     leaving it. The column carries the margin-left:auto that used to sit on
+     the glyph itself. */
+  .row-actions {
     margin-left: auto; flex-shrink: 0; align-self: flex-start; margin-top: 3px;
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
+  }
+  .alignment-state, .edit-pencil {
     font: inherit; font-size: var(--fs-md); line-height: 1; color: var(--text-3);
     background: transparent; border: 1px solid transparent; border-radius: 5px;
     padding: 1px 4px; cursor: pointer;
   }
-  .alignment-state:hover, .alignment-state:focus-visible { background: var(--surface-2); border-color: var(--border-strong); outline: none; }
-  .alignment-state:disabled { opacity: .55; cursor: not-allowed; }
+  .alignment-state:hover, .alignment-state:focus-visible,
+  .edit-pencil:hover, .edit-pencil:focus-visible { background: var(--surface-2); border-color: var(--border-strong); outline: none; }
+  .alignment-state:disabled, .edit-pencil:disabled { opacity: .55; cursor: not-allowed; }
+  .edit-pencil:hover:not(:disabled), .edit-pencil:focus-visible { color: var(--accent); }
   .alignment-state.complete { color: var(--success); }
   .alignment-state.partial { color: var(--warning); }
   .alignment-state.invalid { color: var(--danger); font-weight: 800; }

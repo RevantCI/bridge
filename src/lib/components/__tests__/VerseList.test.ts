@@ -393,6 +393,100 @@ describe("VerseList alignment glyph (issue #70)", () => {
   });
 });
 
+describe("VerseList edit pencil (issue #73)", () => {
+  beforeEach(() => seed(PHP_1_6));
+
+  function pencil(): HTMLElement {
+    return screen.getByLabelText("Edit verse 6") as HTMLElement;
+  }
+
+  it("renders a pencil above the alignment arrow, in the same action column", () => {
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    const arrow = screen.getByLabelText(/Open Align Words/);
+    const column = pencil().parentElement!;
+
+    expect(pencil()).toHaveTextContent("✎");
+    expect(column).toHaveClass("row-actions");
+    expect(arrow.parentElement).toBe(column);
+    // "Above" is the ask: the pencil precedes the arrow in a column layout.
+    expect(Array.from(column.children).indexOf(pencil())).toBeLessThan(
+      Array.from(column.children).indexOf(arrow),
+    );
+  });
+
+  it("selects the verse and opens the editor when clicked", async () => {
+    const onSelect = vi.fn();
+    render(VerseList, { props: { onSelect } });
+    await fireEvent.click(pencil());
+
+    expect(onSelect).toHaveBeenCalledWith("6");
+    expect(get(editingChapter)).toBe("1");
+    expect(get(editingVerse)).toBe("6");
+  });
+
+  it("does not also trigger the row's own select handler", async () => {
+    const onSelect = vi.fn();
+    render(VerseList, { props: { onSelect } });
+    await fireEvent.click(pencil());
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the pencil and refuses to open while background checking runs", async () => {
+    checkingProgress.set({
+      running: true, percent: 40, label: "Checking…", jobId: "j1",
+      state: "running", error: "", scope: "chapter",
+    });
+    const onSelect = vi.fn();
+    render(VerseList, { props: { onSelect } });
+
+    expect(pencil()).toBeDisabled();
+    await fireEvent.click(pencil());
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(get(editingVerse)).toBe("");
+  });
+
+  it("refuses to open while an edit save or recheck is in flight", async () => {
+    editSaving.set(true);
+    const { unmount } = render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(pencil()).toBeDisabled();
+    unmount();
+    editSaving.set(false);
+
+    recheckingKey.set(verseKey("1", "6"));
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(pencil()).toBeDisabled();
+    recheckingKey.set("");
+  });
+
+  it("leaves the selection alone when a double-click's edit is refused", async () => {
+    // Pre-existing, found while adding the pencil: beginEditFromList selected
+    // the verse before asking startVerseEdit whether it could open, so a
+    // double-click during background checking moved the reader's selection for
+    // an edit that never appeared. Double-click has no disabled attribute to
+    // hide it behind, unlike the pencil.
+    checkingProgress.set({
+      running: true, percent: 40, label: "Checking…", jobId: "j1",
+      state: "running", error: "", scope: "chapter",
+    });
+    const onSelect = vi.fn();
+    const { container } = render(VerseList, { props: { onSelect } });
+    const row = container.querySelector(`[data-verse-key="${verseKey("1", "6")}"]`)!;
+
+    await fireEvent.dblClick(row);
+    expect(get(editingVerse)).toBe("");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("gives way to the edit form once that verse is being edited", () => {
+    editingChapter.set("1");
+    editingVerse.set("6");
+    render(VerseList, { props: { onSelect: vi.fn() } });
+
+    expect(screen.queryByLabelText("Edit verse 6")).toBeNull();
+    expect(screen.queryByLabelText(/Open Align Words/)).toBeNull();
+  });
+});
+
 describe("VerseList verse context menu (issue #69)", () => {
   beforeEach(() => seed("alpha beta"));
 
