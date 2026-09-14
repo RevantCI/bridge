@@ -50,6 +50,22 @@
     const value = (e.target as HTMLSelectElement).value;
     onChapterChange(value);
   }
+
+  /* Previous/next chapter (issue #53). "Previous" and "next" are defined by
+     position in the same list the dropdown renders, not by numeric value, so
+     stepping always agrees with what the reader can see -- and a book whose
+     chapters are not a clean 1..n run still steps sensibly. Both routes call
+     onChapterChange, so unsaved-edit handling, project, book and view mode
+     follow whatever the dropdown already does, by construction. */
+  $: chapters = $project?.chapters ?? [];
+  $: chapterIndex = chapters.indexOf($currentChapter);
+  $: hasPreviousChapter = chapterIndex > 0;
+  $: hasNextChapter = chapterIndex >= 0 && chapterIndex < chapters.length - 1;
+
+  function stepChapter(delta: -1 | 1): void {
+    const target = chapters[chapterIndex + delta];
+    if (target !== undefined) onChapterChange(target);
+  }
 </script>
 
 <div class="topbar no-print">
@@ -95,11 +111,29 @@
   </nav>
 
   {#if screen === "editor"}
-    <select class="select" style="width:72px;" value={$currentChapter} on:change={handleChapterSelect}>
-      {#each $project?.chapters ?? [] as ch}
-        <option value={ch}>Ch {ch}</option>
-      {/each}
-    </select>
+    <div class="chapter-nav" role="group" aria-label="Chapter navigation">
+      <button
+        type="button"
+        class="chapter-step"
+        disabled={!hasPreviousChapter}
+        title={hasPreviousChapter ? "Previous chapter" : "Already at the first chapter"}
+        aria-label="Previous chapter"
+        on:click={() => stepChapter(-1)}
+      >‹</button>
+      <select class="select" style="width:72px;" value={$currentChapter} on:change={handleChapterSelect}>
+        {#each chapters as ch}
+          <option value={ch}>Ch {ch}</option>
+        {/each}
+      </select>
+      <button
+        type="button"
+        class="chapter-step"
+        disabled={!hasNextChapter}
+        title={hasNextChapter ? "Next chapter" : "Already at the last chapter"}
+        aria-label="Next chapter"
+        on:click={() => stepChapter(1)}
+      >›</button>
+    </div>
     <div class="goto">
       <input
         bind:value={gotoValue}
@@ -148,6 +182,21 @@
   .crumb-sep { color: var(--text-3); font-size: var(--fs-sm); flex-shrink: 0; }
   .crumb-select { height: 28px; border: 1px solid transparent; border-radius: 6px; font-size: var(--fs-sm); font-weight: 600; padding: 0 4px; background: transparent; color: var(--text); max-width: 200px; }
   .crumb-select:hover { background: var(--surface-2); }
+  /* Chapter stepper (issue #53): the two arrows read as one control with the
+     dropdown between them, so the reader's eye finds prev/next where the
+     chapter already is rather than somewhere else in the bar. */
+  .chapter-nav { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
+  .chapter-step {
+    height: 28px; width: 24px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font: inherit; font-size: var(--fs-md); line-height: 1;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); color: var(--text); cursor: pointer;
+  }
+  .chapter-step:hover:not(:disabled), .chapter-step:focus-visible {
+    border-color: var(--border-strong); background: var(--surface-2);
+  }
+  .chapter-step:disabled { opacity: .4; cursor: not-allowed; }
   .select { height: 28px; border: 1px solid var(--border); border-radius: 6px; font-size: var(--fs-sm); padding: 0 6px; background: var(--surface); color: var(--text); flex-shrink: 0; }
   .goto { display: flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 0 8px; height: 28px; width: 150px; flex-shrink: 0; }
   .goto input { border: none; background: transparent; font-size: var(--fs-sm); color: var(--text); outline: none; width: 100%; }
