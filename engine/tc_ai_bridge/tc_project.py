@@ -360,14 +360,40 @@ class TranslationCoreProject:
         self, chapter: str | int, verse: str | int, state: str = 'cancelled'
     ) -> None:
         """Prevent a cancelled in-flight result from being treated as resumably complete."""
-        p = self.companion_dir() / 'aiReview' / self.book_id / str(chapter) / f'{verse}.json'
-        if not p.exists():
+        d = self.load_ai_review_result(chapter, verse)
+        if d is None:
             return
-        d = _read_json(p)
-        if isinstance(d, dict):
-            d['batchState'] = str(state or 'incomplete')
-            d['batchStateTimestamp'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-            _write_json_atomic(p, d)
+        d['batchState'] = str(state or 'incomplete')
+        d['batchStateTimestamp'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        self._write_ai_review_payload(chapter, verse, d)
+
+    def _write_ai_review_payload(
+        self, chapter: str | int, verse: str | int, payload: dict[str, Any],
+    ) -> str:
+        """Upsert one verse's AI review result and return its row id.
+
+        One result per verse, so `(book, chapter, verse)` is the natural key --
+        the same thing the one-file-per-verse layout encoded in its path. The
+        read-modify-write callers around this (cancellation, fingerprint
+        rebasing, selection outcomes) rewrite the whole payload rather than
+        appending to what they read, which is what keeps a re-run idempotent.
+        """
+        identity = self.workbench_identity
+        row_id = natural_row_id(
+            identity.project_id, self.book_id, 'ai_review', str(chapter), str(verse),
+        )
+        self.workbench._write(
+            'ai_review_results', row_id,
+            project_id=identity.project_id, book_id=self.book_id, payload=payload,
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None,
+            extra_columns={
+                'chapter': str(chapter), 'verse': str(verse),
+                'input_fingerprint': str(payload.get('inputFingerprint') or ''),
+                'generated_at': str(payload.get('generatedTimestamp') or ''),
+            },
+        )
+        return row_id
 
     @staticmethod
     def _alignment_work_state(alignment: VerseAlignment) -> str:
@@ -1205,7 +1231,7 @@ class TranslationCoreProject:
             decision=str(status), payload=data,
         )
 
-    def record_ai_review_result(self, chapter: str | int, verse: str | int, payload: dict[str, Any]) -> Path:
+    def record_ai_review_result(self, chapter: str | int, verse: str | int, payload: dict[str, Any]) -> str:
         data = {
             'bookId': self.book_id,
             'chapter': str(chapter),
@@ -1216,19 +1242,14 @@ class TranslationCoreProject:
             'schemaVersion': 3,
             **copy.deepcopy(payload),
         }
-        p = self.companion_dir() / 'aiReview' / self.book_id / str(chapter) / f'{verse}.json'
-        _write_json_atomic(p, data)
-        return p
+        return self._write_ai_review_payload(chapter, verse, data)
 
     def load_ai_review_result(self, chapter: str | int, verse: str | int) -> dict[str, Any] | None:
-        p = self.companion_dir() / 'aiReview' / self.book_id / str(chapter) / f'{verse}.json'
-        if not p.exists():
-            return None
-        try:
-            d = _read_json(p)
-            return d if isinstance(d, dict) else None
-        except Exception:
-            return None
+        found = self.workbench.payloads(
+            'ai_review_results', project_id=self.workbench_identity.project_id,
+            book_id=self.book_id, equals={'chapter': str(chapter), 'verse': str(verse)},
+        )
+        return found[0] if found else None
 
     def record_human_decision(self, chapter: str | int, verse: str | int, check_id: str, decision: str, note: str = '', selection_text: list[str] | None = None, selection_ids: list[str] | None = None, tool: str = '', group_id: str = '', model: str = '', evidence: list[dict[str, Any]] | None = None) -> str:
         stamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -1317,11 +1338,8 @@ class TranslationCoreProject:
         Storing it beside the review lets nativeChecks.list answer 'why is this
         still pending?' on any later visit, including after a restart.
         """
-        p = self.companion_dir() / 'aiReview' / self.book_id / str(chapter) / f'{verse}.json'
-        if not p.exists():
-            return
-        d = _read_json(p)
-        if not isinstance(d, dict):
+        d = self.load_ai_review_result(chapter, verse)
+        if d is None:
             return
         outcomes: dict[str, Any] = {}
         for item in list(applied or []):
@@ -1332,33 +1350,22 @@ class TranslationCoreProject:
             outcomes[key] = {'outcome': 'skipped', 'reason': str(item.get('reason') or '')}
         d['automaticSelection'] = outcomes
         d['automaticSelectionTimestamp'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        _write_json_atomic(p, d)
+        self._write_ai_review_payload(chapter, verse, d)
 
     def rebase_ai_review_fingerprint(self, chapter: str | int, verse: str | int) -> None:
         """Keep an already-reviewed verse current after human-only TN/TW state synchronization."""
-        p = self.companion_dir() / 'aiReview' / self.book_id / str(chapter) / f'{verse}.json'
-        if not p.exists(): return
-        d = _read_json(p)
-        if isinstance(d, dict):
+        d = self.load_ai_review_result(chapter, verse)
+        if d is not None:
             d['inputFingerprint'] = self.review_input_fingerprint(chapter, verse)
             d['humanStateRebasedTimestamp'] = datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
-            _write_json_atomic(p, d)
+            self._write_ai_review_payload(chapter, verse, d)
 
     def list_ai_review_results(self, chapter: str | int | None = None) -> list[dict[str, Any]]:
-        root = self.companion_dir() / 'aiReview' / self.book_id
-        if chapter is not None:
-            root = root / str(chapter)
-        out: list[dict[str, Any]] = []
-        if not root.exists():
-            return out
-        for p in sorted(root.rglob('*.json')):
-            try:
-                d = _read_json(p)
-                if isinstance(d, dict):
-                    out.append(d)
-            except Exception:
-                pass
-        return out
+        equals = {} if chapter is None else {'chapter': str(chapter)}
+        return self.workbench.payloads(
+            'ai_review_results', project_id=self.workbench_identity.project_id,
+            book_id=self.book_id, equals=equals,
+        )
 
     def terminology_rules(self) -> list[dict[str, Any]]:
         return self._human_decision_payloads(kind='terminology')

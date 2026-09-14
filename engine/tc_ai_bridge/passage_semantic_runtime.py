@@ -1132,9 +1132,14 @@ class PassageSemanticRuntime:
         validation = root / "semanticValidation" / "irvtam-v0.1.json"
         if validation.is_file():
             sources.append((validation, "bridge.semantic_mapping_validation_audit.v0.1"))
-        ai_root = root / "aiReview" / self.book.lower()
-        if ai_root.exists():
-            sources.extend((path, "bridge.ai_review.legacy") for path in ai_root.rglob("*.json"))
+        # `aiReview` was a third legacy source here until #76 moved that store
+        # into the workbench database. No project created after the cutover has
+        # those files, and one created before it refuses to open, so the branch
+        # could only ever have matched nothing. It is removed rather than left
+        # to look load-bearing. This is deliberately *not* repointed at the
+        # workbench: that would turn a one-time import of old files into a
+        # standing import of current reviews as evidence, which is a different
+        # behaviour and not one anything asked for.
         for path, schema in sources:
             self._import_legacy_file(path, schema)
         self.synchronize_alignment_state()
