@@ -577,7 +577,7 @@ class TranslationCoreProject:
         _write_json_atomic(path, data)
         return path
 
-    def record_alignment_diagnostic(self, chapter: str | int, verse: str | int, payload: dict[str, Any]) -> Path:
+    def record_alignment_diagnostic(self, chapter: str | int, verse: str | int, payload: dict[str, Any]) -> str:
         """Persist non-secret compiler diagnostics for field reliability analysis."""
         iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         safe = iso.replace(':', '_').replace('.', '_')
@@ -586,9 +586,21 @@ class TranslationCoreProject:
             'timestamp': iso, 'app': 'translationCore AI Bridge', 'schemaVersion': 1,
             **copy.deepcopy(payload),
         }
-        path = self.companion_dir() / 'alignmentDiagnostics' / self.book_id / str(chapter) / str(verse) / f'{safe}.json'
-        _write_json_atomic(path, data)
-        return path
+        # Append-only: the timestamp is part of the key, so every diagnostic is
+        # its own row rather than overwriting the previous one for that verse.
+        identity = self.workbench_identity
+        row_id = natural_row_id(
+            identity.project_id, self.book_id, 'alignment_diagnostic',
+            str(chapter), str(verse), safe,
+        )
+        self.workbench._write(
+            'alignment_diagnostics', row_id,
+            project_id=identity.project_id, book_id=self.book_id, payload=data,
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None,
+            extra_columns={'chapter': str(chapter), 'verse': str(verse)},
+        )
+        return row_id
 
     def recover_incomplete_transactions(self) -> list[dict[str, Any]]:
         """Roll back any transaction left unfinished by a prior crash/power loss."""
@@ -1048,11 +1060,22 @@ class TranslationCoreProject:
         self._validate_verse_raw(raw)
         backup = self.backup_chapter(chapter)
         iso, safe = self._timestamp()
-        history_path = (
-            self.companion_dir() / 'alignmentHistory' / self.book_id
-            / str(chapter) / str(verse) / f'{safe}_{operation}.json'
-        )
-        tx = self.journal.begin('saveApprovedAlignment', [chapter_path, history_path])
+        # The journal protects the tC chapter file; history used to be a file
+        # enrolled alongside it, so a rollback removed both. A database row
+        # cannot join a file transaction, but the guarantee that mattered is
+        # preserved by keeping the row write *inside* the try: if history cannot
+        # be recorded the whole operation fails and the chapter write rolls
+        # back, so an alignment never changes without a history entry
+        # (test_alignment_history_failure_rolls_back_chapter_write).
+        #
+        # What is genuinely no longer atomic is the reverse direction: if
+        # `journal.commit` itself fails after the row is written, the chapter
+        # rolls back and the row is orphaned. That window is much narrower than
+        # the one it replaces -- commit only writes a small journal file once
+        # the real work is done -- and `journal_tx_id` on the row is what makes
+        # such a row identifiable as belonging to a transaction that did not
+        # complete.
+        tx = self.journal.begin('saveApprovedAlignment', [chapter_path])
         self.journal.mark_writing(tx)
         try:
             chapter_data[str(verse)] = raw
@@ -1062,7 +1085,8 @@ class TranslationCoreProject:
             self._validate_verse_raw(written)
             self._record_alignment_history(
                 chapter, verse, operation, backup, current, raw,
-                path=history_path, timestamp=iso,
+                history_id=f'{safe}_{operation}.json', timestamp=iso,
+                journal_tx_id=tx.transaction_id,
             )
             self.journal.commit(tx, {'operation':'saveApprovedAlignment','chapter':str(chapter),'verse':str(verse)})
         except Exception as e:
@@ -1078,20 +1102,24 @@ class TranslationCoreProject:
         before: Any,
         after: Any,
         *,
-        path: Path | None = None,
+        history_id: str = '',
         timestamp: str = '',
-    ) -> Path:
+        journal_tx_id: str | None = None,
+    ) -> str:
         iso = timestamp
         if not iso:
             iso, safe = self._timestamp()
-            path = (
-                self.companion_dir() / 'alignmentHistory' / self.book_id
-                / str(chapter) / str(verse) / f'{safe}_{operation}.json'
-            )
-        if path is None:
+            history_id = f'{safe}_{operation}.json'
+        if not history_id:
             raise ProjectError('Alignment history destination was not created.')
-        _write_json_atomic(path, {
-            'id': path.name,
+        # The id keeps the old filename shape on purpose: it is what
+        # `restore_verse_alignment_history` is given by the UI, so changing it
+        # would invalidate every history id a running client already holds
+        # (TEAM_ARCHITECTURE ss3.1). `backupPath` still points at a real file --
+        # `backups/` deliberately stays on disk (ss3.4), because crash recovery
+        # must not depend on the database opening.
+        payload = {
+            'id': history_id,
             'bookId': self.book_id,
             'chapter': str(chapter),
             'verse': str(verse),
@@ -1104,25 +1132,50 @@ class TranslationCoreProject:
             'afterFingerprint': hashlib.sha256(
                 json.dumps(after, sort_keys=True, ensure_ascii=False).encode('utf-8')
             ).hexdigest(),
-        })
-        return path
+        }
+        identity = self.workbench_identity
+        row_id = natural_row_id(
+            identity.project_id, self.book_id, 'alignment_history',
+            str(chapter), str(verse), history_id,
+        )
+        self.workbench._write(
+            'alignment_history', row_id,
+            project_id=identity.project_id, book_id=self.book_id, payload=payload,
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None, journal_tx_id=journal_tx_id,
+            extra_columns={
+                'chapter': str(chapter), 'verse': str(verse), 'backup_path': str(backup),
+            },
+        )
+        return history_id
+
+    def _alignment_history_entries(
+        self, chapter: str | int, verse: str | int,
+    ) -> list[dict[str, Any]]:
+        """Newest first, matching the reverse-sorted directory listing.
+
+        The id embeds a sortable timestamp, so ordering by it reproduces what
+        `sorted(root.glob('*.json'), reverse=True)` produced.
+        """
+        entries = [
+            value for value in self.workbench.payloads(
+                'alignment_history', project_id=self.workbench_identity.project_id,
+                book_id=self.book_id,
+                equals={'chapter': str(chapter), 'verse': str(verse)},
+            )
+            if value.get('backupPath')
+        ]
+        return sorted(entries, key=lambda value: str(value.get('id') or ''), reverse=True)
 
     def alignment_history(self, chapter: str | int, verse: str | int) -> list[dict[str, Any]]:
-        root = self.companion_dir() / 'alignmentHistory' / self.book_id / str(chapter) / str(verse)
-        result: list[dict[str, Any]] = []
-        if root.is_dir():
-            for path in sorted(root.glob('*.json'), reverse=True):
-                try:
-                    value = _read_json(path)
-                except Exception:
-                    continue
-                if isinstance(value, dict) and value.get('backupPath'):
-                    result.append({
-                        'id': path.name,
-                        'operation': str(value.get('operation') or 'save'),
-                        'timestamp': str(value.get('timestamp') or ''),
-                    })
-        return result
+        return [
+            {
+                'id': str(value.get('id') or ''),
+                'operation': str(value.get('operation') or 'save'),
+                'timestamp': str(value.get('timestamp') or ''),
+            }
+            for value in self._alignment_history_entries(chapter, verse)
+        ]
 
     def restore_verse_alignment_history(
         self,
@@ -1131,13 +1184,12 @@ class TranslationCoreProject:
         history_id: str = '',
         expected_original: dict[str, Any] | None = None,
     ) -> Path:
-        root = self.companion_dir() / 'alignmentHistory' / self.book_id / str(chapter) / str(verse)
-        candidates = sorted(root.glob('*.json'), reverse=True) if root.is_dir() else []
+        candidates = self._alignment_history_entries(chapter, verse)
         if history_id:
-            candidates = [path for path in candidates if path.name == history_id]
+            candidates = [value for value in candidates if str(value.get('id') or '') == history_id]
         if not candidates:
             raise ProjectError('No saved alignment change is available to restore for this verse.')
-        entry = _read_json(candidates[0])
+        entry = candidates[0]
         if not isinstance(entry, dict) or not entry.get('backupPath'):
             raise ProjectError('Alignment history entry is invalid.')
         backup = Path(str(entry['backupPath'])).resolve()

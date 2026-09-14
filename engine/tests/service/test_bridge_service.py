@@ -551,6 +551,41 @@ def test_alignment_history_failure_rolls_back_chapter_write(fixture_project, mon
     assert engine.project.pending_transactions() == []
 
 
+def test_every_redirected_store_populates_its_lifted_columns(fixture_project):
+    """#76: a row whose lifted columns are NULL is invisible to every query.
+
+    This bit twice. `alignment_history` rows were written without chapter/verse,
+    so `alignment_history()` returned nothing and restore had no candidates --
+    caught only because two tests read it back. `alignment_diagnostics` is
+    **write-only**: nothing reads it, so the same mistake there would have sat
+    undetected until someone came to build a reader months later and found an
+    unqueryable table. Hence a direct assertion on the columns.
+    """
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    project = engine.project
+
+    project.record_alignment_diagnostic("1", "1", {"reason": "token mismatch"})
+    project.record_human_decision("1", "1", "check-1", "accepted")
+    project.record_qa_decision("1", "1", "finding-1", "ignored")
+    project.record_review_state("1", "1", "reviewed")
+    project.record_ai_review_result("1", "1", {"summary": "fine"})
+
+    expected = {
+        "alignment_diagnostics": ("chapter", "verse"),
+        "human_decisions": ("chapter", "verse", "key", "kind"),
+        "ai_review_results": ("chapter", "verse"),
+    }
+    with project.workbench._connect() as conn:
+        for table, columns in expected.items():
+            rows = conn.execute(f"SELECT * FROM {table}").fetchall()
+            assert rows, f"{table} got no rows"
+            for row in rows:
+                for column in columns:
+                    assert row[column] is not None, f"{table}.{column} is NULL"
+                assert row["project_id"] and row["actor_id"] and row["device_id"]
+
+
 def test_alignment_reports_missing_original_language_source(fixture_project):
     path = fixture_project / ".apps" / "translationCore" / "alignmentData" / "rut" / "1.json"
     path.write_text(json.dumps({
