@@ -225,12 +225,12 @@ than no derived value.
 prune superseded rows to save space.
 
 **Schema changes are migrations.** The companion SQLite database is at
-**schema v14** (`DATABASE_SCHEMA_VERSION` in
+**schema v15** (`DATABASE_SCHEMA_VERSION` in
 `engine/tc_ai_bridge/passage_semantic_repository.py`). There is no `migrations/`
-directory and no `.sql` files — the schema and every `_MIGRATION_V1` … `_V14`
+directory and no `.sql` files — the schema and every `_MIGRATION_V1` … `_V15`
 block live in that one module, applied in order. Any change needs: a version
 bump, a new forward migration block, a migration test in the established
-`test_v13_to_v14_migration_is_additive_and_keeps_v13_data_readable` style — build a
+`test_v14_to_v15_migration_is_additive_and_keeps_v14_data_readable` style — build a
 database at the previous version, migrate forward, assert the old rows are still
 readable — and a note in `docs/HANDOFF.md`. The repository refuses to open a
 database newer than it understands, and never downgrades. Never edit the schema in
@@ -240,7 +240,7 @@ that database *is* months of work.
 This same discipline now has a second, independent ladder: `bridge-workbench.sqlite3`
 (`WorkbenchRepository`, `engine/tc_ai_bridge/workbench_repository.py`,
 `WORKBENCH_SCHEMA_VERSION`, currently v1). It is a different database with its own
-version number — a workbench schema bump is never a v14 bump and vice versa; each
+version number — a workbench schema bump is never a v15 bump and vice versa; each
 gets its own migration block and its own compatibility test.
 
 **Offline operation is a product invariant, not a preference.** Do not introduce a
@@ -425,7 +425,7 @@ pass; check the matrix's source/frozen/desktop rows.
 
 `docs/TEAM_ARCHITECTURE.md` (2026-09-11) is the design record for the planned
 direction behind issues #44–#47: a second per-project `bridge-workbench.sqlite3`
-for the Bridge-private stores (the v14 semantic DB is not extended), a named
+for the Bridge-private stores (the semantic DB is not extended), a named
 user + device on every write, an *optional* team hub that syncs review state,
 and a hub-served dashboard. Until that work lands, the single-user, file-based
 description above is what the code does; when it lands, this file's on-disk
@@ -468,7 +468,7 @@ to an AI-assisted session specifically:
 These are cheap to start and expensive to undo. If a task appears to require one,
 raise it as a question in the issue rather than deciding it in a commit:
 
-- Changing the companion database schema (currently v14)
+- Changing the companion database schema (currently v15)
 - Anything that adds a server, an account, a login, or a network round-trip on a
   runtime path a translator hits
 - Re-baselining either golden
