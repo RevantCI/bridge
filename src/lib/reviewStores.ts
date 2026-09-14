@@ -9,6 +9,7 @@ import type {
   ReviewQueueOrder,
   ReviewerDecision,
 } from "./types/qaReview";
+import type { CoverageDimension } from "./types/passageSemanticV1";
 
 /**
  * State for the Stage 9A review queue.
@@ -24,6 +25,7 @@ export interface ReviewFilters {
   chapter: number | null;
   canonicalReferences: string[];
   kinds: string[];
+  coverageDimensions: CoverageDimension[];
   severities: string[];
   dispositions: QaDisposition[];
   lifecycleStatuses: string[];
@@ -35,6 +37,7 @@ export const EMPTY_FILTERS: ReviewFilters = {
   chapter: null,
   canonicalReferences: [],
   kinds: [],
+  coverageDimensions: [],
   severities: [],
   dispositions: [],
   lifecycleStatuses: [],
@@ -72,6 +75,9 @@ function toQueryFilters(filters: ReviewFilters, cursor: string): ReviewQueueFilt
       ? filters.canonicalReferences
       : undefined,
     kinds: filters.kinds.length ? filters.kinds : undefined,
+    coverageDimensions: filters.coverageDimensions.length
+      ? filters.coverageDimensions
+      : undefined,
     severities: filters.severities.length ? (filters.severities as never) : undefined,
     dispositions: filters.dispositions.length ? filters.dispositions : undefined,
     lifecycleStatuses: filters.lifecycleStatuses.length

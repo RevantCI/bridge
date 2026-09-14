@@ -4174,6 +4174,7 @@ class BridgeEngine:
                     canonical_references=tuple(p.get("canonicalReferences") or ()),
                     kinds=tuple(p.get("kinds") or ()),
                     severities=tuple(p.get("severities") or ()),
+                    coverage_dimensions=tuple(p.get("coverageDimensions") or ()),
                     dispositions=tuple(p.get("dispositions") or ()),
                     review_statuses=tuple(p.get("reviewStatuses") or ()),
                     lifecycle_statuses=tuple(p.get("lifecycleStatuses") or ()),

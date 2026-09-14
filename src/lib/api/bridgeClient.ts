@@ -748,6 +748,7 @@ export const bridge = {
       canonicalReferences: filters.canonicalReferences,
       kinds: filters.kinds,
       severities: filters.severities,
+      coverageDimensions: filters.coverageDimensions,
       dispositions: filters.dispositions,
       reviewStatuses: filters.reviewStatuses,
       lifecycleStatuses: filters.lifecycleStatuses,

@@ -89,6 +89,17 @@ describe("review queue store", () => {
     }));
   });
 
+  it("passes semantic coverage dimensions through to the engine", async () => {
+    qaReviewGetQueue.mockResolvedValue(page([]));
+    reviewFilters.update((filters) => ({
+      ...filters, coverageDimensions: ["POLARITY"],
+    }));
+    await loadQueue();
+    expect(qaReviewGetQueue).toHaveBeenCalledWith(expect.objectContaining({
+      coverageDimensions: ["POLARITY"],
+    }));
+  });
+
   it("passes the active canonical semantic scope through to the engine", async () => {
     qaReviewGetQueue.mockResolvedValue(page([]));
     setReviewCanonicalScope(["PHP 1:3", "PHP 1:4", "PHP 1:5", "PHP 1:6"]);

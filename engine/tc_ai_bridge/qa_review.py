@@ -76,6 +76,7 @@ class QaReviewService:
         self, *, book: str = "", chapter: int | None = None,
         canonical_references: tuple[str, ...] = (),
         kinds: tuple[str, ...] = (), severities: tuple[str, ...] = (),
+        coverage_dimensions: tuple[str, ...] = (),
         dispositions: tuple[str, ...] = (), review_statuses: tuple[str, ...] = (),
         lifecycle_statuses: tuple[str, ...] = (), order: str = "CANONICAL",
         limit: int = 50, cursor: str = "",
@@ -84,7 +85,8 @@ class QaReviewService:
         page = self.repository.query_qa_findings(
             self.project_id, book=book or "", chapter=chapter,
             canonical_references=canonical_references, kinds=kinds,
-            severities=severities, dispositions=dispositions,
+            severities=severities, coverage_dimensions=coverage_dimensions,
+            dispositions=dispositions,
             review_statuses=review_statuses, lifecycle_statuses=lifecycle_statuses,
             order=order, limit=limit, cursor=cursor,
         )

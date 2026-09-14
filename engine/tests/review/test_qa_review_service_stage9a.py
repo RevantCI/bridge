@@ -560,6 +560,27 @@ def test_review_apis_round_trip_over_the_protocol(english: PassageSemanticRuntim
     assert [r["actorType"] for r in history["result"]["records"]] == ["HUMAN", "HUMAN"]
 
 
+def test_semantic_dimension_filter_round_trips_over_the_protocol(
+    english: PassageSemanticRuntime,
+) -> None:
+    bridge = _bridge(english)
+    omissions = _call(bridge, "qaReview.getQueue", {
+        "kinds": ["POSSIBLE_OMISSION"], "limit": 200,
+    })
+    finding = omissions["result"]["findings"][0]
+    stored = english.repository.qa_finding(finding["id"])
+    owner = english.repository.semantic_unit(stored["sourceSemanticUnitIds"][0])
+
+    filtered = _call(bridge, "qaReview.getQueue", {
+        "coverageDimensions": [owner["coverageDimension"]], "limit": 200,
+    })
+
+    assert filtered["success"] is True
+    assert finding["id"] in {
+        item["id"] for item in filtered["result"]["findings"]
+    }
+
+
 def test_a_stale_write_returns_revision_conflict_on_the_wire(
     english: PassageSemanticRuntime,
 ) -> None:

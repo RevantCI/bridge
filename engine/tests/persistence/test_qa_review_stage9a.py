@@ -219,6 +219,51 @@ def test_filters_narrow_the_queue(repo: FoundationRepository) -> None:
     assert [f["id"] for f in stale_only["findings"]] == ["f-stale"]
 
 
+def test_semantic_dimension_filter_includes_a_negation_omission(
+    repo: FoundationRepository,
+) -> None:
+    """Negation is a semantic category, not only a NEGATION_PROBLEM kind.
+
+    When Stage 6B cannot locate a required negation, Stage 8 correctly emits
+    POSSIBLE_OMISSION.  The QA queue's Negation filter must still find it by
+    the owning source unit's POLARITY coverage dimension.
+    """
+    _insert(repo, "f-negation-omission", verse=22, kind="POSSIBLE_OMISSION")
+    _insert(repo, "f-lexical-omission", verse=23, kind="POSSIBLE_OMISSION")
+    with repo._connect() as conn:
+        conn.execute(
+            "INSERT INTO semantic_units VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "source-negation", "proj", "SOURCE", "NEGATION", "source-negation",
+                "ELIGIBLE", "REQUIRED", "PRIMARY", "POLARITY", "negation-fingerprint",
+                "AI_PROPOSED", "ACTIVE", 1,
+                json.dumps({
+                    "id": "source-negation",
+                    "canonicalReferences": ["PHP 1:22"],
+                    "coverageDimension": "POLARITY",
+                }),
+            ),
+        )
+        row = conn.execute(
+            "SELECT payload_json FROM qa_findings WHERE id=?",
+            ("f-negation-omission",),
+        ).fetchone()
+        payload = json.loads(row[0])
+        payload["sourceSemanticUnitIds"] = ["source-negation"]
+        conn.execute(
+            "UPDATE qa_findings SET payload_json=? WHERE id=?",
+            (json.dumps(payload), "f-negation-omission"),
+        )
+        conn.commit()
+
+    polarity = repo.query_qa_findings(
+        "proj", coverage_dimensions=("POLARITY",),
+    )
+    assert [finding["id"] for finding in polarity["findings"]] == [
+        "f-negation-omission",
+    ]
+
+
 def test_book_and_chapter_filters(repo: FoundationRepository) -> None:
     _insert(repo, "php-1", book="PHP", chapter=1, verse=3)
     _insert(repo, "php-2", book="PHP", chapter=2, verse=1)

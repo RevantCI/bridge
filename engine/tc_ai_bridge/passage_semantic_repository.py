@@ -22,6 +22,7 @@ import uuid
 from .passage_semantic_models import (
     ActorType,
     Cardinality,
+    CoverageDimension,
     CorrectionApplicationIntent,
     CorrectionApplicationState,
     CorrectionCreationMode,
@@ -3861,6 +3862,7 @@ class FoundationRepository:
         self, project_id: str, *, book: str = "", chapter: int | None = None,
         canonical_references: tuple[str, ...] = (),
         kinds: tuple[str, ...] = (), severities: tuple[str, ...] = (),
+        coverage_dimensions: tuple[str, ...] = (),
         dispositions: tuple[str, ...] = (), review_statuses: tuple[str, ...] = (),
         lifecycle_statuses: tuple[str, ...] = (), order: str = "CANONICAL",
         limit: int = 50, cursor: str = "",
@@ -3889,6 +3891,36 @@ class FoundationRepository:
             if values:
                 where.append(f"{column} IN ({','.join('?' * len(values))})")
                 params.extend(values)
+        selected_dimensions = tuple(dict.fromkeys(
+            CoverageDimension(str(dimension)).value for dimension in coverage_dimensions
+        ))
+        if selected_dimensions:
+            placeholders = ",".join("?" * len(selected_dimensions))
+            # A semantic category is intentionally independent from a QA
+            # finding kind.  For example, an unlocated NEGATION unit is a
+            # POSSIBLE_OMISSION whose coverage dimension is POLARITY; it is
+            # not a NEGATION_PROBLEM unless a located realization contradicts
+            # the source polarity.  Resolve dimensions through the persisted
+            # semantic owners/components so existing v0.9.7 findings work
+            # without a destructive migration or analysis rerun.
+            where.append(
+                "(EXISTS (SELECT 1 FROM json_each(COALESCE("
+                "json_extract(qa_findings.payload_json,'$.sourceSemanticUnitIds'),'[]')) ids "
+                "JOIN semantic_units units ON units.id=ids.value "
+                f"WHERE units.coverage_dimension IN ({placeholders})) "
+                "OR EXISTS (SELECT 1 FROM json_each(COALESCE("
+                "json_extract(qa_findings.payload_json,'$.targetSemanticUnitIds'),'[]')) ids "
+                "JOIN semantic_units units ON units.id=ids.value "
+                f"WHERE units.coverage_dimension IN ({placeholders})) "
+                "OR EXISTS (SELECT 1 FROM json_each(COALESCE("
+                "json_extract(qa_findings.payload_json,'$.meaningAssessmentIds'),'[]')) ids "
+                "JOIN meaning_component_assessments components "
+                "ON components.assessment_id=ids.value "
+                f"WHERE components.coverage_dimension IN ({placeholders})))"
+            )
+            params.extend(selected_dimensions)
+            params.extend(selected_dimensions)
+            params.extend(selected_dimensions)
         if book:
             where.append("book=?")
             params.append(book)

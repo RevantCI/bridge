@@ -12,6 +12,7 @@
     AnalysisJobSnapshot, AnalysisScopeState, AnalysisScopeStatus,
   } from "../types/analysisJob";
   import type { QaDisposition, ReviewQueueOrder, ReviewerDecision } from "../types/qaReview";
+  import type { CoverageDimension } from "../types/passageSemanticV1";
   import { REVIEWER_ACTIONS } from "../utils/reviewLabels";
   import {
     addReviewerNote,
@@ -45,20 +46,22 @@
   export let chapter: string;
   export let verse: string | null = null;
 
-  const KIND_FILTERS: Array<{ value: string; label: string }> = [
-    { value: "POSSIBLE_OMISSION", label: "Possible omissions" },
-    { value: "POSSIBLE_ADDITION", label: "Possible additions" },
-    { value: "POSSIBLE_UNDERTRANSLATION", label: "Undertranslation" },
-    { value: "POSSIBLE_OVERTRANSLATION", label: "Overtranslation" },
-    { value: "MEANING_SHIFT", label: "Meaning shifts" },
-    { value: "CONTRADICTION", label: "Contradictions" },
-    { value: "NEGATION_PROBLEM", label: "Negation" },
-    { value: "QUANTITY_PROBLEM", label: "Quantity" },
-    { value: "TEMPORAL_PROBLEM", label: "Temporal" },
-    { value: "PARTICIPANT_PROBLEM", label: "Participant" },
-    { value: "REFERENT_PROBLEM", label: "Referent" },
-    { value: "RESOURCE_CONFLICT", label: "Resource conflict" },
-    { value: "SOURCE_VARIANT_REVIEW", label: "Source variant" },
+  type IssueFilter = { kind?: string; dimension?: CoverageDimension; label: string };
+
+  const ISSUE_FILTERS: IssueFilter[] = [
+    { kind: "POSSIBLE_OMISSION", label: "Possible omissions" },
+    { kind: "POSSIBLE_ADDITION", label: "Possible additions" },
+    { kind: "POSSIBLE_UNDERTRANSLATION", label: "Undertranslation" },
+    { kind: "POSSIBLE_OVERTRANSLATION", label: "Overtranslation" },
+    { kind: "MEANING_SHIFT", label: "Meaning shifts" },
+    { kind: "CONTRADICTION", label: "Contradictions" },
+    { dimension: "POLARITY", label: "Negation" },
+    { dimension: "QUANTITY", label: "Quantity" },
+    { dimension: "TEMPORAL_ASPECTUAL", label: "Temporal" },
+    { dimension: "PARTICIPANT", label: "Participant" },
+    { dimension: "REFERENT", label: "Referent" },
+    { kind: "RESOURCE_CONFLICT", label: "Resource conflict" },
+    { kind: "SOURCE_VARIANT_REVIEW", label: "Source variant" },
   ];
 
   const STATE_FILTERS: Array<{ value: QaDisposition; label: string }> = [
@@ -109,10 +112,30 @@
     return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
   }
 
-  async function toggleKind(value: string): Promise<void> {
-    reviewFilters.update((f) => ({ ...f, kinds: toggle(f.kinds, value) }));
+  async function toggleIssueFilter(option: IssueFilter): Promise<void> {
+    reviewFilters.update((filters) => ({
+      ...filters,
+      kinds: option.kind ? toggle(filters.kinds, option.kind) : filters.kinds,
+      coverageDimensions: option.dimension
+        ? toggle(filters.coverageDimensions, option.dimension)
+        : filters.coverageDimensions,
+    }));
     await applyFilters();
   }
+
+  function issueFilterSelected(option: IssueFilter): boolean {
+    return option.kind
+      ? $reviewFilters.kinds.includes(option.kind)
+      : Boolean(option.dimension && $reviewFilters.coverageDimensions.includes(option.dimension));
+  }
+
+  $: hasActiveQueueFilters = Boolean(
+    $reviewFilters.kinds.length
+    || $reviewFilters.coverageDimensions.length
+    || $reviewFilters.severities.length
+    || $reviewFilters.dispositions.length
+    || $reviewFilters.lifecycleStatuses.length,
+  );
 
   async function toggleDisposition(value: QaDisposition): Promise<void> {
     reviewFilters.update((f) => ({ ...f, dispositions: toggle(f.dispositions, value) }));
@@ -341,12 +364,13 @@
     <div class="filter-row">
       <span class="filter-label" id="filter-kind">Issue type</span>
       <div class="chips" role="group" aria-labelledby="filter-kind">
-        {#each KIND_FILTERS as option}
+        {#each ISSUE_FILTERS as option}
           <button
             type="button"
             class="chip"
-            aria-pressed={$reviewFilters.kinds.includes(option.value)}
-            on:click={() => toggleKind(option.value)}
+            aria-pressed={issueFilterSelected(option)}
+            title={option.dimension ? `Includes all findings in the ${option.dimension.toLowerCase().replace("_", " ")} semantic category.` : undefined}
+            on:click={() => toggleIssueFilter(option)}
           >{option.label}</button>
         {/each}
       </div>
@@ -372,7 +396,11 @@
       {:else if analysisState === "FAILED"}
         The latest analysis failed. Retry it from the analysis controls above.
       {:else if analysisState === "CURRENT"}
-        Analysis complete. No possible QA issues were found in this range.
+        {#if hasActiveQueueFilters}
+          Analysis complete. No findings match the selected filters in this range.
+        {:else}
+          Analysis complete. No possible QA issues were found in this range.
+        {/if}
       {:else if analysisState === "RUNNING"}
         Analysis is running. Findings will appear here when the QA stage completes.
       {/if}

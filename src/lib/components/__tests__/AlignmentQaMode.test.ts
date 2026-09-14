@@ -133,6 +133,18 @@ describe("AlignmentQaMode analysis states", () => {
     expect(await screen.findByText(/Review scope: Current analysis range/i)).toBeInTheDocument();
   });
 
+  it("filters negation-related omissions by their POLARITY dimension", async () => {
+    scopeStatus.mockResolvedValue(scope("CURRENT", null, ["PHP 1:22"]));
+    render(AlignmentQaMode, { props: { chapter: "1", verse: "22" } });
+    await waitFor(() => expect(queue).toHaveBeenCalled());
+    await fireEvent.click(screen.getByRole("button", { name: "Negation" }));
+    await waitFor(() => expect(queue).toHaveBeenLastCalledWith(expect.objectContaining({
+      canonicalReferences: ["PHP 1:22"],
+      coverageDimensions: ["POLARITY"],
+    })));
+    expect(queue.mock.calls.at(-1)?.[0].kinds).toBeUndefined();
+  });
+
   it("opens row actions and keeps Apply proposed fix disabled without a proposal", async () => {
     scopeStatus.mockResolvedValue(scope("CURRENT"));
     queue.mockResolvedValue({ findings: [summary()], nextCursor: "", totalCount: 1, order: "CANONICAL" });

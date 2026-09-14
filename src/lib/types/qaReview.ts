@@ -9,6 +9,8 @@
  * as though it were the latter.
  */
 
+import type { CoverageDimension } from "./passageSemanticV1";
+
 export type QaDisposition =
   | "UNRESOLVED"
   | "CONFIRMED_TRANSLATION_ERROR"
@@ -104,6 +106,8 @@ export interface ReviewQueueFilters {
   /** Canonical semantic scope; source-owned for coverage and target-owned for support. */
   canonicalReferences?: string[];
   kinds?: string[];
+  /** Semantic categories, independent of the finding's QA classification. */
+  coverageDimensions?: CoverageDimension[];
   severities?: QaFindingSeverity[];
   dispositions?: QaDisposition[];
   reviewStatuses?: ReviewStatus[];
