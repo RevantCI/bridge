@@ -2,6 +2,7 @@ import threading
 import time
 
 from tc_ai_bridge.navigation import NavigationSyncCoordinator
+from tests.support.waits import job_timeout
 
 
 class FakeOwnership:
@@ -32,7 +33,7 @@ class FakeConnector:
 
 
 def wait_for(predicate, timeout=1.0):
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + job_timeout(timeout)
     while time.monotonic() < deadline:
         value = predicate()
         if value:

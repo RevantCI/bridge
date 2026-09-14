@@ -2,10 +2,11 @@ import threading
 import time
 
 from ai_review_jobs import AIReviewJobManager, AIReviewJobSpec
+from tests.support.waits import job_timeout
 
 
 def _wait(manager, job_id, timeout=2):
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + job_timeout(timeout)
     while time.monotonic() < deadline:
         snapshot = manager.status(job_id)
         if snapshot["state"] in {"succeeded", "failed", "cancelled"}:

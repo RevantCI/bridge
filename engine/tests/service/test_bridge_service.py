@@ -17,6 +17,7 @@ import pytest
 
 from bridge_service import BridgeEngine
 from greek_room_engine.protocol import EngineRequest
+from tests.support.waits import job_timeout
 
 
 @pytest.fixture
@@ -95,7 +96,7 @@ def call(engine, method, params=None):
 
 
 def wait_for_job(engine, job_id, timeout=5.0):
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + job_timeout(timeout)
     while time.monotonic() < deadline:
         snapshot = call(engine, "checks.status", {"jobId": job_id})["result"]
         if snapshot["state"] in {"succeeded", "failed", "cancelled"}:
@@ -105,7 +106,7 @@ def wait_for_job(engine, job_id, timeout=5.0):
 
 
 def wait_for_sweep(engine, job_id, timeout=5.0):
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + job_timeout(timeout)
     while time.monotonic() < deadline:
         snapshot = call(engine, "project.sweepStatus", {"jobId": job_id})["result"]
         if snapshot["state"] in {"succeeded", "failed", "cancelled"}:

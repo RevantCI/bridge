@@ -22,10 +22,11 @@ from tc_ai_bridge.qa_report import (
 )
 
 from .test_bridge_service import _write_minimal_book, call, fixture_project, two_book_collection, wait_for_job  # noqa: F401
+from tests.support.waits import job_timeout
 
 
 def wait_for_report(engine, job_id, timeout=5.0):
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + job_timeout(timeout)
     while time.monotonic() < deadline:
         snapshot = call(engine, "report.status", {"jobId": job_id})["result"]
         if snapshot["state"] in {"succeeded", "failed", "cancelled"}:
