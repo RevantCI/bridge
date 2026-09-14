@@ -101,13 +101,26 @@ forgotten.
 
 ## Windows installer
 
-`Bridge_0.9.7_x64-setup.exe` — 57,685,729 bytes (~55.0 MiB)
+`Bridge_0.9.7_x64-setup.exe` — the release asset attached by
+`.github/workflows/release.yml`'s own CI build (run
+[34806217730](https://github.com/RevantCI/bridge/actions/runs/34806217730),
+concluded `success`), not the local build below — 59,872,723 bytes
+(~57.1 MiB).
 
-SHA-256:
-`77B5806DBE5619AB7F1F5A0351364AF57B0B4859D3A5E797E3AB420590550E47`
+SHA-256 (CI-built, the actual release asset):
+`CDB662CF6211988AC6637D6FE34FFBF06C1037959CAA6CA122EBB389A331D78F`
 
-`scripts/smoke_sidecars.py` against the frozen pair: fails on the same
-known, pre-existing `project.inspectImport` duplicate-classification
-mismatch documented in `CLAUDE.md` (continue-on-error in CI for this exact
-reason) — unrelated to anything this release changed, not a new
-regression. Everything else the smoke check exercises passed.
+A separate local build made for this gate run (same source, same
+`0.9.7` version, different machine/timestamp — installer builds aren't
+byte-reproducible here) is 57,685,729 bytes with SHA-256
+`77B5806DBE5619AB7F1F5A0351364AF57B0B4859D3A5E797E3AB420590550E47`,
+kept only as this session's own verification copy, not shipped.
+
+`scripts/smoke_sidecars.py` against the frozen pair (both the local and
+CI builds): fails on the same known, pre-existing `project.inspectImport`
+duplicate-classification mismatch documented in `CLAUDE.md`
+(continue-on-error in CI for this exact reason) — unrelated to anything
+this release changed, not a new regression. Everything else the smoke
+check exercises passed, and CI's own `Frontend checks` / `Rust tests`
+steps (svelte-check, Vitest, `cargo test`) all passed independently of
+this session's local gate run.
