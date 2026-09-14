@@ -195,6 +195,59 @@ def _build_minimal_project(root: Path) -> Path:
     return root
 
 
+def test_a_pre_cutover_project_refuses_to_open_rather_than_looking_empty(tmp_path):
+    """#76: the readers now query a database those records were never in.
+
+    Opening such a project would succeed and show an empty review queue and no
+    decision history, which looks exactly like data loss. A refusal naming the
+    directories is worse for nobody and much easier to act on.
+    """
+    from tc_ai_bridge.tc_project import ProjectError, TranslationCoreProject
+
+    root = _build_minimal_project(tmp_path / "rut")
+    legacy = root / ".apps" / "translationCoreAI" / "qaDecisions" / "rut" / "1" / "1"
+    legacy.mkdir(parents=True)
+    (legacy / "finding-1.json").write_text(
+        json.dumps({"issueKey": "finding-1", "decision": "accepted"}), encoding="utf-8",
+    )
+
+    with pytest.raises(ProjectError) as raised:
+        TranslationCoreProject(root)
+
+    message = str(raised.value)
+    assert "qaDecisions" in message, "the message must name what it found"
+    assert "Re-import" in message
+    assert "Nothing has been deleted" in message
+    assert legacy.is_dir(), "the guard must not touch the files it refuses over"
+
+
+def test_an_empty_legacy_directory_does_not_block_opening(tmp_path):
+    """Directories get created by things other than records being written.
+
+    The guard keys on actual JSON, not on a directory existing, so a stray
+    empty folder cannot make a healthy project unopenable.
+    """
+    from tc_ai_bridge.tc_project import TranslationCoreProject
+
+    root = _build_minimal_project(tmp_path / "rut")
+    (root / ".apps" / "translationCoreAI" / "decisions" / "rut").mkdir(parents=True)
+
+    assert TranslationCoreProject(root).book_id == "rut"
+
+
+def test_an_audit_directory_alone_does_not_block_opening(tmp_path):
+    """`audit/` tails are still written as files, so their presence says
+    nothing about which build created the project."""
+    from tc_ai_bridge.tc_project import TranslationCoreProject
+
+    root = _build_minimal_project(tmp_path / "rut")
+    audit = root / ".apps" / "translationCoreAI" / "audit" / "rut" / "1" / "1"
+    audit.mkdir(parents=True)
+    (audit / "x_scripture-edit.json").write_text("{}", encoding="utf-8")
+
+    assert TranslationCoreProject(root).book_id == "rut"
+
+
 def test_translation_core_project_creates_an_empty_workbench_db(tmp_path):
     from tc_ai_bridge.tc_project import TranslationCoreProject
 

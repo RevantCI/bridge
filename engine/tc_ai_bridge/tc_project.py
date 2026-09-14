@@ -63,6 +63,17 @@ class ProjectSummary:
 
 _PARATEXT_SYNC_STATE_KEY = 'paratext_live_sync_state'
 
+# Directories that held human-owned records before #76 moved those stores into
+# `bridge-workbench.sqlite3`. A project containing any of them was written by a
+# pre-cutover build and is not upgraded -- see TEAM_ARCHITECTURE.md ss3.5 for why
+# there is no migration. `audit/` is deliberately absent: audit tails are still
+# written as files, so their presence says nothing about which build made the
+# project.
+_PRE_CUTOVER_STORE_DIRS = (
+    'decisions', 'qaDecisions', 'review', 'terminology', 'aiReview',
+    'issueResolutions', 'alignmentHistory', 'alignmentDiagnostics',
+)
+
 
 class TranslationCoreProject:
     def __init__(self, project_path: str | Path, *, identity: WorkbenchIdentity | None = None):
@@ -84,6 +95,7 @@ class TranslationCoreProject:
         self._index_cache: dict[str, list[dict[str, Any]]] = {}
         self._checks_by_verse_cache: dict[tuple[str, str], list[dict[str, Any]]] | None = None
         self.journal = TransactionJournal(self.path, self.companion_dir())
+        self._refuse_pre_cutover_project()
         self.workbench = WorkbenchRepository(self.companion_dir() / 'bridge-workbench.sqlite3')
         # Identity for every workbench write. Injectable so a test can stamp a
         # known actor without touching app-level state; resolved lazily
@@ -93,6 +105,36 @@ class TranslationCoreProject:
         # Stage 4 attaches an advisory companion runtime after project identity
         # is resolved. Direct TranslationCoreProject users remain unchanged.
         self.passage_semantic_runtime: Any | None = None
+
+    def _refuse_pre_cutover_project(self) -> None:
+        """Refuse to open a project whose records predate the #76 cutover.
+
+        Opening it would succeed and show an empty review queue, empty decision
+        history and no saved issue resolutions, because the new readers query a
+        database those records were never written to. That looks exactly like
+        data loss. A refusal naming the reason is worse for nobody and much
+        easier to act on.
+
+        Nothing is deleted: the directories stay untouched and the project can
+        be re-imported alongside them.
+        """
+        companion = self.companion_dir()
+        if not companion.is_dir():
+            return
+        stale = sorted(
+            name for name in _PRE_CUTOVER_STORE_DIRS
+            if any((companion / name).glob('**/*.json'))
+        )
+        if not stale:
+            return
+        raise ProjectError(
+            'This project was created by an earlier version of Bridge and stores '
+            'its decisions in files (' + ', '.join(stale) + '). Bridge now keeps '
+            'them in the project database and does not convert the old format. '
+            'Re-import the project to open it. Nothing has been deleted -- the '
+            'original files are still in '
+            + str(companion) + '.'
+        )
 
     def attach_passage_semantic_runtime(self, runtime: Any | None) -> None:
         self.passage_semantic_runtime = runtime
