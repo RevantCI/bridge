@@ -465,7 +465,7 @@
             aria-label={`Edit verse ${v}`}
             on:click|stopPropagation={() => beginEditFromList(v)}
             on:dblclick|stopPropagation
-          >✎</button>
+          >✎︎</button>
           <button
             type="button"
             class="alignment-state {alignmentStatus}"
@@ -557,8 +557,15 @@
     margin-left: auto; flex-shrink: 0; align-self: flex-start; margin-top: 3px;
     display: flex; flex-direction: column; align-items: center; gap: 1px;
   }
+  /* U+270E is emoji-presentation-capable, so Windows resolves it through Segoe
+     UI Emoji and renders a filled colour glyph next to the arrow's thin
+     monochrome one -- they read as two different weights. The U+FE0E variation
+     selector on the character asks for text presentation; `font-variant-emoji`
+     says the same thing for renderers that honour it. Both are harmless where
+     unsupported. */
   .alignment-state, .edit-pencil {
     font: inherit; font-size: var(--fs-md); line-height: 1; color: var(--text-3);
+    font-variant-emoji: text;
     background: transparent; border: 1px solid transparent; border-radius: 5px;
     padding: 1px 4px; cursor: pointer;
   }
