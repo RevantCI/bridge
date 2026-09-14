@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -1523,7 +1524,7 @@ def test_v13_to_v14_migration_is_additive_and_keeps_v13_data_readable(
 
     repo = FoundationRepository(database)
 
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 15
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 16
     # Every v13 record survives, unmodified.
     finding = repo.qa_finding("legacy-finding")
     assert finding["qaDisposition"] == "CONFIRMED_TRANSLATION_ERROR"
@@ -1559,6 +1560,118 @@ def test_v13_to_v14_migration_is_additive_and_keeps_v13_data_readable(
     # error and never as a verdict.
     assert repo.current_correction_verification("legacy-application") is None
     assert repo.correction_verification_history("legacy-application") == []
+
+
+def test_every_ledger_insert_names_its_columns_and_assigns_seq() -> None:
+    """Static guard: #84's `seq` has to be set by *every* writer, not most.
+
+    Adding the column broke four positional `INSERT ... VALUES(?,?,...)`
+    statements at once, and the fourth -- the STALE event written by dependency
+    invalidation -- was missed on the first pass and only surfaced as 93 test
+    failures. A positional insert into an append-only ledger is exactly the
+    shape that breaks silently the next time a column is added, so forbid it
+    outright rather than trusting the next person to grep.
+    """
+    source = Path(repository_module.__file__).read_text(encoding="utf-8")
+    # The _MIGRATION_V* scripts legitimately rebuild these tables with their
+    # own column lists; only runtime writes are in scope here.
+    runtime = re.sub(r'_MIGRATION_V\d+ = r?""".*?"""', "", source, flags=re.S)
+
+    for table in ("correction_proposal_events", "correction_verifications", "review_records"):
+        # `INSERT OR IGNORE` counts: import_review_record used that form, and a
+        # pattern matching only bare `INSERT INTO` missed it -- which showed up
+        # not as a crash but as a legacy import being silently quarantined by
+        # the `except Exception` around it.
+        statements = [
+            runtime[m.start():m.start() + 800]
+            for m in re.finditer(
+                rf'"INSERT( OR (?:IGNORE|REPLACE|ABORT))? INTO {table}[\s("]', runtime
+            )
+        ]
+        assert statements, f"expected at least one runtime INSERT into {table}"
+        for statement in statements:
+            assert f"IFNULL(MAX(seq),0)+1 FROM {table}" in statement, (
+                f"a runtime INSERT INTO {table} does not assign seq:\n"
+                f"{statement[:300]}"
+            )
+
+
+def test_v15_to_v16_migration_gives_every_ledger_row_an_explicit_sequence(
+    tmp_path: Path,
+) -> None:
+    """#84: v16 retires the `ORDER BY created_at, rowid` tie-break.
+
+    Builds a real v15 database and writes ten proposal events that all share
+    one `created_at` -- the tick collision that produced randomly-ordered
+    history in the first place -- then migrates forward and asserts the rows
+    still come back in the order they were written. The backfill is from
+    rowid, which is exactly what the tie-break was already reading, so this
+    pins that the replacement agrees with the thing it replaces.
+
+    The new insert SQL is not exercised here on purpose: every test in the
+    suite that creates a proposal or a review runs through
+    `_append_correction_event` / `_append_review`, so a mistake in the named
+    column lists fails loudly and everywhere rather than in one migration test.
+    """
+    database = tmp_path / "semantic.sqlite3"
+    conn = sqlite3.connect(database)
+    for version in range(1, 16):
+        conn.executescript(getattr(repository_module, f"_MIGRATION_V{version}"))
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_migrations("
+            "version INTEGER PRIMARY KEY,schema_id TEXT NOT NULL,applied_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO schema_migrations VALUES(?,?,?)",
+            (version, repository_module.SCHEMA_ID, "2026-09-14T00:00:00Z"),
+        )
+    policy_id = "legacy-policy"
+    conn.execute(
+        "INSERT INTO policy_bindings VALUES(?,?,?,?)",
+        (policy_id, "confidence-v1", "calibration-v1", "audit-v1"),
+    )
+    finding_payload = {
+        "id": "f1", "projectId": "p1", "qaDisposition": "UNRESOLVED",
+        "reviewStatus": "UNREVIEWED", "lifecycleStatus": "ACTIVE", "revision": 1,
+    }
+    conn.execute(
+        "INSERT INTO qa_findings"
+        "(id,project_id,qa_disposition,policy_binding_id,review_status,lifecycle_status,"
+        "revision,payload_json) VALUES(?,?,?,?,?,?,?,?)",
+        ("f1", "p1", "UNRESOLVED", policy_id, "UNREVIEWED", "ACTIVE", 1,
+         json.dumps(finding_payload)),
+    )
+    proposal_payload = {"id": "prop-1", "qaFindingId": "f1", "projectId": "p1", "revision": 1}
+    conn.execute(
+        "INSERT INTO correction_proposals VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("prop-1", "p1", "f1", "target-r1", "target-r2", policy_id, "UNREVIEWED",
+         "ACTIVE", 1, json.dumps(proposal_payload), 1, "PENDING", 1),
+    )
+    frozen = "2026-09-14T00:00:00+00:00"
+    written = [f"EVENT-{index}" for index in range(10)]
+    for index, reason in enumerate(written):
+        conn.execute(
+            "INSERT INTO correction_proposal_events VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (f"evt-{index}", "prop-1", "EDITED", "HUMAN", "human", index, index + 1,
+             reason, "{}", json.dumps(proposal_payload), frozen),
+        )
+    conn.commit()
+    conn.close()
+
+    repo = FoundationRepository(database)
+
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 16
+    events = repo.correction_proposal_history("prop-1")
+    assert [event["reason"] for event in events] == written, (
+        "v16 must preserve the order the rowid tie-break was already reading"
+    )
+
+    with sqlite3.connect(database) as check:
+        seqs = [row[0] for row in check.execute(
+            "SELECT seq FROM correction_proposal_events ORDER BY seq"
+        ).fetchall()]
+    assert all(value is not None for value in seqs), "every backfilled row needs a seq"
+    assert len(set(seqs)) == 10 and seqs == sorted(seqs), "seq must be unique and ordered"
 
 
 def test_v14_to_v15_migration_is_additive_and_keeps_v14_data_readable(
@@ -1628,7 +1741,7 @@ def test_v14_to_v15_migration_is_additive_and_keeps_v14_data_readable(
 
     repo = FoundationRepository(database)
 
-    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 15
+    assert repo.schema_version() == DATABASE_SCHEMA_VERSION == 16
     # The pre-existing row and its event survive, unmodified by the rebuild.
     with sqlite3.connect(database) as migrated:
         migrated.row_factory = sqlite3.Row

@@ -52,7 +52,7 @@ from .passage_semantic_models import (
 )
 
 
-DATABASE_SCHEMA_VERSION = 15
+DATABASE_SCHEMA_VERSION = 16
 
 # The one authoritative record_type -> table map for the dependency graph.
 #
@@ -1103,6 +1103,39 @@ CREATE INDEX ix_correction_proposal_events
 ON correction_proposal_events(proposal_id,created_at,id);
 """
 
+# v16 (#84): an explicit per-ledger sequence, replacing the `ORDER BY
+# created_at, rowid` tie-break 7bf0a66 put in as a stopgap.
+#
+# The three append-only ledgers are read back in write order. They were ordered
+# by `created_at` alone, and on Windows/CPython `datetime.now()` advances only
+# about every 15 ms, so events written to one record inside a single tick came
+# back in random order -- a proposal history that read CREATED, REJECTED,
+# EDITED. The rowid tie-break fixed the symptom but leans on an implementation
+# detail: rowids are reassigned by any table rebuild, and v13 and v15 both
+# rebuild one of these tables. It held (verified empirically against v15's
+# rebuild), but nothing would have caught it if it had not.
+#
+# `seq` is assigned inside the writing transaction as MAX(seq)+1, which is
+# ordered, gap-free per table, and independent of both clock resolution and
+# storage internals. Backfilled from rowid, which is correct because that is
+# exactly the order the tie-break was already reading and preserving.
+_MIGRATION_V16 = r"""
+ALTER TABLE correction_proposal_events ADD COLUMN seq INTEGER;
+ALTER TABLE correction_verifications ADD COLUMN seq INTEGER;
+ALTER TABLE review_records ADD COLUMN seq INTEGER;
+
+UPDATE correction_proposal_events SET seq = rowid;
+UPDATE correction_verifications SET seq = rowid;
+UPDATE review_records SET seq = rowid;
+
+CREATE INDEX ix_correction_proposal_events_seq
+    ON correction_proposal_events(proposal_id, seq);
+CREATE INDEX ix_correction_verifications_seq
+    ON correction_verifications(application_id, seq);
+CREATE INDEX ix_review_records_seq
+    ON review_records(entity_type, entity_id, seq);
+"""
+
 
 class FoundationRepository:
     def __init__(self, path: str | Path):
@@ -1196,6 +1229,10 @@ class FoundationRepository:
             if current < 15:
                 self._backup_before_migration(conn, current, 15)
                 self._apply_migration(conn, 15, _MIGRATION_V15)
+                current = 15
+            if current < 16:
+                self._backup_before_migration(conn, current, 16)
+                self._apply_migration(conn, 16, _MIGRATION_V16)
         self._ensure_policy(PolicyBinding.foundation_v1())
 
     def _backup_before_migration(
@@ -1819,7 +1856,8 @@ class FoundationRepository:
                 "proposal_id,proposal_revision,finding_id,analysis_job_id,target_revision,"
                 "target_content_hash,verifier_fingerprint,result,confidence,reason_codes_json,"
                 "lifecycle_status,acknowledged_at,acknowledged_by,revision,created_at,updated_at,"
-                "payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',NULL,NULL,1,?,?,?)",
+                "payload_json,seq) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'ACTIVE',NULL,NULL,1,?,?,?,"
+                "(SELECT IFNULL(MAX(seq),0)+1 FROM correction_verifications))",
                 (verification_id, project_id, application_id, proposal_id, int(proposal_revision),
                  finding_id, analysis_job_id, target_revision, target_content_hash,
                  verifier_fingerprint, result, float(confidence),
@@ -1902,7 +1940,7 @@ class FoundationRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM correction_verifications WHERE application_id=? "
-                "ORDER BY created_at,rowid", (application_id,),
+                "ORDER BY seq", (application_id,),
             ).fetchall()
         return [self._verification_payload(row) for row in rows]
 
@@ -4139,7 +4177,11 @@ class FoundationRepository:
         actor_type: ActorType, actor_id: str, base_revision: int, reason: str = "",
     ) -> None:
         conn.execute(
-            "INSERT INTO correction_proposal_events VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO correction_proposal_events("
+            "id,proposal_id,event_type,actor_type,actor_id,base_revision,new_revision,"
+            "reason,provider_metadata_json,proposal_snapshot_json,created_at,seq) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,"
+            "(SELECT IFNULL(MAX(seq),0)+1 FROM correction_proposal_events))",
             (str(uuid.uuid4()), str(proposal["id"]), event_type, actor_type.value,
              actor_id, base_revision, int(proposal["revision"]), reason,
              json.dumps(proposal.get("providerMetadata") or {}, ensure_ascii=False),
@@ -4275,7 +4317,7 @@ class FoundationRepository:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM correction_proposal_events WHERE proposal_id=? "
-                "ORDER BY created_at,rowid", (proposal_id,),
+                "ORDER BY seq", (proposal_id,),
             ).fetchall()
         return [{
             "id": row["id"], "proposalId": row["proposal_id"],
@@ -4741,8 +4783,11 @@ class FoundationRepository:
                 changed += updated
                 if updated and record_type == "CORRECTION_PROPOSAL":
                     conn.execute(
-                        "INSERT INTO correction_proposal_events "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO correction_proposal_events("
+                        "id,proposal_id,event_type,actor_type,actor_id,base_revision,"
+                        "new_revision,reason,provider_metadata_json,proposal_snapshot_json,"
+                        "created_at,seq) VALUES(?,?,?,?,?,?,?,?,?,?,?,"
+                        "(SELECT IFNULL(MAX(seq),0)+1 FROM correction_proposal_events))",
                         (str(uuid.uuid4()), record_id, "STALE", ActorType.SYSTEM.value,
                          "dependency-invalidation",
                          max(0, int(payload.get("revision", 1)) - 1),
@@ -4762,7 +4807,12 @@ class FoundationRepository:
                        actor_type: ActorType, actor_id: str, base_revision: int,
                        note: str = "") -> None:
         conn.execute(
-            "INSERT INTO review_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO review_records("
+            "id,entity_type,entity_id,previous_review_status,new_review_status,"
+            "previous_lifecycle_status,new_lifecycle_status,previous_qa_disposition,"
+            "new_qa_disposition,actor_type,actor_id,note,base_revision,created_at,seq) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+            "(SELECT IFNULL(MAX(seq),0)+1 FROM review_records))",
             (str(uuid.uuid4()), entity_type, entity_id, previous_review, new_review, previous_lifecycle,
              new_lifecycle, previous_disposition, new_disposition, actor_type.value, actor_id, note, base_revision, self._now()),
         )
@@ -4770,7 +4820,7 @@ class FoundationRepository:
     def review_records(self, entity_type: str, entity_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM review_records WHERE entity_type=? AND entity_id=? ORDER BY created_at,rowid",
+                "SELECT * FROM review_records WHERE entity_type=? AND entity_id=? ORDER BY seq",
                 (entity_type, entity_id),
             ).fetchall()
         return [
@@ -4796,7 +4846,12 @@ class FoundationRepository:
     ) -> None:
         with self._connect() as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO review_records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO review_records("
+                "id,entity_type,entity_id,previous_review_status,new_review_status,"
+                "previous_lifecycle_status,new_lifecycle_status,previous_qa_disposition,"
+                "new_qa_disposition,actor_type,actor_id,note,base_revision,created_at,seq) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+                "(SELECT IFNULL(MAX(seq),0)+1 FROM review_records))",
                 (record_id, entity_type, entity_id, None, review_status.value, None,
                  lifecycle_status.value, None,
                  qa_disposition.value if qa_disposition is not None else None,
