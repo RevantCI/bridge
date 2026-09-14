@@ -137,10 +137,28 @@ change_log(seq INTEGER PRIMARY KEY AUTOINCREMENT,
 
 ### 3.5 Migration and the API seam
 
-- Lazy, on first open, inside `TranslationCoreProject.__init__` after journal recovery.
-  Per store in its own transaction, `INSERT OR IGNORE` on natural keys, progress recorded
-  in `project_state('migration')`. Readers fall back to `_legacy_*` file readers until the
-  status is `complete`. Source files are never deleted by the migration.
+- Lazy, on first open, after journal recovery. **Correction (2026-09-14, #76 step 1):**
+  this cannot live in `TranslationCoreProject.__init__` as originally written — journal
+  recovery is not in the constructor, it is `recover_incomplete_transactions()`, which
+  `bridge_service.py` calls on the already-constructed project. Migrating from files the
+  journal is about to roll back would copy state the project is about to disown, so the
+  ordering is real and the seam is a separate method,
+  `TranslationCoreProject.run_workbench_migration(identity)`, called straight after
+  recovery.
+  Per store, `INSERT OR IGNORE` on natural keys, progress recorded in
+  `project_state('migration')` **per project+book** (Bridge imports one project per book,
+  so PHP finishing says nothing about TIT). Readers fall back to `_legacy_*` file readers
+  per store until that store reports `complete` — not per project, so a reader for a moved
+  store is not held back by one that has not moved yet. Source files are never deleted by
+  the migration.
+- Per-store *atomicity* is deliberately not required: `_write` commits per row, and row ids
+  are derived from natural keys (`workbench_repository.natural_row_id`), so a store
+  interrupted part-way through re-runs safely — the rows it already wrote are overwritten
+  with the same values rather than duplicated. A store migration must therefore never
+  append to a list it read from the database, only rewrite it from the file.
+- A store that raises must never make a project unopenable. The runner records the failure,
+  stops (rather than skipping ahead, since a later store may depend on an earlier one),
+  and leaves the project reading from its files exactly as before.
 - `TransactionJournal` stays for tC-file writes. `apply_scripture_edit` records
   `journal_tx_id` on its change-log row with the same ordering as the existing
   `journal_prepared_callback`.
@@ -166,6 +184,14 @@ repaired on next open if `source_seq` lags the workbench `change_log`.
 
 - Local "login" is choosing or creating a display name at startup. No password.
 - Every workbench write carries `actor_id = user_id`. Display names resolve at read time.
+  **The `user_id` therefore cannot wait for this step.** `change_log` is append-only and
+  its `BEFORE UPDATE`/`BEFORE DELETE` triggers reject every column but `synced_at`, so an
+  `actor_id` written during the store moves (step 2 in §10, i.e. #76/#77) is permanent and
+  cannot be backfilled here. Stamping `settings.reviewer_name` — a display name Settings
+  can change at any time — would split one person's history irreversibly the first time
+  they rename themselves. So `workspace.users` and a stable local `user_id` land with the
+  workbench stores (#76 step 1, 2026-09-14); roles, `authorize()` and choosing between
+  several users remain this step's.
 - The `actor_id="human"` defaults (`passage_semantic_repository.py:3693, 4210, 4275`,
   `qa_review.py:66`, `correction_wording.py:588-646`) become required parameters.
   `settings.reviewer_name` becomes a derived value of the current user; translationCore

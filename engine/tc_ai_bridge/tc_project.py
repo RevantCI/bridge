@@ -17,6 +17,7 @@ from .usfm import strip_usfm, whitespace_tokens
 from .models import VerseAlignment
 from .transaction_journal import TransactionJournal
 from .workbench_repository import WorkbenchRepository
+from .workbench_migration import WorkbenchIdentity, run_pending_migrations
 from .paratext_notes import append_paratext_note, validate_notes_11, convert_comment_list_to_notes_11, convert_legacy_notes_11, EXTERNAL_NOTE_SOURCE
 from .alignment_reliability import structural_issues, alignment_fingerprint
 
@@ -540,6 +541,22 @@ class TranslationCoreProject:
 
     def pending_transactions(self) -> list[dict[str, Any]]:
         return self.journal.pending()
+
+    def run_workbench_migration(self, identity: WorkbenchIdentity) -> dict[str, Any]:
+        """Move any not-yet-migrated file-backed store into the workbench DB.
+
+        Call this once per open, **after** `recover_incomplete_transactions`:
+        a crash can leave a tC file half-written, and migrating a store from
+        files the journal is about to roll back would copy state the project
+        is about to disown. TEAM_ARCHITECTURE.md ss3.5 says "inside
+        `__init__` after journal recovery", but recovery is not in `__init__`
+        -- `bridge_service.py` calls it on the constructed project -- so the
+        ordering it asks for is only expressible as a separate method.
+
+        Never raises: a project whose migration fails must still open and
+        read from its files. See `workbench_migration`.
+        """
+        return run_pending_migrations(self, self.workbench, identity)
 
     def sync_comment(self, chapter: str | int, verse: str | int, context_id: dict[str, Any], text: str, username: str = 'AI Bridge Reviewer', gateway_language_code: str = 'en', gateway_language_quote: str = '') -> Path:
         """Append a native translationCore comment using the observed checkData/comments shape.

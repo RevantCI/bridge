@@ -3847,3 +3847,51 @@ with filters set. Still open from the same V11 round and untouched here:
 #58, #62, #63, and #54's cross-verse half (blocked on the
 embedding-provider direction, which is a stop-and-ask). #76 remains the
 sequenced next step on the #44–#47 direction.
+
+## 44.15 #76 step 1: workbench migration runner + a stable local user id (2026-09-14)
+
+#76 is being landed as a sequence rather than one change, on the maintainer's
+call — as filed it covers ten store groups in `tc_project.py`, three
+collaborator modules, the migration framework and the `audit/` → `change_log`
+switch. This is the first piece: **the mechanism only**. `REGISTRY` is empty,
+so on a real project the new code does nothing; a test asserts it stays empty.
+Full detail in `docs/BUILD_LOG.md`'s same-dated entry.
+
+**Two contradictions in `TEAM_ARCHITECTURE.md` had to be resolved to proceed,
+and both are now corrected in that file:**
+
+1. §5 requires `actor_id = user_id` on every workbench write, but §10 schedules
+   identity (#78) *after* the store moves (#76/#77). `change_log`'s
+   `BEFORE UPDATE`/`BEFORE DELETE` triggers make the first `actor_id`
+   permanent, so it cannot wait — and the only identity that existed,
+   `settings.reviewer_name`, is a display name Settings can change, which would
+   split one person's history irreversibly on the first rename. So
+   `workspace.users` + `get_or_create_local_user()` land here: a stable uuid4
+   `user_id` with the display name hanging off it. Roles, `authorize()` and
+   multi-user remain #78's.
+2. §3.5 says the migration runs "inside `TranslationCoreProject.__init__` after
+   journal recovery". Recovery is not in the constructor — it is
+   `recover_incomplete_transactions()`, called by `bridge_service.py:596` on
+   the built project. The ordering is real, so the seam is a separate method,
+   `run_workbench_migration(identity)`.
+
+**Where to pick up.** The next piece is the first real store move, and it
+should carry the `bridge_service.py` wiring with it — the seam is deliberately
+uncalled today, because wiring it now would make every project open create
+`%LOCALAPPDATA%\Bridge\data\workspace.sqlite3` for a runner with nothing to
+run. Check decisions are the natural first store (single kind, `human_decisions`
+already has the lifted columns). The pattern to copy is in
+`workbench_migration.py`'s docstring: derive row ids with `natural_row_id`,
+rewrite from the file rather than appending to what is already in the database,
+and add the `_legacy_*` reader fallback gated on `is_store_migrated`.
+
+**Decide before the `audit/` step:** `tc_project.py:1787` returns
+`'audit': str(audit)` — a companion-dir path — in a public result, and
+`tests/service/test_check_selection.py:239` reads the file at that path. #76's
+"stop writing `audit/` files" is therefore a public API break that the issue
+does not mention. Recorded on the issue.
+
+**Still open and unrelated:** #83 (a *pending* CI run on `main` is still
+evicted by the next push; 9bf8857 only fixed the in-progress half) needs a
+maintainer call between two fixes recorded on the issue. #61, #73 and #53 are
+green on the automated gate but have not been seen in the running desktop app.

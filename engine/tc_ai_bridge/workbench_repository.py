@@ -59,6 +59,26 @@ MUTABLE_TABLES: tuple[str, ...] = (
 )
 
 
+def natural_row_id(*parts: Any) -> str:
+    """A deterministic row id derived from a store's natural key.
+
+    Migration has to be idempotent -- it can be interrupted and re-run, and
+    re-running must not duplicate a record (TEAM_ARCHITECTURE.md ss3.5,
+    "INSERT OR IGNORE on natural keys"). Deriving the primary key from the
+    natural key is what makes a plain upsert idempotent without a separate
+    existence query, and it makes the same record land on the same id on
+    every machine, which is what the hub will later need to match rows
+    across devices. A random uuid4 would satisfy neither.
+
+    ``None`` and ``''`` are distinct from the string ``'None'``: parts are
+    length-prefixed so ("a", "bc") and ("ab", "c") cannot collide.
+    """
+    encoded = "|".join(
+        "~" if part is None else f"{len(str(part))}:{part}" for part in parts
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:32]
+
+
 class WorkbenchError(RuntimeError):
     pass
 

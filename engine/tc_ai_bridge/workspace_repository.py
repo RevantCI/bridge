@@ -1,11 +1,23 @@
 """SQLite persistence for Bridge's app-level workspace store.
 
-Skeleton only (#75): a ``devices`` table holding one generated, stable
-device id per installation, so every workbench write has a real
-``device_id`` to stamp before identity work (#78) exists. Users, the
-project registry, settings and the per-project rollup cache
-(``docs/TEAM_ARCHITECTURE.md`` section 4) land in a later step once there is
-a user to attach them to.
+A ``devices`` table holding one generated, stable device id per
+installation, and a ``users`` table holding one stable local ``user_id``
+(#76), so every workbench write has a real ``actor_id``/``device_id`` pair
+to stamp. The project registry, settings and the per-project rollup cache
+(``docs/TEAM_ARCHITECTURE.md`` section 4) land in a later step.
+
+Why the ``user_id`` exists before #78 builds real identity: ``change_log``
+is append-only and its ``BEFORE UPDATE``/``BEFORE DELETE`` triggers reject
+every column but ``synced_at``, so whatever ``actor_id`` a workbench write
+stamps is permanent and cannot be backfilled later. The only identity that
+existed before this was ``AppSettings.reviewer_name`` -- a *display name*
+the user can change in Settings at any time (and which V11-005 reseeds), so
+stamping it would mean one person's history splits irreversibly into two
+un-linkable sets of immutable rows the first time they rename themselves.
+The id here is stable and the display name hangs off it, which is the shape
+section 5 specifies ("every workbench write carries ``actor_id = user_id``;
+display names resolve at read time"). Roles, ``authorize()`` and real
+multi-user remain #78's.
 
 This lives at the app level (``%LOCALAPPDATA%\\Bridge\\data\\workspace.sqlite3``
 on Windows), not inside any project folder -- callers decide the path;
@@ -53,6 +65,11 @@ class WorkspaceRepository:
                 "CREATE TABLE IF NOT EXISTS devices("
                 "device_id TEXT PRIMARY KEY, machine_id TEXT, os_user TEXT, created_at TEXT NOT NULL)"
             )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS users("
+                "user_id TEXT PRIMARY KEY, display_name TEXT NOT NULL, created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1)"
+            )
             conn.commit()
 
     @staticmethod
@@ -80,3 +97,41 @@ class WorkspaceRepository:
             )
             conn.commit()
             return device_id
+
+    def get_or_create_local_user(self, display_name: str) -> dict[str, str]:
+        """Return this installation's local user, minting one on first call.
+
+        The ``user_id`` is stable for the life of the workspace database and
+        is what every workbench write stamps. ``display_name`` is refreshed
+        from the caller on every call -- renaming yourself in Settings must
+        change how you are shown everywhere, past rows included, *without*
+        detaching you from the history you already wrote. That is the whole
+        reason the two are separate columns.
+
+        One workspace database is one installation, so the first (oldest)
+        active row wins. Choosing between several users is #78's job.
+        """
+        name = str(display_name or "").strip() or "Unnamed Reviewer"
+        now = self._now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT user_id, display_name FROM users WHERE active=1 ORDER BY created_at LIMIT 1"
+            ).fetchone()
+            if row is not None:
+                user_id = str(row["user_id"])
+                if str(row["display_name"]) != name:
+                    conn.execute(
+                        "UPDATE users SET display_name=?, updated_at=? WHERE user_id=?",
+                        (name, now, user_id),
+                    )
+                conn.commit()
+                return {"userId": user_id, "displayName": name}
+            user_id = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO users(user_id, display_name, created_at, updated_at, active) "
+                "VALUES(?,?,?,?,1)",
+                (user_id, name, now, now),
+            )
+            conn.commit()
+            return {"userId": user_id, "displayName": name}

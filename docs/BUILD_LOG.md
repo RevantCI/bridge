@@ -7410,3 +7410,119 @@ desktop app. jsdom does not lay out or paint, so the pencil's position
 above the arrow and the chapter arrows' fit beside the dropdown at 1366x768
 still need a human look — as does whether the persisted filters read
 sensibly after a real project reload.
+
+## 2026-09-14 — #76 step 1: the workbench migration runner, and a local user id
+
+#76 as filed is one issue covering ten store groups in `tc_project.py`, three
+collaborator modules, a lazy-migration framework and the `audit/` →
+`change_log` switch. On the maintainer's call it is being landed as a
+sequence, and this is the first piece: **the mechanism only**. `REGISTRY` is
+empty, so on a real project this code does nothing at all. There is a test
+asserting that, so a later step cannot register a store by accident.
+
+Landing the runner alone is deliberate. The behaviour worth reviewing is what
+happens when a migration is interrupted or fails — on a translation team's
+only copy of months of work — and that is much harder to see once ten real
+store moves are layered on top of it.
+
+### The identity problem, which had to be solved first
+
+`_write()` requires an `actor_id` on every row, and `change_log` carries
+`BEFORE UPDATE`/`BEFORE DELETE` triggers that reject every column but
+`synced_at`. So whatever `actor_id` the store moves stamp is **permanent and
+cannot be backfilled**.
+
+The only identity that existed was `AppSettings.reviewer_name` — a *display
+name* the user can change in Settings at any time, and which V11-005 reseeds
+from the OS account. Stamping that would mean one person's history splits
+irreversibly into two un-linkable sets of immutable rows the first time they
+rename themselves.
+
+`TEAM_ARCHITECTURE.md` §5 already specifies the right shape ("every workbench
+write carries `actor_id = user_id`; display names resolve at read time") — but
+§10 schedules identity (step 3, #78) *after* the store moves (step 2, #76/#77),
+which cannot work for the reason above. That is an internal contradiction in
+the design doc, not a judgement call, so §5 now records why the `user_id` has
+to come first.
+
+`workspace.sqlite3` gains a `users` table and
+`WorkspaceRepository.get_or_create_local_user(display_name)`: a stable uuid4
+`user_id`, with the display name refreshed from the caller on every call.
+Renaming changes how you are shown everywhere, past rows included, without
+detaching you from the history you already wrote — which is the entire reason
+the two are separate columns. Roles, `authorize()` and choosing between
+several users stay #78's.
+
+### The runner
+
+New `engine/tc_ai_bridge/workbench_migration.py`:
+`WorkbenchIdentity` (project_id, book_id, actor_id, device_id — a value object
+with no defaults, because every field lands verbatim on rows that can never be
+edited), `StoreMigration`, an ordered `REGISTRY`, and
+`run_pending_migrations()`. Progress lives in `project_state('migration')`.
+
+Three properties, each with a test:
+
+- **Never breaks project open.** A store that raises leaves the migration
+  incomplete and the project usable, reading from its files exactly as before.
+  The runner stops rather than skipping ahead, since a later store may depend
+  on an earlier one and finishing out of order would record a completion that
+  is not true. `KeyboardInterrupt` is deliberately *not* caught — a real kill
+  should not be swallowed — and the state written up to that point is still
+  correct, which is what the resume test exercises.
+- **Resumable, not restartable.** Each store records itself the moment it
+  finishes; a run interrupted after the third of five resumes at the fourth.
+- **Idempotent at the row level.** New `natural_row_id()` in
+  `workbench_repository.py` derives the primary key from a store's natural key,
+  so a store interrupted *mid-way* — after some rows but before recording
+  itself — re-runs safely. Parts are length-prefixed so `("a","bc")` and
+  `("ab","c")` cannot collide, and `None` is distinct from the string `"None"`.
+  This is also what will let the hub match rows across devices later; a uuid4
+  would satisfy neither.
+
+Per-store atomicity is therefore *not* required, which is the property that
+makes `_write`'s one-transaction-per-row sufficient. The consequence, recorded
+in both the module docstring and §3.5: a store migration must never append to
+a list it read from the database, only rewrite it from the file.
+
+Progress is scoped per project **and book** — Bridge imports one project per
+book, so PHP finishing says nothing about TIT — and `is_store_migrated()` is
+per store, not per project, so a reader for a moved store is not held back by
+one that has not moved yet.
+
+### A second design-doc correction
+
+§3.5 says the migration runs "inside `TranslationCoreProject.__init__` after
+journal recovery". Both halves cannot hold: journal recovery is not in the
+constructor. It is `recover_incomplete_transactions()`, which
+`bridge_service.py:596` calls on the already-constructed project. The ordering
+it asks for is real — migrating from files the journal is about to roll back
+would copy state the project is about to disown — so the seam is a separate
+method, `TranslationCoreProject.run_workbench_migration(identity)`, to be
+called straight after recovery. §3.5 now says so.
+
+### Deliberately not done
+
+`bridge_service.py` is **not** wired to call the seam yet. Doing so would make
+every project open construct a workspace repository and create
+`%LOCALAPPDATA%\Bridge\data\workspace.sqlite3` — an observable change, for a
+runner that has nothing to run. It lands with the first real store, where the
+wiring is worth something. No store is moved, no reader is redirected, no
+`audit/` behaviour changes, and no schema moved: the v1 workbench schema
+already carries every lifted column §3.1 calls for, verified rather than
+assumed, so this needed no workbench bump and did not go near the v15
+companion database.
+
+### Verified
+
+`pytest tests/persistence/test_workbench_migration.py`: 18 passed. Full engine
++ Greek Room suite under `-n auto`: **1184 passed, 0 failed**. No frontend or
+Rust surface touched.
+
+### Found while reading, not fixed here
+
+`tc_project.py:1787` returns `'audit': str(audit)` — a companion-dir path — in
+a public result, and `tests/service/test_check_selection.py:239` reads the file
+at that path. #76's "stop writing `audit/` files" therefore breaks a public
+contract, which the issue does not mention. Recorded on the issue rather than
+decided here.
