@@ -7526,3 +7526,153 @@ a public result, and `tests/service/test_check_selection.py:239` reads the file
 at that path. #76's "stop writing `audit/` files" therefore breaks a public
 contract, which the issue does not mention. Recorded on the issue rather than
 decided here.
+
+## 2026-09-14 (afternoon) — running the app: #61/#73/#53 verified, #89 found, #83 closed properly
+
+### #83: the half that `cancel-in-progress` never covered
+
+9bf8857 (this morning) scoped `cancel-in-progress` to `pull_request`, and the
+issue was closed on the strength of "the guard has held over 16 commits". That
+closure was wrong and today's own pushes disproved it within the hour.
+
+`cancel-in-progress` governs only a run that is already **in progress**. A
+**pending** run is evicted whenever a newer run joins the concurrency group,
+unconditionally, because the default `queue: single` means "at most one run
+may be pending, and a new one replaces it". Checked against the docs rather
+than inferred — [Using concurrency](https://docs.github.com/en/actions/using-jobs/using-concurrency),
+verbatim: *"At most one job or workflow run can be `pending` in the
+concurrency group."*, *"When a new job or workflow run is queued, any
+existing `pending` job or workflow run in the same group is canceled and
+replaced."*, and *"To **also** cancel any currently running job or workflow
+in the same concurrency group, specify `cancel-in-progress: true`."*
+
+What happened, all `push` events on `main`:
+
+| run | commit | started | outcome |
+|---|---|---|---|
+| 34816856162 | `b6c77f8` | 07:13 | success (17m26s) |
+| 34817605819 | `fc57811` | 07:23 | **cancelled** |
+| 34818151211 | `057b328` | 07:30 | success |
+
+`fc57811` sat pending behind `b6c77f8`'s 17-minute run; pushing `057b328`
+evicted it. And `fc57811` was the merge commit carrying f9140c6
+(`bridge_service.py`, `passage_semantic_repository.py`, `qa_review.py`,
+`commands.rs`, four frontend files). f9140c6 and fc57811 were pushed together
+so — correctly — only the head commit got a run, which makes that cancelled
+run **the only one that would ever have covered f9140c6's engine changes**.
+The next run skipped the `engine` job entirely, because its own path filter
+only sees its own diff.
+
+That combination is what makes this worth fixing rather than living with: the
+eviction is silent *and* the safety net one would assume exists (the next run
+covers it) does not. The gap was closed by hand — full engine + Greek Room
+**1166 passed**, `cargo check` clean, `cargo test` **12 passed**, frontend
+**364 passed** — so nothing was actually broken, only unchecked.
+
+**Fix (ae0bd73):** `queue: max`, `cancel-in-progress` removed. Up to 100
+pending runs, FIFO, GA since 2026-05-07. The two cannot coexist (workflow
+validation error) and the maintainer's call was that cancelling superseded PR
+runs is not worth losing a gate over. Confirmed `queue` was real before
+touching the only automated gate, and confirmed the file still parsed and that
+both keys could not both be set. **Verified live on the next push**: `92d9fd0`
+pending behind `ae0bd73` in progress, both green — under the old config the
+pending one would have been discarded. `release.yml` untouched: two triggers
+fire for one tag and the job is idempotent, so collapsing there is deliberate.
+
+### Running the app, and what that cost
+
+Bridge is Tauri/WebView2 on native Windows, so there is no CDP endpoint and
+no `_electron` driver; UI Automation returns zero elements because WebView2
+does not expose its tree by default. Driving it meant a small Win32 harness —
+`GetWindowRect` + `CopyFromScreen` for capture, `SetCursorPos` + `mouse_event`
+for clicks, `SendKeys` for keys.
+
+Two traps worth recording for anyone who does this again:
+
+- **DPI awareness is per-process, and every PowerShell invocation is a new
+  process.** `GetWindowRect` returned `1550x926` in one and `1938x1158` in the
+  next — exactly the 1.25 factor of a 125% display. Screenshots were being
+  captured in one coordinate space and clicks synthesised in another, so early
+  clicks silently missed. Fixed by calling
+  `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)` at the top of every
+  invocation, before anything queries a rect.
+- **`ShowWindow(hwnd, SW_RESTORE)` un-maximizes the window you are about to
+  capture.** Use `SW_SHOW`.
+
+If driving the app becomes routine this belongs in a project skill via
+`/run-skill-generator` rather than being rediscovered.
+
+### #61, #73, #53 verified
+
+Sidecars rebuilt first (the ones on disk were from 2026-09-08 and predated
+f9140c6's `coverageDimensions` protocol change), then `npm run tauri dev`.
+
+- **#53** against every boundary it claims: Genesis Ch 1/50 and Ruth Ch 1/4
+  (`‹` disabled), Ruth Ch 2/4 (both enabled, stepped 1→2→3→4 with the status
+  line tracking), Ruth Ch 4/4 (`›` disabled, tooltip "Already at the last
+  chapter"), Obadiah Ch 1/1 (both disabled).
+- **#73** pencil renders above the arrow and opens the inline editor.
+- **#61** the way it actually matters: filters set in Tamil Ruth → Projects →
+  a *different* project (Hindi Genesis). Preferences followed; `Review scope`
+  correctly reset to `GEN 1:1 - GEN 1:2`, so the reviewer is not silently
+  pointed at a previous book's text.
+
+### #89: the filter chips that filtered but never looked selected
+
+Clicking any chip in the QA **Issue type** row did nothing visible; Order and
+Review state worked. The filter was applied the whole time — click fired,
+store updated, queue re-queried, value even round-tripped through
+`localStorage`. Only `aria-pressed` never changed.
+
+```svelte
+aria-pressed={issueFilterSelected(option)}          <- #89, never updates
+aria-pressed={$reviewFilters.order === "CANONICAL"} <- fine
+```
+
+`issueFilterSelected` read `$reviewFilters` **inside its own body**. Svelte
+resolves a template expression's dependencies syntactically, so it registered
+`issueFilterSelected` and `option` and never the store; the expression
+rendered once on mount and never again. `.chip[aria-pressed="true"]` is the
+only selected styling, so the row looked permanently off — worse than an inert
+control, since the queue silently narrows with no way to see or undo it, and
+`aria-pressed` is what a screen reader announces.
+
+The confirmation was exact, and came from #61's own reload rather than from
+reasoning: after a fresh mount the chips rendered correctly pressed, with
+`Negation` the only one off — matching the fact that it was the one chip
+clicked twice (on, then off) while probing. Correct on mount, never updated
+after.
+
+Fixed (e0330e1) by passing the filters in, so the store is named at the call
+site. Three regression tests, each confirmed to fail against the old shape
+(3 failed / 11 passed) and pass against the new. The test f9140c6 added
+asserts the *query* (`coverageDimensions: ["POLARITY"]`) rather than the chip,
+which is why the suite stayed green — correct as far as it went.
+
+**Worth a grep when touching this file:** any `aria-*` or `class:` binding
+computed by a helper that reads a store internally has this bug latent.
+
+### A defect #61 introduced, caught by #89's own tests
+
+Because filters now persist, `resetReviewState()` rehydrates from
+`localStorage` — and jsdom keeps one storage per test file. So a test that
+clicked a filter chip silently armed the next test that called
+`resetReviewState()` *for isolation*. That is precisely how the new #89 tests
+first failed (`Negation` already `aria-pressed="true"` before the click).
+Fixed in `setup.ts` with a global `beforeEach` clear rather than by patching
+the one file that noticed — forgetting it produces a confusing failure in a
+test that never mentions storage.
+
+### #73 glyph
+
+U+270E is emoji-presentation-capable, so Windows resolved it through Segoe UI
+Emoji and drew a filled colour glyph directly above the alignment arrow's thin
+monochrome one. U+FE0E (variation selector-15) plus `font-variant-emoji: text`
+asks for text presentation; both are inert where unsupported. Not re-checked in
+the desktop app — worth a glance next time it is open.
+
+### Verified
+
+`npm run check` 0/0; `npm run test` **367 passed** across 26 files; `npm run
+build` clean. Engine untouched this half of the day. CI green on `main` at
+`de2b9a3`, `ae0bd73` and `92d9fd0`.

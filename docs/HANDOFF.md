@@ -3829,7 +3829,7 @@ it does not, but only incidentally — nothing would catch a future rebuild
 that did. Two concrete follow-ups recorded on the issue; the ordering
 regression test is worth doing and needs no schema change.
 
-**#83 and #57 closed** — both had landed without a closing comment.
+**#83 and #57 closed** — both had landed without a closing comment. **#83 was reopened the same afternoon: that closure was wrong.** 9bf8857 fixed only the in-progress half; a *pending* run is evicted unconditionally. See §44.16.
 
 **Three UI issues landed:** #61 (filter selections persist across a project
 reload, preferences only, never navigation scope), #73 (edit pencil above
@@ -3895,3 +3895,95 @@ does not mention. Recorded on the issue.
 evicted by the next push; 9bf8857 only fixed the in-progress half) needs a
 maintainer call between two fixes recorded on the issue. #61, #73 and #53 are
 green on the automated gate but have not been seen in the running desktop app.
+
+## 44.16 Desktop verification of #61/#73/#53, the CI gate closed for real, and #89 (2026-09-14)
+
+Second half of the same day as 44.14/44.15. Everything here came out of
+actually running the app rather than reading it.
+
+**The CI gate hole is closed (#83), and this one is worth understanding
+rather than just noting.** 9bf8857 fixed half of it this morning.
+`cancel-in-progress` only ever governed a run that is already *in progress*;
+a **pending** run is evicted whenever a newer run joins the concurrency
+group no matter what that setting says, because the default `queue: single`
+means "at most one run may be pending, and a new one replaces it". Three
+pushes to `main` inside twenty minutes on 2026-09-14 and the middle one's
+run was discarded while still queued behind a 17-minute run — and the
+replacement run then *skipped the very jobs the evicted one would have run*,
+because its own path filter only sees its own diff. Net effect: f9140c6's
+engine changes reached `main` having never been tested by CI. They were
+verified by hand afterwards (1184 engine, 12 Rust, 364 frontend, all green)
+and are fine; nothing automatic would have caught it.
+
+`ci.yml` now uses `queue: max` with `cancel-in-progress` removed entirely —
+up to 100 pending runs, FIFO, generally available since 2026-05-07. The two
+cannot be combined (workflow validation error), and per the maintainer,
+cancelling superseded PR runs is not worth losing a gate over. **Verified on
+the very next push**: `92d9fd0` sat *pending* behind `ae0bd73` in progress
+instead of evicting it, and both completed green. `release.yml` keeps its own
+`cancel-in-progress: true` deliberately and is untouched (two triggers fire
+for one tag there, the job is idempotent).
+
+**#61, #73 and #53 verified in the running desktop app** and closed —
+rebuilt sidecars, `npm run tauri dev`, real Tamil and Hindi projects. #53
+exercised against every boundary it claims (Genesis 1/50 and Ruth 1/4 first
+chapter, Ruth 2/4 middle, Ruth 4/4 last with the "Already at the last
+chapter" tooltip, Obadiah 1/1 both-disabled). #61 checked the way it
+actually matters: filters set in Ruth, back to Projects, then into a
+*different* project (Genesis) — preferences followed, `Review scope` correctly
+reset to `GEN 1:1 - GEN 1:2`. #73's pencil opens the inline editor.
+
+**#89, found by running it.** Clicking any chip in the QA **Issue type** row
+did nothing visible, while the Order and Review state rows worked. The filter
+was applied the whole time — click fired, store updated, queue re-queried,
+value even round-tripped through `localStorage` — but `aria-pressed` never
+changed, so the reviewer silently narrows their queue with no way to see
+what is on or turn it off, and a screen reader reports every filter as off.
+Cause: `aria-pressed={issueFilterSelected(option)}` called a helper that read
+`$reviewFilters` *inside its own body*; Svelte resolves a template
+expression's dependencies syntactically, so the store was never registered
+and the expression rendered once on mount and never again. The four working
+chips name `$reviewFilters` directly. Fixed in e0330e1 by passing the filters
+in. The test f9140c6 added asserts the *query* rather than the chip, which is
+why the suite stayed green.
+
+The confirmation was exact and came from #61's own reload: after a fresh
+mount the chips rendered correctly pressed, with `Negation` the only one off
+— matching the fact that it was the one chip clicked twice. Correct on
+mount, never updated after: the signature of a missing reactive dependency.
+
+**A defect #61 introduced, caught by #89's tests.** Remembering filters means
+`resetReviewState()` rehydrates from `localStorage`, and jsdom keeps one
+storage per test file — so a test that clicked a filter chip silently armed
+the next test that called `resetReviewState()` *for isolation*. That is
+exactly how the new #89 tests first failed. Fixed globally in `setup.ts`
+(clear storage before every test) rather than patching the one file that
+noticed.
+
+**Also:** #85 and #83 closed (both had landed without a closing note, same as
+#57 this morning); #73's pencil switched to text presentation via U+FE0E, as
+U+270E was resolving through Segoe UI Emoji and rendering a filled colour
+glyph beside the arrow's thin monochrome one.
+
+**Board corrected.** #53/#61/#73/#83/#85 moved to Done, #76 to In Progress,
+#88 and #89 added (they were created today and were not on it). **#54 was
+sitting in Done while the issue is open** — e3ff0de landed only the
+same-verse half and the spike's own recommendation left cross-verse here, so
+it is now In Progress; left in Done the remaining half would have
+disappeared from the board.
+
+### Where to pick up
+
+1. **#76 step 2** — the first real store move plus the `bridge_service.py`
+   wiring the seam is deliberately still waiting for. Check decisions are the
+   natural first store. The pattern to copy is in `workbench_migration.py`'s
+   docstring.
+2. **The `audit/` decision** (recorded on #76) is needed only when that
+   specific step arrives. The question is not which option is tidier but
+   **whether anything outside this repository reads the `audit/` folder** —
+   inside Bridge the blast radius is small and visible, outside it is not.
+3. **Untouched all day:** #58, #62, #63 from the V11 round, #82's remaining
+   module-scoping scope (waiting on #74 step 4), #84's v16 sequence-column
+   decision, and **#88**, filed by Benz mid-session and not triaged here.
+4. **#54's cross-verse half** remains blocked on the embedding-provider
+   direction, which is a stop-and-ask.
