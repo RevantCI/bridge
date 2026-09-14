@@ -38,6 +38,7 @@ describe("review filter persistence (#61)", () => {
       order: "SEVERITY",
       dispositions: [],
       kinds: ["MEANING_SHIFT"],
+      coverageDimensions: [],
       lifecycleStatuses: [],
     });
   });
@@ -59,6 +60,7 @@ describe("review filter persistence (#61)", () => {
       order: "SEVERITY",
       dispositions: ["NEEDS_DISCUSSION"],
       kinds: ["QUANTITY_PROBLEM"],
+      coverageDimensions: ["POLARITY"],
       lifecycleStatuses: ["STALE"],
     }));
 
@@ -68,6 +70,7 @@ describe("review filter persistence (#61)", () => {
       chapter: null,
       canonicalReferences: [],
       kinds: ["QUANTITY_PROBLEM"],
+      coverageDimensions: ["POLARITY"],
       severities: [],
       dispositions: ["NEEDS_DISCUSSION"],
       lifecycleStatuses: ["STALE"],
@@ -96,6 +99,19 @@ describe("review filter persistence (#61)", () => {
     expect(after.canonicalReferences).toEqual([]);
   });
 
+  it("remembers the semantic dimension chips too", async () => {
+    // Added alongside f9140c6, which made polarity/quantity/temporal/
+    // participant/referent coverage filters rather than finding kinds: they
+    // are the same class of preference as the rest of the chip rows.
+    const { reviewFilters } = await freshStores();
+    reviewFilters.update((f) => ({ ...f, coverageDimensions: ["POLARITY", "QUANTITY"] }));
+    expect(JSON.parse(localStorage.getItem(KEY)!).coverageDimensions)
+      .toEqual(["POLARITY", "QUANTITY"]);
+
+    const reloaded = await freshStores();
+    expect(get(reloaded.reviewFilters).coverageDimensions).toEqual(["POLARITY", "QUANTITY"]);
+  });
+
   describe("a stored value that cannot be trusted", () => {
     it("falls back to defaults on unparseable JSON", async () => {
       localStorage.setItem(KEY, "{not json");
@@ -118,6 +134,14 @@ describe("review filter persistence (#61)", () => {
       }));
       const { reviewFilters } = await freshStores();
       expect(get(reviewFilters).dispositions).toEqual([]);
+    });
+
+    it("discards a coverage dimension this build does not know", async () => {
+      localStorage.setItem(KEY, JSON.stringify({
+        coverageDimensions: ["POLARITY", "NOT_A_DIMENSION"],
+      }));
+      const { reviewFilters } = await freshStores();
+      expect(get(reviewFilters).coverageDimensions).toEqual([]);
     });
 
     it("ignores a field of the wrong shape", async () => {

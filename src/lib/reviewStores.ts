@@ -50,7 +50,8 @@ let queueGeneration = 0;
 /**
  * Filter state splits in two, and only one half survives a project reload.
  *
- * `order`, `dispositions`, `kinds` and `lifecycleStatuses` are *preferences* --
+ * `order`, `dispositions`, `kinds`, `coverageDimensions` and
+ * `lifecycleStatuses` are *preferences* --
  * a reviewer's working style, which they reasonably expect to still be set the
  * next time they open the app (#61: losing them mid-session was misread as a
  * finding-count bug). `book`, `chapter` and `canonicalReferences` are *scope*:
@@ -63,7 +64,7 @@ const FILTER_STORAGE_KEY = "bridge.reviewFilters.v1";
 
 type PersistedFilters = Pick<
   ReviewFilters,
-  "order" | "dispositions" | "kinds" | "lifecycleStatuses"
+  "order" | "dispositions" | "kinds" | "coverageDimensions" | "lifecycleStatuses"
 >;
 
 const REVIEW_QUEUE_ORDERS: readonly ReviewQueueOrder[] = ["CANONICAL", "SEVERITY"];
@@ -74,6 +75,12 @@ const QA_DISPOSITIONS: readonly QaDisposition[] = [
   "FALSE_POSITIVE",
   "NEEDS_DISCUSSION",
   "CORRECTED",
+];
+
+const COVERAGE_DIMENSIONS: readonly CoverageDimension[] = [
+  "LEXICAL_CONTENT", "POLARITY", "QUANTITY", "PARTICIPANT", "REFERENT",
+  "PREDICATION", "TEMPORAL_ASPECTUAL", "SPATIAL_RELATION", "CLAUSE_RELATION",
+  "DISCOURSE_RELATION", "OTHER",
 ];
 
 function stringArray(value: unknown): string[] | null {
@@ -117,6 +124,15 @@ function readPersistedFilters(): Partial<PersistedFilters> {
   const lifecycleStatuses = stringArray(source.lifecycleStatuses);
   if (lifecycleStatuses) restored.lifecycleStatuses = lifecycleStatuses;
 
+  const dimensions = stringArray(source.coverageDimensions);
+  if (dimensions) {
+    const known = dimensions.filter(
+      (value): value is CoverageDimension =>
+        COVERAGE_DIMENSIONS.includes(value as CoverageDimension),
+    );
+    if (known.length === dimensions.length) restored.coverageDimensions = known;
+  }
+
   const dispositions = stringArray(source.dispositions);
   if (dispositions) {
     const known = dispositions.filter(
@@ -133,6 +149,7 @@ function writePersistedFilters(filters: ReviewFilters): void {
       order: filters.order,
       dispositions: filters.dispositions,
       kinds: filters.kinds,
+      coverageDimensions: filters.coverageDimensions,
       lifecycleStatuses: filters.lifecycleStatuses,
     } satisfies PersistedFilters));
   } catch {
