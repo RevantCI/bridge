@@ -145,6 +145,49 @@ describe("AlignmentQaMode analysis states", () => {
     expect(queue.mock.calls.at(-1)?.[0].kinds).toBeUndefined();
   });
 
+  // #89: the chips filtered the queue correctly but never looked selected,
+  // because `aria-pressed` called a helper that read $reviewFilters inside its
+  // own body -- Svelte never registered the store as a dependency of the
+  // expression, so it rendered once on mount and never updated. Both chip
+  // kinds are covered: the bug was in the shared binding, not in either branch.
+  it("marks a dimension chip as pressed when it is clicked, and unpressed again", async () => {
+    scopeStatus.mockResolvedValue(scope("CURRENT", null, ["PHP 1:22"]));
+    render(AlignmentQaMode, { props: { chapter: "1", verse: "22" } });
+    await waitFor(() => expect(queue).toHaveBeenCalled());
+
+    const chip = screen.getByRole("button", { name: "Negation" });
+    expect(chip).toHaveAttribute("aria-pressed", "false");
+
+    await fireEvent.click(chip);
+    expect(chip).toHaveAttribute("aria-pressed", "true");
+
+    await fireEvent.click(chip);
+    expect(chip).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("marks a kind chip as pressed when it is clicked", async () => {
+    scopeStatus.mockResolvedValue(scope("CURRENT", null, ["PHP 1:22"]));
+    render(AlignmentQaMode, { props: { chapter: "1", verse: "22" } });
+    await waitFor(() => expect(queue).toHaveBeenCalled());
+
+    const chip = screen.getByRole("button", { name: "Meaning shifts" });
+    await fireEvent.click(chip);
+
+    expect(chip).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("leaves the other chips in the row alone", async () => {
+    scopeStatus.mockResolvedValue(scope("CURRENT", null, ["PHP 1:22"]));
+    render(AlignmentQaMode, { props: { chapter: "1", verse: "22" } });
+    await waitFor(() => expect(queue).toHaveBeenCalled());
+
+    await fireEvent.click(screen.getByRole("button", { name: "Quantity" }));
+
+    expect(screen.getByRole("button", { name: "Quantity" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Negation" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Meaning shifts" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("opens row actions and keeps Apply proposed fix disabled without a proposal", async () => {
     scopeStatus.mockResolvedValue(scope("CURRENT"));
     queue.mockResolvedValue({ findings: [summary()], nextCursor: "", totalCount: 1, order: "CANONICAL" });

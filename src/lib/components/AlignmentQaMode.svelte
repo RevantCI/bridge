@@ -14,6 +14,7 @@
   import type { QaDisposition, ReviewQueueOrder, ReviewerDecision } from "../types/qaReview";
   import type { CoverageDimension } from "../types/passageSemanticV1";
   import { REVIEWER_ACTIONS } from "../utils/reviewLabels";
+  import type { ReviewFilters } from "../reviewStores";
   import {
     addReviewerNote,
     decideFinding,
@@ -123,10 +124,17 @@
     await applyFilters();
   }
 
-  function issueFilterSelected(option: IssueFilter): boolean {
+  /* Takes the filters as an argument rather than reading the store itself.
+     Svelte works out a template expression's dependencies syntactically, so
+     `aria-pressed={issueFilterSelected(option)}` registered only
+     `issueFilterSelected` and `option` -- the `$reviewFilters` read was hidden
+     inside the function body, the expression never re-evaluated, and the chip
+     rendered correctly on mount and then never updated again (#89). Naming the
+     store in the call site is what makes it a dependency. */
+  function issueFilterSelected(filters: ReviewFilters, option: IssueFilter): boolean {
     return option.kind
-      ? $reviewFilters.kinds.includes(option.kind)
-      : Boolean(option.dimension && $reviewFilters.coverageDimensions.includes(option.dimension));
+      ? filters.kinds.includes(option.kind)
+      : Boolean(option.dimension && filters.coverageDimensions.includes(option.dimension));
   }
 
   $: hasActiveQueueFilters = Boolean(
@@ -368,7 +376,7 @@
           <button
             type="button"
             class="chip"
-            aria-pressed={issueFilterSelected(option)}
+            aria-pressed={issueFilterSelected($reviewFilters, option)}
             title={option.dimension ? `Includes all findings in the ${option.dimension.toLowerCase().replace("_", " ")} semantic category.` : undefined}
             on:click={() => toggleIssueFilter(option)}
           >{option.label}</button>
