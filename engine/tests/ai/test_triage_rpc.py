@@ -15,6 +15,7 @@ from tc_ai_bridge.tc_project import TranslationCoreProject
 from tc_ai_bridge.triage import triage_hash
 
 from tests.service.test_bridge_service import call, fixture_project, two_book_collection  # noqa: F401
+from tests.support.waits import job_timeout
 
 
 class StubClient:
@@ -70,7 +71,7 @@ def _open(root, client=None, monkeypatch=None):
 
 
 def wait_for_triage(engine, job_id, timeout=5.0):
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + job_timeout(timeout)
     while time.monotonic() < deadline:
         snapshot = call(engine, "triage.status", {"jobId": job_id})["result"]
         if snapshot["state"] in {"succeeded", "failed", "cancelled"}:
@@ -239,7 +240,7 @@ def test_two_runs_cannot_overlap(fixture_project, monkeypatch):
 
     first = call(engine, "triage.run")["result"]
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + job_timeout(5)
         while client.calls == 0 and time.monotonic() < deadline:
             time.sleep(0.01)
         conflict = call(engine, "triage.run")
@@ -257,7 +258,7 @@ def test_cancel_stops_the_run(fixture_project, monkeypatch):
     engine = _open(fixture_project, client, monkeypatch)
 
     started = call(engine, "triage.run")["result"]
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + job_timeout(5)
     while client.calls == 0 and time.monotonic() < deadline:
         time.sleep(0.01)
     cancelled = call(engine, "triage.cancel", {"jobId": started["jobId"]})["result"]
@@ -404,7 +405,7 @@ def test_clear_is_refused_while_a_run_is_active(fixture_project, monkeypatch):
 
     started = call(engine, "triage.run")["result"]
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + job_timeout(5)
         while client.calls == 0 and time.monotonic() < deadline:
             time.sleep(0.01)
         response = call(engine, "triage.clear")

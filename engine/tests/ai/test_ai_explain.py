@@ -27,6 +27,7 @@ from tc_ai_bridge.plugins import TamilPlugin
 from tc_ai_bridge.review_policy import gate_check_reviews
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.tc_project import TranslationCoreProject
+from tests.support.waits import job_timeout
 
 
 def call(engine, method, params=None):
@@ -168,7 +169,7 @@ def _omitted_selection_transport(rationale, *, verdict="pass", confidence=0.90):
 
 
 def _wait_for_ai_job(engine, job_id, timeout=10):
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + job_timeout(timeout)
     while time.monotonic() < deadline:
         status = call(engine, "ai.review.status", {"jobId": job_id})
         assert status["success"] is True, status

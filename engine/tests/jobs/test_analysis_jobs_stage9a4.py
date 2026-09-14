@@ -16,10 +16,11 @@ from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime
 from tc_ai_bridge.tc_project import TranslationCoreProject
 
 from tests.semantic.test_qa_audit_stage8 import _runtime
+from tests.support.waits import job_timeout
 
 
 def _wait(manager: AnalysisJobManager, job_id: str, timeout: float = 5.0) -> dict[str, Any]:
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + job_timeout(timeout)
     while time.monotonic() < deadline:
         result = manager.status(job_id)
         if result["overallStatus"] in {
@@ -475,7 +476,7 @@ def test_analysis_job_apis_round_trip_over_bridge_protocol(tmp_path) -> None:
     })
     assert started["success"] is True
     job_id = started["result"]["jobId"]
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + job_timeout(5)
     while time.monotonic() < deadline:
         status = call("analysisJob.status", {"jobId": job_id})
         assert status["success"] is True

@@ -26,6 +26,7 @@ from greek_room_engine.protocol import EngineRequest
 from tc_ai_bridge.ai_client import OpenAIResponsesClient
 from tc_ai_bridge.alignment_engine import apply_proposal, validate_preparation_proposal
 from tc_ai_bridge.secret_store import AppSettings
+from tests.support.waits import job_timeout
 
 
 def call(engine, method, params=None):
@@ -108,7 +109,7 @@ def _stub_prepare_verse_review(monkeypatch):
 
 def _wait_for_ai_job(engine, job_id, timeout=10):
     import time
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + job_timeout(timeout)
     while time.monotonic() < deadline:
         status = call(engine, "ai.review.status", {"jobId": job_id})
         assert status["success"] is True, status

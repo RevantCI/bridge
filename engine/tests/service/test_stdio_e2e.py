@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 from tests.support.paths import ENGINE_ROOT
+from tests.support.waits import job_timeout
 
 
 class Sidecar:
@@ -57,7 +58,7 @@ class Sidecar:
 
 
 def _wait_for_job(sidecar: Sidecar, job_id: str) -> dict:
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + job_timeout(20)
     while time.monotonic() < deadline:
         snapshot = sidecar.request("checks.status", {"jobId": job_id})["result"]
         if snapshot["state"] in {"succeeded", "failed", "cancelled"}:
