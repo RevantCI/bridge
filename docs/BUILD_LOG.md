@@ -7261,3 +7261,152 @@ one. Full engine + Greek Room suite: **1155 passed, 0 failed** (up from
 336/336 (up from 335). Production build passed. Schema now **v15**; no
 engine or policy version changed. `docs/QA_TEST_MATRIX.md` has no existing
 row for this manual-write path, so none was updated (not fabricated new).
+
+## 2026-09-14 — #85 wait budgets, the v15 doc drift, and three V11-round UI issues
+
+A bookkeeping-and-easy-wins session on top of the weekend's work (0.9.7,
+#75, the #54 tractable half, #57, #69/#70/#86). Nothing here touches the
+schema, a golden, a threshold, or the engine's behaviour.
+
+### #85: background-job wait budgets are now environment-scaled
+
+#85 was filed as an artifact of `-n auto` contention: two different tests,
+in two different local runs, failing with `_wait_for_ai_job`'s
+`AssertionError: AI review job did not finish` under 12 workers. The new
+evidence is that the **same 10 s budget expired on serial CI** — run
+34806216124, the 0.9.7 release-notes push,
+`test_ai_explain.py::test_manual_override_review_still_applies_safe_selections`,
+1 failed / 1148 passed in 26:54. `ci.yml` deliberately does not pass
+`-n auto` (commented at the pytest step), so worker-count scaling alone —
+#85's own suggested fix — would not have prevented that failure.
+
+New `engine/tests/support/waits.py`: `job_timeout(base)` returns
+`max(base * worker_count(), FLOOR_SECONDS)` with `FLOOR_SECONDS = 60`,
+reading `PYTEST_XDIST_WORKER_COUNT` (absent means 1) and falling back to
+serial on a malformed value rather than raising during collection. Applied
+to 14 loops across 9 files: the eight named helpers (`_wait_for_ai_job`
+twice, `wait_for_triage`, `wait_for_report`, `wait_for_job`,
+`wait_for_sweep`, `_wait` twice, `wait_for`) plus four inline
+`deadline = time.monotonic() + N` loops of the same shape. Both tests #85
+names are covered: the second, `test_ai_review_stale_after_apply.py`,
+imports `_wait_for_ai_job` from `test_ai_explain.py` rather than defining
+its own.
+
+The design argument for a floor this generous: **every one of these loops
+returns as soon as the state is terminal**, so a larger budget is only ever
+spent on a run that was going to fail anyway. The cost is a slower report
+of a genuine hang (60 s rather than 10 s per hung test, against a ~15 min
+serial CI run); the benefit is a gate that can be trusted on every push to
+main. Not touched: `threading.Event` gates holding a lock open in
+concurrency tests, and `test_correction_case_c_production.py`'s existing
+300 s budget — the first assert the timeout rather than tolerate it, the
+second is already generous.
+
+`engine/tests/support/test_waits.py` covers the floor, the scaling, the
+serial default, and the malformed-env fallback. Verified with the 11
+affected files under `-n auto`: 169 passed in 66 s.
+
+### CLAUDE.md said v14; the code says v15
+
+9053b5d (#57, 2026-09-12) bumped `DATABASE_SCHEMA_VERSION` to 15 with a
+real `_MIGRATION_V15` block and
+`test_v14_to_v15_migration_is_additive_and_keeps_v14_data_readable`.
+CLAUDE.md was edited in the same window for the *workbench* ladder (#75)
+but kept saying v14 for the semantic database in four places — including
+the "Stop and ask before writing any code" list, which is the one where a
+stale number actually misleads. Corrected, along with the
+`_MIGRATION_V1 … _V14` range and the cited migration-test name.
+
+### #84 re-pointed, with the rowid question actually tested
+
+#84 was left open "for the sequence-column decision (v15)". v15 came and
+went on an unrelated change without adding one, so that decision now points
+at v16. The other half — "a design note for #75's `change_log`" — is
+already absorbed: `change_log` ships with
+`seq INTEGER PRIMARY KEY AUTOINCREMENT` and `ix_change_log_project_seq`, so
+workbench-side appends never depend on a timestamp tie-break.
+
+Worth recording because it was checked rather than assumed:
+`_MIGRATION_V15` **rebuilds** `correction_proposal_events` (rename,
+recreate, `INSERT … SELECT`, drop), which reassigns every rowid — the exact
+key 7dbcb35's `ORDER BY created_at, rowid` depends on. Tested against
+SQLite 3.49.1 with ten events tied on `created_at` and ids deliberately
+unsorted: order preserved, both with the index dropped (what v15 does) and
+with a covering index left in place (the planner still chose `SCAN`). So
+**v15 did not permute anyone's proposal history** — but that is incidental,
+not guaranteed: SQLite defines row order without `ORDER BY` as undefined.
+The existing migration test asserts old rows are *readable*, not that they
+come back *in order*, so nothing would catch a future rebuild that did
+permute one. Both follow-ups recorded on #84.
+
+### #61: filter selections survive a reload
+
+Filter state splits in two and only one half should persist. `order`,
+`dispositions`, `kinds`, `coverageDimensions` and `lifecycleStatuses` are
+*preferences* — a reviewer's working style — and now round-trip through
+`localStorage` (the app's first use of it) including across
+`resetReviewState()`, which is what both project-reload call sites in
+`App.svelte` go through. `book`, `chapter` and `canonicalReferences` are
+*navigation scope*, set from the project being opened; restoring a previous
+project's book would silently point the queue at text the reviewer is not
+looking at, so these still reset, with a test asserting they are never
+written.
+
+Everything read back is validated rather than trusted — the stored value
+outlives the build that wrote it, and a disposition or coverage dimension
+this build no longer knows would otherwise reach the engine as a filter
+nothing can match, hiding the whole queue. Every storage access is wrapped:
+losing a preference must never break review.
+
+`coverageDimensions` was added mid-session by f9140c6 (semantic dimension
+chips) and folded in as a second commit — without it the new chips would
+have been the one row still resetting.
+
+### #73: edit pencil above the alignment arrow, and a defect it exposed
+
+Pencil and arrow now share a `.row-actions` column in `VerseList.svelte`,
+pencil above, reusing the existing `beginEditFromList` action — a new
+trigger location, no new edit logic. U+270E rather than an icon font
+(gotcha 9), same disabled guard as the arrow, absent entirely while that
+verse is being edited.
+
+**Pre-existing defect found while adding it:** `beginEditFromList` selected
+the verse *before* asking `startVerseEdit` whether it could open, so when
+the edit was refused — background check, in-flight save, or recheck — the
+reader's selection moved for an edit that never appeared.
+`openAlignmentFromList` was deliberately written the other way round in
+#70, with a comment explaining exactly this. The double-click route was the
+one really exposed, having no `disabled` attribute to hide behind. Fixed by
+reordering, now consistent with #70; both paths pinned by tests confirmed
+to fail without the reorder (2 failed / 41 passed on the reverted code).
+
+### #53: previous/next chapter
+
+Two arrow buttons flanking the existing chapter dropdown in
+`TopBar.svelte`, editor screen only. Both route through the same
+`onChapterChange` the dropdown uses, so project, book, view mode and
+unsaved-edit handling follow by construction rather than by a second
+implementation that could drift.
+
+"Previous" and "next" are defined by **position in the book's chapter
+list** — the same list the dropdown renders — not by numeric value: chapter
+ids arrive from the engine as strings with no guarantee of a clean 1..n
+run, and stepping must agree with what the reader can see. Disabled on the
+first and last chapter, on a single-chapter book, and when the current
+chapter is not in the list at all (briefly true mid-book-switch, where
+stepping would be a guess). Real `<button>`s in a labelled `role="group"`.
+First test file for `TopBar`.
+
+### Verified
+
+`npm run check` 0 errors / 0 warnings; `npm run test` **364 passed** across
+26 files (up from 336, 28 new); `npm run build` clean. Engine: the 11 files
+affected by the wait-budget change under `-n auto`, 169 passed — the full
+Python suite was not re-run locally, since nothing outside `tests/` changed
+on the engine side; CI on main is the gate for that.
+
+**Not verified:** none of the three UI changes has been seen in the running
+desktop app. jsdom does not lay out or paint, so the pencil's position
+above the arrow and the chapter arrows' fit beside the dropdown at 1366x768
+still need a human look — as does whether the persisted filters read
+sensibly after a real project reload.

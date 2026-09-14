@@ -3797,3 +3797,53 @@ part of any schema bump in this codebase, not special to this one).
 Full detail, including the whitespace-only-proposal edge case the reseed's
 eligibility check has to guard against: `docs/BUILD_LOG.md`'s same-dated
 entry.
+
+## 44.14 CI gate reliability, doc drift, and three easy V11-round issues (2026-09-14)
+
+A bookkeeping session after the 0.9.7 release. No schema, golden, threshold
+or engine-behaviour change. Full detail in `docs/BUILD_LOG.md`'s same-dated
+entry.
+
+**#85 is no longer just a parallel-run flake.** The 10 s budget in the
+"poll until the job reaches a terminal state" helpers expired on **serial
+CI** during the release window (run 34806216124, `test_ai_explain.py`), not
+only under `-n auto` as the issue assumed — so #85's own suggested fix,
+scaling by worker count, would not have caught it. New
+`engine/tests/support/waits.py` gives `job_timeout(base) =
+max(base * xdist_workers, 60 s)`, applied to 14 wait loops across 9 files.
+Generous on purpose: every loop returns as soon as the state is terminal,
+so the budget is only ever spent on a run that was already failing.
+Verified with the affected files under `-n auto`, 169 passed.
+
+**CLAUDE.md was a schema version behind.** The companion database has been
+**v15** since 9053b5d (#57); CLAUDE.md still said v14 in four places,
+including the "Stop and ask before writing any code" list. Corrected.
+
+**#84 re-pointed at v16.** It was held open for "the sequence-column
+decision (v15)" — v15 landed for an unrelated reason without one. The
+`change_log` half is already satisfied (#75 shipped
+`seq INTEGER PRIMARY KEY AUTOINCREMENT`). Also tested, rather than assumed,
+that `_MIGRATION_V15`'s table rebuild does not permute existing proposal
+history despite reassigning the rowids that 7dbcb35's ordering depends on:
+it does not, but only incidentally — nothing would catch a future rebuild
+that did. Two concrete follow-ups recorded on the issue; the ordering
+regression test is worth doing and needs no schema change.
+
+**#83 and #57 closed** — both had landed without a closing comment.
+
+**Three UI issues landed:** #61 (filter selections persist across a project
+reload, preferences only, never navigation scope), #73 (edit pencil above
+the alignment arrow), #53 (previous/next chapter, stepping by position in
+the book's chapter list rather than by number). #73 also fixed a
+pre-existing defect it inherited: `beginEditFromList` moved the reader's
+selection even when `startVerseEdit` refused to open, which the
+double-click route exposed with no `disabled` attribute to hide behind.
+
+**Where to pick up.** The three UI changes are green on the automated gate
+but **have not been seen in the running desktop app** — jsdom does not lay
+out or paint. That is the next thing: a build, then eyes on the pencil's
+position, the chapter arrows' fit at 1366x768, and a real project reload
+with filters set. Still open from the same V11 round and untouched here:
+#58, #62, #63, and #54's cross-verse half (blocked on the
+embedding-provider direction, which is a stop-and-ask). #76 remains the
+sequenced next step on the #44–#47 direction.
