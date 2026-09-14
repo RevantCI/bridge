@@ -858,18 +858,43 @@ def test_mixed_script_verse_is_flagged_by_greek_room(monkeypatch):
     assert any(f.check_type == "wildebeest.script.mixed" for f in findings)
 
 
-def test_decide_verse_writes_real_qa_decision_file(fixture_project):
+def test_decide_verse_really_persists_the_qa_decision(fixture_project):
+    """Was `..._writes_real_qa_decision_file` and read the path back off disk.
+
+    #76 moved QA decisions into the workbench database, so there is no file to
+    open. The intent was never the file though -- it was that a decision the
+    reviewer makes is actually durable and readable afterwards -- so this now
+    asserts that through the public reader.
+    """
     engine = BridgeEngine()
     call(engine, "project.open", {"path": str(fixture_project)})
     result = call(engine, "verse.decide", {
         "chapter": "1", "verse": "1", "findingId": "test-finding",
         "status": "accepted", "comment": "looks fine",
     })["result"]
-    written = Path(result["recordedAt"])
-    assert written.exists()
-    data = json.loads(written.read_text(encoding="utf-8"))
-    assert data["decision"] == "accepted"
-    assert data["issueKey"] == "test-finding"
+
+    assert result["recordedAt"], "the response still identifies the stored record"
+    stored = engine.project.qa_decisions_for_verse("1", "1")["test-finding"]
+    assert stored["decision"] == "accepted"
+    assert stored["issueKey"] == "test-finding"
+    assert stored["note"] == "looks fine"
+
+
+def test_a_qa_decision_survives_reopening_the_project(fixture_project):
+    """The durability half, which the file-based test got for free."""
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(fixture_project)})
+    call(engine, "verse.decide", {
+        "chapter": "1", "verse": "1", "findingId": "test-finding",
+        "status": "accepted", "comment": "looks fine",
+    })
+
+    reopened = BridgeEngine()
+    call(reopened, "project.open", {"path": str(fixture_project)})
+
+    stored = reopened.project.qa_decisions_for_verse("1", "1")["test-finding"]
+    assert stored["decision"] == "accepted"
+    assert stored["note"] == "looks fine"
 
 
 def test_usfm_checks_run_once_per_book_not_once_per_verse(fixture_project):

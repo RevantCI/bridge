@@ -16,7 +16,7 @@ from .usfm import strip_usfm, whitespace_tokens
 
 from .models import VerseAlignment
 from .transaction_journal import TransactionJournal
-from .workbench_repository import WorkbenchRepository
+from .workbench_repository import WorkbenchIdentity, WorkbenchRepository, natural_row_id
 from .paratext_notes import append_paratext_note, validate_notes_11, convert_comment_list_to_notes_11, convert_legacy_notes_11, EXTERNAL_NOTE_SOURCE
 from .alignment_reliability import structural_issues, alignment_fingerprint
 
@@ -62,7 +62,7 @@ class ProjectSummary:
 
 
 class TranslationCoreProject:
-    def __init__(self, project_path: str | Path):
+    def __init__(self, project_path: str | Path, *, identity: WorkbenchIdentity | None = None):
         self.path = Path(project_path).resolve()
         manifest_path = self.path / 'manifest.json'
         if not manifest_path.exists():
@@ -81,15 +81,59 @@ class TranslationCoreProject:
         self._index_cache: dict[str, list[dict[str, Any]]] = {}
         self._checks_by_verse_cache: dict[tuple[str, str], list[dict[str, Any]]] | None = None
         self.journal = TransactionJournal(self.path, self.companion_dir())
-        # #75: the workbench DB skeleton. Nothing reads from or writes to it
-        # yet -- creating an empty database is the only observable change.
         self.workbench = WorkbenchRepository(self.companion_dir() / 'bridge-workbench.sqlite3')
+        # Identity for every workbench write. Injectable so a test can stamp a
+        # known actor without touching app-level state; resolved lazily
+        # otherwise, because working it out opens the workspace database and
+        # most project operations never write anything.
+        self._identity: WorkbenchIdentity | None = identity
         # Stage 4 attaches an advisory companion runtime after project identity
         # is resolved. Direct TranslationCoreProject users remain unchanged.
         self.passage_semantic_runtime: Any | None = None
 
     def attach_passage_semantic_runtime(self, runtime: Any | None) -> None:
         self.passage_semantic_runtime = runtime
+
+    @property
+    def workbench_identity(self) -> WorkbenchIdentity:
+        """Who is writing, and to which project, for every workbench row.
+
+        Resolved once, on first write. `.bridge/project.json` carries the
+        stable `projectId` the registry also knows the project by, so workbench
+        rows key to the same identity the rest of the app uses. A project
+        written before that file existed falls back to a deterministic id
+        derived from its path -- stable across opens on one machine, which is
+        all a pre-release project needs, and never a fresh uuid4 (that would
+        detach a project's rows from themselves on every open).
+
+        The actor is the local user from the workspace database, not
+        `settings.reviewer_name`: `change_log` rows can never be edited, so
+        attribution has to survive the reviewer renaming themselves.
+        """
+        if self._identity is None:
+            from .secret_store import AppSettings, _default_app_root
+            from .workspace_repository import WorkspaceRepository
+
+            project_id = ''
+            try:
+                marker = _read_json(self.path / '.bridge' / 'project.json')
+                project_id = str(marker.get('projectId') or '') if isinstance(marker, dict) else ''
+            except Exception:
+                project_id = ''
+            if not project_id:
+                project_id = 'path:' + hashlib.sha256(
+                    str(self.path).casefold().encode('utf-8')
+                ).hexdigest()[:32]
+
+            workspace = WorkspaceRepository(_default_app_root() / 'workspace.sqlite3')
+            # Reuse the OS-account seeding V11-005 already settled, rather than
+            # inventing a second source of "who is this person by default".
+            user = workspace.get_or_create_local_user(AppSettings._seed_reviewer_name())
+            self._identity = WorkbenchIdentity(
+                project_id=project_id, book_id=self.book_id,
+                actor_id=user['userId'], device_id=workspace.get_or_create_device_id(),
+            )
+        return self._identity
 
     @property
     def summary(self) -> ProjectSummary:
@@ -247,18 +291,7 @@ class TranslationCoreProject:
         return out
 
     def decisions_for_verse(self, chapter: str | int, verse: str | int) -> list[dict[str, Any]]:
-        root = self.companion_dir() / 'decisions' / self.book_id / str(chapter) / str(verse)
-        out: list[dict[str, Any]] = []
-        if not root.exists():
-            return out
-        for path in sorted(root.glob('*.json')):
-            try:
-                d = _read_json(path)
-                if isinstance(d, dict):
-                    out.append(d)
-            except Exception:
-                pass
-        return out
+        return self._human_decision_payloads(kind='check', chapter=chapter, verse=verse)
 
     def review_input_fingerprint(self, chapter: str | int, verse: str | int) -> str:
         """Fingerprint all project inputs that can materially change an AI verse review.
@@ -1150,16 +1183,12 @@ class TranslationCoreProject:
         return safety_backup
 
     def load_review_state(self, chapter: str | int, verse: str | int) -> dict[str, Any] | None:
-        p = self.companion_dir() / 'review' / self.book_id / str(chapter) / f'{verse}.json'
-        if not p.exists():
-            return None
-        try:
-            d = _read_json(p)
-            return d if isinstance(d, dict) else None
-        except Exception:
-            return None
+        found = self._human_decision_payloads(
+            kind='verse_status', chapter=chapter, verse=verse,
+        )
+        return found[0] if found else None
 
-    def record_review_state(self, chapter: str | int, verse: str | int, status: str, note: str = '') -> Path:
+    def record_review_state(self, chapter: str | int, verse: str | int, status: str, note: str = '') -> str:
         data = {
             'bookId': self.book_id,
             'chapter': str(chapter),
@@ -1170,12 +1199,11 @@ class TranslationCoreProject:
             'app': 'translationCore AI Bridge',
             'schemaVersion': 1,
         }
-        p = self.companion_dir() / 'review' / self.book_id / str(chapter) / f'{verse}.json'
-        _write_json_atomic(p, data)
-        stamp = str(data['modifiedTimestamp']).replace(':','_').replace('.','_')
-        audit = self.companion_dir() / 'audit' / self.book_id / str(chapter) / str(verse) / f'{stamp}_verse-status.json'
-        _write_json_atomic(audit, data)
-        return p
+        # One status per verse, so the verse itself is the natural key.
+        return self._record_human_decision_row(
+            kind='verse_status', chapter=chapter, verse=verse, key=str(verse),
+            decision=str(status), payload=data,
+        )
 
     def record_ai_review_result(self, chapter: str | int, verse: str | int, payload: dict[str, Any]) -> Path:
         data = {
@@ -1202,7 +1230,7 @@ class TranslationCoreProject:
         except Exception:
             return None
 
-    def record_human_decision(self, chapter: str | int, verse: str | int, check_id: str, decision: str, note: str = '', selection_text: list[str] | None = None, selection_ids: list[str] | None = None, tool: str = '', group_id: str = '', model: str = '', evidence: list[dict[str, Any]] | None = None) -> Path:
+    def record_human_decision(self, chapter: str | int, verse: str | int, check_id: str, decision: str, note: str = '', selection_text: list[str] | None = None, selection_ids: list[str] | None = None, tool: str = '', group_id: str = '', model: str = '', evidence: list[dict[str, Any]] | None = None) -> str:
         stamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         compact_evidence = []
         for ev in list(evidence or []):
@@ -1226,15 +1254,56 @@ class TranslationCoreProject:
             'app': 'translationCore AI Bridge',
             'schemaVersion': 2,
         }
-        safe_id = ''.join(ch if ch.isalnum() or ch in ('-','_') else '_' for ch in str(check_id)) or 'verse'
-        p = self.companion_dir() / 'decisions' / self.book_id / str(chapter) / str(verse) / f'{safe_id}.json'
-        _write_json_atomic(p, data)
-        # Append-only audit history: the latest decision remains easy to read, while earlier
-        # AI/human states are never lost when the reviewer changes a decision later.
-        safe_stamp = stamp.replace(':','_').replace('.','_')
-        audit = self.companion_dir() / 'audit' / self.book_id / str(chapter) / str(verse) / f'{safe_stamp}_{safe_id}.json'
-        _write_json_atomic(audit, data)
-        return p
+        # The `audit/` file this used to write alongside the record is gone: a
+        # change_log row carries the full payload at time of change, which is
+        # exactly what that file was (TEAM_ARCHITECTURE.md ss3.3). The
+        # append-only property is unchanged -- human_decisions holds the current
+        # decision, change_log holds every version it has ever had.
+        return self._record_human_decision_row(
+            kind='check', chapter=chapter, verse=verse, key=str(check_id),
+            decision=str(decision), payload=data,
+        )
+
+    def _record_human_decision_row(
+        self, *, kind: str, chapter: str | int, verse: str | int, key: str,
+        decision: str, payload: dict[str, Any],
+    ) -> str:
+        """Upsert one human decision and return its workbench row id.
+
+        The four decision kinds (check, qa, verse_status, terminology) shared a
+        directory-per-kind on disk and share one table here, discriminated by
+        `kind`. The row id is derived from the natural key so re-deciding the
+        same thing updates in place rather than accumulating rows -- the same
+        property the one-file-per-decision layout had.
+        """
+        identity = self.workbench_identity
+        row_id = natural_row_id(
+            identity.project_id, self.book_id, kind, str(chapter), str(verse), key,
+        )
+        self.workbench._write(
+            'human_decisions', row_id,
+            project_id=identity.project_id, book_id=self.book_id, payload=payload,
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None,
+            extra_columns={
+                'kind': kind, 'chapter': str(chapter), 'verse': str(verse),
+                'key': key, 'decision': decision,
+            },
+        )
+        return row_id
+
+    def _human_decision_payloads(
+        self, *, kind: str, chapter: str | int | None = None, verse: str | int | None = None,
+    ) -> list[dict[str, Any]]:
+        equals: dict[str, Any] = {'kind': kind}
+        if chapter is not None:
+            equals['chapter'] = str(chapter)
+        if verse is not None:
+            equals['verse'] = str(verse)
+        return self.workbench.payloads(
+            'human_decisions', project_id=self.workbench_identity.project_id,
+            book_id=self.book_id, equals=equals,
+        )
 
     def record_ai_selection_outcomes(
         self, chapter: str | int, verse: str | int,
@@ -1292,17 +1361,9 @@ class TranslationCoreProject:
         return out
 
     def terminology_rules(self) -> list[dict[str, Any]]:
-        root = self.companion_dir() / 'terminology' / self.book_id
-        out: list[dict[str, Any]] = []
-        if not root.exists(): return out
-        for p in sorted(root.glob('*.json')):
-            try:
-                d=_read_json(p)
-                if isinstance(d,dict): out.append(d)
-            except Exception: pass
-        return out
+        return self._human_decision_payloads(kind='terminology')
 
-    def record_terminology_rule(self, concept_id: str, approved_renderings: list[str], allowed_alternatives: list[str] | None = None, rejected_renderings: list[str] | None = None, source_lemma: str = '', strong: str = '', note: str = '', username: str = 'AI Bridge Reviewer', scope: str = 'book') -> Path:
+    def record_terminology_rule(self, concept_id: str, approved_renderings: list[str], allowed_alternatives: list[str] | None = None, rejected_renderings: list[str] | None = None, source_lemma: str = '', strong: str = '', note: str = '', username: str = 'AI Bridge Reviewer', scope: str = 'book') -> str:
         concept_id=str(concept_id).strip()
         approved=[str(x).strip() for x in approved_renderings if str(x).strip()]
         if not concept_id: raise ProjectError('Terminology concept/key-term ID is required.')
@@ -1315,23 +1376,25 @@ class TranslationCoreProject:
             'note':note,'scope':scope,'username':username,'modifiedTimestamp':iso,'status':'human_approved',
             'app':'translationCore AI Bridge','schemaVersion':1,
         }
-        p=self.companion_dir()/'terminology'/self.book_id/f'{safe}.json'; _write_json_atomic(p,data)
-        audit=self.companion_dir()/'audit'/self.book_id/'terminology'/f"{iso.replace(':','_').replace('.','_')}_{safe}.json"; _write_json_atomic(audit,data)
-        return p
+        # Book-scoped rather than verse-scoped: a terminology rule applies to the
+        # whole book, so chapter/verse stay empty and the concept is the key.
+        return self._record_human_decision_row(
+            kind='terminology', chapter='', verse='', key=concept_id,
+            decision='human_approved', payload=data,
+        )
 
     def project_decisions(self) -> list[dict[str, Any]]:
-        root = self.companion_dir() / 'decisions' / self.book_id
-        out: list[dict[str, Any]] = []
-        if not root.exists():
-            return out
-        for p in root.rglob('*.json'):
-            try:
-                d = _read_json(p)
-                if isinstance(d, dict):
-                    out.append(d)
-            except Exception:
-                pass
-        return out
+        return self._human_decision_payloads(kind='check')
+
+    def project_qa_decisions(self) -> list[dict[str, Any]]:
+        """Every QA decision in the book, for whole-book readers.
+
+        `qa_report` built this by walking the `qaDecisions` tree itself rather
+        than going through this class, which is why the cutover broke it. One
+        query beats a directory walk, and it keeps the store boundary in one
+        place.
+        """
+        return self._human_decision_payloads(kind='qa')
 
     def _timestamp(self) -> tuple[str, str]:
         iso = datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
@@ -2157,26 +2220,25 @@ class TranslationCoreProject:
             pass
         return {'oldText': old_text, 'newText': new_text, 'backup': str(backup), 'verseEdit': str(edit_path), 'alignmentInvalid': str(invalid), 'indexesTouched': touched, 'semanticInvalidation': semantic_invalidation, 'journalTransactionId': journal_tx.transaction_id}
 
-    def record_qa_decision(self, chapter: str | int, verse: str | int, issue_key: str, decision: str, note: str = '', issue: dict[str, Any] | None = None) -> Path:
-        iso, safe = self._timestamp()
-        key = ''.join(ch if ch.isalnum() or ch in ('-','_') else '_' for ch in issue_key)[:120] or 'qa'
+    def record_qa_decision(self, chapter: str | int, verse: str | int, issue_key: str, decision: str, note: str = '', issue: dict[str, Any] | None = None) -> str:
+        iso, _ = self._timestamp()
         data = {'bookId':self.book_id,'chapter':str(chapter),'verse':str(verse),'issueKey':issue_key,'decision':decision,'note':note,'issue':copy.deepcopy(issue or {}),'modifiedTimestamp':iso,'app':'translationCore AI Bridge','schemaVersion':1}
-        p = self.companion_dir() / 'qaDecisions' / self.book_id / str(chapter) / str(verse) / f'{key}.json'
-        _write_json_atomic(p, data)
-        audit = self.companion_dir() / 'audit' / self.book_id / str(chapter) / str(verse) / f'{safe}_qa_{key}.json'
-        _write_json_atomic(audit, data)
-        return p
+        # The key is stored raw. On disk it was sanitised and truncated to 120
+        # characters to make a filename, so two finding ids differing only past
+        # that point shared one file and silently overwrote each other; a column
+        # has no such limit.
+        return self._record_human_decision_row(
+            kind='qa', chapter=chapter, verse=verse, key=str(issue_key),
+            decision=str(decision), payload=data,
+        )
 
     def qa_decisions_for_verse(self, chapter: str | int, verse: str | int) -> dict[str, dict[str, Any]]:
-        root = self.companion_dir() / 'qaDecisions' / self.book_id / str(chapter) / str(verse)
-        out = {}
-        if root.exists():
-            for p in root.glob('*.json'):
-                try:
-                    d = _read_json(p)
-                    if isinstance(d, dict): out[str(d.get('issueKey',''))] = d
-                except Exception: pass
-        return out
+        return {
+            str(payload.get('issueKey', '')): payload
+            for payload in self._human_decision_payloads(
+                kind='qa', chapter=chapter, verse=verse,
+            )
+        }
 
     def timestamp_iso(self) -> str:
         """Public wrapper so bridge_service can stamp a rollup entry with the

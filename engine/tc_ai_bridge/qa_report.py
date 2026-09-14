@@ -198,14 +198,9 @@ class _SelectionIndex:
 
 
 def _decision_index(project: TranslationCoreProject) -> dict[tuple[str, str, str], dict[str, Any]]:
-    root = project.companion_dir() / "qaDecisions" / project.book_id
     out: dict[tuple[str, str, str], dict[str, Any]] = {}
-    if not root.is_dir():
-        return out
-    for path in root.rglob("*.json"):
-        record = _safe_read(path)
-        if isinstance(record, dict):
-            out[(str(record.get("chapter", "")), str(record.get("verse", "")), str(record.get("issueKey", "")))] = record
+    for record in project.project_qa_decisions():
+        out[(str(record.get("chapter", "")), str(record.get("verse", "")), str(record.get("issueKey", "")))] = record
     return out
 
 
