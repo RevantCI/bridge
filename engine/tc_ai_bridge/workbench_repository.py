@@ -17,6 +17,7 @@ and #77 (derived stores, workspace rollup cache, sync readiness).
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -57,6 +58,23 @@ MUTABLE_TABLES: tuple[str, ...] = (
     "metrics_counters",
     "file_backups",
 )
+
+
+@dataclass(frozen=True)
+class WorkbenchIdentity:
+    """Who is writing, and to which project.
+
+    Carried explicitly rather than read from global settings, so a background
+    job and a user action are attributable to the same identity without either
+    reaching for app state. Every field lands verbatim on ``change_log`` rows
+    that can never be edited afterwards, so this is deliberately a value object
+    with no defaults -- a caller has to say who it is.
+    """
+
+    project_id: str
+    book_id: str | None
+    actor_id: str
+    device_id: str
 
 
 def natural_row_id(*parts: Any) -> str:

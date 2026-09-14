@@ -20,6 +20,7 @@ from tc_ai_bridge.workbench_repository import (
     WorkbenchConflict,
     WorkbenchRepository,
     WorkbenchValidationError,
+    natural_row_id,
 )
 from tc_ai_bridge.workspace_repository import WorkspaceRepository
 
@@ -213,3 +214,59 @@ def repo_is_empty(repo) -> bool:
             if conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] != 0:
                 return False
         return conn.execute("SELECT COUNT(*) FROM change_log").fetchone()[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# Stable row ids and local identity. Both were written alongside the lazy
+# migration runner and outlived it: the runner went when the decision was taken
+# to reset all development data rather than migrate it, but deriving a row id
+# from a natural key and stamping a stable `user_id` are properties of every
+# workbench write, not of migration.
+# ---------------------------------------------------------------------------
+
+def test_natural_row_id_is_stable_for_the_same_key():
+    assert natural_row_id("proj", "php", "1", "4") == natural_row_id("proj", "php", "1", "4")
+
+
+def test_natural_row_id_does_not_collide_across_field_boundaries():
+    """Length-prefixing is what stops ("a","bc") and ("ab","c") colliding."""
+    assert natural_row_id("a", "bc") != natural_row_id("ab", "c")
+
+
+def test_natural_row_id_separates_none_from_the_string_none():
+    assert natural_row_id("a", None) != natural_row_id("a", "None")
+    assert natural_row_id("a", "") != natural_row_id("a", None)
+
+
+def test_the_local_user_id_is_stable_across_calls(tmp_path):
+    workspace = tmp_path / "workspace.sqlite3"
+    first = WorkspaceRepository(workspace).get_or_create_local_user("Revant")
+    second = WorkspaceRepository(workspace).get_or_create_local_user("Revant")
+
+    assert first["userId"] == second["userId"]
+
+
+def test_renaming_yourself_keeps_the_same_user_id(tmp_path):
+    """Why the id exists at all: change_log rows can never be edited.
+
+    If `actor_id` were the display name, renaming in Settings would split one
+    person's history into two sets of immutable rows that can never be
+    re-linked.
+    """
+    workspace = tmp_path / "workspace.sqlite3"
+    before = WorkspaceRepository(workspace).get_or_create_local_user("Revant")
+    after = WorkspaceRepository(workspace).get_or_create_local_user("R. Idikulay")
+
+    assert after["userId"] == before["userId"]
+    assert after["displayName"] == "R. Idikulay"
+
+
+def test_a_blank_display_name_falls_back_rather_than_writing_an_empty_actor(tmp_path):
+    user = WorkspaceRepository(tmp_path / "workspace.sqlite3").get_or_create_local_user("   ")
+    assert user["displayName"] == "Unnamed Reviewer"
+    assert user["userId"]
+
+
+def test_device_id_and_user_id_are_independent(tmp_path):
+    repo = WorkspaceRepository(tmp_path / "workspace.sqlite3")
+    assert repo.get_or_create_device_id() != repo.get_or_create_local_user("Revant")["userId"]

@@ -135,30 +135,37 @@ change_log(seq INTEGER PRIMARY KEY AUTOINCREMENT,
   of SQLite).
 - Everything translationCore reads.
 
-### 3.5 Migration and the API seam
+### 3.5 Cutover and the API seam
 
-- Lazy, on first open, after journal recovery. **Correction (2026-09-14, #76 step 1):**
-  this cannot live in `TranslationCoreProject.__init__` as originally written — journal
-  recovery is not in the constructor, it is `recover_incomplete_transactions()`, which
-  `bridge_service.py` calls on the already-constructed project. Migrating from files the
-  journal is about to roll back would copy state the project is about to disown, so the
-  ordering is real and the seam is a separate method,
-  `TranslationCoreProject.run_workbench_migration(identity)`, called straight after
-  recovery.
-  Per store, `INSERT OR IGNORE` on natural keys, progress recorded in
-  `project_state('migration')` **per project+book** (Bridge imports one project per book,
-  so PHP finishing says nothing about TIT). Readers fall back to `_legacy_*` file readers
-  per store until that store reports `complete` — not per project, so a reader for a moved
-  store is not held back by one that has not moved yet. Source files are never deleted by
-  the migration.
-- Per-store *atomicity* is deliberately not required: `_write` commits per row, and row ids
-  are derived from natural keys (`workbench_repository.natural_row_id`), so a store
-  interrupted part-way through re-runs safely — the rows it already wrote are overwritten
-  with the same values rather than duplicated. A store migration must therefore never
-  append to a list it read from the database, only rewrite it from the file.
-- A store that raises must never make a project unopenable. The runner records the failure,
-  stops (rather than skipping ahead, since a later store may depend on an earlier one),
-  and leaves the project reading from its files exactly as before.
+**Superseded 2026-09-14.** This section originally specified a lazy, resumable,
+per-store migration with `_legacy_*` fallback readers, `INSERT OR IGNORE` on natural
+keys and progress in `project_state('migration')`. That machinery was built (#76 step 1)
+and then deleted, because the maintainer confirmed there is no user data to preserve on
+any machine: Bridge is pre-release, every project on disk is a development import, and
+fresh imports are cheap. Migrating data that nobody needs is cost without benefit, and
+the migration path was by some distance the hardest part of this work to get right and
+to review.
+
+**What replaces it: a straight cutover.** The stores are redirected to SQLite in one
+change. There is no migration, no fallback reader, no per-store progress and no
+resumability. Projects created before the cutover are not upgraded.
+
+- **Old projects must refuse to open, with a message naming the reason.** Silently
+  showing an empty review queue for a project that has decisions on disk reads as data
+  loss, which is worse than a refusal. The guard lands *with* the cutover, not before it:
+  until the writes are redirected the app still creates those directories, so a guard
+  keyed on "has file stores" would misclassify every brand-new project.
+- Nothing is deleted from anyone's disk. The old directories stay where they are; the
+  app simply stops reading and writing them.
+- A pre-cutover archive of the twelve development projects that held real decisions was
+  taken on 2026-09-14 (`%LOCALAPPDATA%\Bridge\data\_pre-workbench-backup`), so the
+  decision is reversible even though the data is not needed.
+
+`natural_row_id` survives the deletion and is still how every row id is derived: a key
+built from the natural key is what lets the same record land on the same id on every
+machine, which is what the hub will need to match rows across devices. `WorkbenchIdentity`
+survives too and now lives in `workbench_repository.py`.
+
 - `TransactionJournal` stays for tC-file writes. `apply_scripture_edit` records
   `journal_tx_id` on its change-log row with the same ordering as the existing
   `journal_prepared_callback`.
