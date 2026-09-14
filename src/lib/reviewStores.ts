@@ -47,7 +47,108 @@ export const EMPTY_FILTERS: ReviewFilters = {
 const PAGE_SIZE = 50;
 let queueGeneration = 0;
 
-export const reviewFilters = writable<ReviewFilters>({ ...EMPTY_FILTERS });
+/**
+ * Filter state splits in two, and only one half survives a project reload.
+ *
+ * `order`, `dispositions`, `kinds` and `lifecycleStatuses` are *preferences* --
+ * a reviewer's working style, which they reasonably expect to still be set the
+ * next time they open the app (#61: losing them mid-session was misread as a
+ * finding-count bug). `book`, `chapter` and `canonicalReferences` are *scope*:
+ * they come from the project being opened, and restoring a previous project's
+ * book would silently point the queue at text the reviewer is not looking at.
+ *
+ * So scope always resets and preferences always rehydrate.
+ */
+const FILTER_STORAGE_KEY = "bridge.reviewFilters.v1";
+
+type PersistedFilters = Pick<
+  ReviewFilters,
+  "order" | "dispositions" | "kinds" | "lifecycleStatuses"
+>;
+
+const REVIEW_QUEUE_ORDERS: readonly ReviewQueueOrder[] = ["CANONICAL", "SEVERITY"];
+const QA_DISPOSITIONS: readonly QaDisposition[] = [
+  "UNRESOLVED",
+  "CONFIRMED_TRANSLATION_ERROR",
+  "ACCEPTABLE_TRANSLATION",
+  "FALSE_POSITIVE",
+  "NEEDS_DISCUSSION",
+  "CORRECTED",
+];
+
+function stringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.every((item) => typeof item === "string") ? (value as string[]) : null;
+}
+
+/**
+ * Read back what a previous session stored.
+ *
+ * Every field is validated rather than trusted: this value outlives the app
+ * version that wrote it, so a renamed disposition or a hand-edited entry has to
+ * degrade to the default instead of being forwarded to the engine as a filter
+ * nothing will ever match. One bad field discards only that field.
+ */
+function readPersistedFilters(): Partial<PersistedFilters> {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(FILTER_STORAGE_KEY);
+  } catch {
+    return {}; // storage unavailable (disabled, or a webview without it)
+  }
+  if (!raw) return {};
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (!parsed || typeof parsed !== "object") return {};
+
+  const source = parsed as Record<string, unknown>;
+  const restored: Partial<PersistedFilters> = {};
+
+  if (REVIEW_QUEUE_ORDERS.includes(source.order as ReviewQueueOrder)) {
+    restored.order = source.order as ReviewQueueOrder;
+  }
+  const kinds = stringArray(source.kinds);
+  if (kinds) restored.kinds = kinds;
+  const lifecycleStatuses = stringArray(source.lifecycleStatuses);
+  if (lifecycleStatuses) restored.lifecycleStatuses = lifecycleStatuses;
+
+  const dispositions = stringArray(source.dispositions);
+  if (dispositions) {
+    const known = dispositions.filter(
+      (value): value is QaDisposition => QA_DISPOSITIONS.includes(value as QaDisposition),
+    );
+    if (known.length === dispositions.length) restored.dispositions = known;
+  }
+  return restored;
+}
+
+function writePersistedFilters(filters: ReviewFilters): void {
+  try {
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({
+      order: filters.order,
+      dispositions: filters.dispositions,
+      kinds: filters.kinds,
+      lifecycleStatuses: filters.lifecycleStatuses,
+    } satisfies PersistedFilters));
+  } catch {
+    // Best-effort: failing to remember a filter must never break review itself.
+  }
+}
+
+/** A fresh queue's filters: scope cleared, preferences as the reviewer left them. */
+export function initialReviewFilters(): ReviewFilters {
+  return { ...EMPTY_FILTERS, ...readPersistedFilters() };
+}
+
+export const reviewFilters = writable<ReviewFilters>(initialReviewFilters());
+
+// Singleton store for the app's lifetime, so this subscription is never torn down.
+reviewFilters.subscribe(writePersistedFilters);
 export const reviewQueue = writable<QaFindingSummary[]>([]);
 export const reviewTotal = writable(0);
 export const reviewCursor = writable("");
@@ -293,7 +394,7 @@ export async function addReviewerNote(findingId: string, note: string): Promise<
 
 export function resetReviewState(): void {
   queueGeneration += 1;
-  reviewFilters.set({ ...EMPTY_FILTERS });
+  reviewFilters.set(initialReviewFilters());
   reviewQueue.set([]);
   reviewTotal.set(0);
   reviewCursor.set("");
