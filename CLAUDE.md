@@ -169,6 +169,17 @@ A raw Scripture import becomes a translationCore-compatible book project:
                                                 no store above has moved into it yet — that's #76/#77.
 ```
 
+**The human-owned stores are mid-cutover (#76).** `decisions/`, `qaDecisions/`,
+`review/`, `terminology/`, `aiReview/`, `issueResolutions/`, `alignmentHistory/`,
+`alignmentDiagnostics/` and `audit/` still live as JSON under
+`.apps/translationCoreAI/` and are still what the code reads and writes. They move
+into `bridge-workbench.sqlite3` in one cutover, with **no migration**: the
+maintainer confirmed there is no user data to preserve while Bridge is pre-release,
+so projects created before the cutover are not upgraded — they will refuse to open
+and be re-imported. Nothing is deleted from anyone's disk. See
+`docs/TEAM_ARCHITECTURE.md` §3.5, which records why the lazy-migration machinery
+was built and then removed.
+
 `TranslationCoreProject` (`tc_ai_bridge/tc_project.py`) is the reader/writer
 for this; `project_import.py` is the normalizer. translationNotes/Words are
 never fabricated for a raw import — they're `requires-resource-index` until
@@ -225,23 +236,39 @@ than no derived value.
 prune superseded rows to save space.
 
 **Schema changes are migrations.** The companion SQLite database is at
-**schema v15** (`DATABASE_SCHEMA_VERSION` in
+**schema v16** (`DATABASE_SCHEMA_VERSION` in
 `engine/tc_ai_bridge/passage_semantic_repository.py`). There is no `migrations/`
-directory and no `.sql` files — the schema and every `_MIGRATION_V1` … `_V15`
+directory and no `.sql` files — the schema and every `_MIGRATION_V1` … `_V16`
 block live in that one module, applied in order. Any change needs: a version
-bump, a new forward migration block, a migration test in the established
-`test_v14_to_v15_migration_is_additive_and_keeps_v14_data_readable` style — build a
-database at the previous version, migrate forward, assert the old rows are still
-readable — and a note in `docs/HANDOFF.md`. The repository refuses to open a
-database newer than it understands, and never downgrades. Never edit the schema in
-place and never assume a user's project can be recreated — for a translation team,
-that database *is* months of work.
+bump, a new forward migration block, and a note in `docs/HANDOFF.md`. The
+repository refuses to open a database newer than it understands, and never
+downgrades. Never edit the schema in place.
+
+**Pre-release amendment (2026-09-14, while Bridge has no users).** The
+maintainer confirmed there is no user data to preserve on any machine: every
+project on disk is a development import and fresh imports are cheap. Until first
+release, two parts of the rule above are relaxed:
+
+- **A data-preservation migration test is no longer required** for every bump —
+  the `test_vN_to_vN+1_…_keeps_vN_data_readable` style. Write one when the
+  migration does something a reader should not have to take on trust (v16 has
+  one because it backfills an ordering column); skip it for a plain additive
+  change.
+- **A schema bump is no longer a "stop and ask"** and has been removed from that
+  list below.
+
+What does *not* relax: the version bump and forward migration block still happen
+(a fresh database is built by running the ladder, so editing an earlier block is
+still wrong — v13 and v15 rebuild tables and would silently drop a column added
+above them), and the append-only invariants are unchanged. **When Bridge has its
+first real user, restore both requirements and delete this amendment** — for a
+translation team that database *is* months of work, and no reset is available.
 
 This same discipline now has a second, independent ladder: `bridge-workbench.sqlite3`
 (`WorkbenchRepository`, `engine/tc_ai_bridge/workbench_repository.py`,
 `WORKBENCH_SCHEMA_VERSION`, currently v1). It is a different database with its own
-version number — a workbench schema bump is never a v15 bump and vice versa; each
-gets its own migration block and its own compatibility test.
+version number — a workbench schema bump is never a v16 bump and vice versa; each
+gets its own migration block. The pre-release amendment above applies to both.
 
 **Offline operation is a product invariant, not a preference.** Do not introduce a
 runtime dependency on a network service, a hosted API, or a login, in any code path
@@ -468,7 +495,6 @@ to an AI-assisted session specifically:
 These are cheap to start and expensive to undo. If a task appears to require one,
 raise it as a question in the issue rather than deciding it in a commit:
 
-- Changing the companion database schema (currently v15)
 - Anything that adds a server, an account, a login, or a network round-trip on a
   runtime path a translator hits
 - Re-baselining either golden

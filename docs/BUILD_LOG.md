@@ -7676,3 +7676,121 @@ the desktop app — worth a glance next time it is open.
 `npm run check` 0/0; `npm run test` **367 passed** across 26 files; `npm run
 build` clean. Engine untouched this half of the day. CI green on `main` at
 `de2b9a3`, `ae0bd73` and `92d9fd0`.
+
+## 2026-09-14 (evening) — the pre-release data reset: #76 becomes a cutover, #84 lands as v16
+
+### The decision
+
+There is no user data to preserve, on any machine. Bridge is pre-release, every
+project on disk is a development import, fresh imports are cheap. Confirmed by
+the maintainer for his own machine and Benz's.
+
+That single fact removes the largest source of complexity in the #44 line, since
+most of it existed to carry existing data forward. What it does **not** touch:
+the append-only invariants, token lineage, staleness propagation. Those are
+properties of future data, not of migration.
+
+Before acting, the actual contents of disk were checked rather than assumed: 202
+projects, of which **twelve hold real review decisions and audit trails** (up to
+19 decision files and 85 audit files each, some with semantic databases). That
+was reported back so the call was informed, and a verified archive taken first —
+96 MB, 9,116 entries, all twelve top-level directories, decision payloads
+spot-checked by opening the zip rather than trusting `Compress-Archive`'s exit
+code. Nothing was deleted from anyone's disk; the guard in the cutover will make
+old projects refuse to open, which reaches the same end without destroying
+anything, and deleting is the maintainer's call.
+
+### A: the migration runner deleted (aeccc47)
+
+`workbench_migration.py` and its tests, 541 lines, removed one day after
+landing. Worth being clear that this is the right outcome rather than a waste:
+the machinery existed to answer "what happens if this dies halfway through a
+team's only copy of months of work", and the answer is now "that cannot arise
+yet". It is in git history, and building it later against real requirements will
+beat keeping speculative code alive — dead code that looks load-bearing is worse
+than none.
+
+Kept, because neither was ever about migration: `natural_row_id` (a row id
+derived from a natural key is what makes the same record land on the same id on
+every machine, which the hub will need) and `WorkbenchIdentity`, rehoused into
+`workbench_repository.py` beside the `_write` that consumes it. Their tests moved
+into `test_workbench_repository.py` rather than being deleted with the file.
+
+`TEAM_ARCHITECTURE.md` §3.5 rewritten from "Migration and the API seam" to
+"Cutover and the API seam", recording why the machinery was built and then
+removed rather than quietly dropping the section — a reader who finds the design
+doc later should not have to reconstruct that from git.
+
+Suite after A: **1173 passed** = 1184 − 18 deleted migration tests + 7 rescued.
+
+### C: #84 as schema v16 (78c7634)
+
+Deferred on #84 because a sequence column needed a migration and a migration was
+a stop-and-ask. With the reset that constraint is gone.
+
+`seq INTEGER` added to `correction_proposal_events`, `correction_verifications`
+and `review_records`, backfilled `SET seq = rowid`, one index per ledger, all
+three reads moved from `ORDER BY created_at, rowid` to `ORDER BY seq`. `seq` is
+assigned `MAX(seq)+1` inside the writing transaction: ordered, unique per table,
+independent of both clock resolution and storage internals. The backfill is
+correct precisely because the rowid ordering was empirically verified this
+morning to have survived v15's table rebuild.
+
+**A base-schema edit was considered and rejected.** A fresh database is built by
+running the ladder V1…V16 in order, and v13 and v15 *rebuild* two of these three
+tables — a column added to `_MIGRATION_V1` would be silently dropped on the way
+up. Editing the base plus every later rebuild block is fragile for no gain, so
+v16 is an ordinary forward block. It will never actually run on any database,
+since every database will now be created fresh, but the ladder stays honest and
+the collapse-to-one-v1 option stays open for later.
+
+Seven `== 15` literals bumped to 16 across five test files.
+
+### The call-site fan-out, which is the part worth remembering
+
+Adding one column broke **five** insert statements. Grep found three.
+
+- Two positional `VALUES(?,?,…)` inserts, fixed in the first pass by naming
+  columns.
+- A third — the `STALE` event written by dependency invalidation, nested in a
+  loop inside a conditional — was missed and failed **loudly**: 93 tests.
+- A fourth, `import_review_record`, used `INSERT OR IGNORE`, so a search for
+  `INSERT INTO` never saw it. This one did **not** fail loudly. It sits inside an
+  `except Exception` that quarantines malformed legacy records, so the broken
+  insert was swallowed and surfaced as `KeyError: 'reviewStatus'` on a migration
+  report — one failing test, three layers from the cause, with nothing in the
+  stack trace pointing at the change. Confirmed it was genuinely new by stashing
+  the repository diff and watching the test pass.
+
+Hence a static guard, following the idiom the repository already uses for
+`change_log`: strip the `_MIGRATION_V*` scripts (which legitimately rebuild these
+tables with their own column lists) and assert every remaining runtime insert
+into a ledger assigns `seq`, matching `INSERT OR IGNORE/REPLACE/ABORT` as well as
+the bare form. A positional insert into an append-only ledger is exactly the
+shape that breaks silently on the next column, so it is forbidden outright rather
+than left to the next person's grep. The first version of that guard scanned
+backwards through the source to detect migration blocks; it was rewritten to
+strip them with one regex, which is both shorter and actually correct.
+
+C was estimated at one hour, high confidence. It took roughly three, all of it
+call-site fan-out rather than schema work. That is the honest signal to carry
+into B, which is the same pattern at twenty times the scale.
+
+Suite after C: **1175 passed** (1173 + 2 new).
+
+### D: `CLAUDE.md`'s schema invariant amended
+
+"Schema changes are migrations" now carries a dated pre-release amendment.
+Until first release: no data-preservation migration test is required per bump
+(write one when the migration does something a reader should not take on trust —
+v16 has one because it backfills an ordering column), and a schema bump is no
+longer a stop-and-ask, removed from that list.
+
+What does not relax, and is spelled out because it is the trap: the version bump
+and forward block still happen, since a fresh database is built by running the
+whole ladder, so editing an earlier block is still wrong. The amendment
+instructs its own deletion when Bridge has a first real user.
+
+The on-disk shape section now says the human-owned stores are mid-cutover and
+points at §3.5. `QA_TEST_MATRIX.md` is deliberately untouched: the row it needs
+is "a pre-cutover project refuses to open", which belongs with the cutover.

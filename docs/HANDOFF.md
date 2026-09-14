@@ -3987,3 +3987,85 @@ disappeared from the board.
    decision, and **#88**, filed by Benz mid-session and not triaged here.
 4. **#54's cross-verse half** remains blocked on the embedding-provider
    direction, which is a stop-and-ask.
+
+## 44.17 The pre-release data reset: #76 becomes a cutover, #84 unblocked (2026-09-14)
+
+**The decision that drives all of this.** The maintainer confirmed there is no
+user data to preserve on any machine, his or Benz's: Bridge is pre-release,
+every project on disk is a development import, and fresh imports are cheap.
+That removes the single largest source of complexity in the #44 line of work,
+because most of it existed only to carry existing data forward safely.
+
+**What it changed, per issue:**
+
+- **#76** loses its hardest half. No lazy migration, no `_legacy_*` fallback
+  readers, no per-store progress, no resumability. What remains is plain
+  redirection — ~21 methods (356 lines) plus the issue-resolution block (290
+  lines) in `tc_project.py`, plus ~100 lines of persistence surface across four
+  collaborator modules. One shot is now realistic where it was not before.
+- **#84** is unblocked outright. It was parked because a sequence column needed
+  a migration and a migration was a stop-and-ask. Landed as v16 (78c7634).
+- **#77** gets easier for free: derived data is rebuildable by definition.
+- **The `audit/` question** dissolves — no live consumer, so the files simply
+  stop being written and the one caller is fixed.
+- **#78 unaffected.** The stable `user_id` that landed this morning was argued
+  from "change_log is permanent"; that argument weakens under a reset, but it is
+  forty lines and it is the right shape for when data does matter. Kept.
+- **The v15 ladder was deliberately left alone.** Collapsing ~613 lines of
+  forward migrations into one clean v1 is tempting and was considered, but that
+  module holds the correction ledger, token lineage and staleness propagation,
+  and collapsing buys readability rather than capability on code that works and
+  is tested. Revisit once, properly, before first release.
+
+**Done this pass:** A (aeccc47) deleted the migration runner and its tests, 541
+lines, a day after landing — `natural_row_id` and `WorkbenchIdentity` kept, their
+tests rehoused, TEAM_ARCHITECTURE §3.5 rewritten from "migration" to "cutover".
+C (78c7634) is #84's v16. D amends `CLAUDE.md`.
+
+**`CLAUDE.md`'s "schema changes are migrations" invariant is now amended**, which
+is worth reading before the next schema change. Until first release: no
+data-preservation migration test is required per bump, and a schema bump is no
+longer a stop-and-ask (removed from that list). What did *not* relax: the version
+bump and forward block still happen, because a fresh database is built by running
+the whole ladder — editing an earlier block is still wrong, since v13 and v15
+rebuild tables and would silently drop a column added above them. **The amendment
+says to delete itself when Bridge has its first real user.**
+
+**A verified archive of the twelve development projects that held real decisions
+was taken first** (96 MB, 9,116 entries, decision payloads spot-checked) at
+`%LOCALAPPDATA%\Bridge\data\_pre-workbench-backup`. Nothing was deleted from
+disk; deleting projects is the maintainer's to do when he chooses.
+
+### Where to pick up: B, the cutover
+
+One PR. Redirect the stores, stop writing `audit/`, add the guard that makes a
+pre-cutover project **refuse to open with a message naming the reason** — a
+silent empty review queue reads as data loss, which is worse than a refusal.
+That guard could not land earlier: until the writes are redirected the app still
+creates those directories, so it would have misclassified every new project.
+
+**Read the call sites; do not trust a grep.** C was estimated at an hour with
+high confidence and cost roughly three, entirely because of call-site fan-out:
+adding one column broke five inserts, and grep found three of them. The fourth
+failed loudly (93 tests). The fifth, `import_review_record`, used
+`INSERT OR IGNORE` so a search for `INSERT INTO` never saw it — and it sits
+inside an `except Exception` that quarantines malformed legacy records, so a
+broken insert surfaced as a missing key in a migration report three layers from
+the cause, as one failing test with no stack trace pointing anywhere near the
+change. `tc_project.py` has the same swallowing shape around several store
+operations, and B is that pattern at twenty times the scale. Be suspicious of
+any store method whose failure mode is "returns empty" rather than "raises".
+
+The checkpoint proposed for B — pause after the straightforward 21 methods,
+before the issue-resolution block — should be treated as firm. That block holds
+`save_issue_resolution` (91 lines) and `reconcile_issue_resolutions_after_ai_review`
+(71 lines), and CLAUDE.md's "compacting a record must not compact its lifecycle
+events" applies directly to it.
+
+`WorkbenchRepository` also needs a **query API** before B can land: it has only
+`get(table, row_id)` and `change_log_entries()` today, and every "decisions for
+this verse" or "AI review results for this book" needs one. That is new design,
+roughly 200 lines plus tests, and was not in the original plan.
+
+**Coordination:** B rewrites ~650 lines of `tc_project.py`. Benz should know it
+is locked before it starts.
