@@ -266,14 +266,25 @@ def test_build_corpus_stats_performance_over_a_realistically_sized_completed_cor
     _write_book(root, "big", chapters)
 
     project = TranslationCoreProject(root)
-    start = time.perf_counter()
+    wall_start, cpu_start = time.perf_counter(), time.process_time()
     table = corpus_stats.build_corpus_stats(project, include_collection=False)
-    elapsed = time.perf_counter() - start
+    wall = time.perf_counter() - wall_start
+    cpu = time.process_time() - cpu_start
 
     assert table.verses_scanned == 2000
     assert table.total_pairs == 2000 * 6
-    # Generous ceiling, not a tight regression bound (no known-bad prior
-    # implementation to compare against, unlike the bigram-blocking case) —
-    # this is a linear scan over already-completed verses, dominated by
-    # JSON parsing of 50 chapter files, not by any O(n^2) comparison.
-    assert elapsed < 5.0, f"build_corpus_stats took {elapsed:.2f}s for 2000 completed verses"
+    # What this asserts is that the build stays a linear scan: 12,000 pairs
+    # cost ~0.2s of CPU on the reference machine (2026-09-15, three runs,
+    # 0.19-0.23s), and a comparison that went quadratic over those pairs
+    # would be seconds to minutes of CPU, so 2.0s separates the two with room
+    # for a slower machine. It is deliberately CPU time, not wall-clock: the
+    # same runs took 1.1-1.3s of wall-clock, almost all of it reading 100
+    # small files, and under `pytest -n auto` that I/O queues behind other
+    # workers -- the old `elapsed < 5.0` wall budget failed there about half
+    # the time while the algorithm had not changed (#90). The UI question
+    # ("is the first consistency check of a book fast enough?" -- this runs
+    # inline on the dispatcher from _consistency_findings_for_book) is a
+    # wall-clock question about a real disk, answered in BUILD_LOG, not here.
+    assert cpu < 2.0, (
+        f"build_corpus_stats used {cpu:.2f}s CPU ({wall:.2f}s wall) for 2000 completed verses"
+    )
