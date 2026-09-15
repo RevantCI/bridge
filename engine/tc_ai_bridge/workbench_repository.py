@@ -700,7 +700,142 @@ class WorkbenchRepository:
         transaction, following the pattern in
         passage_semantic_repository.py:3717-3733 -- callers never touch
         change_log directly.
+
+        One row, one transaction. A store that has to change many rows for
+        one human action (a check job re-populating a chapter's progress)
+        uses :meth:`batch`, which runs the same code against one connection
+        so the whole update is a single commit and a single fsync.
         """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            result = self._write_in(
+                conn, table, row_id, project_id=project_id, book_id=book_id,
+                payload=payload, actor_id=actor_id, device_id=device_id,
+                expected_revision=expected_revision, op=op,
+                extra_columns=extra_columns, journal_tx_id=journal_tx_id,
+            )
+            conn.commit()
+        return result
+
+    def _delete(
+        self,
+        table: str,
+        row_id: str,
+        *,
+        project_id: str,
+        book_id: str | None,
+        actor_id: str,
+        device_id: str,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Delete one row, logging the deletion as a ``change_log`` event.
+
+        Returns the write receipt, or ``None`` if there was no such row. The
+        row's last image travels on the event, so the log alone still says
+        what was removed -- and sync (TEAM_ARCHITECTURE.md ss7) can replay a
+        deletion the same way it replays an upsert.
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            result = self._delete_in(
+                conn, table, row_id, project_id=project_id, book_id=book_id,
+                actor_id=actor_id, device_id=device_id, expected_revision=expected_revision,
+            )
+            conn.commit()
+        return result
+
+    @contextmanager
+    def batch(self) -> Iterator["WorkbenchBatch"]:
+        """Several row writes and deletes in one transaction.
+
+        Everything the batch does commits together or not at all, with one
+        ``change_log`` row per operation exactly as the single-row paths
+        write. Nothing here may touch a second database: the batch holds
+        ``BEGIN IMMEDIATE`` on this one for its whole life, and a caller
+        that needs to update the workspace cache afterwards does so after
+        the ``with`` block, from the receipts.
+        """
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield WorkbenchBatch(self, conn)
+            except BaseException:
+                conn.rollback()
+                raise
+            conn.commit()
+
+    def max_seq(self, *, project_id: str, table: str | None = None) -> int:
+        """Highest ``change_log.seq`` for a project, optionally for one table.
+
+        ``0`` when nothing has been written. This is the ``source_seq`` the
+        workspace progress cache records, so a cache entry can be compared
+        against the log it was built from.
+        """
+        with self._connect() as conn:
+            if table is None:
+                row = conn.execute(
+                    "SELECT COALESCE(MAX(seq),0) FROM change_log WHERE project_id=?", (project_id,),
+                ).fetchone()
+            else:
+                self._require_mutable_table(table)
+                row = conn.execute(
+                    "SELECT COALESCE(MAX(seq),0) FROM change_log WHERE project_id=? AND table_name=?",
+                    (project_id, table),
+                ).fetchone()
+            return int(row[0])
+
+    def _delete_in(
+        self,
+        conn: sqlite3.Connection,
+        table: str,
+        row_id: str,
+        *,
+        project_id: str,
+        book_id: str | None,
+        actor_id: str,
+        device_id: str,
+        expected_revision: int | None,
+    ) -> dict[str, Any] | None:
+        self._require_mutable_table(table)
+        row = conn.execute(f"SELECT revision, payload_json FROM {table} WHERE id=?", (row_id,)).fetchone()
+        if row is None:
+            return None
+        base_revision = int(row["revision"])
+        if expected_revision is not None and expected_revision != base_revision:
+            raise WorkbenchConflict(f"{table}:{row_id} revision conflict")
+        changed = conn.execute(
+            f"DELETE FROM {table} WHERE id=? AND revision=?", (row_id, base_revision),
+        ).rowcount
+        if changed != 1:
+            raise WorkbenchConflict(f"{table}:{row_id} revision conflict")
+        event_id = str(uuid.uuid4())
+        cursor = conn.execute(
+            "INSERT INTO change_log(event_id,project_id,book_id,table_name,row_key,op,"
+            "base_revision,new_revision,actor_id,device_id,created_at,payload_json,journal_tx_id) "
+            "VALUES(?,?,?,?,?,?,?,NULL,?,?,?,?,NULL)",
+            (
+                event_id, project_id, book_id, table, row_id, "delete",
+                base_revision, actor_id, device_id, self._now(), row["payload_json"],
+            ),
+        )
+        return {"id": row_id, "revision": None, "eventId": event_id, "seq": int(cursor.lastrowid)}
+
+    def _write_in(
+        self,
+        conn: sqlite3.Connection,
+        table: str,
+        row_id: str,
+        *,
+        project_id: str,
+        book_id: str | None,
+        payload: dict[str, Any],
+        actor_id: str,
+        device_id: str,
+        expected_revision: int | None,
+        op: str = "upsert",
+        extra_columns: dict[str, Any] | None = None,
+        journal_tx_id: str | None = None,
+    ) -> dict[str, Any]:
         self._require_mutable_table(table)
         extra_columns = extra_columns or {}
         for column in extra_columns:
@@ -708,8 +843,7 @@ class WorkbenchRepository:
                 raise WorkbenchValidationError(f"Unsafe column name: {column!r}")
         now = self._now()
         payload_text = json.dumps(payload, ensure_ascii=False)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        if True:  # kept one level deep so the body below reads as it did under `with`
             row = conn.execute(f"SELECT revision FROM {table} WHERE id=?", (row_id,)).fetchone()
             if row is None:
                 if expected_revision not in (None, 0):
@@ -746,7 +880,7 @@ class WorkbenchRepository:
                 if changed != 1:
                     raise WorkbenchConflict(f"{table}:{row_id} revision conflict")
             event_id = str(uuid.uuid4())
-            conn.execute(
+            cursor = conn.execute(
                 "INSERT INTO change_log(event_id,project_id,book_id,table_name,row_key,op,"
                 "base_revision,new_revision,actor_id,device_id,created_at,payload_json,journal_tx_id) "
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -755,5 +889,59 @@ class WorkbenchRepository:
                     base_revision, new_revision, actor_id, device_id, now, payload_text, journal_tx_id,
                 ),
             )
-            conn.commit()
-        return {"id": row_id, "revision": new_revision, "eventId": event_id}
+        return {"id": row_id, "revision": new_revision, "eventId": event_id, "seq": int(cursor.lastrowid)}
+
+
+class WorkbenchBatch:
+    """The handle :meth:`WorkbenchRepository.batch` yields: the single-row
+    write and delete with the transaction already open. Receipts carry the
+    same fields as the single-row paths, including ``seq``."""
+
+    def __init__(self, repository: WorkbenchRepository, conn: sqlite3.Connection):
+        self._repository = repository
+        self._conn = conn
+
+    def get(self, table: str, row_id: str) -> dict[str, Any] | None:
+        """One row as this transaction sees it -- including rows the batch
+        itself has already written."""
+        self._repository._require_mutable_table(table)
+        row = self._conn.execute(f"SELECT * FROM {table} WHERE id=?", (row_id,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def write(
+        self,
+        table: str,
+        row_id: str,
+        *,
+        project_id: str,
+        book_id: str | None,
+        payload: dict[str, Any],
+        actor_id: str,
+        device_id: str,
+        expected_revision: int | None = None,
+        op: str = "upsert",
+        extra_columns: dict[str, Any] | None = None,
+        journal_tx_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._repository._write_in(
+            self._conn, table, row_id, project_id=project_id, book_id=book_id,
+            payload=payload, actor_id=actor_id, device_id=device_id,
+            expected_revision=expected_revision, op=op,
+            extra_columns=extra_columns, journal_tx_id=journal_tx_id,
+        )
+
+    def delete(
+        self,
+        table: str,
+        row_id: str,
+        *,
+        project_id: str,
+        book_id: str | None,
+        actor_id: str,
+        device_id: str,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any] | None:
+        return self._repository._delete_in(
+            self._conn, table, row_id, project_id=project_id, book_id=book_id,
+            actor_id=actor_id, device_id=device_id, expected_revision=expected_revision,
+        )

@@ -45,7 +45,8 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
-from typing import Iterator
+from typing import Any, Iterator
+import os
 import uuid
 
 
@@ -120,6 +121,14 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
 
 class WorkspaceError(RuntimeError):
     pass
+
+
+def project_path_key(path: str | Path) -> str:
+    """The comparison key the registry uses for a project path, so the
+    progress cache and `projects` agree on what "the same folder" means
+    (Windows path aliases, case, trailing separators)."""
+    resolved = Path(path).expanduser().resolve(strict=False)
+    return os.path.normcase(os.path.normpath(str(resolved)))
 
 
 class WorkspaceRepository:
@@ -287,3 +296,95 @@ class WorkspaceRepository:
             )
             conn.commit()
             return {"userId": user_id, "displayName": name}
+
+    # -- per-project progress rollup cache (TEAM_ARCHITECTURE.md section 4) --
+    #
+    # The multi-book dashboard needs one number per book for every sibling in
+    # a collection, most of which have never been opened this session. Each
+    # book's rollup lives in its own workbench database, and opening 66 of
+    # those to answer "how far along is this Bible" is worse than the 66 file
+    # reads it replaces. So the totals are cached here, keyed by project
+    # folder, refreshed by the project that wrote them and repaired on its
+    # next open when `source_seq` disagrees with the workbench change_log.
+
+    def upsert_progress_cache(
+        self,
+        project_path: str | Path,
+        *,
+        project_id: str,
+        book_id: str,
+        totals: dict[str, Any],
+        updated_at: str | None,
+        source_seq: int,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "INSERT INTO project_progress_cache(path_key, project_path, project_id, book_id, "
+                "totals_json, updated_at, source_seq, refreshed_at) VALUES(?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(path_key) DO UPDATE SET project_path=excluded.project_path, "
+                "project_id=excluded.project_id, book_id=excluded.book_id, "
+                "totals_json=excluded.totals_json, updated_at=excluded.updated_at, "
+                "source_seq=excluded.source_seq, refreshed_at=excluded.refreshed_at",
+                (
+                    project_path_key(project_path), str(Path(project_path)), project_id, book_id,
+                    json.dumps(totals, ensure_ascii=False), updated_at, int(source_seq), self._now(),
+                ),
+            )
+            conn.commit()
+
+    def progress_cache_entry(self, project_path: str | Path) -> dict[str, Any] | None:
+        found = self.progress_cache_for_paths([project_path])
+        return found.get(project_path_key(project_path))
+
+    def progress_cache_for_paths(self, paths: list[str | Path]) -> dict[str, dict[str, Any]]:
+        """Cached rollups for several project folders in one query, keyed by
+        :func:`project_path_key`. Folders with no entry are simply absent."""
+        keys = [project_path_key(path) for path in paths]
+        if not keys:
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        with self._connect() as conn:
+            for start in range(0, len(keys), 500):
+                chunk = keys[start:start + 500]
+                rows = conn.execute(
+                    "SELECT * FROM project_progress_cache WHERE path_key IN ("
+                    + ",".join("?" for _ in chunk) + ")",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    try:
+                        totals = json.loads(row["totals_json"])
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(totals, dict):
+                        continue
+                    out[str(row["path_key"])] = {
+                        "projectPath": str(row["project_path"]),
+                        "projectId": str(row["project_id"]),
+                        "bookId": str(row["book_id"]),
+                        "totals": totals,
+                        "updatedAt": row["updated_at"],
+                        "sourceSeq": int(row["source_seq"]),
+                        "refreshedAt": str(row["refreshed_at"]),
+                    }
+        return out
+
+    def forget_progress_cache(self, paths: list[str | Path]) -> int:
+        """Drop cache entries for folders that are being deleted, forgotten or
+        re-imported, so a stale rollup cannot outlive the project it described."""
+        keys = [project_path_key(path) for path in paths]
+        if not keys:
+            return 0
+        removed = 0
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for start in range(0, len(keys), 500):
+                chunk = keys[start:start + 500]
+                removed += conn.execute(
+                    "DELETE FROM project_progress_cache WHERE path_key IN ("
+                    + ",".join("?" for _ in chunk) + ")",
+                    chunk,
+                ).rowcount
+            conn.commit()
+        return removed

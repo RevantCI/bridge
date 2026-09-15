@@ -35,7 +35,7 @@ from greek_room_engine.models.finding import QaFinding, FindingCategory, Severit
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
 from tc_ai_bridge.tc_project import (
-    TranslationCoreProject, ProjectError, read_progress_rollup, read_triage_records,
+    TranslationCoreProject, ProjectError, peek_progress_totals, read_triage_records,
 )
 from tc_ai_bridge.project_import import (
     apply_resource_materialization,
@@ -82,7 +82,7 @@ from tc_ai_bridge.logos_connector import LogosConnectorClient, LogosConnectorErr
 from tc_ai_bridge.navigation import NavigationSyncCoordinator
 from tc_ai_bridge.models import QAIssue, TokenRef, VerseAlignment
 from tc_ai_bridge.secret_store import AppSettings
-from tc_ai_bridge.workspace_repository import WorkspaceRepository
+from tc_ai_bridge.workspace_repository import WorkspaceRepository, project_path_key
 from tc_ai_bridge.resource_materializer import materialize_book_checks
 from tc_ai_bridge.usfm import whitespace_tokens
 from tc_ai_bridge import versification as versification_tool
@@ -604,6 +604,15 @@ class BridgeEngine:
             str(item.get("status") or "") == "recovery_required"
             for item in tc_recovery
         )
+        # The workspace progress cache is repaired on every open, after
+        # recovery (which may roll back what it would otherwise have cached).
+        # A cache problem must not make the project unopenable -- the record
+        # is the workbench, the cache is a copy -- but it must not vanish
+        # either, so it comes back on the open result.
+        try:
+            progress_cache = {"state": candidate.sync_progress_cache()}
+        except Exception as exc:
+            progress_cache = {"state": "error", "error": str(exc)}
         if recovery_failed:
             self._passage_semantic_status = {
                 "available": False, "readOnly": True,
@@ -621,6 +630,7 @@ class BridgeEngine:
                 "collectionId": registered.get("collectionId", ""),
                 "managed": registered.get("managed", False),
                 "passageSemantic": dict(self._passage_semantic_status),
+                "progressCache": progress_cache,
             })
             return info
         self._passage_semantic_status = {
@@ -659,6 +669,7 @@ class BridgeEngine:
             "collectionId": registered.get("collectionId", ""),
             "managed": registered.get("managed", False),
             "passageSemantic": dict(self._passage_semantic_status),
+            "progressCache": progress_cache,
         })
         return info
 
@@ -669,7 +680,15 @@ class BridgeEngine:
         """Progress rollups for every book in the currently open collection,
         for the project dashboard. Lazy siblings are never materialized just
         to compute stats — their progress comes back null and the frontend
-        renders a distinct 'not yet opened' state."""
+        renders a distinct 'not yet opened' state.
+
+        Reads the workspace `project_progress_cache` in one query rather than
+        each sibling's own workbench database (#77): a 66-book Bible would
+        otherwise mean opening 66 SQLite files to draw one dashboard. A
+        materialized sibling with no cache entry (the workspace database was
+        reset, or the folder came from another machine) is peeked read-only
+        once and its entry written, so the next call is one query again.
+        """
         self._require_project()
         siblings = collection_projects(str(self.project.path))
         if not siblings:
@@ -677,6 +696,11 @@ class BridgeEngine:
                 "path": str(self.project.path), "bookId": self.project.book_id,
                 "bookName": self.project.summary.book_name, "lazy": False,
             }]
+        cache_candidates = [
+            str(entry.get("path") or "") for entry in siblings
+            if not entry.get("lazy") and Path(str(entry.get("path") or "")).is_dir()
+        ]
+        cached = self.workspace.progress_cache_for_paths(cache_candidates)
         books: list[dict[str, Any]] = []
         for entry in siblings:
             path = Path(str(entry.get("path") or ""))
@@ -684,9 +708,18 @@ class BridgeEngine:
             progress = None
             missing = not path.is_dir()
             if not lazy and not missing:
-                rollup = read_progress_rollup(path)
-                if rollup is not None:
-                    progress = {**rollup.get("totals", {}), "updatedAt": rollup.get("updatedAt")}
+                hit = cached.get(project_path_key(path))
+                if hit is None:
+                    peeked = peek_progress_totals(path)
+                    if peeked is not None:
+                        self.workspace.upsert_progress_cache(
+                            path, project_id=peeked["projectId"], book_id=peeked["bookId"],
+                            totals=peeked["totals"], updated_at=peeked["updatedAt"],
+                            source_seq=peeked["sourceSeq"],
+                        )
+                        hit = peeked
+                if hit is not None:
+                    progress = {**hit["totals"], "updatedAt": hit["updatedAt"]}
             books.append({
                 "path": str(path), "bookId": str(entry.get("bookId") or ""),
                 "bookName": str(entry.get("bookName") or ""), "lazy": lazy,
@@ -697,7 +730,11 @@ class BridgeEngine:
     def forget_project(self, project_id: str) -> dict[str, Any]:
         if not project_id:
             raise ProjectError("projectId is required")
-        return {"forgotten": self.project_registry.forget(project_id)}
+        paths = [str(entry.get("path") or "") for entry in self.project_registry.group_entries(project_id)]
+        forgotten = self.project_registry.forget(project_id)
+        if forgotten:
+            self.workspace.forget_progress_cache([path for path in paths if path])
+        return {"forgotten": forgotten}
 
     def delete_project(self, project_id: str) -> dict[str, Any]:
         if not project_id:
@@ -706,6 +743,10 @@ class BridgeEngine:
         if entry is None:
             raise ProjectError("Project not found")
         managed = bool(entry.get("managed"))
+        self.workspace.forget_progress_cache([
+            str(sibling.get("path") or "") for sibling in self.project_registry.group_entries(project_id)
+            if sibling.get("path")
+        ])
         if managed:
             managed_root = self.project_registry.managed_root
             for sibling in self.project_registry.group_entries(project_id):
@@ -785,6 +826,11 @@ class BridgeEngine:
                 )
             root = Path(destination_root).resolve() if destination_root else self.project_root
             result = import_source(path, root, metadata)
+            # A folder that is being (re)populated is a new project even at an
+            # old path; whatever the cache said about that path is void.
+            self.workspace.forget_progress_cache([
+                str(imported.get("path") or "") for imported in result["projects"] if imported.get("path")
+            ])
             fingerprints = source_fingerprints(preview)
             for imported in result["projects"]:
                 book_id = str(imported.get("bookId") or "").lower()
@@ -3264,18 +3310,19 @@ class BridgeEngine:
                 }
                 snapshot_by_chapter.setdefault(str(chapter), {})[str(verse)] = findings
 
-            rollup = project.load_progress_rollup()
-            chapters_dict = rollup.setdefault("chapters", {})
             now = project.timestamp_iso()
-            for chapter, verses_map in by_chapter.items():
-                chapters_dict[chapter] = {
+            project.replace_progress_chapters({
+                chapter: {
                     "verseCount": len(project.verses(chapter)),
                     "aiChecked": True,
                     "aiCheckedAt": now,
                     "verses": {v: {"findings": f} for v, f in verses_map.items()},
                 }
+                for chapter, verses_map in by_chapter.items()
+            })
+            rollup = project.load_progress_rollup()
             self._recompute_progress_totals(project, rollup)
-            project.save_progress_rollup(rollup)
+            project.save_progress_totals(rollup["totals"])
             # Written after the rollup so a crash between the two leaves the
             # rollup -- what the dashboard reads -- intact.
             for chapter, verses_map in snapshot_by_chapter.items():
@@ -3315,22 +3362,19 @@ class BridgeEngine:
         finding_id: str, status: str,
     ) -> None:
         """Incrementally updates the book's progress rollup for one decision
-        — reads/updates/writes one small file, never rescans qaDecisions on
-        disk. Best-effort: a rollup bookkeeping failure must never surface as
+        — one finding row and the totals row, never a rescan of the decision
+        store. Best-effort: a rollup bookkeeping failure must never surface as
         a decide_verse failure, since the actual decision is already safely
         recorded via record_qa_decision above."""
         try:
-            rollup = project.load_progress_rollup()
-            chapters = rollup.setdefault("chapters", {})
             chapter_key = str(chapter)
-            chapter_entry = chapters.setdefault(chapter_key, {
-                "verseCount": len(project.verses(chapter_key)) if chapter_key in project.chapters() else 0,
-                "aiChecked": False, "aiCheckedAt": None, "verses": {},
-            })
-            verse_entry = chapter_entry.setdefault("verses", {}).setdefault(str(verse), {"findings": {}})
-            verse_entry["findings"][str(finding_id)] = str(status)
+            project.record_progress_decision(
+                chapter_key, verse, finding_id, status,
+                verse_count=len(project.verses(chapter_key)) if chapter_key in project.chapters() else 0,
+            )
+            rollup = project.load_progress_rollup()
             self._recompute_progress_totals(project, rollup)
-            project.save_progress_rollup(rollup)
+            project.save_progress_totals(rollup["totals"])
         except Exception:
             pass
 

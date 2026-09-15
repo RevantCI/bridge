@@ -418,3 +418,61 @@ def test_a_blank_display_name_falls_back_rather_than_writing_an_empty_actor(tmp_
 def test_device_id_and_user_id_are_independent(tmp_path):
     repo = WorkspaceRepository(tmp_path / "workspace.sqlite3")
     assert repo.get_or_create_device_id() != repo.get_or_create_local_user("Revant")["userId"]
+
+
+# -- #77: batched writes, deletes, seq receipts ------------------------------
+
+
+def test_a_batch_commits_every_write_or_none_of_them(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "w.sqlite3")
+    with pytest.raises(WorkbenchValidationError):
+        with repo.batch() as batch:
+            batch.write("check_cache", "c1", project_id="proj-1", book_id="rut",
+                        payload={"n": 1}, actor_id="u", device_id="d")
+            batch.write("not_a_table", "c2", project_id="proj-1", book_id="rut",
+                        payload={"n": 2}, actor_id="u", device_id="d")
+    assert repo.get("check_cache", "c1") is None
+    assert repo.change_log_entries("proj-1") == []
+
+    with repo.batch() as batch:
+        first = batch.write("check_cache", "c1", project_id="proj-1", book_id="rut",
+                            payload={"n": 1}, actor_id="u", device_id="d")
+        second = batch.write("check_cache", "c2", project_id="proj-1", book_id="rut",
+                             payload={"n": 2}, actor_id="u", device_id="d")
+        assert batch.get("check_cache", "c1") is not None, "a batch sees its own writes"
+    assert [e["row_key"] for e in repo.change_log_entries("proj-1")] == ["c1", "c2"]
+    assert second["seq"] == first["seq"] + 1
+
+
+def test_delete_removes_the_row_and_logs_its_last_image(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "w.sqlite3")
+    _write(repo, "check_cache", "c1", payload={"n": 1})
+    receipt = repo._delete("check_cache", "c1", project_id="proj-1", book_id="rut",
+                           actor_id="u", device_id="d")
+    assert receipt["revision"] is None and receipt["seq"] == 2
+    assert repo.get("check_cache", "c1") is None
+    event = repo.change_log_entries("proj-1")[-1]
+    assert (event["op"], event["base_revision"], event["new_revision"]) == ("delete", 1, None)
+    assert json.loads(event["payload_json"]) == {"n": 1}
+    assert repo._delete("check_cache", "c1", project_id="proj-1", book_id="rut",
+                        actor_id="u", device_id="d") is None
+
+
+def test_delete_honours_an_expected_revision(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "w.sqlite3")
+    _write(repo, "check_cache", "c1")
+    _write(repo, "check_cache", "c1")
+    with pytest.raises(WorkbenchConflict):
+        repo._delete("check_cache", "c1", project_id="proj-1", book_id="rut",
+                     actor_id="u", device_id="d", expected_revision=1)
+
+
+def test_write_receipts_carry_the_change_log_seq_and_max_seq_reads_it_back(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "w.sqlite3")
+    first = _write(repo, "check_cache", "c1")
+    second = _write(repo, "progress_totals", "t1")
+    assert (first["seq"], second["seq"]) == (1, 2)
+    assert repo.max_seq(project_id="proj-1") == 2
+    assert repo.max_seq(project_id="proj-1", table="check_cache") == 1
+    assert repo.max_seq(project_id="proj-1", table="progress_totals") == 2
+    assert repo.max_seq(project_id="nobody") == 0

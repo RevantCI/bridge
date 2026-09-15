@@ -18,6 +18,8 @@ from .models import VerseAlignment
 from .transaction_journal import TransactionJournal
 from .workbench_repository import WorkbenchIdentity, WorkbenchRepository, natural_row_id
 from .workspace_repository import WorkspaceRepository
+import sqlite3
+from urllib.parse import quote as _url_quote
 from .paratext_notes import append_paratext_note, validate_notes_11, convert_comment_list_to_notes_11, convert_legacy_notes_11, EXTERNAL_NOTE_SOURCE
 from .alignment_reliability import structural_issues, alignment_fingerprint
 
@@ -77,6 +79,14 @@ _PRE_CUTOVER_STORE_DIRS = (
     'issueResolutions', 'alignmentHistory', 'alignmentDiagnostics',
     'semanticMappings', 'semanticValidation',
 )
+# Single files, relative to the project root, that #77 moved the same way.
+# The progress rollup lived under `.bridge/`, not the companion dir, and
+# the dashboard read it for siblings that were never opened -- so a project
+# carrying one was written by a build whose review progress this build
+# cannot see.
+_PRE_CUTOVER_STORE_FILES = (
+    '.bridge/progress.json',
+)
 
 
 class TranslationCoreProject:
@@ -132,21 +142,22 @@ class TranslationCoreProject:
         be re-imported alongside them.
         """
         companion = self.companion_dir()
-        if not companion.is_dir():
-            return
-        stale = sorted(
-            name for name in _PRE_CUTOVER_STORE_DIRS
-            if any((companion / name).glob('**/*.json'))
-        )
+        stale: list[str] = []
+        if companion.is_dir():
+            stale.extend(sorted(
+                name for name in _PRE_CUTOVER_STORE_DIRS
+                if any((companion / name).glob('**/*.json'))
+            ))
+        stale.extend(rel for rel in _PRE_CUTOVER_STORE_FILES if (self.path / rel).is_file())
         if not stale:
             return
         raise ProjectError(
             'This project was created by an earlier version of Bridge and stores '
-            'its decisions in files (' + ', '.join(stale) + '). Bridge now keeps '
+            'its review data in files (' + ', '.join(stale) + '). Bridge now keeps '
             'them in the project database and does not convert the old format. '
             'Re-import the project to open it. Nothing has been deleted -- the '
             'original files are still in '
-            + str(companion) + '.'
+            + str(self.path) + '.'
         )
 
     def attach_passage_semantic_runtime(self, runtime: Any | None) -> None:
@@ -2555,51 +2566,295 @@ class TranslationCoreProject:
     # -- per-book progress rollup --------------------------------------------
     #
     # Incrementally-updated summary of human-review and AI-check progress,
-    # read by the project dashboard. Never rebuilt by a full rescan of
-    # qaDecisions/checkCache on every read — callers update just the one
-    # chapter/verse that changed (see bridge_service.py's decide_verse and
-    # check-job completion hook).
+    # read by the project dashboard, the QA report and the exception queue.
+    # Never rebuilt by a full rescan of decisions on every read -- callers
+    # update just the chapter/verse that changed (bridge_service.py's
+    # decide_verse and check-job completion hook).
+    #
+    # #77 normalised the old `.bridge/progress.json` into three workbench
+    # tables: one `progress_chapters` row per chapter (verseCount, aiChecked,
+    # aiCheckedAt), one `progress_findings` row per finding id -> status, and
+    # one `progress_totals` row per book. `load_progress_rollup()` reassembles
+    # exactly the dict the file held, so no reader reshapes. Writing the totals
+    # also refreshes the app-level `project_progress_cache`, which is what the
+    # multi-book dashboard reads instead of opening every sibling's database.
 
-    def progress_rollup_path(self) -> Path:
-        return self.path / '.bridge' / 'progress.json'
+    def _progress_chapter_row_id(self, chapter: str) -> str:
+        return natural_row_id(self.workbench_identity.project_id, self.book_id, 'progress_chapter', chapter)
+
+    def _progress_finding_row_id(self, chapter: str, verse: str, finding_id: str) -> str:
+        return natural_row_id(
+            self.workbench_identity.project_id, self.book_id, 'progress_finding', chapter, verse, finding_id,
+        )
+
+    def _progress_totals_row_id(self) -> str:
+        return natural_row_id(self.workbench_identity.project_id, self.book_id, 'progress_totals')
 
     def load_progress_rollup(self) -> dict[str, Any]:
-        p = self.progress_rollup_path()
-        data: dict[str, Any] | None = None
-        if p.exists():
-            try:
-                loaded = _read_json(p)
-                if isinstance(loaded, dict):
-                    data = loaded
-            except Exception:
-                data = None
-        if data is None:
-            data = {'schemaVersion': 1, 'bookId': self.book_id, 'updatedAt': None, 'chapters': {}, 'totals': {}}
-        data.setdefault('schemaVersion', 1)
-        data.setdefault('bookId', self.book_id)
-        data.setdefault('chapters', {})
-        data.setdefault('totals', {})
-        return data
+        project_id = self.workbench_identity.project_id
+        chapters: dict[str, Any] = {}
+        for payload in self.workbench.payloads(
+            'progress_chapters', project_id=project_id, book_id=self.book_id,
+        ):
+            chapter = str(payload.get('chapter') or '')
+            if not chapter:
+                continue
+            listed = payload.get('checkedVerses')
+            chapters[chapter] = {
+                'verseCount': int(payload.get('verseCount') or 0),
+                'aiChecked': bool(payload.get('aiChecked')),
+                'aiCheckedAt': payload.get('aiCheckedAt'),
+                # A verse the job checked and found nothing in has no finding
+                # row, but it was checked: the file kept an empty entry for it
+                # and the QA report's coverage counts it as PASS, so the
+                # chapter row lists it.
+                'verses': {
+                    str(v): {'findings': {}} for v in (listed if isinstance(listed, list) else [])
+                },
+            }
+        for payload in self.workbench.payloads(
+            'progress_findings', project_id=project_id, book_id=self.book_id,
+        ):
+            chapter = str(payload.get('chapter') or '')
+            verse = str(payload.get('verse') or '')
+            finding_id = str(payload.get('findingId') or '')
+            if not (chapter and verse and finding_id):
+                continue
+            entry = chapters.setdefault(chapter, {
+                'verseCount': 0, 'aiChecked': False, 'aiCheckedAt': None, 'verses': {},
+            })
+            entry['verses'].setdefault(verse, {'findings': {}})['findings'][finding_id] = str(
+                payload.get('status') or ''
+            )
+        totals_rows = self.workbench.payloads(
+            'progress_totals', project_id=project_id, book_id=self.book_id,
+        )
+        totals = dict(totals_rows[0]) if totals_rows else {}
+        updated_at = totals.pop('updatedAt', None)
+        return {
+            'schemaVersion': 1, 'bookId': self.book_id, 'updatedAt': updated_at,
+            'chapters': chapters, 'totals': totals,
+        }
 
-    def save_progress_rollup(self, data: dict[str, Any]) -> Path:
-        p = self.progress_rollup_path()
-        data['updatedAt'] = self._timestamp()[0]
-        _write_json_atomic(p, data)
-        return p
+    def record_progress_decision(
+        self, chapter: str | int, verse: str | int, finding_id: str, status: str, *,
+        verse_count: int,
+    ) -> None:
+        """One human decision: the finding's row, plus the chapter row if this
+        is the first thing recorded for that chapter. One transaction."""
+        identity = self.workbench_identity
+        chapter_key, verse_key = str(chapter), str(verse)
+        chapter_row_id = self._progress_chapter_row_id(chapter_key)
+        chapter_exists = self.workbench.get('progress_chapters', chapter_row_id) is not None
+        with self.workbench.batch() as batch:
+            if not chapter_exists:
+                batch.write(
+                    'progress_chapters', chapter_row_id,
+                    project_id=identity.project_id, book_id=self.book_id,
+                    payload={
+                        'chapter': chapter_key, 'verseCount': int(verse_count),
+                        'aiChecked': False, 'aiCheckedAt': None, 'checkedVerses': [],
+                    },
+                    actor_id=identity.actor_id, device_id=identity.device_id,
+                    extra_columns={'chapter': chapter_key},
+                )
+            batch.write(
+                'progress_findings', self._progress_finding_row_id(chapter_key, verse_key, str(finding_id)),
+                project_id=identity.project_id, book_id=self.book_id,
+                payload={
+                    'chapter': chapter_key, 'verse': verse_key,
+                    'findingId': str(finding_id), 'status': str(status),
+                },
+                actor_id=identity.actor_id, device_id=identity.device_id,
+                extra_columns={'chapter': chapter_key},
+            )
+
+    def replace_progress_chapters(self, chapters: dict[str, dict[str, Any]]) -> None:
+        """A succeeded check job's result for exactly the chapters it covered.
+
+        Each chapter's row is rewritten and its finding rows replaced -- a
+        finding the new run no longer reports loses its row, as the whole
+        chapter entry was replaced in the file. Chapters not named are left
+        alone. One transaction for the whole job, so a book-wide run is one
+        commit rather than one per finding.
+        """
+        identity = self.workbench_identity
+        plan: list[tuple[str, dict[str, Any], dict[str, tuple[str, str, str]], list[str]]] = []
+        for chapter, entry in chapters.items():
+            chapter_key = str(chapter)
+            wanted: dict[str, tuple[str, str, str]] = {}
+            verses = entry.get('verses') if isinstance(entry.get('verses'), dict) else {}
+            for verse, verse_entry in verses.items():
+                findings = verse_entry.get('findings') if isinstance(verse_entry, dict) else None
+                for finding_id, status in (findings or {}).items():
+                    row_id = self._progress_finding_row_id(chapter_key, str(verse), str(finding_id))
+                    wanted[row_id] = (str(verse), str(finding_id), str(status))
+            # Read what exists before the write transaction opens, so the batch
+            # holds the write lock for as short a time as possible.
+            stale = [
+                str(row['id']) for row in self.workbench.rows(
+                    'progress_findings', project_id=identity.project_id, book_id=self.book_id,
+                    equals={'chapter': chapter_key},
+                ) if str(row['id']) not in wanted
+            ]
+            plan.append((chapter_key, entry, wanted, stale))
+        with self.workbench.batch() as batch:
+            for chapter_key, entry, wanted, stale in plan:
+                batch.write(
+                    'progress_chapters', self._progress_chapter_row_id(chapter_key),
+                    project_id=identity.project_id, book_id=self.book_id,
+                    payload={
+                        'chapter': chapter_key,
+                        'verseCount': int(entry.get('verseCount') or 0),
+                        'aiChecked': bool(entry.get('aiChecked')),
+                        'aiCheckedAt': entry.get('aiCheckedAt'),
+                        'checkedVerses': [str(v) for v in (
+                            entry.get('verses') if isinstance(entry.get('verses'), dict) else {}
+                        )],
+                    },
+                    actor_id=identity.actor_id, device_id=identity.device_id,
+                    extra_columns={'chapter': chapter_key},
+                )
+                for row_id in stale:
+                    batch.delete(
+                        'progress_findings', row_id,
+                        project_id=identity.project_id, book_id=self.book_id,
+                        actor_id=identity.actor_id, device_id=identity.device_id,
+                    )
+                for row_id, (verse, finding_id, status) in wanted.items():
+                    batch.write(
+                        'progress_findings', row_id,
+                        project_id=identity.project_id, book_id=self.book_id,
+                        payload={
+                            'chapter': chapter_key, 'verse': verse,
+                            'findingId': finding_id, 'status': status,
+                        },
+                        actor_id=identity.actor_id, device_id=identity.device_id,
+                        extra_columns={'chapter': chapter_key},
+                    )
+
+    def save_progress_totals(self, totals: dict[str, Any]) -> dict[str, Any]:
+        """Write the book's totals row and refresh the workspace cache from it.
+
+        The cache write happens after the workbench commit, from that commit's
+        change_log `seq`. A crash between the two leaves the workbench -- the
+        record -- correct, and the cache one step behind, which the next open
+        repairs (`sync_progress_cache`).
+        """
+        identity = self.workbench_identity
+        iso = self._timestamp()[0]
+        payload = {**dict(totals), 'updatedAt': iso}
+        receipt = self.workbench._write(
+            'progress_totals', self._progress_totals_row_id(),
+            project_id=identity.project_id, book_id=self.book_id, payload=payload,
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None,
+        )
+        self.workspace.upsert_progress_cache(
+            self.path, project_id=identity.project_id, book_id=self.book_id,
+            totals=dict(totals), updated_at=iso, source_seq=int(receipt['seq']),
+        )
+        return receipt
+
+    def sync_progress_cache(self) -> str:
+        """Repair this project's entry in the workspace progress cache.
+
+        Called on project open. The entry is trusted only if its `source_seq`
+        is the change_log seq of the latest progress_totals write *and* it
+        names this project id and book -- a re-import at the same folder
+        starts a fresh workbench whose seq restarts, and the old entry would
+        otherwise look current by accident. Returns 'fresh', 'repaired' or
+        'cleared' so the caller can report what happened.
+        """
+        identity = self.workbench_identity
+        current_seq = self.workbench.max_seq(project_id=identity.project_id, table='progress_totals')
+        cached = self.workspace.progress_cache_entry(self.path)
+        if (
+            cached is not None
+            and cached['sourceSeq'] == current_seq
+            and cached['projectId'] == identity.project_id
+            and cached['bookId'] == self.book_id
+        ):
+            return 'fresh'
+        rows = self.workbench.payloads(
+            'progress_totals', project_id=identity.project_id, book_id=self.book_id,
+        )
+        if not rows:
+            if cached is not None:
+                self.workspace.forget_progress_cache([self.path])
+                return 'cleared'
+            return 'fresh'
+        totals = dict(rows[0])
+        updated_at = totals.pop('updatedAt', None)
+        self.workspace.upsert_progress_cache(
+            self.path, project_id=identity.project_id, book_id=self.book_id,
+            totals=totals, updated_at=updated_at, source_seq=current_seq,
+        )
+        return 'repaired'
 
 
-def read_progress_rollup(project_root: str | Path) -> dict[str, Any] | None:
-    """Peek at a sibling book's progress rollup without constructing a full
-    TranslationCoreProject (which requires a valid manifest.json) — used by
-    the dashboard to summarize collection siblings that may still be lazy."""
-    p = Path(project_root).resolve() / '.bridge' / 'progress.json'
-    if not p.is_file():
+def _workbench_db_path(project_root: str | Path) -> Path:
+    return Path(project_root).resolve() / '.apps' / 'translationCoreAI' / 'bridge-workbench.sqlite3'
+
+
+def _peek_workbench(project_root: str | Path) -> sqlite3.Connection | None:
+    """A read-only connection to a sibling's workbench database, or None.
+
+    For readers that must look at a book without constructing a
+    TranslationCoreProject: the dashboard and the triage report walk every
+    sibling in a collection, and a lazy sibling has no manifest, no
+    alignmentData and no workbench database. `mode=ro` guarantees this never
+    creates the file, and no migration runs -- a database newer than this
+    build understands is simply read as far as its tables allow.
+    """
+    db = _workbench_db_path(project_root)
+    if not db.is_file():
         return None
     try:
-        data = _read_json(p)
-    except Exception:
+        conn = sqlite3.connect(
+            'file:///' + _url_quote(db.as_posix(), safe='/:') + '?mode=ro', uri=True, timeout=5.0,
+        )
+    except sqlite3.Error:
         return None
-    return data if isinstance(data, dict) else None
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def peek_progress_totals(project_root: str | Path) -> dict[str, Any] | None:
+    """A sibling book's progress totals straight from its workbench database.
+
+    The dashboard's fallback for a materialized sibling with no entry in the
+    workspace cache (the workspace database was reset, or the folder arrived
+    from another machine); the caller writes what this returns into the cache
+    so the next dashboard load is one query again. None when there is no
+    database or no totals row.
+    """
+    conn = _peek_workbench(project_root)
+    if conn is None:
+        return None
+    try:
+        row = conn.execute(
+            'SELECT project_id, book_id, payload_json FROM progress_totals ORDER BY updated_at DESC LIMIT 1'
+        ).fetchone()
+        if row is None:
+            return None
+        seq = conn.execute(
+            "SELECT COALESCE(MAX(seq),0) FROM change_log WHERE project_id=? AND table_name='progress_totals'",
+            (row['project_id'],),
+        ).fetchone()[0]
+        payload = json.loads(row['payload_json'])
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+    finally:
+        conn.close()
+    if not isinstance(payload, dict):
+        return None
+    totals = dict(payload)
+    updated_at = totals.pop('updatedAt', None)
+    return {
+        'projectId': str(row['project_id']), 'bookId': str(row['book_id']),
+        'totals': totals, 'updatedAt': updated_at, 'sourceSeq': int(seq),
+    }
 
 
 def read_triage_records(project_root: str | Path, book_id: str) -> dict[str, Any] | None:
