@@ -14,6 +14,7 @@ deleted, because that is a product call.
 """
 from __future__ import annotations
 
+import itertools
 import os
 import time
 import uuid
@@ -22,6 +23,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .workbench_repository import natural_row_id
+
+_EVENT_SEQUENCE = itertools.count()
 
 
 class MetricsStore:
@@ -70,11 +73,12 @@ class MetricsStore:
         }
         identity = self.project.workbench_identity
         # Rows read back ordered by created_at then id. created_at is only as
-        # fine as the platform clock (about a millisecond on Windows), so two
-        # events in one tick would otherwise come back in uuid order; a
-        # nanosecond prefix on the id keeps the stream in the order it was
-        # written.
-        event_id = f"{time.time_ns():020d}-{uuid.uuid4().hex[:12]}"
+        # fine as the platform clock -- on Windows both datetime.now and
+        # time.time_ns advance in ~15 ms ticks, so several events in one tick
+        # would come back in uuid order. The id is the wall clock (orders
+        # across sessions) then a per-process counter (orders within a tick),
+        # then a little entropy so two processes in one tick cannot collide.
+        event_id = f"{time.time_ns():020d}-{next(_EVENT_SEQUENCE):08d}-{uuid.uuid4().hex[:8]}"
         with self.project.workbench.batch() as batch:
             batch.write(
                 'metrics_events', event_id,

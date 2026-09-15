@@ -1107,6 +1107,12 @@ class WorkbenchBatch:
     def __init__(self, repository: WorkbenchRepository, conn: sqlite3.Connection):
         self._repository = repository
         self._conn = conn
+        # One transaction, one timestamp: every row and event the batch
+        # writes carries the same created_at unless the caller supplies its
+        # own (sync import does, to keep the originating machine's). Without
+        # this, two rows written microseconds apart in the same commit sort
+        # apart by created_at, which is not what "one change" means.
+        self._created_at = repository._now()
 
     def get(self, table: str, row_id: str) -> dict[str, Any] | None:
         """One row as this transaction sees it -- including rows the batch
@@ -1135,6 +1141,7 @@ class WorkbenchBatch:
             payload=payload, actor_id=actor_id, device_id=device_id,
             expected_revision=expected_revision, op=op,
             extra_columns=extra_columns, journal_tx_id=journal_tx_id,
+            created_at=self._created_at,
         )
 
     def delete(
@@ -1151,4 +1158,5 @@ class WorkbenchBatch:
         return self._repository._delete_in(
             self._conn, table, row_id, project_id=project_id, book_id=book_id,
             actor_id=actor_id, device_id=device_id, expected_revision=expected_revision,
+            created_at=self._created_at,
         )
