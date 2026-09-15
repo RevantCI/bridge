@@ -236,8 +236,10 @@ def test_an_empty_legacy_directory_does_not_block_opening(tmp_path):
 
 
 def test_an_audit_directory_alone_does_not_block_opening(tmp_path):
-    """`audit/` tails are still written as files, so their presence says
-    nothing about which build created the project."""
+    """`audit/` is not written any more, but its presence still says nothing
+    about which build created the project: it was a derived shadow of records
+    held elsewhere, never a store of its own, and projects written before it
+    was removed still carry the tails."""
     from tc_ai_bridge.tc_project import TranslationCoreProject
 
     root = _build_minimal_project(tmp_path / "rut")

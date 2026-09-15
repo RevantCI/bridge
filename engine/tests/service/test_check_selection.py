@@ -13,13 +13,29 @@ from bridge_service import BridgeEngine
 from greek_room_engine.protocol import EngineRequest
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.tc_project import ProjectError, TranslationCoreProject
-import tc_ai_bridge.tc_project as tc_project_module
 
 
 def _write_json(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 
+
+
+def _selection_provenance(project_root: Path, chapter: str, verse: str, check_id: str) -> dict:
+    """The newest check-selection provenance event for one check."""
+    from tc_ai_bridge.workbench_repository import natural_row_id
+
+    project = TranslationCoreProject(project_root)
+    identity = project.workbench_identity
+    row_key = natural_row_id(
+        identity.project_id, project.book_id, "check_selection",
+        str(chapter), str(verse), str(check_id),
+    )
+    events = project.workbench.events_for_row(
+        "human_decisions", row_key, project_id=identity.project_id,
+    )
+    assert events, "no check selection provenance event was recorded"
+    return json.loads(events[-1]["payload_json"])
 
 @pytest.fixture
 def check_project(tmp_path: Path) -> Path:
@@ -236,12 +252,18 @@ def test_human_save_writes_native_state_and_survives_restart(check_project, tmp_
     assert mutation["review"]["provenance"] == "human"
     selection_record = json.loads(Path(mutation["files"]["selection"]).read_text(encoding="utf-8"))
     invalid_record = json.loads(Path(mutation["files"]["invalidated"]).read_text(encoding="utf-8"))
-    audit_record = json.loads(Path(mutation["files"]["audit"]).read_text(encoding="utf-8"))
     assert selection_record["selections"] == [selection]
     assert selection_record["nothingToSelect"] is False
     assert invalid_record["invalidated"] is False
+    assert "audit" not in mutation["files"]
+
+    # The Bridge-side provenance is a `change_log` event now, not a file. The
+    # native selection record cannot hold it: it has `username`, a display
+    # string, and no place for which interface the human used.
+    audit_record = _selection_provenance(check_project, "1", "1", "tn-1")
     assert audit_record["provenance"] == "human"
     assert audit_record["metadata"] == {"reason": "manual review"}
+    assert audit_record["operation"] == "tcCheckSelectionSave"
 
     restarted = _engine(tmp_path / "restart")
     _open(restarted, check_project)
@@ -427,20 +449,24 @@ def test_scripture_edit_invalidates_selection_without_calling_it_failed(check_pr
     assert rechecked["result"]["review"]["stale"] is False
 
 
-def test_native_and_audit_files_roll_back_if_transaction_write_fails(check_project, monkeypatch):
+def test_native_files_roll_back_if_the_provenance_write_fails(check_project, monkeypatch):
+    """The last write in the transaction was the `audit/` file; it is a
+    `change_log` event now, and the rollback guarantee is unchanged.
+
+    It matters more than it did as a file. A selection whose provenance never
+    recorded is one nobody can attribute to a human or to Bridge AI, and that
+    attribution exists in no other record.
+    """
     project = TranslationCoreProject(check_project)
     review = project.check_review("1", "1", "translationNotes", "figs-metaphor", "tn-1")
     index_path = check_project / ".apps" / "translationCore" / "index" / "translationNotes" / "tit" / "figs-metaphor.json"
     before = index_path.read_bytes()
-    real_write = tc_project_module._write_json_atomic
 
-    def fail_on_audit(path: Path, data) -> None:
-        if "tc-selection" in Path(path).name:
-            raise OSError("simulated audit write failure")
-        real_write(path, data)
+    def fail_on_provenance(*args, **kwargs):
+        raise OSError("simulated provenance write failure")
 
-    monkeypatch.setattr(tc_project_module, "_write_json_atomic", fail_on_audit)
-    with pytest.raises(OSError, match="simulated audit"):
+    monkeypatch.setattr(project, "_record_check_selection_provenance", fail_on_provenance)
+    with pytest.raises(OSError, match="simulated provenance"):
         project.save_check_selection(
             "1", "1", "translationNotes", "figs-metaphor", "tn-1",
             [{"text": "beta", "occurrence": 1, "occurrences": 1}], False,

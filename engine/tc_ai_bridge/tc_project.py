@@ -66,9 +66,11 @@ _PARATEXT_SYNC_STATE_KEY = 'paratext_live_sync_state'
 # Directories that held human-owned records before #76 moved those stores into
 # `bridge-workbench.sqlite3`. A project containing any of them was written by a
 # pre-cutover build and is not upgraded -- see TEAM_ARCHITECTURE.md ss3.5 for why
-# there is no migration. `audit/` is deliberately absent: audit tails are still
-# written as files, so their presence says nothing about which build made the
-# project.
+# there is no migration. `audit/` is deliberately absent, and stays absent now
+# that Bridge no longer writes it: it was always a derived shadow of records
+# held elsewhere, never a store in its own right. Projects on disk still carry
+# those tails, and refusing to open on them would reject projects whose actual
+# stores are fine.
 _PRE_CUTOVER_STORE_DIRS = (
     'decisions', 'qaDecisions', 'review', 'terminology', 'aiReview',
     'issueResolutions', 'alignmentHistory', 'alignmentDiagnostics',
@@ -691,8 +693,6 @@ class TranslationCoreProject:
             self.journal.commit(tx,{'operation':'tcCommentSync','checkId':ctx.get('checkId','')})
         except Exception as e:
             self.journal.rollback(tx,str(e)); raise
-        audit=self.companion_dir()/'audit'/self.book_id/str(chapter)/str(verse)/f'{safe}_tc-comment.json'
-        _write_json_atomic(audit,{'operation':'tcCommentSync','path':str(path),'text':text,'username':username,'modifiedTimestamp':iso,'contextId':ctx})
         return path
 
 
@@ -1448,6 +1448,40 @@ class TranslationCoreProject:
         )
         return row_id
 
+    def _record_check_selection_provenance(
+        self, chapter: str | int, verse: str | int, tool: str, group_id: str,
+        check_id: str, record: dict[str, Any], *, journal_tx_id: str | None = None,
+    ) -> str:
+        """Append one check selection's Bridge-side provenance to `change_log`.
+
+        This was a file under `audit/`, a shadow of the native selection record
+        with two fields the native one has no place for. It is an event, not a
+        row image: the native `checkData/selections/` file is still the record,
+        and this says who chose it and what they were looking at. `change_log`
+        is where an event with no row of its own belongs, and its append-only
+        triggers enforce what the file layout only implied.
+
+        Keyed to the `human_decisions` row for the same check, so a reader that
+        wants the decision and its provenance asks for one row key, not two.
+        """
+        identity = self.workbench_identity
+        row_key = natural_row_id(
+            identity.project_id, self.book_id, 'check_selection',
+            str(chapter), str(verse), str(check_id),
+        )
+        return self.workbench.append_event(
+            'human_decisions', row_key,
+            project_id=identity.project_id, book_id=self.book_id,
+            op=str(record.get('operation') or 'tcCheckSelectionSave'),
+            payload={
+                'bookId': self.book_id, 'chapter': str(chapter), 'verse': str(verse),
+                'tool': tool, 'groupId': group_id, 'checkId': str(check_id),
+                **copy.deepcopy(record),
+            },
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            journal_tx_id=journal_tx_id,
+        )
+
     def _human_decision_payloads(
         self, *, kind: str, chapter: str | int | None = None, verse: str | int | None = None,
     ) -> list[dict[str, Any]]:
@@ -1907,20 +1941,16 @@ class TranslationCoreProject:
         state_root = self.check_dir
         suffix = ''
         counter = 0
-        safe_check_id = ''.join(
-            char if char.isalnum() or char in ('-', '_') else '_' for char in str(check_id)
-        )[:120] or 'check'
         while True:
             stem = f'{safe}{suffix}'
             sel_path = state_root / 'selections' / self.book_id / str(chapter) / str(verse) / f'{stem}.json'
             inv_path = state_root / 'invalidated' / self.book_id / str(chapter) / str(verse) / f'{stem}.json'
-            audit = self.companion_dir() / 'audit' / self.book_id / str(chapter) / str(verse) / f'{stem}_tc-selection_{safe_check_id}.json'
-            if not sel_path.exists() and not inv_path.exists() and not audit.exists():
+            if not sel_path.exists() and not inv_path.exists():
                 break
             counter += 1
             suffix = f'-{counter}'
 
-        tx_paths = [path, sel_path, inv_path, audit]
+        tx_paths = [path, sel_path, inv_path]
         existed = {str(x.resolve()): x.exists() for x in tx_paths}
         backup = self._backup_paths(tx_paths, 'checkDataSync')
         journal_tx = self.journal.begin('checkDataSync', tx_paths)
@@ -1946,7 +1976,14 @@ class TranslationCoreProject:
             'gatewayLanguageQuote': gateway_language_quote,
             'modifiedTimestamp': iso,
         }
-        audit_record = {
+        # Not a file any more, but not droppable either: `provenance`
+        # (human vs bridge_ai) and `metadata` (which interface the human used,
+        # and whether AI evidence was on screen when they chose) exist in no
+        # other record. The native selection record only has `username`, a
+        # display string. Given Bridge's three-way split -- Greek Room suspects,
+        # AI interprets, the human decides -- that is not reconstructable once
+        # it stops being written.
+        selection_provenance = {
             'operation': 'tcCheckSelectionClear' if clear else 'tcCheckSelectionSave',
             'tool': tool,
             'groupId': group_id,
@@ -1969,9 +2006,12 @@ class TranslationCoreProject:
             entry['verseEdits'] = False
             data[idx] = entry
             _write_json_atomic(path, data)
-            _write_json_atomic(audit, audit_record)
+            self._record_check_selection_provenance(
+                chapter, verse, tool, group_id, check_id, selection_provenance,
+                journal_tx_id=journal_tx.transaction_id,
+            )
             self.journal.commit(journal_tx, {
-                'operation': audit_record['operation'], 'tool': tool, 'checkId': check_id,
+                'operation': selection_provenance['operation'], 'tool': tool, 'checkId': check_id,
             })
         except Exception as exc:
             try:
@@ -1989,7 +2029,7 @@ class TranslationCoreProject:
             'review': self.check_review(chapter, verse, tool, group_id, check_id),
             'files': {
                 'selection': str(sel_path), 'invalidated': str(inv_path),
-                'index': str(path), 'audit': str(audit), 'backup': str(backup),
+                'index': str(path), 'backup': str(backup),
             },
         }
 
@@ -2356,8 +2396,6 @@ class TranslationCoreProject:
                 chapter, verse, 'stale',
                 reason='Scripture text changed; the saved issue resolution requires a new AI review.',
             )
-            audit = self.companion_dir() / 'audit' / self.book_id / str(chapter) / str(verse) / f'{safe}_scripture-edit.json'
-            _write_json_atomic(audit, {'operation':'scriptureEdit','verseBefore':old_text,'verseAfter':new_text,'tags':list(tags or ['meaning']),'username':username,'backup':str(backup),'modifiedTimestamp':iso})
         except Exception:
             pass
         return {'oldText': old_text, 'newText': new_text, 'backup': str(backup), 'verseEdit': str(edit_path), 'alignmentInvalid': str(invalid), 'indexesTouched': touched, 'semanticInvalidation': semantic_invalidation, 'journalTransactionId': journal_tx.transaction_id}
