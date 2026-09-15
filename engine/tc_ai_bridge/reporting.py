@@ -170,7 +170,7 @@ class ReportService:
     def _metrics(self):
         try:
             from .metrics import MetricsStore
-            return MetricsStore(self.project.companion_dir(),self.project.book_id).summary()
+            return MetricsStore(self.project).summary()
         except Exception:return {}
 
     def export(self,out_dir:Path)->dict[str,str]:

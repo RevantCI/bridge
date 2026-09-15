@@ -82,7 +82,7 @@ _PRE_CUTOVER_STORE_DIRS = (
     # carrying them was reviewed on a build whose check results, triage
     # verdicts and progress this build cannot see, and showing "not checked"
     # for a checked book is the same silent-empty failure.
-    'checkFindings', 'triage',
+    'checkFindings', 'triage', 'metrics',
 )
 # Single files, relative to the project root, that #77 moved the same way.
 # The progress rollup lived under `.bridge/`, not the companion dir, and
@@ -1155,7 +1155,37 @@ class TranslationCoreProject:
         dst = self.companion_dir() / 'backups' / stamp / 'alignmentData' / self.book_id / src.name
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
+        self._index_backups([dst], label='alignmentData', stamp=stamp)
         return dst
+
+    # -- backups index --------------------------------------------------------
+    #
+    # The backup files themselves stay on disk (TEAM_ARCHITECTURE.md ss3.4:
+    # crash recovery must not depend on a database opening). `file_backups`
+    # is only an index over them, so a reader can ask "which backups exist
+    # for this chapter" with one query instead of walking `backups/`.
+
+    def _index_backups(self, files: list[Path], *, label: str, stamp: str) -> None:
+        if not files:
+            return
+        identity = self.workbench_identity
+        root = (self.companion_dir() / 'backups').resolve()
+        with self.workbench.batch() as batch:
+            for file in files:
+                resolved = file.resolve()
+                try:
+                    relative = resolved.relative_to(root).as_posix()
+                except ValueError:
+                    relative = resolved.as_posix()
+                batch.write(
+                    'file_backups', natural_row_id(identity.project_id, self.book_id, 'file_backup', relative),
+                    project_id=identity.project_id, book_id=self.book_id,
+                    payload={
+                        'path': str(resolved), 'relativePath': relative, 'label': label,
+                        'stamp': stamp, 'name': resolved.name,
+                    },
+                    actor_id=identity.actor_id, device_id=identity.device_id,
+                )
 
     def save_verse_alignment(
         self,
@@ -1348,10 +1378,19 @@ class TranslationCoreProject:
 
 
     def list_alignment_backups(self, chapter: str | int) -> list[Path]:
-        root = self.companion_dir() / 'backups'
-        if not root.exists():
-            return []
-        found = list(root.glob(f'*/alignmentData/{self.book_id}/{chapter}.json'))
+        """Newest first. Read from the `file_backups` index rather than a
+        directory walk; an indexed file that has since gone is skipped."""
+        suffix = f'/alignmentData/{self.book_id}/{chapter}.json'
+        found: list[Path] = []
+        for payload in self.workbench.payloads(
+            'file_backups', project_id=self.workbench_identity.project_id, book_id=self.book_id,
+        ):
+            relative = str(payload.get('relativePath') or '')
+            if payload.get('label') != 'alignmentData' or not relative.endswith(suffix):
+                continue
+            path = Path(str(payload.get('path') or ''))
+            if path.is_file():
+                found.append(path)
         return sorted(found, key=lambda x: x.parts[-4], reverse=True)
 
     def restore_alignment_backup(self, chapter: str | int, backup_path: str | Path) -> Path:
@@ -1613,6 +1652,7 @@ class TranslationCoreProject:
         """Back up existing project files before a multi-file tC-compatible transaction."""
         iso, safe = self._timestamp()
         root = self.companion_dir() / 'backups' / safe / label
+        copied: list[Path] = []
         for path in paths:
             if not path.exists():
                 continue
@@ -1623,6 +1663,8 @@ class TranslationCoreProject:
             dst = root / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(path, dst)
+            copied.append(dst)
+        self._index_backups(copied, label=label, stamp=safe)
         return root
 
     def _rollback_paths(self, backup_root: Path, paths: list[Path], existed: dict[str, bool]) -> None:
