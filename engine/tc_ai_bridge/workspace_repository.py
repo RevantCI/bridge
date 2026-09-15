@@ -317,20 +317,35 @@ class WorkspaceRepository:
         updated_at: str | None,
         source_seq: int,
     ) -> None:
+        self.upsert_progress_cache_many([{
+            "projectPath": project_path, "projectId": project_id, "bookId": book_id,
+            "totals": totals, "updatedAt": updated_at, "sourceSeq": source_seq,
+        }])
+
+    def upsert_progress_cache_many(self, entries: list[dict[str, Any]]) -> None:
+        """Several entries in one commit. The dashboard's cold-cache refill
+        peeks every sibling with no entry and writes them all back; one
+        transaction is one fsync instead of one per book."""
+        if not entries:
+            return
+        now = self._now()
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            conn.execute(
-                "INSERT INTO project_progress_cache(path_key, project_path, project_id, book_id, "
-                "totals_json, updated_at, source_seq, refreshed_at) VALUES(?,?,?,?,?,?,?,?) "
-                "ON CONFLICT(path_key) DO UPDATE SET project_path=excluded.project_path, "
-                "project_id=excluded.project_id, book_id=excluded.book_id, "
-                "totals_json=excluded.totals_json, updated_at=excluded.updated_at, "
-                "source_seq=excluded.source_seq, refreshed_at=excluded.refreshed_at",
-                (
-                    project_path_key(project_path), str(Path(project_path)), project_id, book_id,
-                    json.dumps(totals, ensure_ascii=False), updated_at, int(source_seq), self._now(),
-                ),
-            )
+            for entry in entries:
+                conn.execute(
+                    "INSERT INTO project_progress_cache(path_key, project_path, project_id, book_id, "
+                    "totals_json, updated_at, source_seq, refreshed_at) VALUES(?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(path_key) DO UPDATE SET project_path=excluded.project_path, "
+                    "project_id=excluded.project_id, book_id=excluded.book_id, "
+                    "totals_json=excluded.totals_json, updated_at=excluded.updated_at, "
+                    "source_seq=excluded.source_seq, refreshed_at=excluded.refreshed_at",
+                    (
+                        project_path_key(entry["projectPath"]), str(Path(entry["projectPath"])),
+                        str(entry["projectId"]), str(entry["bookId"]),
+                        json.dumps(entry["totals"], ensure_ascii=False), entry.get("updatedAt"),
+                        int(entry["sourceSeq"]), now,
+                    ),
+                )
             conn.commit()
 
     def progress_cache_entry(self, project_path: str | Path) -> dict[str, Any] | None:
@@ -340,7 +355,12 @@ class WorkspaceRepository:
     def progress_cache_for_paths(self, paths: list[str | Path]) -> dict[str, dict[str, Any]]:
         """Cached rollups for several project folders in one query, keyed by
         :func:`project_path_key`. Folders with no entry are simply absent."""
-        keys = [project_path_key(path) for path in paths]
+        return self.progress_cache_by_keys([project_path_key(path) for path in paths])
+
+    def progress_cache_by_keys(self, keys: list[str]) -> dict[str, dict[str, Any]]:
+        """:meth:`progress_cache_for_paths` for callers that already hold the
+        keys -- `project_path_key` resolves the path, and the dashboard has
+        66 of them to resolve exactly once."""
         if not keys:
             return {}
         out: dict[str, dict[str, Any]] = {}

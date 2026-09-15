@@ -697,27 +697,24 @@ class BridgeEngine:
                 "path": str(self.project.path), "bookId": self.project.book_id,
                 "bookName": self.project.summary.book_name, "lazy": False,
             }]
-        cache_candidates = [
-            str(entry.get("path") or "") for entry in siblings
-            if not entry.get("lazy") and Path(str(entry.get("path") or "")).is_dir()
-        ]
-        cached = self.workspace.progress_cache_for_paths(cache_candidates)
-        books: list[dict[str, Any]] = []
+        rows: list[tuple[dict[str, Any], Path, bool, bool, str]] = []
         for entry in siblings:
             path = Path(str(entry.get("path") or ""))
             lazy = bool(entry.get("lazy"))
-            progress = None
             missing = not path.is_dir()
-            if not lazy and not missing:
-                hit = cached.get(project_path_key(path))
+            key = project_path_key(path) if not lazy and not missing else ""
+            rows.append((entry, path, lazy, missing, key))
+        cached = self.workspace.progress_cache_by_keys([key for *_, key in rows if key])
+        refill: list[dict[str, Any]] = []
+        books: list[dict[str, Any]] = []
+        for entry, path, lazy, missing, key in rows:
+            progress = None
+            if key:
+                hit = cached.get(key)
                 if hit is None:
                     peeked = peek_progress_totals(path)
                     if peeked is not None:
-                        self.workspace.upsert_progress_cache(
-                            path, project_id=peeked["projectId"], book_id=peeked["bookId"],
-                            totals=peeked["totals"], updated_at=peeked["updatedAt"],
-                            source_seq=peeked["sourceSeq"],
-                        )
+                        refill.append({**peeked, "projectPath": path})
                         hit = peeked
                 if hit is not None:
                     progress = {**hit["totals"], "updatedAt": hit["updatedAt"]}
@@ -726,6 +723,9 @@ class BridgeEngine:
                 "bookName": str(entry.get("bookName") or ""), "lazy": lazy,
                 "missing": missing, "progress": progress,
             })
+        # Written after the walk, as one commit: a cold cache on a fully
+        # opened Bible is 66 peeks, and one fsync rather than 66.
+        self.workspace.upsert_progress_cache_many(refill)
         return {"books": books}
 
     def forget_project(self, project_id: str) -> dict[str, Any]:
