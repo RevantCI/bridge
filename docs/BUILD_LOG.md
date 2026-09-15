@@ -7794,3 +7794,123 @@ instructs its own deletion when Bridge has a first real user.
 The on-disk shape section now says the human-owned stores are mid-cutover and
 points at §3.5. `QA_TEST_MATRIX.md` is deliberately untouched: the row it needs
 is "a pre-cutover project refuses to open", which belongs with the cutover.
+
+## 2026-09-15 — #76 finishes: the last two semantic stores, the legacy import, and `audit/`
+
+Four commits. The first two are the mechanical half of the cutover; the third and
+fourth are behaviour changes, and both of them turned up something the briefs
+that scoped this work had wrong.
+
+### The two remaining stores
+
+`SemanticMappingStore` wrote `semanticMappings/<book>/<fingerprint>.json`;
+`semantic_validation_service` wrote one read-modify-write blob at
+`semanticValidation/irvtam-v0.1.json`. Both target tables already existed at
+workbench v1 with the right lifted columns — `semantic_mappings.fingerprint`
+with `UNIQUE(project_id, book_id, fingerprint)`, and
+`semantic_validation_runs.suite_id` — so neither needed a schema bump.
+
+Two things worth keeping in mind for the next store of this shape:
+
+**Book-case normalisation stopped being cosmetic.** `path_for()` lowercased its
+directory component, so callers had always been free to pass either case:
+`semantic_mapping_service` passes upper, `map_units` passes whatever the target
+index carries. As a directory, a case mismatch was a miss you would notice. Under
+`UNIQUE(project_id, book_id, fingerprint)` it is a *second row*, silently. The
+store normalises to lowercase, matching `book_id` everywhere else.
+
+**Both directories had to join `_PRE_CUTOVER_STORE_DIRS` in the same commit as
+their redirect.** Without that, a project holding the old files opens and ignores
+them — the same silent-empty failure this cutover has now produced four distinct
+ways.
+
+The validation blob keeps its append-only `audit` list by staying a
+read-modify-write of the whole payload, and each decision additionally appends to
+`change_log`. A row image can in principle be rewritten by a later caller; a
+`change_log` row cannot, because the triggers reject it. That is CLAUDE.md's
+"compacting a record must not compact its lifecycle events" enforced rather than
+intended.
+
+`auditPath` came out of both `semantic_validation_list` and
+`semantic_validation_decide`. The brief flagged only the `decide` return — there
+was a second one in `list`. Nothing consumed either: `SemanticMappingValidation.svelte`
+never reads the field, and `npm run check` is clean with it gone from
+`finding.ts` and `bridgeClient.ts`.
+
+### The legacy import was not untested, and it was not harmless
+
+`_migrate_legacy_companions()` ran inside `PassageSemanticRuntime.__init__`, so
+it re-ran on every runtime construction, and it de-duplicated on
+`(project_id, source_path, source_hash)` — a *content* hash. Both its remaining
+sources were rewritten by ordinary human work, so every confirm/reject/correct
+changed the digest and imported again. `save_evidence_record` is a plain INSERT
+with no `ON CONFLICT`, and the evidence id was minted per revision, so each
+decision left another `AI_RATIONALE` record, another `legacy-review` record, and
+`record_dependencies` edges to every target reference in the file — which pulled
+each orphan into the staleness graph, so every scripture edit marked them STALE.
+Nothing read any of it: `AI_RATIONALE` has no reader that selects by kind, and
+the records carried empty source/target unit ids so nothing could cite them. The
+only full scan is `integrity_check`, which re-verifies their content hash. The
+accretion made that slower and did nothing else.
+
+So it was deleted, not repointed — the same call made for `aiReview` earlier in
+#76, but for a stronger reason. Repointing would have made a live defect
+permanent. The usual "preserve current behaviour" instinct is wrong when the
+current behaviour *is* the defect.
+
+**The brief said there was zero test coverage. That was wrong, and the way it was
+wrong is worth recording.** The claim rested on greps for
+`_migrate_legacy_companions`, `_import_legacy_file`, `legacy-evidence` and
+`legacy-review`. All four greps were accurate. But three tests in
+`test_passage_semantic_runtime.py` (8 cases) pinned this machinery under names
+containing none of those strings — `test_legacy_review_state_mapping_is_conservative`,
+`test_legacy_validation_is_history_only_and_hash_mismatch_is_stale`,
+`test_legacy_record_is_current_only_when_source_and_target_hashes_match` — and
+all eight failed the moment the code went. This is the third time in this cutover
+that a grep-shaped answer was confidently wrong; the lesson is the same one as
+#84's fifth insert site. A grep proves a string is absent, not that a behaviour
+is unpinned.
+
+Those eight tested only the deleted code, so they went with it. Replacing them:
+`test_reopening_after_a_decision_does_not_accrete_evidence_records`. Since
+nothing pinned the broken behaviour, the new test was checked against `aceb06f`
+with the two store redirects reverted, where it fails with exactly the accreted
+`legacy-evidence-<digest>` record. A test written after the fix is worth what its
+red run is worth.
+
+### `audit/`
+
+Three writers, zero readers, every file a duplicate of a native
+`checkData/` write made in the same transaction under a namespace Bridge
+invented. `sync_comment` and `apply_scripture_edit` are deleted outright.
+
+`_persist_check_selection` is redirected instead, because its record carries
+`provenance` (human vs bridge_ai) and `metadata` (which interface, and whether AI
+evidence was on screen) and those exist nowhere else — the native selection
+record has `username`, a display string. Given the three-way split the whole
+design rests on, that is not reconstructable once it stops being written.
+
+The brief proposed `change_log` with `table_name='check_selections'`. That would
+raise: `append_event` calls `_require_mutable_table`, and `check_selections` is
+neither in `MUTABLE_TABLES` nor a table. It goes to `human_decisions`, where
+check decisions already live, so the decision and its provenance share a row key.
+
+Also not in the brief, and the more valuable of the two test changes:
+`test_native_and_audit_files_roll_back_if_transaction_write_fails` injected its
+failure at the audit file write, which no longer exists. Rewritten to inject at
+the provenance write. The guarantee is unchanged and matters more now — a
+selection whose provenance never recorded is one nobody can attribute.
+
+### Gates
+
+Engine **1182 passed, 0 failed, serially** (10m37s) — the configuration CI
+actually runs. Frontend `npm run check` 0/0, `npm run test` 367 passed,
+`npm run build` clean. `src-tauri/` untouched, so cargo was not run.
+
+Under `-n auto` two wall-clock budget tests each failed once and passed alone in
+under two seconds: `test_live_greek_room_and_status_stay_responsive_during_check_preparation`
+and `test_build_corpus_stats_performance_over_a_realistically_sized_completed_corpus`.
+Both pass in the serial run above, so this is parallel contention, not a
+regression. They are not covered by `tests/support/waits.py`, which scales
+background-job waits rather than performance budgets. Filed separately rather
+than fixed here.

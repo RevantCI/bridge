@@ -165,20 +165,29 @@ A raw Scripture import becomes a translationCore-compatible book project:
                                                 the findings behind those ids, from the last succeeded
                                                 check job — what the project QA report reads
 <project>/.apps/translationCoreAI/bridge-workbench.sqlite3
-                                                schema v1 (#75). Created empty on every project open;
-                                                no store above has moved into it yet — that's #76/#77.
+                                                schema v1 (#75). Every human-owned store now lives
+                                                here (#76). `checkFindings/` above is still a file
+                                                tree — that's #77.
 ```
 
-**The human-owned stores are mid-cutover (#76).** `decisions/`, `qaDecisions/`,
-`review/`, `terminology/`, `aiReview/`, `issueResolutions/`, `alignmentHistory/`,
-`alignmentDiagnostics/` and `audit/` still live as JSON under
-`.apps/translationCoreAI/` and are still what the code reads and writes. They move
-into `bridge-workbench.sqlite3` in one cutover, with **no migration**: the
-maintainer confirmed there is no user data to preserve while Bridge is pre-release,
-so projects created before the cutover are not upgraded — they will refuse to open
-and be re-imported. Nothing is deleted from anyone's disk. See
-`docs/TEAM_ARCHITECTURE.md` §3.5, which records why the lazy-migration machinery
-was built and then removed.
+**The human-owned stores have moved (#76, 2026-09-15).** `decisions/`,
+`qaDecisions/`, `review/`, `terminology/`, `aiReview/`, `issueResolutions/`,
+`alignmentHistory/`, `alignmentDiagnostics/`, `semanticMappings/` and
+`semanticValidation/` are rows in `bridge-workbench.sqlite3`, not JSON trees.
+There is **no migration**: the maintainer confirmed there is no user data to
+preserve while Bridge is pre-release, so a project holding any of those
+directories refuses to open and is re-imported. Nothing is deleted from anyone's
+disk. Those ten names are `_PRE_CUTOVER_STORE_DIRS` in `tc_project.py` — a store
+that moves must be added there in the same commit, or an old project opens and
+silently ignores its own records. See `docs/TEAM_ARCHITECTURE.md` §3.5 for why
+the lazy-migration machinery was built and then removed.
+
+`audit/` is the exception and is **not** in that list. It was a write-only shadow
+of records already held natively under `.apps/translationCore/checkData/`, and
+Bridge no longer writes it; the one field that existed nowhere else — a check
+selection's `provenance`/`metadata` — is now a `change_log` event. Projects on
+disk still carry the old tails, and their presence says nothing about which build
+made the project, so they must not be treated as pre-cutover.
 
 `TranslationCoreProject` (`tc_ai_bridge/tc_project.py`) is the reader/writer
 for this; `project_import.py` is the normalizer. translationNotes/Words are
