@@ -21,7 +21,6 @@ from tc_ai_bridge.passage_semantic_repository import (
     FoundationValidationError,
 )
 from tc_ai_bridge.passage_semantic_runtime import (
-    PassageSemanticRuntime,
     _canonical_reference,
     build_current_text_overlay,
     tokenize_target_text,
@@ -399,84 +398,6 @@ def test_pending_invalidation_uses_current_revision_cas(tmp_path: Path) -> None:
         repo.apply_target_invalidation(
             competing, actual_text_hash="second", text_revision="revision-second",
         )
-
-
-@pytest.mark.parametrize(("decision", "expected"), [
-    ("confirmed", ReviewStatus.HUMAN_APPROVED),
-    ("corrected", ReviewStatus.HUMAN_MODIFIED),
-    ("edited", ReviewStatus.HUMAN_MODIFIED),
-    ("rejected", ReviewStatus.HUMAN_REJECTED),
-    ("unsure", ReviewStatus.NEEDS_DISCUSSION),
-    ("unconfirmed", ReviewStatus.AI_PROPOSED),
-])
-def test_legacy_review_state_mapping_is_conservative(
-    tmp_path: Path, stage4_project: Path, decision: str, expected: ReviewStatus,
-) -> None:
-    project = TranslationCoreProject(stage4_project)
-    runtime = PassageSemanticRuntime(project, "legacy-test")
-    assert runtime._legacy_review_status({"decision": decision}) == expected
-
-
-def test_legacy_validation_is_history_only_and_hash_mismatch_is_stale(
-    tmp_path: Path, stage4_project: Path,
-) -> None:
-    legacy = (
-        stage4_project / ".apps" / "translationCoreAI" / "semanticValidation" /
-        "irvtam-v0.1.json"
-    )
-    legacy.parent.mkdir(parents=True)
-    legacy.write_text(json.dumps({
-        "schema": "bridge.semantic_mapping_validation_audit.v0.1",
-        "targetContentHash": "definitely-not-current",
-        "decisions": {
-            "candidate-1": {
-                "decision": "confirmed", "reviewer": "Corpus Reviewer",
-                "updatedAt": "2026-08-31T12:00:00+00:00",
-            },
-        },
-    }), encoding="utf-8")
-
-    engine = _engine(tmp_path)
-    _call(engine, "project.open", {"path": str(stage4_project)})
-    report = engine.passage_semantic_runtime.migration_report()
-    imported = next(
-        run for run in report["runs"]
-        if run["sourceSchema"] == "bridge.semantic_mapping_validation_audit.v0.1"
-    )
-    assert imported["report"]["reviewStatus"] == "HUMAN_APPROVED"
-    assert imported["report"]["lifecycleStatus"] == "STALE"
-    evidence_id = imported["report"]["evidenceId"]
-    history = engine.passage_semantic_runtime.repository.review_records(
-        "EVIDENCE_RECORD", evidence_id,
-    )
-    assert any(
-        item["actorId"] == "Corpus Reviewer"
-        and "candidate-1: confirmed" in item["note"]
-        for item in history
-    )
-    assert not engine.passage_semantic_runtime.repository.token_lineage_candidates(
-        engine.passage_semantic_runtime.project_id
-    )
-
-
-def test_legacy_record_is_current_only_when_source_and_target_hashes_match(
-    tmp_path: Path, stage4_project: Path,
-) -> None:
-    engine = _engine(tmp_path)
-    _call(engine, "project.open", {"path": str(stage4_project)})
-    runtime = engine.passage_semantic_runtime
-    lock = runtime.repository.source_lock(runtime.project_id, "RUT")
-    target = {"RUT 1:1": "புதிய தற்போதைய வசனம்."}
-    payload = {
-        "sourceResourceHash": lock["resource_hash"],
-        "targetContentHash": runtime.repository.target_content_hash(target),
-        "result": {"mappings": [{
-            "target_spans": [{"reference": "RUT 1:1", "quote": "புதிய"}],
-        }]},
-    }
-    assert runtime._legacy_lifecycle(payload) == LifecycleStatus.ACTIVE
-    payload["sourceResourceHash"] = "old-source"
-    assert runtime._legacy_lifecycle(payload) == LifecycleStatus.STALE
 
 
 def test_open_and_passage_rebuild_do_not_mutate_scripture_or_native_alignment(

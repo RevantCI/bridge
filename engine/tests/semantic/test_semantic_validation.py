@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.semantic_validation_service import (
     _load_audit, decide_semantic_validation_candidate, list_semantic_validation_candidates,
 )
+from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime
 from tc_ai_bridge.tc_project import TranslationCoreProject
 from tc_ai_bridge.usfm_passages import UsfmPassageIndex
 
@@ -177,3 +179,48 @@ def test_validation_protocol_requires_reviewer_and_survives_dispatch(
     )).to_dict()
     assert missing_reviewer["success"] is False
     assert "Reviewer name is required" in missing_reviewer["error"]["message"]
+
+
+def _evidence_ids(runtime: PassageSemanticRuntime) -> set[str]:
+    with sqlite3.connect(str(runtime.repository.path)) as conn:
+        return {str(row[0]) for row in conn.execute("SELECT id FROM evidence_records")}
+
+
+def test_reopening_after_a_decision_does_not_accrete_evidence_records(
+    php_validation_project, validation_manifest,
+):
+    """A human validation decision must never become AI evidence.
+
+    Until #76 the validation audit was a companion file that
+    `_migrate_legacy_companions` imported on every `PassageSemanticRuntime`
+    construction, de-duplicated on the file's own content hash. Every decision
+    changed that content, so the next open imported a *fresh* `AI_RATIONALE`
+    evidence record -- of a kind no reader selects by, built with empty
+    source/target unit ids so nothing could ever cite it, and carrying
+    dependency edges that pulled each orphan into the staleness graph.
+
+    Nothing pinned that behaviour in either direction, which is exactly why it
+    survived. This pins the fixed behaviour: deciding, then reopening, adds no
+    evidence at all.
+    """
+    project = TranslationCoreProject(php_validation_project)
+    runtime = PassageSemanticRuntime(project, "php-validation")
+    before = _evidence_ids(runtime)
+
+    decide_semantic_validation_candidate(
+        project, candidate_id="php-1-3-validation", decision="confirmed",
+        reviewer="Benz",
+    )
+    # A second decision changes the stored state again -- the case the old
+    # content-hash dedupe could not skip.
+    decide_semantic_validation_candidate(
+        project, candidate_id="php-1-3-validation", decision="unsure",
+        reviewer="Consultant", note="Needs group review",
+    )
+
+    reopened = PassageSemanticRuntime(
+        TranslationCoreProject(php_validation_project), "php-validation",
+    )
+    after = _evidence_ids(reopened)
+    assert after == before
+    assert not [item for item in after if item.startswith("legacy-")]

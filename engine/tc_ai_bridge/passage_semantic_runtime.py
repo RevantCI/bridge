@@ -24,17 +24,12 @@ import regex
 
 from .original_language_resources import resource_for_book
 from .passage_semantic_models import (
-    ActorType,
     CharacterSpan,
-    EvidenceKind,
-    EvidenceRecord,
     LifecycleStatus,
     PassageRecord,
     PassageStructureKind,
     PassageStructureMarker,
     PolicyBinding,
-    ResourceValidationStatus,
-    ReviewStatus,
     SemanticUnitProvenance,
     TokenInstance,
     TokenKind,
@@ -582,7 +577,15 @@ class PassageSemanticRuntime:
         self.correction_wording = CorrectionWordingService(self)
         self.correction_application_recovery = CorrectionApplicationRecoveryCoordinator(self)
         self.application_recovery = self.correction_application_recovery.reconcile_incomplete()
-        self._migrate_legacy_companions()
+        # `_migrate_legacy_companions()` used to run here. It imported
+        # `semanticMappings/` and `semanticValidation/` companion files as
+        # AI_RATIONALE evidence, and #76 moved both stores into the workbench
+        # database. Deleted rather than repointed: it de-duplicated on file
+        # content, so every human decision changed the digest and imported a
+        # *new* evidence record, for a kind nothing reads. See the commit that
+        # removed it. What remains is the alignment scan, which is a real
+        # content-addressed compatibility check and always was.
+        self.synchronize_alignment_state()
 
     def _identity_fingerprint(self) -> str:
         manifest = self.project.manifest
@@ -959,190 +962,6 @@ class PassageSemanticRuntime:
                 relation="POSSIBLE_SUCCESSOR", confidence=1.0,
                 reason_code="EXACT_NORMALIZED_OCCURRENCE_SIGNATURE",
             )
-
-    def _legacy_review_status(self, payload: dict[str, Any]) -> ReviewStatus:
-        decisions: list[str] = []
-        confirmations = payload.get("humanConfirmations")
-        if isinstance(confirmations, dict):
-            decisions.extend(str(item.get("decision") or "") for item in confirmations.values() if isinstance(item, dict))
-        validation_decisions = payload.get("decisions")
-        if isinstance(validation_decisions, dict):
-            decisions.extend(
-                str(item.get("decision") or item.get("status") or "")
-                for item in validation_decisions.values() if isinstance(item, dict)
-            )
-        if isinstance(payload.get("decision"), str):
-            decisions.append(str(payload["decision"]))
-        normalized = {item.lower() for item in decisions}
-        if normalized & {"corrected", "edited", "human_corrected"}:
-            return ReviewStatus.HUMAN_MODIFIED
-        if normalized & {"rejected", "human_rejected"}:
-            return ReviewStatus.HUMAN_REJECTED
-        if normalized & {"confirmed", "human_confirmed", "approved", "human_approved"}:
-            return ReviewStatus.HUMAN_APPROVED
-        if normalized & {"unsure", "needs_discussion"}:
-            return ReviewStatus.NEEDS_DISCUSSION
-        return ReviewStatus.AI_PROPOSED
-
-    def _legacy_lifecycle(self, payload: dict[str, Any]) -> LifecycleStatus:
-        old_hash = str(payload.get("targetContentHash") or payload.get("target_content_hash") or "")
-        old_source_hash = str(
-            payload.get("sourceResourceHash") or payload.get("source_resource_hash") or ""
-        )
-        refs = self._legacy_target_references(payload)
-        lock = self.repository.source_lock(self.project_id, self.book)
-        source_matches = bool(
-            old_source_hash and lock is not None and old_source_hash == lock["resource_hash"]
-        )
-        current = current_target_text(self.project)
-        selected = {reference: current[reference] for reference in sorted(refs) if reference in current}
-        if source_matches and old_hash and selected and old_hash == self.repository.target_content_hash(selected):
-            return LifecycleStatus.ACTIVE
-        return LifecycleStatus.STALE
-
-    @staticmethod
-    def _legacy_target_references(payload: dict[str, Any]) -> set[str]:
-        refs: set[str] = set()
-        result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
-        for mapping in result.get("mappings", []) if isinstance(result.get("mappings"), list) else []:
-            for span in mapping.get("target_spans", []) if isinstance(mapping, dict) else []:
-                if isinstance(span, dict) and span.get("reference"):
-                    refs.add(str(span["reference"]))
-        return refs
-
-    def _import_legacy_file(self, path: Path, source_schema: str) -> dict[str, Any]:
-        raw = path.read_bytes()
-        digest = hashlib.sha256(raw).hexdigest()
-        existing = self.repository.migration_run_for(self.project_id, str(path), digest)
-        if existing is not None:
-            return {"status": "SKIPPED", "path": str(path)}
-        started = _now()
-        try:
-            payload = json.loads(raw.decode("utf-8-sig"))
-            if not isinstance(payload, dict):
-                raise ValueError("legacy root is not an object")
-            review = self._legacy_review_status(payload)
-            lifecycle = self._legacy_lifecycle(payload)
-            evidence_id = "legacy-evidence-" + digest[:32]
-            content = raw.decode("utf-8-sig")
-            evidence = EvidenceRecord(
-                id=evidence_id, project_id=self.project_id, book=self.book,
-                kind=EvidenceKind.AI_RATIONALE, resource_id=source_schema,
-                resource_version=str(payload.get("schema") or source_schema), resource_hash=digest,
-                occurrence_id=str(path), displayed_references=(), canonical_references=(),
-                content=content, content_hash=_sha256_text(content),
-                validation_status=ResourceValidationStatus.NOT_CHECKED,
-                source_semantic_unit_ids=(), target_semantic_unit_ids=(),
-                policy_binding=PolicyBinding.foundation_v1(), review_status=review,
-                lifecycle_status=lifecycle,
-            )
-            self.repository.save_evidence_record(evidence)
-            for reference in self._legacy_target_references(payload):
-                self.repository.add_record_dependency(
-                    "EVIDENCE_RECORD", evidence_id, "TARGET_REFERENCE",
-                    self.repository.target_dependency_id(
-                        self.project_id, self.book, reference,
-                    ),
-                )
-            legacy_source_hash = str(
-                payload.get("sourceResourceHash")
-                or payload.get("source_resource_hash") or ""
-            )
-            if legacy_source_hash:
-                self.repository.add_record_dependency(
-                    "EVIDENCE_RECORD", evidence_id, "SOURCE_RESOURCE",
-                    self.repository.source_dependency_id(
-                        self.project_id, self.book, legacy_source_hash,
-                    ),
-                )
-            actor = "migration"
-            at = str(payload.get("updatedAt") or payload.get("createdAt") or started)
-            audit = payload.get("reviewAudit") if isinstance(payload.get("reviewAudit"), list) else []
-            if not audit and isinstance(payload.get("audit"), list):
-                audit = payload["audit"]
-            if audit:
-                latest = audit[-1] if isinstance(audit[-1], dict) else {}
-                actor = str(latest.get("reviewer") or actor)
-                at = str(latest.get("at") or at)
-            self.repository.import_review_record(
-                record_id="legacy-review-" + digest[:32], entity_type="EVIDENCE_RECORD",
-                entity_id=evidence_id, review_status=review, lifecycle_status=lifecycle,
-                actor_type=ActorType.MIGRATION, actor_id=actor,
-                note=f"Imported as history from {source_schema}; not promoted to alignment truth.",
-                created_at=at,
-            )
-            validation_decisions = payload.get("decisions")
-            if isinstance(validation_decisions, dict):
-                for decision_id, decision_payload in validation_decisions.items():
-                    if not isinstance(decision_payload, dict):
-                        continue
-                    decision_value = str(
-                        decision_payload.get("decision") or decision_payload.get("status") or ""
-                    )
-                    decision_review = self._legacy_review_status({"decision": decision_value})
-                    decision_actor = str(
-                        decision_payload.get("reviewer") or decision_payload.get("actor") or "migration"
-                    )
-                    decision_at = str(
-                        decision_payload.get("at") or decision_payload.get("updatedAt")
-                        or decision_payload.get("createdAt") or at
-                    )
-                    decision_record_id = "legacy-review-" + _sha256_text(
-                        f"{digest}\u241f{decision_id}\u241f{decision_value}"
-                    )[:32]
-                    self.repository.import_review_record(
-                        record_id=decision_record_id, entity_type="EVIDENCE_RECORD",
-                        entity_id=evidence_id, review_status=decision_review,
-                        lifecycle_status=lifecycle, actor_type=ActorType.MIGRATION,
-                        actor_id=decision_actor,
-                        note=(
-                            f"Imported validation decision {decision_id}: {decision_value}; "
-                            "historical evidence only."
-                        ),
-                        created_at=decision_at,
-                    )
-            report = {"evidenceId": evidence_id, "reviewStatus": review.value, "lifecycleStatus": lifecycle.value}
-            self.repository.save_migration_run(
-                run_id=str(uuid.uuid4()), project_id=self.project_id,
-                source_path=str(path), source_hash=digest, source_schema=source_schema,
-                status="IMPORTED", started_at=started, report=report,
-            )
-            return {"status": "IMPORTED", "path": str(path), **report}
-        except Exception as exc:
-            self.repository.quarantine_migration_record(
-                source_kind=source_schema, source_identity=str(path),
-                reason_code="MALFORMED_LEGACY_RECORD",
-                payload={
-                    "sha256": digest, "error": str(exc),
-                    "originalText": raw.decode("utf-8-sig", errors="replace"),
-                },
-            )
-            report = {"error": str(exc), "reason": "MALFORMED_LEGACY_RECORD"}
-            self.repository.save_migration_run(
-                run_id=str(uuid.uuid4()), project_id=self.project_id,
-                source_path=str(path), source_hash=digest, source_schema=source_schema,
-                status="QUARANTINED", started_at=started, report=report,
-            )
-            return {"status": "QUARANTINED", "path": str(path), **report}
-
-    def _migrate_legacy_companions(self) -> None:
-        root = self.project.companion_dir()
-        sources: list[tuple[Path, str]] = []
-        sources.extend((path, "bridge.semantic_mapping.v0.4") for path in (root / "semanticMappings" / self.book.lower()).glob("*.json"))
-        validation = root / "semanticValidation" / "irvtam-v0.1.json"
-        if validation.is_file():
-            sources.append((validation, "bridge.semantic_mapping_validation_audit.v0.1"))
-        # `aiReview` was a third legacy source here until #76 moved that store
-        # into the workbench database. No project created after the cutover has
-        # those files, and one created before it refuses to open, so the branch
-        # could only ever have matched nothing. It is removed rather than left
-        # to look load-bearing. This is deliberately *not* repointed at the
-        # workbench: that would turn a one-time import of old files into a
-        # standing import of current reviews as evidence, which is a different
-        # behaviour and not one anything asked for.
-        for path, schema in sources:
-            self._import_legacy_file(path, schema)
-        self.synchronize_alignment_state()
 
     @staticmethod
     def _legacy_token_signature(token: Any) -> tuple[str, int, int] | None:
