@@ -502,7 +502,7 @@ export const bridge = {
     reviewer: string,
     note = "",
     correctedMapping?: SemanticValidationCorrection,
-  ): Promise<{ saved: boolean; event: Record<string, unknown>; auditPath: string }> {
+  ): Promise<{ saved: boolean; event: Record<string, unknown> }> {
     return call("semantic_validation_decide", {
       candidateId, decision, reviewer, note, correctedMapping,
     });

@@ -11,7 +11,7 @@ from greek_room_engine.protocol import EngineRequest
 from tc_ai_bridge.semantic_mapping import SemanticMappingError
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.semantic_validation_service import (
-    decide_semantic_validation_candidate, list_semantic_validation_candidates,
+    _load_audit, decide_semantic_validation_candidate, list_semantic_validation_candidates,
 )
 from tc_ai_bridge.tc_project import TranslationCoreProject
 from tc_ai_bridge.usfm_passages import UsfmPassageIndex
@@ -105,14 +105,14 @@ def test_validation_queue_confirms_and_persists_append_only_audit(
     assert persisted["candidates"][0]["reviewDecision"]["reviewer"] == "Benz"
     assert persisted["calibration"]["reviewed"] == 1
     assert persisted["calibration"]["proposalAgreementPercent"] == 100
-    audit = json.loads(Path(result["auditPath"]).read_text(encoding="utf-8"))
+    audit = _load_audit(reopened)
     assert len(audit["audit"]) == 1
 
     decide_semantic_validation_candidate(
         reopened, candidate_id="php-1-3-validation", decision="unsure",
         reviewer="Consultant", note="Needs group review",
     )
-    audit = json.loads(Path(result["auditPath"]).read_text(encoding="utf-8"))
+    audit = _load_audit(reopened)
     assert len(audit["audit"]) == 2
     assert audit["decisions"]["php-1-3-validation"]["decision"] == "unsure"
 

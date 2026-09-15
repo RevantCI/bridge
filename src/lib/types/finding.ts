@@ -379,7 +379,6 @@ export interface SemanticValidationQueue {
     byRelationship: Record<string, { reviewed: number; confirmed: number; corrected: number; rejected: number }>;
   };
   relationships: string[];
-  auditPath: string;
 }
 
 export interface SemanticValidationCorrection {

@@ -16,10 +16,14 @@ from typing import Any
 
 from .semantic_mapping import MEANING_STATUSES, RELATIONSHIPS, SemanticMappingError
 from .semantic_mapping_service import _validate_human_mapping
+from .workbench_repository import natural_row_id
 
 
 VALIDATION_SET_NAME = "irvtam-semantic-mapping-candidates.json"
 AUDIT_SCHEMA = "bridge.semantic_mapping_validation_audit.v0.1"
+# The suite this queue validates. It was the stem of
+# `semanticValidation/irvtam-v0.1.json`; it is the `suite_id` column now.
+VALIDATION_SUITE_ID = "irvtam-v0.1"
 DECISION_STATUS = {
     "confirmed": "HUMAN_CONFIRMED",
     "rejected": "HUMAN_REJECTED",
@@ -64,20 +68,29 @@ def _load_manifest(path: Path | None = None) -> tuple[dict[str, Any], str]:
     return manifest, hashlib.sha256(raw).hexdigest()
 
 
-def _audit_path(project: Any) -> Path:
-    return project.companion_dir() / "semanticValidation" / "irvtam-v0.1.json"
+def _audit_row_id(project: Any) -> str:
+    """One row per (project, book, suite).
+
+    This was a single file, `semanticValidation/irvtam-v0.1.json`, holding the
+    whole suite's state. The natural key its path encoded is the suite id, which
+    is the `suite_id` column on `semantic_validation_runs`.
+    """
+    return natural_row_id(
+        project.workbench_identity.project_id, str(project.book_id).lower(),
+        "semantic_validation", VALIDATION_SUITE_ID,
+    )
 
 
 def _load_audit(project: Any) -> dict[str, Any]:
-    path = _audit_path(project)
-    if not path.exists():
+    found = project.workbench.payloads(
+        "semantic_validation_runs",
+        project_id=project.workbench_identity.project_id,
+        book_id=str(project.book_id).lower(),
+        equals={"suite_id": VALIDATION_SUITE_ID},
+    )
+    if not found:
         return {"schema": AUDIT_SCHEMA, "decisions": {}, "audit": []}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        raise SemanticMappingError(f"Semantic validation audit cannot be read: {path}") from exc
-    if not isinstance(payload, dict):
-        raise SemanticMappingError(f"Semantic validation audit has an invalid contract: {path}")
+    payload = found[0]
     if not isinstance(payload.get("decisions"), dict):
         payload["decisions"] = {}
     if not isinstance(payload.get("audit"), list):
@@ -85,14 +98,36 @@ def _load_audit(project: Any) -> dict[str, Any]:
     return payload
 
 
-def _save_audit(project: Any, payload: dict[str, Any]) -> Path:
-    path = _audit_path(project)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    json.loads(temporary.read_text(encoding="utf-8"))
-    temporary.replace(path)
-    return path
+def _save_audit(project: Any, payload: dict[str, Any], *, event: dict[str, Any] | None = None) -> str:
+    """Write the suite blob back, and append the decision to `change_log`.
+
+    The blob is read-modify-write, exactly as the file was, so the `audit` list
+    stays whole -- nothing here compacts it. The `change_log` append is the
+    belt-and-braces half: CLAUDE.md requires that compacting a record must not
+    compact its lifecycle events, and a row image can in principle be rewritten
+    by a later caller, while a `change_log` row cannot (the repository's
+    BEFORE UPDATE/DELETE triggers reject it). If the list is ever capped the way
+    an issue resolution's history is, the events still survive here.
+    """
+    identity = project.workbench_identity
+    row_id = _audit_row_id(project)
+    project.workbench._write(
+        "semantic_validation_runs", row_id,
+        project_id=identity.project_id, book_id=str(project.book_id).lower(),
+        payload=payload,
+        actor_id=identity.actor_id, device_id=identity.device_id,
+        expected_revision=None, op="upsert",
+        extra_columns={"suite_id": VALIDATION_SUITE_ID},
+    )
+    if event is not None:
+        project.workbench.append_event(
+            "semantic_validation_runs", row_id,
+            project_id=identity.project_id, book_id=str(project.book_id).lower(),
+            op="decision:" + str(event.get("decision") or "unknown"),
+            payload={"schemaVersion": 1, "suiteId": VALIDATION_SUITE_ID, **event},
+            actor_id=identity.actor_id, device_id=identity.device_id,
+        )
+    return row_id
 
 
 def _candidate_book(candidate: dict[str, Any]) -> str:
@@ -203,7 +238,6 @@ def list_semantic_validation_candidates(project: Any) -> dict[str, Any]:
         "summary": {"total": len(rows), "counts": counts},
         "calibration": calibration,
         "relationships": relationships,
-        "auditPath": str(_audit_path(project)),
     }
 
 
@@ -295,5 +329,5 @@ def decide_semantic_validation_candidate(
     })
     audit.setdefault("audit", []).append(event)
     audit.setdefault("decisions", {})[str(candidate_id)] = event
-    path = _save_audit(project, audit)
-    return {"saved": True, "event": event, "auditPath": str(path)}
+    _save_audit(project, audit, event=event)
+    return {"saved": True, "event": event}
