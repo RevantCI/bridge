@@ -1,0 +1,208 @@
+"""#77: sync readiness without a server.
+
+An unsynced cursor, acknowledgement, and a JSON-lines export/import that
+carries an event batch between two workbench databases (a USB stick). Import
+goes through the same revision check every local write uses; a divergent
+row is a conflict handed back, never an overwrite.
+
+Also the workbench v1 -> v2 migration: change_log gains `columns_json` and
+its immutability trigger is rebuilt, which a reader should not take on trust.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+
+import pytest
+
+from tc_ai_bridge.workbench_repository import (
+    MUTABLE_TABLES,
+    WORKBENCH_SCHEMA_VERSION,
+    WorkbenchRepository,
+    _MIGRATION_V1,
+)
+from tests.persistence.test_workbench_repository import _REQUIRED_EXTRA_COLUMNS, _write
+
+
+_SECOND_ROW = {
+    "ai_review_results": {"extra_columns": {"chapter": "2"}},
+    "semantic_mappings": {"extra_columns": {"fingerprint": "fp2"}},
+    "project_state": {"extra_columns": {"key": "k2"}},
+    "progress_chapters": {"extra_columns": {"chapter": "2"}},
+    "check_findings": {"extra_columns": {"chapter": "2"}},
+    "progress_totals": {"book_id": "gen"},
+    "triage_verdicts": {"book_id": "gen"},
+}
+
+
+def _events(repo, project_id="proj-1"):
+    return repo.change_log_entries(project_id)
+
+
+def test_unsynced_is_a_cursor_and_mark_synced_advances_it(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "a.sqlite3")
+    first = _write(repo, "check_cache", "c1")
+    second = _write(repo, "check_cache", "c2")
+    third = _write(repo, "check_cache", "c1")
+
+    pending = repo.unsynced(project_id="proj-1")
+    assert [e["seq"] for e in pending] == [first["seq"], second["seq"], third["seq"]]
+    assert [e["seq"] for e in repo.unsynced(project_id="proj-1", after_seq=first["seq"])] == [second["seq"], third["seq"]]
+    assert len(repo.unsynced(project_id="proj-1", limit=1)) == 1
+
+    assert repo.mark_synced([first["eventId"], second["eventId"]], synced_at="2026-09-15T00:00:00Z") == 2
+    assert repo.mark_synced([first["eventId"]]) == 0, "acknowledging twice is a no-op"
+    assert [e["seq"] for e in repo.unsynced(project_id="proj-1")] == [third["seq"]]
+    assert _events(repo)[0]["synced_at"] == "2026-09-15T00:00:00Z"
+
+
+def test_every_row_event_carries_its_lifted_columns(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "a.sqlite3")
+    _write(repo, "human_decisions", "h1", extra_columns={"chapter": "1", "verse": "2", "decision": "accepted"})
+    event = _events(repo)[0]
+    assert json.loads(event["columns_json"]) == {
+        "kind": "qa", "key": "k1", "chapter": "1", "verse": "2", "decision": "accepted",
+    }
+    _write(repo, "check_cache", "c1")
+    assert _events(repo)[1]["columns_json"] is None
+
+
+@pytest.mark.parametrize("table", MUTABLE_TABLES)
+def test_export_then_import_into_an_empty_database_reproduces_the_rows(tmp_path, table):
+    """The issue's test, per table: rows, revisions, lifted columns and the
+    event log itself all arrive intact, and importing twice changes nothing."""
+    source = WorkbenchRepository(tmp_path / "source.sqlite3")
+    _write(source, table, "r1", payload={"v": 1})
+    _write(source, table, "r1", payload={"v": 2})
+    # Several tables are UNIQUE on their lifted columns within a book, so the
+    # second row has to differ where the table says it must.
+    second = _SECOND_ROW.get(table, {})
+    _write(source, table, "r2", payload={"v": 3}, **second)
+    source.append_event(table, "r1", project_id="proj-1", book_id="rut", op="noted",
+                        payload={"note": "domain event"}, actor_id="human", device_id="dev-1")
+    source._delete(table, "r2", project_id="proj-1", book_id="rut", actor_id="human", device_id="dev-1")
+
+    exported = source.export_events(tmp_path / "batch.jsonl", project_id="proj-1")
+    assert exported["count"] == 5
+    lines = (tmp_path / "batch.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 5 and all(json.loads(line)["event_id"] for line in lines)
+
+    target = WorkbenchRepository(tmp_path / "target.sqlite3")
+    result = target.import_events(tmp_path / "batch.jsonl")
+    assert (result["applied"], result["duplicates"], result["conflicts"], result["malformed"]) == (5, 0, [], 0)
+
+    row = target.get(table, "r1")
+    assert row is not None and row["revision"] == 2 and json.loads(row["payload_json"]) == {"v": 2}
+    for column, value in _REQUIRED_EXTRA_COLUMNS.get(table, {}).items():
+        assert row[column] == value
+    assert target.get(table, "r2") is None
+
+    source_log = [(e["event_id"], e["op"], e["row_key"], e["base_revision"], e["new_revision"], e["payload_json"], e["columns_json"], e["actor_id"], e["created_at"]) for e in _events(source)]
+    target_log = [(e["event_id"], e["op"], e["row_key"], e["base_revision"], e["new_revision"], e["payload_json"], e["columns_json"], e["actor_id"], e["created_at"]) for e in _events(target)]
+    assert target_log == source_log
+    assert all(e["synced_at"] for e in _events(target)), "imported events have nowhere to travel back to"
+
+    again = target.import_events(tmp_path / "batch.jsonl")
+    assert (again["applied"], again["duplicates"]) == (0, 5)
+    assert len(_events(target)) == 5
+
+
+def test_a_divergent_local_row_is_a_conflict_not_an_overwrite(tmp_path):
+    source = WorkbenchRepository(tmp_path / "source.sqlite3")
+    target = WorkbenchRepository(tmp_path / "target.sqlite3")
+    # Both sides start from the same first version, then each edits it.
+    _write(source, "check_cache", "shared", payload={"v": "origin"})
+    source.export_events(tmp_path / "base.jsonl", project_id="proj-1")
+    target.import_events(tmp_path / "base.jsonl")
+    _write(target, "check_cache", "shared", payload={"v": "mine"})
+    _write(source, "check_cache", "shared", payload={"v": "theirs"})
+
+    source.export_events(tmp_path / "delta.jsonl", project_id="proj-1", after_seq=1)
+    result = target.import_events(tmp_path / "delta.jsonl")
+
+    assert result["applied"] == 0
+    [conflict] = result["conflicts"]
+    assert conflict["reason"] == "revision_mismatch"
+    assert (conflict["table"], conflict["rowKey"], conflict["baseRevision"], conflict["localRevision"]) == ("check_cache", "shared", 1, 2)
+    assert json.loads(target.get("check_cache", "shared")["payload_json"]) == {"v": "mine"}
+    assert len(_events(target)) == 2, "a conflicting event is not logged as applied"
+
+
+def test_an_event_whose_base_is_missing_locally_is_a_conflict(tmp_path):
+    source = WorkbenchRepository(tmp_path / "source.sqlite3")
+    _write(source, "check_cache", "c1")
+    _write(source, "check_cache", "c1")
+    source.export_events(tmp_path / "tail.jsonl", project_id="proj-1", after_seq=1)
+
+    target = WorkbenchRepository(tmp_path / "target.sqlite3")
+    result = target.import_events(tmp_path / "tail.jsonl")
+    assert [c["reason"] for c in result["conflicts"]] == ["missing_base"]
+    assert target.get("check_cache", "c1") is None
+
+
+def test_only_unsynced_export_and_malformed_lines(tmp_path):
+    repo = WorkbenchRepository(tmp_path / "a.sqlite3")
+    first = _write(repo, "check_cache", "c1")
+    _write(repo, "check_cache", "c2")
+    repo.mark_synced([first["eventId"]])
+    exported = repo.export_events(tmp_path / "u.jsonl", project_id="proj-1", only_unsynced=True)
+    assert exported["count"] == 1
+
+    with (tmp_path / "u.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write("not json\n")
+        handle.write(json.dumps({"event_id": "x", "table_name": "not_a_table"}) + "\n")
+    target = WorkbenchRepository(tmp_path / "b.sqlite3")
+    result = target.import_events(tmp_path / "u.jsonl")
+    # c2's only event is its creation, which needs no base; the two bad
+    # lines are counted and skipped rather than aborting the batch.
+    assert (result["applied"], result["malformed"], result["conflicts"]) == (1, 2, [])
+    assert target.get("check_cache", "c2") is not None and target.get("check_cache", "c1") is None
+
+
+def test_workbench_v1_to_v2_keeps_v1_rows_readable_and_the_log_immutable(tmp_path):
+    """v2 adds a column and rebuilds the trigger. A v1 database must come up
+    at v2 with its rows and events intact, the backup taken, and the trigger
+    still rejecting everything but synced_at."""
+    path = tmp_path / "bridge-workbench.sqlite3"
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, schema_id TEXT NOT NULL, applied_at TEXT NOT NULL)"
+        )
+        conn.executescript(
+            "BEGIN;\n" + _MIGRATION_V1
+            + "\nINSERT INTO schema_migrations(version,schema_id,applied_at) VALUES(1,'bridge-workbench-v1','t');\nCOMMIT;"
+        )
+        conn.execute(
+            "INSERT INTO check_cache(id,project_id,book_id,revision,actor_id,device_id,created_at,updated_at,payload_json) "
+            "VALUES('c1','proj-1','rut',1,'human','dev-1','t','t','{\"v\":1}')"
+        )
+        conn.execute(
+            "INSERT INTO change_log(event_id,project_id,book_id,table_name,row_key,op,base_revision,new_revision,"
+            "actor_id,device_id,created_at,payload_json) VALUES('e1','proj-1','rut','check_cache','c1','upsert',NULL,1,"
+            "'human','dev-1','t','{\"v\":1}')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    repo = WorkbenchRepository(path)
+    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 2
+    assert json.loads(repo.get("check_cache", "c1")["payload_json"]) == {"v": 1}
+    [event] = _events(repo)
+    assert event["columns_json"] is None and event["event_id"] == "e1"
+    assert list((tmp_path / "backups").glob("pre-workbench-v2-*"))
+
+    conn = sqlite3.connect(str(path))
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE change_log SET columns_json='{}' WHERE event_id='e1'")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("DELETE FROM change_log WHERE event_id='e1'")
+        conn.execute("UPDATE change_log SET synced_at='now' WHERE event_id='e1'")
+    finally:
+        conn.close()
+
+    # And a later write on the upgraded database records its lifted columns.
+    _write(repo, "human_decisions", "h1")
+    assert json.loads(_events(repo)[-1]["columns_json"]) == {"kind": "qa", "key": "k1"}
