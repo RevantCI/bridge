@@ -4069,3 +4069,65 @@ roughly 200 lines plus tests, and was not in the original plan.
 
 **Coordination:** B rewrites ~650 lines of `tc_project.py`. Benz should know it
 is locked before it starts.
+
+## 44.18 #77: derived stores, the workspace ladder, the rollup cache, sync readiness (2026-09-15)
+
+Six commits on `main`, `274cbcd`..`8b8ad19`, each one store group or one
+mechanism, plus this docs commit. `docs/BUILD_LOG.md` (2026-09-15, #77) has the
+narrative and the before/after table; this is the pickup summary.
+
+**What the code does now.** Every Bridge-private file store is a workbench row:
+#76's ten human-owned groups and #77's derived ones (`progress_*`,
+`check_findings`, `check_cache`, `triage_verdicts`, `metrics_*`, `file_backups`).
+`workspace.sqlite3` holds users, devices, the project registry (`projects`),
+non-secret settings (`settings_kv`) and one cached rollup per project
+(`project_progress_cache`); `settings.json` holds only DPAPI-wrapped secrets.
+`project.listBookProgress` reads the cache in one query; `project.open` repairs
+the entry from `change_log.seq` + project id + book and reports
+`progressCache: {state}` on the open result. `WorkbenchRepository` has `batch()`,
+`_delete()`, `max_seq()`, `unsynced()`, `mark_synced()`, `export_events()`,
+`import_events()`. Workbench is v2 (`change_log.columns_json`), workspace is v2
+(a real ladder now; v1 adopts the unversioned first cut).
+
+**Decisions the maintainer made this session.** Option A for the workspace
+ladder (`docs/DECISIONS.md` 2026-09-15). Two calls I made and flagged rather
+than asked: workbench v2 for sync (a row image without its lifted columns cannot
+be rebuilt elsewhere -- the prep comment's "no workbench bump" held for the
+derived stores, not for sync), and a one-shot seed of the `projects` table from
+a pre-#77 `project-registry.json` (the issue's "every project stays listed"
+test; the file is renamed `*.imported-<stamp>.json` afterwards so an emptied
+table cannot resurrect it).
+
+**Traps for whoever touches this next.**
+
+- Workbench rows are keyed by the *registered* project id from
+  `.bridge/project.json`. A project constructed before its first `project.open`
+  falls back to a path-derived id, and rows written then are invisible to the
+  opened project. Files had no project id, so this only bit when a fixture
+  planted a snapshot before opening (`test_triage_rpc._plant`). Production has
+  no pre-registration writer -- `project_import.py`'s construction only reads.
+- `rows()` orders by `created_at` then `id`, and `created_at` is only as fine as
+  the Windows clock. Two appends in one tick come back in id order. Metrics
+  events carry a nanosecond prefix on their id for that reason; any other
+  append-only store that cares about order needs the same or a `seq`.
+- Reads inside a `batch()` go through `batch.get()` on the same connection. Do
+  the bulk reads *before* opening the batch (as `replace_progress_chapters`
+  does) so the write lock is held for as little time as possible.
+- `peek_progress_totals`/`read_triage_records` open a sibling's workbench with a
+  `mode=ro` URI and no migration. They must stay that way: the dashboard must
+  never create or upgrade a database it is only looking at.
+- The guard now has two tuples: `_PRE_CUTOVER_STORE_DIRS` (companion
+  subdirectories) and `_PRE_CUTOVER_STORE_FILES` (paths relative to the project
+  root -- `.bridge/progress.json` is outside the companion dir).
+
+**Not done, on purpose.** `TeamWorkflow` (dead writers; #78). `hub_credentials`
+and a `sync_conflicts` table (hub slice). A persistent workspace connection --
+each call still opens one, which is most of the cache's per-call cost on the
+2-materialized shape; measure before changing.
+
+### Where to pick up
+
+#78 (identity and roles) is next in the ss10 order and now has everything it
+needs: a stable local `user_id`/`device_id`, a versioned workspace to add roles
+to, and `WorkbenchIdentity` on every write. The `actor_id="human"` defaults
+listed in TEAM_ARCHITECTURE ss5 are still defaults.

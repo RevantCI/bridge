@@ -7914,3 +7914,170 @@ Both pass in the serial run above, so this is parallel contention, not a
 regression. They are not covered by `tests/support/waits.py`, which scales
 background-job waits rather than performance budgets. Filed separately rather
 than fixed here.
+
+## 2026-09-15 — #77: derived stores, the workspace ladder, the rollup cache, sync readiness
+
+Seven commits on `main`, one store group or one mechanism each, plus a docs
+commit. #76 was placement: same data, new home, one seam. #77 is cache
+coherency: the dashboard reads a copy of data that lives in sixty-six other
+databases, and the question is when that copy is allowed to be trusted.
+
+### The decision taken first: a third ladder
+
+`workspace_repository.py` created `devices` and `users` with
+`CREATE TABLE IF NOT EXISTS` and no version. Adding `projects`, `settings_kv`
+and `project_progress_cache` forced the question CLAUDE.md's "schema changes
+are migrations" rule already answers for the other two databases. The
+trade-off put to the maintainer: a versioned ladder (consistent, one more
+version number, ~80 lines copied from the workbench runner) against keeping
+`IF NOT EXISTS` and calling the database disposable — which is false for one
+table, because `users` and `devices` ids are stamped on immutable
+`change_log` rows. He chose the ladder. `_MIGRATION_V1` is deliberately what
+the unversioned first cut created, `IF NOT EXISTS` kept so an existing file is
+adopted with its ids; v2 adds the three tables. Backups only for a database
+that already held tables (the first cut of that check archived an empty file
+on every fresh install; a test caught it). `docs/DECISIONS.md` has the
+five-line version.
+
+### The crux: `read_progress_rollup`, and what replaced it
+
+`list_book_progress` walked every sibling in a collection and read
+`.bridge/progress.json` without constructing a project, because most siblings
+are lazy stubs. The workbench is per project, so the naive redirect is "open
+66 SQLite files to draw one dashboard". What landed instead:
+
+- `progress.json` became `progress_chapters` / `progress_findings` /
+  `progress_totals`; `load_progress_rollup()` reassembles exactly the dict the
+  file held, so `qa_report`, `reporting` and `analytics` did not change. **One
+  thing the normalisation lost and the existing coverage test caught:** a
+  verse a check job found nothing in has no finding row, but it was checked,
+  and the QA report's PASS coverage depends on knowing so. The chapter row now
+  lists its `checkedVerses`.
+- `save_progress_totals` writes the totals row and then the workspace
+  `project_progress_cache` entry, carrying the `change_log.seq` of that write
+  as `source_seq`. `list_book_progress` reads the cache in one query.
+- `sync_progress_cache()` runs on every `project.open`, after journal
+  recovery: the entry is trusted only if `source_seq` equals the seq of the
+  latest `progress_totals` write **and** it names this project id and book.
+  Seq alone is not enough — a re-import at the same folder starts a fresh
+  workbench whose seq restarts at 1, and the stale entry would look current.
+  The result is reported on the open result as `progressCache: {state}`
+  (`fresh` / `repaired` / `cleared` / `error`), never fatal: the record is the
+  workbench, the cache is a copy.
+- A materialized sibling with no entry (workspace reset; folder copied from
+  another machine) is peeked read-only — `peek_progress_totals`, a `mode=ro`
+  URI connection that never creates or migrates — and its entry written back,
+  all peeked entries in one commit. `forget`, `delete` and `import` drop
+  entries for the folders they touch.
+
+`WorkbenchRepository` needed three things the skeleton did not have:
+`batch()` (many writes and deletes in one transaction, so a book-wide check job
+is one commit rather than one per finding), `_delete()` (logged as a `delete`
+event carrying the row's last image), and `seq` on every receipt.
+
+### The other stores
+
+`check_findings` (one row per chapter), `check_cache` (one row per section,
+starts empty), `triage_verdicts` (one row per book, the whole map — the file
+was read whole for the same reason), `metrics_events` + `metrics_counters`
+(one batch per event), `file_backups` (an index; the files stay under
+`backups/`, TEAM_ARCHITECTURE ss3.4). `read_triage_records` keeps its
+"sibling without a project" contract through the same read-only peek.
+
+The registry became the `projects` table (whole-list model kept; load and
+save are one SELECT and one replace-all transaction); a pre-#77
+`project-registry.json` is read once into an empty table and then renamed
+`*.imported-<stamp>.json`, because "read once" has to survive the table being
+emptied by `forget`. `settings.json` keeps only `*_dpapi` secrets; every other
+setting is a `settings_kv` row, adopted once from an older file.
+
+Sync readiness: `unsynced(project_id, after_seq)`, `mark_synced`,
+`export_events` / `import_events` as JSON lines. Import is idempotent on
+`event_id` and applies row events only when the local row is exactly at the
+event's `base_revision`; anything else comes back as a conflict
+(`revision_mismatch` / `missing_base`) and the row is left alone. This needed
+**workbench v2**: a `change_log` row held the payload but not the lifted
+columns (`kind`, `chapter`, `key`, ...) the table also requires, so no generic
+importer could rebuild a `human_decisions` row from it. `columns_json` was
+added and the immutability trigger rebuilt to cover it. The prep comment's
+"the workbench needs no bump" held for the derived stores; it did not hold for
+sync, and the bump has its v1→v2 test because a rebuilt trigger is not
+something to take on trust.
+
+### Three things found the hard way
+
+**Rows are keyed by the registered project id, and a fixture wrote before
+registering.** `test_triage_rpc._plant` constructed a project before
+`project.open`, which keyed its snapshot to the path-derived fallback id; the
+opened project looked it up by the registered id and found nothing. Fourteen
+tests failed with "findings: 0" and no error anywhere. Files had no project id,
+so this could not happen before. The fixture now writes `.bridge/project.json`
+first, as every real project has by the time a check job runs; production has
+no pre-registration writer (`project_import.py`'s one construction only reads).
+Recorded in `HANDOFF.md` as a trap.
+
+**`created_at` ties.** `rows()` orders by `created_at` then `id`, and Windows'
+clock is about a millisecond. Three metrics events written in one tick came
+back in uuid order. Event ids now carry a nanosecond prefix. Any other
+append-only store that cares about order has the same problem.
+
+**The synthetic "before" was wrong about what it measured.** The 66-book
+Kannada collection on the maintainer's disk has 64 lazy siblings, so the
+"66 file reads" the issue describes were 2 reads and 64 stat calls, ~7.5 ms.
+Opening all 66 for real is ~2 minutes per book on this machine (materialise +
+fingerprint + semantic runtime), so the fully-opened shape was built
+synthetically: each lazy sibling given a manifest, RUT's rollup, and (after)
+progress rows plus a cache entry. That measures the exact read path both
+builds take; it does not measure opening.
+
+### Timings
+
+In-process `BridgeEngine.handle_request`, product pragmas (FULL sync, WAL),
+scratchpad copy of the real 66-book Kannada collection, medians of 7 after a
+warm-up (report: 3). "before" is `fc26601` in a worktree; "after" is `8b8ad19`
+plus the dashboard tweak in the same series. Two before runs and three after
+runs were taken; the spread is real and is shown.
+
+| Call | Before | After |
+|---|---|---|
+| `project.listBookProgress`, 64 lazy + 2 materialized | 7.5 ms | 15–23 ms |
+| `project.listBookProgress`, all 66 materialized (synthetic), cache warm | 19 ms (66 file reads) | 25–32 ms (one query) |
+| `project.listBookProgress`, all 66, cache cold (66 peeks + refill) | — | 0.75–1.0 s, once |
+| `verse.decide`, RUT 1:1 | 41–112 ms | 32–106 ms |
+| `project.report`, RUT | 1.05–1.10 s | 0.90–1.39 s |
+| `triage.results`, 2 materialized | — | 35–51 ms |
+| `triage.results`, all 66 materialized | 25 ms | 0.95–1.13 s |
+
+Decomposed (all-66 shape, medians of 9): `collection_projects` 6.7 ms,
+`project_path_key` ×66 4.5 ms, the cache query 5.9 ms, reading 66 small warm
+JSON files 3.1 ms, a workspace connection 0.7 ms. So:
+
+- **The dashboard is not faster than warm file reads, and was never going to
+  be.** 66 small files the OS already has cached cost 3 ms. The cache's job is
+  the comparison the issue actually poses — against opening 66 SQLite files —
+  and that is the cold row: ~1 s once, then ~25 ms. Without the cache every
+  dashboard load would be the cold row.
+- `verse.decide` went from one file rewrite to four workbench commits and one
+  workspace commit and is no slower; the fsync dominates either way.
+- `project.report` is within noise.
+- **`triage.results` regressed on a fully opened collection**, from a stat miss
+  per untriaged sibling to a ~14 ms read-only SQLite open per sibling. Filed
+  as #94 rather than fixed here; the report screen, not the editor loop.
+
+### Known gaps carried
+
+- The progress rollup's lost-update class between its two writers (dispatcher
+  `decide_verse` vs the job thread's `_on_check_job_complete`) shrinks rather
+  than disappears: each now touches its own rows, and what remains is the
+  recomputed `progress_totals` row, last writer wins.
+- `MetricsStore.event` has no production caller; `list_alignment_backups` /
+  `restore_alignment_backup` have none. Both on #93.
+- `TeamWorkflow` did not move (dead writers) — #78. `hub_credentials` and a
+  `sync_conflicts` table — the hub slice.
+
+### Gates
+
+Engine suite serially, the configuration CI runs: **1245 passed, 0 failed**
+(11m01s), with the perf tweak in the tree. Frontend and `src-tauri/` untouched (the one protocol change is
+an additive `progressCache` field on `project.open`), so those gates were not
+run.

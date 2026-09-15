@@ -21,8 +21,10 @@ one.
 
 ## Project Home, identity, and duplicate safety
 
-Bridge keeps an atomic `project-registry.json` beside application settings and
-discovers older projects already present in its managed `projects` directory.
+Bridge keeps the project registry in the `projects` table of `workspace.sqlite3`
+beside application settings (an atomic `project-registry.json` until #77, read
+once into the table if still present) and discovers older projects already
+present in its managed `projects` directory.
 Each managed project also receives `.bridge/project.json` with a stable UUID.
 The Project Home lists recent projects (one card per multi-book collection), keeps missing entries visible, and lets
 the user locate a moved folder or forget the registry entry. Forget never

@@ -98,6 +98,14 @@ where a query filters on them today.
 | `metrics_events`, `metrics_counters` | `metrics/<book>.json` | Append-only; the 2000-event cap goes away. |
 | `file_backups` | index over `backups/<stamp>/` | Files stay; this only avoids `rglob`. |
 
+**Landed 2026-09-15 (#77), with two corrections.** "Migrated if present" for
+`triage_verdicts` did not happen: under the ss3.5 cutover nothing is migrated, and a
+project carrying `triage/` (or any other of these) refuses to open. And the progress
+chapter row also lists the verses a job checked and found nothing in
+(`checkedVerses`): those have no finding row but were checked, and the QA report's
+PASS coverage depends on knowing so. `MetricsStore.event` had no production caller
+when it moved, and `list_alignment_backups` has none -- both noted on #93.
+
 ### 3.3 `change_log`
 
 ```
@@ -178,6 +186,12 @@ survives too and now lives in `workbench_repository.py`.
 - `bridge_service.py` changes only to construct the workspace repository, pass identity
   in, and read `project_progress_cache` for the multi-book dashboard.
 
+**Completed 2026-09-15.** #76 moved the human-owned groups and #77 the derived ones;
+`_PRE_CUTOVER_STORE_DIRS`/`_PRE_CUTOVER_STORE_FILES` in `tc_project.py` is the guard.
+`TeamWorkflow` did not move: its writers are dead code (nothing calls `add_member` or
+`assign`, so `reporting.py`'s `.config()` always returns the default), and it goes to #78
+with the rest of identity and roles rather than being redirected as-is.
+
 ## 4. Workspace database (app level)
 
 `%LOCALAPPDATA%\Bridge\data\workspace.sqlite3`: `users(user_id, display_name, created_at,
@@ -186,6 +200,35 @@ current `project-registry.json`), `settings_kv` (non-secret settings), `hub_cred
 (device token, DPAPI-wrapped), `project_progress_cache(project_path, book_id, totals_json,
 updated_at, source_seq)`. The rollup cache is refreshed after each workbench commit and
 repaired on next open if `source_seq` lags the workbench `change_log`.
+
+**Landed 2026-09-15 (#77), except `hub_credentials`, which is the hub slice's.** The
+database has its own versioned ladder (`WORKSPACE_SCHEMA_VERSION`, v2), chosen by the
+maintainer over a CLAUDE.md carve-out: it is not disposable, because `users` and
+`devices` ids are stamped on immutable workbench rows. v1 is exactly the unversioned
+first cut (`IF NOT EXISTS`, so an existing database is adopted with its ids); v2 adds the
+three tables. `BridgeEngine` owns one `WorkspaceRepository`, opened by `AppSettings` beside
+`settings.json`, and injects it into the registry and every project it opens.
+
+Three details of the cache that the sentence above hides. `source_seq` is the
+`change_log.seq` of the `progress_totals` write the entry came from, compared on open
+together with the project id and the book: a re-import at the same folder restarts the
+workbench's seq, and seq alone would trust the stale entry. A materialized sibling with no
+entry is peeked read-only (`peek_progress_totals`, `mode=ro`, never creates or migrates)
+and its entry written back, so a reset workspace or a folder copied from another machine
+heals on the first dashboard load. And `forget`, `delete` and `import` drop entries for
+the folders they touch.
+
+What that cache costs, measured on the maintainer's real 66-book Kannada collection
+(in-process, medians; `docs/BUILD_LOG.md` 2026-09-15 has the full table): with 64 lazy
+siblings the dashboard was already ~8 ms from two file reads, and the cache is a few
+milliseconds slower because one workspace connection replaces one file read. The case
+the design is for -- every sibling opened -- is the one to read the table for.
+
+**Sync readiness landed with it:** `unsynced(project_id, after_seq)`, `mark_synced`,
+`export_events`/`import_events` as JSON lines, with `base_revision` conflicts returned to
+the caller rather than stored. Workbench v2 added `change_log.columns_json` because a row
+image without its lifted columns could not be rebuilt elsewhere. `sync_conflicts` as a
+table, and any UI, remain ss7's.
 
 ## 5. Identity and roles
 
@@ -275,9 +318,10 @@ repaired on next open if `source_seq` lags the workbench `change_log`.
 ## 10. Order of work
 
 1. Test suite: baseline, mechanical moves, config + xdist, selection + CI, decoupling.
-2. Workbench DB: skeleton + `change_log`; human-owned stores + lazy migration; derived
-   stores + workspace rollup cache; registry/settings into the workspace DB; sync
-   readiness (cursor API, offline event export/import).
+2. Workbench DB: skeleton + `change_log` (#75, done); human-owned stores as a cutover,
+   not a lazy migration (#76, done); derived stores + workspace rollup cache;
+   registry/settings into the workspace DB; sync readiness (cursor API, offline event
+   export/import) (#77, done 2026-09-15).
 3. Identity: users, devices, required `actor_id`, roles enum, `authorize()`.
 4. Engine session model + HTTP transport + `--serve`.
 5. Hub first slice: join codes, push/pull, conflicts.

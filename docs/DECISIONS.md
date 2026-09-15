@@ -104,4 +104,19 @@ internet. It is the product's actual differentiator.
 login-gated features. A collaborative Bridge has to be sync-based, not client-server.
 **Revisit when:** never for the desktop app. A separate web product is a separate decision.
 
+## 2026-09-15 — The workspace database gets its own versioned ladder
+
+**Decision:** `workspace.sqlite3` is the third versioned schema (`WORKSPACE_SCHEMA_VERSION`),
+alongside the semantic database (v16) and the workbench (v2). v1 is exactly the unversioned
+`devices`/`users` the first cut created, kept as `IF NOT EXISTS` so an existing file is
+adopted; every later change is a forward block. No CLAUDE.md carve-out.
+**Because:** the alternative -- keep `CREATE TABLE IF NOT EXISTS` and call the database
+disposable -- is false for one table: `users` and `devices` ids are stamped on immutable
+workbench `change_log` rows, so they must persist. Consistency with the other two ladders
+costs one more version number and ~80 lines; the first non-additive change then has a home.
+**Rules out:** ad-hoc column checks in `workspace_repository.py`; recreating the identity
+tables. Long form: `docs/TEAM_ARCHITECTURE.md` §4, `docs/BUILD_LOG.md` 2026-09-15 (#77).
+**Revisit when:** never for the ladder itself; the *contents* are revisited when the hub
+adds `hub_credentials`.
+
 <!-- New entries go above this line. -->

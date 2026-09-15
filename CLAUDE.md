@@ -160,27 +160,42 @@ A raw Scripture import becomes a translationCore-compatible book project:
 <project>/.apps/translationCore/alignmentData/<book>/<chapter>.json
 <project>/.apps/translationCore/index/{translationNotes,translationWords}/<book>/
 <project>/.bridge/import.json                   SHA-256 provenance + per-tool capability status
-<project>/.bridge/progress.json                 per-book rollup: checked chapters + finding id → status
-<project>/.apps/translationCoreAI/checkFindings/<book>/<chapter>.json
-                                                the findings behind those ids, from the last succeeded
-                                                check job — what the project QA report reads
 <project>/.apps/translationCoreAI/bridge-workbench.sqlite3
-                                                schema v1 (#75). Every human-owned store now lives
-                                                here (#76). `checkFindings/` above is still a file
-                                                tree — that's #77.
+                                                schema v2. Every Bridge-private store lives here:
+                                                the human-owned ones (#76) and the derived ones
+                                                (#77) -- progress rollup, check-finding snapshots,
+                                                check cache, triage verdicts, metrics, backups index.
+<project>/.apps/translationCoreAI/backups/      the backup files themselves, indexed by the DB
+%LOCALAPPDATA%\Bridge\data\workspace.sqlite3    app-level, schema v2 (#77): users, devices, the
+                                                project registry, non-secret settings, and one cached
+                                                progress rollup per project for the dashboard
+%LOCALAPPDATA%\Bridge\data\settings.json       DPAPI-wrapped secrets only
 ```
 
-**The human-owned stores have moved (#76, 2026-09-15).** `decisions/`,
+**The file stores have moved (#76 and #77, 2026-09-15).** `decisions/`,
 `qaDecisions/`, `review/`, `terminology/`, `aiReview/`, `issueResolutions/`,
-`alignmentHistory/`, `alignmentDiagnostics/`, `semanticMappings/` and
-`semanticValidation/` are rows in `bridge-workbench.sqlite3`, not JSON trees.
-There is **no migration**: the maintainer confirmed there is no user data to
-preserve while Bridge is pre-release, so a project holding any of those
-directories refuses to open and is re-imported. Nothing is deleted from anyone's
-disk. Those ten names are `_PRE_CUTOVER_STORE_DIRS` in `tc_project.py` — a store
-that moves must be added there in the same commit, or an old project opens and
-silently ignores its own records. See `docs/TEAM_ARCHITECTURE.md` §3.5 for why
-the lazy-migration machinery was built and then removed.
+`alignmentHistory/`, `alignmentDiagnostics/`, `semanticMappings/`,
+`semanticValidation/` (#76) and `checkFindings/`, `triage/`, `metrics/`,
+`checkCache.json`, `.bridge/progress.json` (#77) are rows in
+`bridge-workbench.sqlite3`, not JSON files. There is **no migration**: the
+maintainer confirmed there is no user data to preserve while Bridge is
+pre-release, so a project holding any of them refuses to open and is
+re-imported. Nothing is deleted from anyone's disk. The names are
+`_PRE_CUTOVER_STORE_DIRS` and `_PRE_CUTOVER_STORE_FILES` in `tc_project.py` — a
+store that moves must be added there in the same commit, or an old project opens
+and silently ignores its own records. See `docs/TEAM_ARCHITECTURE.md` §3.5 for
+why the lazy-migration machinery was built and then removed.
+
+**The dashboard reads a cache, not the siblings.** `project.listBookProgress`
+walks every book in a collection, most of them lazy stubs that have never been
+opened, and the rollup is per project. So it reads `project_progress_cache` in
+`workspace.sqlite3` in one query; a materialized sibling with no entry is peeked
+read-only (`peek_progress_totals`, a `mode=ro` connection that never creates or
+migrates) and its entry written back. Every totals write refreshes the entry
+with the `change_log.seq` it came from, and `project.open` compares that seq,
+the project id and the book (`sync_progress_cache`) and repairs, clears or
+keeps the entry — reported on the open result as `progressCache`, never fatal.
+The correctness question for that cache is invalidation, not placement.
 
 `audit/` is the exception and is **not** in that list. It was a write-only shadow
 of records already held natively under `.apps/translationCore/checkData/`, and
@@ -273,11 +288,17 @@ above them), and the append-only invariants are unchanged. **When Bridge has its
 first real user, restore both requirements and delete this amendment** — for a
 translation team that database *is* months of work, and no reset is available.
 
-This same discipline now has a second, independent ladder: `bridge-workbench.sqlite3`
+This same discipline now has two more, independent ladders. `bridge-workbench.sqlite3`
 (`WorkbenchRepository`, `engine/tc_ai_bridge/workbench_repository.py`,
-`WORKBENCH_SCHEMA_VERSION`, currently v1). It is a different database with its own
-version number — a workbench schema bump is never a v16 bump and vice versa; each
-gets its own migration block. The pre-release amendment above applies to both.
+`WORKBENCH_SCHEMA_VERSION`, currently v2 — v2 added `change_log.columns_json` for
+sync and rebuilt the immutability trigger) and `workspace.sqlite3`
+(`WorkspaceRepository`, `engine/tc_ai_bridge/workspace_repository.py`,
+`WORKSPACE_SCHEMA_VERSION`, currently v2 — v1 is exactly the unversioned
+devices/users the first cut created, kept as `IF NOT EXISTS` so an existing
+database is adopted with its ids intact; v2 added `projects`, `settings_kv`,
+`project_progress_cache`). Three databases, three version numbers; a bump in one
+is never a bump in another, and each gets its own forward block. The pre-release
+amendment above applies to all three.
 
 **Offline operation is a product invariant, not a preference.** Do not introduce a
 runtime dependency on a network service, a hosted API, or a login, in any code path
@@ -459,12 +480,13 @@ manual-alignment and import subsystems respectively. `docs/QA_TEST_MATRIX.md`
 is the release gate — a feature isn't release-ready because its unit tests
 pass; check the matrix's source/frozen/desktop rows.
 
-`docs/TEAM_ARCHITECTURE.md` (2026-09-11) is the design record for the planned
-direction behind issues #44–#47: a second per-project `bridge-workbench.sqlite3`
-for the Bridge-private stores (the semantic DB is not extended), a named
-user + device on every write, an *optional* team hub that syncs review state,
-and a hub-served dashboard. Until that work lands, the single-user, file-based
-description above is what the code does; when it lands, this file's on-disk
+`docs/TEAM_ARCHITECTURE.md` (2026-09-11) is the design record for the direction
+behind issues #44–#47: a second per-project `bridge-workbench.sqlite3` for the
+Bridge-private stores (the semantic DB is not extended), a named user + device
+on every write, an *optional* team hub that syncs review state, and a
+hub-served dashboard. Its §3 and §4 (the two databases, #75–#77) are what the
+code does as of 2026-09-15; §5–§8 (identity and roles, engine session model,
+hub, dashboard) are still design. When one of those lands, this file's on-disk
 shape and invariants sections must be updated in the same commit.
 
 ## How to work here

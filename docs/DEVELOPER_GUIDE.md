@@ -75,7 +75,7 @@ reasons — this table is the fast way to see both.
 | *(Passage-semantic Stages 4-8)* | Source/target semantic inventories, passage-aware location, meaning preservation, bidirectional QA | ✅ Done (2026-09-01 / 2026-09-02). Deterministic throughout — none of these stages uses a language model. Note the numbering collision: these are semantic **Stages**, a different axis from the Greek Room **Phases** above. Production caveat: `SemanticEmbeddingProvider.available` is `False` in the shipped app, so location runs there use lexical/structural evidence only; `scripts/seed_review_fixture.py` seeds a project with a fixture provider for exercising the review UI. |
 | *(Stage 9A)* | Human QA review, evidence inspection, disposition workflow | ✅ Done, including Stage 9A.4 orchestration (2026-09-03). A 2026-09-04 follow-up kept a running analysis job visible while the reviewer navigates (it was previously dropped), and fixed the Logos VBScript shim going silent on any COM error, and bounded the Bridge navigation publish retry. Alignment Review is a top-level Word/Semantic/Passage/QA surface; `qaReview.*`, `semanticReview.*` and `reviewHistory.*` record decisions with optimistic concurrency. **Run analysis** now executes Stages 5–8 as a persisted background job for passage/chapter/book/range and refreshes the queue. Findings are classified only — no correction generation or application, which remains Stage 9B. Normal runtime visibly reports limited retrieval until a production multilingual embedding provider is configured. |
 | *(Stage 9B)* | Correction wording, review, explicit apply, affected re-analysis, semantic verification | ✅ Done through **9B.4**. 9B.0 schema/eligibility, 9B.1 wording generation, 9B.2 review UI, 9B.3a persistence/recovery, 9B.3b the first authorized Scripture write behind explicit human confirmation, 9B.3c affected re-analysis, and 9B.4 positive semantic verification plus explicit `CORRECTED` acknowledgement are present. Schema is **v14**. Stage 8 target-hash and resource-conflict blockers, Case C source-inventory consistency, and terminal verification refresh were repaired before release v0.9.6. A correction is never verified merely because a finding disappeared: current Stage 6B/7/8 evidence must positively satisfy the original obligation, and `PASSED` alone never sets `CORRECTED`. |
-| *(Project QA report)* | — | ✅ Done (2026-09-04). **Generate report** on the project screen builds a whole-collection QA report in a background sidecar job (`report.generate/status/get/cancel/export`, `tc_ai_bridge/qa_report.py`, `report_jobs.py`): every book's Greek Room / tN / tW / alignment / AI-review progress, and every issue as a filterable row (category, book, chapter, verse, issue, AI proposal, fixed by human/machine, pass/fail) with charts and CSV / TSV / print-to-PDF export. Needed one piece of new persistence: a succeeded check job now snapshots its findings to `.apps/translationCoreAI/checkFindings/<book>/<chapter>.json` (the rollup only ever kept ids). Installed-app acceptance still NOT RUN. |
+| *(Project QA report)* | — | ✅ Done (2026-09-04). **Generate report** on the project screen builds a whole-collection QA report in a background sidecar job (`report.generate/status/get/cancel/export`, `tc_ai_bridge/qa_report.py`, `report_jobs.py`): every book's Greek Room / tN / tW / alignment / AI-review progress, and every issue as a filterable row (category, book, chapter, verse, issue, AI proposal, fixed by human/machine, pass/fail) with charts and CSV / TSV / print-to-PDF export. Needed one piece of new persistence: a succeeded check job now snapshots its findings per chapter (the rollup only ever kept ids) — originally `.apps/translationCoreAI/checkFindings/<book>/<chapter>.json`, a `check_findings` row in `bridge-workbench.sqlite3` since #77. Installed-app acceptance still NOT RUN. |
 | *(AI triage)* | — | ✅ Done (2026-09-07). Optional, **online-only** false-positive scoring layered on that report — see §5. Backend, protocol and report-screen UI; live model behaviour and installed-app acceptance NOT RUN. |
 
 ### 2.1 Complete project history and current continuation
@@ -418,7 +418,7 @@ clears), `triage.clear`, `triage.results`. `triage.results` is in
 `report.get`'s 180 s timeout class; everything else stays interactive at
 30 s so a long run can always be cancelled.
 
-**Stored shape** — `.apps/translationCoreAI/triage/<book>.json`:
+**Stored shape** — one `triage_verdicts` row per book in `bridge-workbench.sqlite3` (until #77, `.apps/translationCoreAI/triage/<book>.json`); the payload is unchanged:
 
 ```json
 {"schemaVersion": 1, "bookId": "rut", "updatedAt": "...",
@@ -461,9 +461,10 @@ Four design points worth knowing before changing any of it:
 **Concurrency.** `triage.override` (dispatcher thread) and the run worker
 both load-merge-save the same book file under one `BridgeEngine._triage_lock`,
 and the worker re-reads immediately before merging each batch, so an
-override recorded mid-run survives. This is the same lost-update class that
-`.bridge/progress.json` still has between its two writers — see the known
-gaps in `BUILD_LOG.md`.
+override recorded mid-run survives. The progress rollup had the same
+lost-update class between its two writers while it was one file; since #77 each
+writer touches only its own rows, and what remains is the recomputed totals row
+(last writer wins) — see the known gaps in `BUILD_LOG.md`.
 
 **The slider** lives in `AppSettings.triage_hide_threshold` (default 90,
 `0` = off, otherwise clamped to 50–100). Only a `false_positive` verdict at
@@ -549,5 +550,5 @@ Three rules a new contributor will otherwise get wrong:
 | [`IMPORTS.md`](IMPORTS.md) | Import pipeline design: supported inputs, normalized project schema, duplicate-safety logic, provenance. |
 | [`ALIGNMENT.md`](ALIGNMENT.md) | Manual word-alignment protocol, persistence, completion states. |
 | [`QA_TEST_MATRIX.md`](QA_TEST_MATRIX.md) | Release gate — what's tested, how, and current pass/fail status per release candidate. |
-| [`TEAM_ARCHITECTURE.md`](TEAM_ARCHITECTURE.md) | Planned direction for #44–#47: per-project workbench SQLite, user + device identity, optional sync hub, hub-served dashboard, and the modular test suite that lands first. Design record, not yet what the code does. |
+| [`TEAM_ARCHITECTURE.md`](TEAM_ARCHITECTURE.md) | Direction for #44–#47: per-project workbench SQLite, app-level workspace SQLite, user + device identity, optional sync hub, hub-served dashboard. §3–§4 (the two databases, #75–#77) describe what the code does as of 2026-09-15; §5–§8 are still design. |
 | [`DECISIONS.md`](DECISIONS.md) | Five-line log of architectural and product decisions, newest first, with what each rules out. |
