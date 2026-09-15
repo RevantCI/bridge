@@ -608,7 +608,6 @@ class OpenAIResponsesClient:
             'resource_provenance': pack.get('resource_provenance', {}),
             'global_checking_evidence_ids': global_evidence_ids,
             'project_reviewer_decisions': sorted(project.project_decisions(), key=lambda d: str(d.get('modifiedTimestamp','')))[-100:],
-            'human_approved_terminology_rules': project.terminology_rules(),
             'language_context': language.to_dict(),
             'target_verse': project.target_verse_text(chapter, verse),
             'source_topWords': top_tokens,
@@ -674,7 +673,7 @@ class OpenAIResponsesClient:
             'Set nothing_to_select=true only when the check is structurally not applicable. A source key term that is translated by a suffix-bearing or compound target token is applicable and must select that entire supplied token ID. '
             'If the rationale names or quotes a target rendering, include every corresponding supplied target ID in selection_ids. '
             'For Translation Notes, apply the linked Translation Academy method/principle and judge whether the target translation handles the specific issue. '
-            'For Translation Words, use the Translation Word article, TWL occurrence, source morphology, approved project renderings, and human_approved_terminology_rules. Human-approved terminology rules outrank AI preference; allow contextually justified variation. '
+            'For Translation Words, use the Translation Word article, TWL occurrence, source morphology, and approved project renderings; allow contextually justified variation. '
             'Then perform whole-verse QA using the supplied checking evidence: accuracy/completeness first, including omission, unsupported addition, wrong lexical meaning, negation/scope, participants/pronouns, number/person, commands/questions, semantic relations, figures, terminology, and stale/misaligned meaning. '
             f'Separately evaluate only the language-appropriate editorial categories: {", ".join(language.qa_categories)}. {language.prompt_guidance} '
             'False-positive discipline: before reporting a missing-rendering or wrong-lexical-meaning issue, inspect every supplied target token for a valid inflected, suffixed, compounded, transliterated, or contextually equivalent rendering. Do not call a rendering absent merely because it differs from an English gloss or citation form. Test the strongest plausible explanation that the target rendering is valid, consult existing alignment/approved decisions/terminology, and report only one finding for one underlying problem. '
