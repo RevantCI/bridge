@@ -77,8 +77,11 @@ def test_fresh_profile_seeds_reviewer_name_from_os_account(tmp_path: Path, monke
     assert settings.reviewer_name == "benz"
     assert settings.reviewer_name != "AI Bridge Reviewer"
     # Seeding persists -- it is not recomputed (and not re-savable) every read.
-    on_disk = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
-    assert on_disk["reviewer_name"] == "benz"
+    # Non-secret settings are workspace rows since #77, so reload rather than
+    # reading settings.json (which now holds only DPAPI-wrapped secrets).
+    monkeypatch.setattr(secret_store.getpass, "getuser", lambda: "someone-else")
+    assert AppSettings(tmp_path / "settings.json").reviewer_name == "benz"
+    assert "reviewer_name" not in (tmp_path / "settings.json").read_text(encoding="utf-8")
 
 
 def test_fresh_profile_falls_back_to_neutral_name_when_os_account_unreadable(
@@ -105,8 +108,10 @@ def test_stale_pre_v11_005_profile_reseeds_from_os_account(tmp_path: Path, monke
     settings = AppSettings(path)
 
     assert settings.reviewer_name == "benz"
-    on_disk = json.loads(path.read_text(encoding="utf-8"))
-    assert on_disk["reviewer_name"] == "benz"
+    # Persisted (as a workspace row since #77): a reload with a different OS
+    # account still reads the healed name rather than reseeding.
+    monkeypatch.setattr(secret_store.getpass, "getuser", lambda: "someone-else")
+    assert AppSettings(path).reviewer_name == "benz"
 
 
 def test_explicit_rename_to_ai_bridge_reviewer_literal_is_respected(tmp_path: Path, monkeypatch) -> None:

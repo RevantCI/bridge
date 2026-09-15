@@ -388,3 +388,82 @@ class WorkspaceRepository:
                 ).rowcount
             conn.commit()
         return removed
+
+    # -- project registry (formerly project-registry.json) -------------------
+    #
+    # `ProjectRegistry` keeps its whole-list-in-memory model; these two calls
+    # are its load and save. `entry_json` holds each entry exactly as the file
+    # did, so `list_projects()` returns the same dicts; the lifted columns are
+    # the ones the registry looks rows up by.
+
+    def load_project_entries(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT entry_json FROM projects ORDER BY position, rowid").fetchall()
+        entries: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                value = json.loads(row["entry_json"])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(value, dict):
+                entries.append(value)
+        return entries
+
+    def save_project_entries(self, entries: list[dict[str, Any]]) -> None:
+        """Replace the registry with `entries`, in one transaction -- the
+        semantics the atomic file rewrite had."""
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("DELETE FROM projects")
+            for position, entry in enumerate(entries):
+                if not isinstance(entry, dict):
+                    continue
+                conn.execute(
+                    "INSERT INTO projects(project_id, collection_id, path, path_key, managed, missing, "
+                    "last_opened_at, position, entry_json) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (
+                        str(entry.get("projectId") or ""), str(entry.get("collectionId") or "") or None,
+                        str(entry.get("path") or ""), str(entry.get("pathKey") or ""),
+                        1 if entry.get("managed") else 0, 1 if entry.get("missing") else 0,
+                        str(entry.get("lastOpenedAt") or "") or None, position,
+                        json.dumps(entry, ensure_ascii=False),
+                    ),
+                )
+            conn.commit()
+
+    # -- non-secret settings ---------------------------------------------------
+    #
+    # DPAPI-wrapped secrets stay in settings.json (`secret_store.py`); every
+    # other setting is a row here. `AppSettings` loads the whole map once and
+    # replaces it on every save, which is what the file write did.
+
+    def load_settings(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT key, value_json FROM settings_kv").fetchall()
+        out: dict[str, Any] = {}
+        for row in rows:
+            try:
+                out[str(row["key"])] = json.loads(row["value_json"])
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def replace_settings(self, values: dict[str, Any]) -> None:
+        now = self._now()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            keys = list(values.keys())
+            if keys:
+                conn.execute(
+                    "DELETE FROM settings_kv WHERE key NOT IN (" + ",".join("?" for _ in keys) + ")", keys,
+                )
+            else:
+                conn.execute("DELETE FROM settings_kv")
+            for key, value in values.items():
+                conn.execute(
+                    "INSERT INTO settings_kv(key, value_json, updated_at) VALUES(?,?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, "
+                    "updated_at=excluded.updated_at",
+                    (str(key), json.dumps(value, ensure_ascii=False), now),
+                )
+            conn.commit()

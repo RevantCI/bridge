@@ -1,10 +1,16 @@
 """Persistent project discovery, identity, and duplicate classification.
 
-The registry is deliberately separate from settings.json: project discovery must
-remain recoverable even when preferences are reset, and it must never share a
-write path with encrypted credentials.  Managed projects also carry a small
+The registry lives in the workspace database's ``projects`` table (#77;
+``project-registry.json`` before that). It is deliberately separate from the
+DPAPI-wrapped secrets in settings.json: project discovery must remain
+recoverable even when preferences are reset, and it must never share a write
+path with encrypted credentials.  Managed projects also carry a small
 ``.bridge/project.json`` identity file so moving the whole project does not turn
 it into a new project.
+
+A ``project-registry.json`` left by an earlier build is read once, when the
+table is empty, so nothing already listed goes missing; after that the file
+is not consulted. There is no other migration (TEAM_ARCHITECTURE.md ss3.5).
 """
 from __future__ import annotations
 
@@ -16,6 +22,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from .workspace_repository import WorkspaceRepository
 
 
 REGISTRY_SCHEMA_VERSION = 1
@@ -113,21 +121,49 @@ def collection_fingerprint(fingerprints: dict[str, str]) -> str:
 
 
 class ProjectRegistry:
-    def __init__(self, path: Path, managed_root: Path):
+    def __init__(
+        self, path: Path, managed_root: Path, *, workspace: WorkspaceRepository | None = None,
+    ):
+        # `path` is where project-registry.json lived; it is read once to seed
+        # an empty table and otherwise unused. The workspace database defaults
+        # to the one beside it, which is where BridgeEngine keeps its own.
         self.path = Path(path)
+        self.workspace = workspace or WorkspaceRepository(self.path.parent / "workspace.sqlite3")
         self.managed_root = Path(managed_root).resolve(strict=False)
         self._data = self._load()
         self._managed_discovered = False
         self._dirty = False
 
     def _load(self) -> dict[str, Any]:
+        entries = self.workspace.load_project_entries()
+        if not entries:
+            legacy = self._load_legacy_file()
+            if legacy:
+                entries = legacy
+                self.workspace.save_project_entries(entries)
+                # Read once means once: a later empty table (every project
+                # forgotten) must not resurrect the file's contents. The file
+                # is kept as evidence, under a name nothing reads.
+                try:
+                    os.replace(
+                        self.path,
+                        self.path.with_name(
+                            f"{self.path.stem}.imported-{datetime.now().strftime('%Y%m%d%H%M%S')}{self.path.suffix}"
+                        ),
+                    )
+                except OSError:
+                    pass
+        return {"schemaVersion": REGISTRY_SCHEMA_VERSION, "projects": entries}
+
+    def _load_legacy_file(self) -> list[dict[str, Any]]:
+        """The pre-#77 project-registry.json, read once into an empty table."""
         if not self.path.is_file():
-            return {"schemaVersion": REGISTRY_SCHEMA_VERSION, "projects": []}
+            return []
         try:
             value = json.loads(self.path.read_text(encoding="utf-8-sig"))
             if not isinstance(value, dict) or not isinstance(value.get("projects"), list):
                 raise ValueError("registry root is invalid")
-            return {"schemaVersion": REGISTRY_SCHEMA_VERSION, "projects": value["projects"]}
+            return [entry for entry in value["projects"] if isinstance(entry, dict)]
         except (OSError, ValueError, json.JSONDecodeError):
             # Keep the damaged evidence for diagnostics, but do not let it prevent
             # managed-project discovery from rebuilding a usable registry.
@@ -136,10 +172,12 @@ class ProjectRegistry:
                 os.replace(self.path, corrupt)
             except OSError:
                 pass
-            return {"schemaVersion": REGISTRY_SCHEMA_VERSION, "projects": []}
+            return []
 
     def _save(self) -> None:
-        _write_json_atomic(self.path, self._data)
+        self.workspace.save_project_entries(
+            [entry for entry in self._data["projects"] if isinstance(entry, dict)]
+        )
         self._dirty = False
 
     def _is_managed(self, path: Path) -> bool:

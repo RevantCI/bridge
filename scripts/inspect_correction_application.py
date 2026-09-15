@@ -36,6 +36,27 @@ def _project_id(project_root: Path) -> str:
 
 
 def _registry_entries(registry_path: Path) -> list[dict[str, Any]]:
+    """Registry entries from the workspace database (#77), falling back to
+    the pre-#77 project-registry.json beside it."""
+    workspace = registry_path.parent / "workspace.sqlite3"
+    if workspace.is_file():
+        try:
+            connection = sqlite3.connect(f"file:{workspace.as_posix()}?mode=ro", uri=True)
+            try:
+                rows = connection.execute("SELECT entry_json FROM projects ORDER BY position").fetchall()
+            finally:
+                connection.close()
+            entries = []
+            for (raw,) in rows:
+                try:
+                    value = json.loads(raw)
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(value, dict):
+                    entries.append(value)
+            return entries
+        except sqlite3.Error:
+            pass
     if not registry_path.is_file():
         return []
     payload = _json(registry_path)

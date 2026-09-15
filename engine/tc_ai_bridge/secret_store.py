@@ -93,17 +93,43 @@ def _default_app_root() -> Path:
     return root
 
 
+def _is_secret_key(key: str) -> bool:
+    """DPAPI-wrapped values stay in settings.json; everything else is a
+    `settings_kv` row in the workspace database (#77)."""
+    return str(key).endswith('_dpapi')
+
+
 class AppSettings:
-    def __init__(self, path: Path | None = None):
+    def __init__(self, path: Path | None = None, workspace: 'WorkspaceRepository | None' = None):
+        from .workspace_repository import WorkspaceRepository
+
         if path is None:
             path = _default_app_root() / 'settings.json'
         self.path = Path(path)
+        # Non-secret settings live in the workspace database beside this file;
+        # `self.data` is the merged in-memory view of both, so every property
+        # below reads and writes exactly as it did when the file held it all.
+        self.workspace = workspace or WorkspaceRepository(self.path.parent / 'workspace.sqlite3')
         self.data: dict = {}
+        on_disk: dict = {}
         if self.path.exists():
             try:
-                self.data = json.loads(self.path.read_text('utf-8'))
+                loaded = json.loads(self.path.read_text('utf-8'))
+                on_disk = loaded if isinstance(loaded, dict) else {}
             except Exception:
-                self.data = {}
+                on_disk = {}
+        stored = self.workspace.load_settings()
+        # A settings.json written before #77 carries non-secret keys too. They
+        # are adopted into the database once (the database wins where both
+        # have a value) and the file is rewritten to secrets only below.
+        legacy_non_secret = {
+            k: v for k, v in on_disk.items()
+            if not _is_secret_key(k) and not str(k).startswith('_') and k not in stored
+        }
+        self.data = {**{k: v for k, v in on_disk.items() if _is_secret_key(k) or str(k).startswith('_')},
+                     **stored, **legacy_non_secret}
+        if legacy_non_secret or any(not _is_secret_key(k) and not str(k).startswith('_') for k in on_disk):
+            self.save_sanitized()
 
         # Older Bridge builds could accidentally persist session-only values by
         # calling save() after set_api_key(). Keep the value available for this
@@ -137,8 +163,10 @@ class AppSettings:
 
     def save_sanitized(self) -> None:
         persistent = {k: v for k, v in self.data.items() if not k.startswith('_')}
+        secrets = {k: v for k, v in persistent.items() if _is_secret_key(k)}
+        self.workspace.replace_settings({k: v for k, v in persistent.items() if not _is_secret_key(k)})
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(persistent, indent=2), encoding='utf-8')
+        self.path.write_text(json.dumps(secrets, indent=2), encoding='utf-8')
         # The persisted file never contains a plaintext API key. Restrict other reviewer/settings
         # metadata as well on platforms that support POSIX permissions; Windows DPAPI protects
         # the credential material itself.

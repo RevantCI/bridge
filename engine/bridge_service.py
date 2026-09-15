@@ -533,14 +533,15 @@ class BridgeEngine:
         # Keep imported projects in the same application-owned folder as settings.
         settings_root = self.settings.path.parent
         self.project_root = settings_root / "projects"
+        # The app-level workspace database (TEAM_ARCHITECTURE.md section 4):
+        # settings already opened it beside settings.json. One instance,
+        # shared with the registry and injected into every project this engine
+        # opens, so the per-project workbench writes and the cross-project
+        # progress cache agree on which installation they belong to.
+        self.workspace: WorkspaceRepository = self.settings.workspace
         self.project_registry = ProjectRegistry(
-            settings_root / "project-registry.json", self.project_root,
+            settings_root / "project-registry.json", self.project_root, workspace=self.workspace,
         )
-        # The app-level workspace database (TEAM_ARCHITECTURE.md section 4).
-        # Owned here and injected into every project this engine opens, so
-        # the per-project workbench writes and the cross-project progress
-        # cache agree on which installation they belong to.
-        self.workspace = WorkspaceRepository(settings_root / "workspace.sqlite3")
 
     # -- lifecycle ------------------------------------------------------
 

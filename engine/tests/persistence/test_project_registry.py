@@ -290,17 +290,17 @@ def test_partial_collection_and_metadata_overlap_remain_non_blocking(tmp_path):
     assert result["exactMatchGroupId"] == ""
 
 
-def test_list_projects_does_not_rewrite_files_when_nothing_changed(tmp_path, monkeypatch):
-    import tc_ai_bridge.project_registry as registry_module
+def test_list_projects_does_not_rewrite_the_registry_when_nothing_changed(tmp_path, monkeypatch):
+    from tc_ai_bridge.workspace_repository import WorkspaceRepository
 
-    calls: list[Path] = []
-    original_write = registry_module._write_json_atomic
+    calls: list[int] = []
+    original_save = WorkspaceRepository.save_project_entries
 
-    def counting_write(path, value):
-        calls.append(path)
-        original_write(path, value)
+    def counting_save(self, entries):
+        calls.append(len(entries))
+        original_save(self, entries)
 
-    monkeypatch.setattr(registry_module, "_write_json_atomic", counting_write)
+    monkeypatch.setattr(WorkspaceRepository, "save_project_entries", counting_save)
 
     managed = tmp_path / "managed"
     registry = ProjectRegistry(tmp_path / "registry.json", managed)
@@ -311,11 +311,51 @@ def test_list_projects_does_not_rewrite_files_when_nothing_changed(tmp_path, mon
     registry.list_projects()
     registry.list_projects()
 
-    assert calls == [], "re-scanning an unchanged managed project must not rewrite any JSON file"
+    assert calls == [], "re-scanning an unchanged managed project must not rewrite the registry"
 
     # Sanity check the counter isn't simply broken: a real change still writes.
     registry.register(project_path, touch=True)
     assert calls, "touching a project should still persist the change"
+
+
+def test_registry_lives_in_the_workspace_database_and_survives_reopen(tmp_path):
+    from tc_ai_bridge.workspace_repository import WorkspaceRepository
+
+    managed = tmp_path / "managed"
+    registry = ProjectRegistry(tmp_path / "registry.json", managed)
+    first = registry.register(_project(managed, "tit"), collection_id="c1")
+
+    assert not (tmp_path / "registry.json").exists(), "the JSON file is no longer written"
+    rows = WorkspaceRepository(tmp_path / "workspace.sqlite3").load_project_entries()
+    assert [row["projectId"] for row in rows] == [first["projectId"]]
+
+    reopened = ProjectRegistry(tmp_path / "registry.json", managed)
+    assert reopened.get(first["projectId"]) == registry.get(first["projectId"])
+
+
+def test_a_pre_77_registry_file_is_read_once_so_every_project_stays_listed(tmp_path):
+    """The issue's test: registry migration keeps every project listed. An
+    external (unmanaged) project cannot be rediscovered from disk, so the
+    old file is the only place it is known from."""
+    from tc_ai_bridge.workspace_repository import WorkspaceRepository
+
+    managed = tmp_path / "managed"
+    external = _project(tmp_path / "external")
+    seed = ProjectRegistry(tmp_path / "legacy" / "registry.json", managed)
+    entry = seed.register(external)
+    legacy_entries = WorkspaceRepository(tmp_path / "legacy" / "workspace.sqlite3").load_project_entries()
+    (tmp_path / "registry.json").write_text(
+        json.dumps({"schemaVersion": 1, "projects": legacy_entries}), encoding="utf-8",
+    )
+
+    registry = ProjectRegistry(tmp_path / "registry.json", managed)
+    listed = registry.list_projects()
+    assert [item["projectId"] for item in listed] == [entry["projectId"]]
+    assert listed[0]["path"] == str(external.resolve())
+
+    # Once seeded, the file is not consulted again: forgetting sticks.
+    registry.forget(entry["projectId"])
+    assert ProjectRegistry(tmp_path / "registry.json", managed).list_projects() == []
 
 
 def test_list_projects_skips_full_rescan_of_already_known_projects(tmp_path, monkeypatch):
