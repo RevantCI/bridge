@@ -250,11 +250,19 @@ def test_triage_store_round_trips(fixture_project):
     assert project.clear_triage_records() is False
 
 
-def test_corrupt_triage_file_reads_as_empty_rather_than_crashing(fixture_project):
+def test_corrupt_triage_row_reads_as_empty_rather_than_crashing(fixture_project):
+    """The file reader treated a corrupt file as absent; the row reader does
+    the same for a payload that will not decode or has no entries map."""
+    import sqlite3
+
     project = TranslationCoreProject(fixture_project)
-    path = project.triage_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("{ this is not json", encoding="utf-8")
+    project.save_triage_records({"abc": {"verdict": "uncertain", "confidence": 0}})
+    conn = sqlite3.connect(str(project.workbench.path))
+    try:
+        conn.execute("UPDATE triage_verdicts SET payload_json='{ this is not json'")
+        conn.commit()
+    finally:
+        conn.close()
     assert project.load_triage_records() == {}
 
 

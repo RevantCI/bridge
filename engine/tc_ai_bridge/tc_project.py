@@ -78,6 +78,11 @@ _PRE_CUTOVER_STORE_DIRS = (
     'decisions', 'qaDecisions', 'review', 'terminology', 'aiReview',
     'issueResolutions', 'alignmentHistory', 'alignmentDiagnostics',
     'semanticMappings', 'semanticValidation',
+    # #77: the derived stores. Rebuildable in principle, but a project
+    # carrying them was reviewed on a build whose check results, triage
+    # verdicts and progress this build cannot see, and showing "not checked"
+    # for a checked book is the same silent-empty failure.
+    'checkFindings', 'triage',
 )
 # Single files, relative to the project root, that #77 moved the same way.
 # The progress rollup lived under `.bridge/`, not the companion dir, and
@@ -86,6 +91,7 @@ _PRE_CUTOVER_STORE_DIRS = (
 # cannot see.
 _PRE_CUTOVER_STORE_FILES = (
     '.bridge/progress.json',
+    '.apps/translationCoreAI/checkCache.json',
 )
 
 
@@ -2456,34 +2462,44 @@ class TranslationCoreProject:
     #
     # _usfm_findings_for_book/_names_findings_for_book (bridge_service.py) are
     # whole-book passes, not per-verse, so they don't fit the qaDecisions
-    # shape above. Cached on disk here, keyed by a content hash of exactly
-    # what each check consumes, so an unchanged reopen can skip the
-    # subprocess/scan while a real content change still invalidates it.
+    # shape above. Cached here, one `check_cache` row per section, keyed by
+    # a content hash of exactly what each check consumes, so an unchanged
+    # reopen can skip the subprocess/scan while a real content change still
+    # invalidates it. The cache starts empty after #77 (TEAM_ARCHITECTURE.md
+    # ss3.2): a miss recomputes.
 
-    def check_cache_path(self) -> Path:
-        return self.companion_dir() / 'checkCache.json'
+    def _check_cache_row_id(self, section: str) -> str:
+        return natural_row_id(self.workbench_identity.project_id, self.book_id, 'check_cache', section)
 
     def load_check_cache(self) -> dict[str, Any]:
-        p = self.check_cache_path()
-        if not p.exists():
-            return {'schemaVersion': 1}
-        try:
-            data = _read_json(p)
-        except Exception:
-            return {'schemaVersion': 1}
-        return data if isinstance(data, dict) else {'schemaVersion': 1}
+        data: dict[str, Any] = {'schemaVersion': 1}
+        for payload in self.workbench.payloads(
+            'check_cache', project_id=self.workbench_identity.project_id, book_id=self.book_id,
+        ):
+            section = str(payload.get('section') or '')
+            if not section:
+                continue
+            data[section] = {
+                'contentHash': payload.get('contentHash'),
+                'computedAt': payload.get('computedAt'),
+                'findings': list(payload.get('findings') or []),
+            }
+        return data
 
-    def save_check_cache_section(self, section: str, content_hash: str, findings: list[dict[str, Any]]) -> Path:
-        p = self.check_cache_path()
-        data = self.load_check_cache()
-        data['schemaVersion'] = 1
-        data[section] = {
-            'contentHash': content_hash,
-            'computedAt': self._timestamp()[0],
-            'findings': findings,
-        }
-        _write_json_atomic(p, data)
-        return p
+    def save_check_cache_section(self, section: str, content_hash: str, findings: list[dict[str, Any]]) -> str:
+        identity = self.workbench_identity
+        row_id = self._check_cache_row_id(section)
+        self.workbench._write(
+            'check_cache', row_id,
+            project_id=identity.project_id, book_id=self.book_id,
+            payload={
+                'section': section, 'contentHash': content_hash,
+                'computedAt': self._timestamp()[0], 'findings': list(findings),
+            },
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None,
+        )
+        return row_id
 
     # -- per-chapter check-finding snapshots ---------------------------------
     #
@@ -2492,76 +2508,93 @@ class TranslationCoreProject:
     # issues, explanations, suggested replacements) used to live only in the
     # check job's in-memory result and were gone once it finished. The
     # project QA report (qa_report.py) needs them, so a succeeded check job
-    # now leaves the chapter's findings here as well
-    # (BridgeEngine._on_check_job_complete). Read-only for everyone else.
+    # leaves the chapter's findings here as well
+    # (BridgeEngine._on_check_job_complete): one `check_findings` row per
+    # chapter, the whole chapter as one payload because qa_report reads whole
+    # chapters. Read-only for everyone else.
 
-    def check_findings_snapshot_path(self, chapter: str | int) -> Path:
-        return self.companion_dir() / 'checkFindings' / self.book_id / f'{chapter}.json'
+    def _check_findings_row_id(self, chapter: str) -> str:
+        return natural_row_id(self.workbench_identity.project_id, self.book_id, 'check_findings', chapter)
 
-    def save_check_findings_snapshot(self, chapter: str | int, verses: dict[str, list[dict[str, Any]]]) -> Path:
-        p = self.check_findings_snapshot_path(chapter)
-        _write_json_atomic(p, {
-            'schemaVersion': 1, 'bookId': self.book_id, 'chapter': str(chapter),
-            'updatedAt': self._timestamp()[0],
-            'verses': {str(v): list(findings) for v, findings in verses.items()},
-        })
-        return p
+    def save_check_findings_snapshot(self, chapter: str | int, verses: dict[str, list[dict[str, Any]]]) -> str:
+        identity = self.workbench_identity
+        chapter_key = str(chapter)
+        row_id = self._check_findings_row_id(chapter_key)
+        self.workbench._write(
+            'check_findings', row_id,
+            project_id=identity.project_id, book_id=self.book_id,
+            payload={
+                'schemaVersion': 1, 'bookId': self.book_id, 'chapter': chapter_key,
+                'updatedAt': self._timestamp()[0],
+                'verses': {str(v): list(findings) for v, findings in verses.items()},
+            },
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None,
+            extra_columns={'chapter': chapter_key},
+        )
+        return row_id
 
     def load_check_findings_snapshot(self, chapter: str | int) -> dict[str, list[dict[str, Any]]]:
-        p = self.check_findings_snapshot_path(chapter)
-        if not p.exists():
+        found = self.workbench.payloads(
+            'check_findings', project_id=self.workbench_identity.project_id,
+            book_id=self.book_id, equals={'chapter': str(chapter)},
+        )
+        if not found:
             return {}
-        try:
-            data = _read_json(p)
-        except Exception:
-            return {}
-        verses = data.get('verses') if isinstance(data, dict) else None
+        verses = found[0].get('verses')
         if not isinstance(verses, dict):
             return {}
-        return {str(v): [f for f in findings if isinstance(f, dict)] for v, findings in verses.items() if isinstance(findings, list)}
+        return {
+            str(v): [f for f in findings if isinstance(f, dict)]
+            for v, findings in verses.items() if isinstance(findings, list)
+        }
 
     # -- AI triage verdicts ---------------------------------------------------
     #
-    # One file per book, not per chapter: the store is read whole (the report
-    # screen merges every verdict in the collection at once), and on Windows
-    # the first open of any file costs ~20-25ms regardless of its size, so
-    # 66 files beat 1,189 by an order of magnitude for that read. Records are
-    # keyed by tc_ai_bridge.triage.triage_hash, which hashes the finding's
-    # evidence -- a finding whose evidence changed loses its cached verdict
-    # rather than carrying a stale one forward. Purely additive: nothing in
-    # the offline check or report flow reads this.
+    # One `triage_verdicts` row per book, not per chapter: the store is read
+    # whole (the report screen merges every verdict in the collection at
+    # once), so one row holding the whole map is the shape the file had.
+    # Records are keyed by tc_ai_bridge.triage.triage_hash, which hashes the
+    # finding's evidence -- a finding whose evidence changed loses its cached
+    # verdict rather than carrying a stale one forward. Purely additive:
+    # nothing in the offline check or report flow reads this.
 
-    def triage_path(self) -> Path:
-        return self.companion_dir() / 'triage' / f'{self.book_id}.json'
+    def _triage_row_id(self) -> str:
+        return natural_row_id(self.workbench_identity.project_id, self.book_id, 'triage_verdicts')
 
     def load_triage_records(self) -> dict[str, Any]:
-        p = self.triage_path()
-        if not p.exists():
-            return {}
-        try:
-            data = _read_json(p)
-        except Exception:
-            return {}
-        entries = data.get('entries') if isinstance(data, dict) else None
+        found = self.workbench.payloads(
+            'triage_verdicts', project_id=self.workbench_identity.project_id, book_id=self.book_id,
+        )
+        entries = found[0].get('entries') if found else None
         if not isinstance(entries, dict):
             return {}
         return {str(k): v for k, v in entries.items() if isinstance(v, dict)}
 
-    def save_triage_records(self, entries: dict[str, Any]) -> Path:
-        p = self.triage_path()
-        _write_json_atomic(p, {
-            'schemaVersion': 1, 'bookId': self.book_id,
-            'updatedAt': self._timestamp()[0],
-            'entries': {str(k): v for k, v in entries.items() if isinstance(v, dict)},
-        })
-        return p
+    def save_triage_records(self, entries: dict[str, Any]) -> str:
+        identity = self.workbench_identity
+        row_id = self._triage_row_id()
+        self.workbench._write(
+            'triage_verdicts', row_id,
+            project_id=identity.project_id, book_id=self.book_id,
+            payload={
+                'schemaVersion': 1, 'bookId': self.book_id,
+                'updatedAt': self._timestamp()[0],
+                'entries': {str(k): v for k, v in entries.items() if isinstance(v, dict)},
+            },
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None,
+        )
+        return row_id
 
     def clear_triage_records(self) -> bool:
-        p = self.triage_path()
-        if not p.exists():
-            return False
-        p.unlink()
-        return True
+        identity = self.workbench_identity
+        receipt = self.workbench._delete(
+            'triage_verdicts', self._triage_row_id(),
+            project_id=identity.project_id, book_id=self.book_id,
+            actor_id=identity.actor_id, device_id=identity.device_id,
+        )
+        return receipt is not None
 
     # -- per-book progress rollup --------------------------------------------
     #
@@ -2859,20 +2892,26 @@ def peek_progress_totals(project_root: str | Path) -> dict[str, Any] | None:
 
 def read_triage_records(project_root: str | Path, book_id: str) -> dict[str, Any] | None:
     """Peek at a sibling book's triage verdicts without constructing a full
-    TranslationCoreProject — same reason as read_progress_rollup above: a
+    TranslationCoreProject -- same reason as peek_progress_totals above: a
     lazy sibling has no usable manifest/alignmentData yet, and triage.results
-    must still be able to report that it simply has no verdicts."""
-    p = (Path(project_root).resolve() / '.apps' / 'translationCoreAI'
-         / 'triage' / f'{str(book_id).lower()}.json')
-    if not p.is_file():
+    must still be able to report that it simply has no verdicts. Read-only;
+    never creates the sibling's database."""
+    conn = _peek_workbench(project_root)
+    if conn is None:
         return None
     try:
-        data = _read_json(p)
-    except Exception:
+        row = conn.execute(
+            'SELECT payload_json FROM triage_verdicts WHERE book_id=? ORDER BY updated_at DESC LIMIT 1',
+            (str(book_id).lower(),),
+        ).fetchone()
+        if row is None:
+            return None
+        payload = json.loads(row['payload_json'])
+    except (sqlite3.Error, TypeError, ValueError):
         return None
-    if not isinstance(data, dict):
-        return None
-    entries = data.get('entries')
+    finally:
+        conn.close()
+    entries = payload.get('entries') if isinstance(payload, dict) else None
     if not isinstance(entries, dict):
         return None
     return {str(k): v for k, v in entries.items() if isinstance(v, dict)}

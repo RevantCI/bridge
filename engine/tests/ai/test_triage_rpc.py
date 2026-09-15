@@ -5,6 +5,7 @@ here reaches a network: BridgeEngine._ai_client is monkeypatched to a stub
 client whose triage_batch answers from a canned script.
 """
 import json
+import uuid
 import threading
 import time
 
@@ -57,6 +58,16 @@ def _finding(**overrides):
 
 
 def _plant(root, findings, chapter="1", verse="1"):
+    # Workbench rows are keyed by the project's registered id
+    # (`.bridge/project.json`), which project.open writes on first open. A
+    # snapshot planted before that would be keyed to the path-derived
+    # fallback id and be invisible to the opened project -- in the app the
+    # snapshot is always written by a check job on an already-open project,
+    # so give the fixture its identity up front the way an open would.
+    marker = root / ".bridge" / "project.json"
+    if not marker.is_file():
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({"schemaVersion": 1, "projectId": str(uuid.uuid4())}), encoding="utf-8")
     project = TranslationCoreProject(root)
     project.save_check_findings_snapshot(chapter, {verse: findings})
     return project

@@ -476,3 +476,24 @@ def test_write_receipts_carry_the_change_log_seq_and_max_seq_reads_it_back(tmp_p
     assert repo.max_seq(project_id="proj-1", table="check_cache") == 1
     assert repo.max_seq(project_id="proj-1", table="progress_totals") == 2
     assert repo.max_seq(project_id="nobody") == 0
+
+
+@pytest.mark.parametrize("relative", [
+    ".apps/translationCoreAI/checkFindings/rut/1.json",
+    ".apps/translationCoreAI/triage/rut.json",
+    ".apps/translationCoreAI/checkCache.json",
+])
+def test_a_project_carrying_a_77_derived_store_file_refuses_to_open(tmp_path, relative):
+    """#77 moved the derived stores too. They are rebuildable, but a project
+    that still has them was checked on a build whose results this one would
+    show as 'not checked' -- the guard exists for exactly that silence."""
+    from tc_ai_bridge.tc_project import ProjectError, TranslationCoreProject
+
+    root = _build_minimal_project(tmp_path / "rut")
+    target = root / Path(relative)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("{}", encoding="utf-8")
+    with pytest.raises(ProjectError) as raised:
+        TranslationCoreProject(root)
+    assert Path(relative).parts[2] in str(raised.value)
+    assert target.is_file()
