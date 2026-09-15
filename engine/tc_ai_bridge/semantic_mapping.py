@@ -16,6 +16,7 @@ import sqlite3
 from typing import Any, Iterable, Protocol, Sequence
 
 from .usfm_passages import PassageWindow, TargetSegment, UsfmPassageIndex
+from .workbench_repository import natural_row_id
 
 SCHEMA_VERSION = "bridge.semantic_mapping_result.v0.4"
 ENGINE_VERSION = "3.0.1-stage3"
@@ -314,32 +315,59 @@ def semantic_mapping_schema() -> dict[str, Any]:
 
 
 class SemanticMappingStore:
-    """Crash-safe companion persistence. Never writes target USFM/tC checkData."""
-    def __init__(self, root: str | Path):
-        self.root = Path(root)
+    """Workbench persistence for Stage 3 mappings. Never writes target USFM/tC checkData.
 
-    def path_for(self, book: str, fingerprint: str) -> Path:
-        return self.root / "semanticMappings" / book.lower() / f"{fingerprint}.json"
+    This was a companion directory of `semanticMappings/<book>/<fingerprint>.json`
+    files until #76. The natural key the filename encoded -- `(book, fingerprint)`
+    -- is now the `UNIQUE(project_id, book_id, fingerprint)` constraint on
+    `semantic_mappings`, so a re-run with the same inputs still lands on the same
+    record rather than accumulating a second one.
+
+    The store takes the project rather than a root path because every workbench
+    write needs an actor and a device, which only the project can resolve.
+    """
+    def __init__(self, project: Any):
+        self.project = project
+
+    @staticmethod
+    def _book_key(book: str) -> str:
+        """Normalize to the lowercase `book_id` every other workbench table uses.
+
+        `path_for` lowercased the directory component, so callers have always
+        been free to pass either case -- `semantic_mapping_service` passes
+        upper, `map_units` passes whatever the target index carries. That
+        freedom has to survive the move, because here a case mismatch would not
+        be a missing directory, it would be a second row under the UNIQUE key.
+        """
+        return str(book).lower()
+
+    def _row_id(self, book: str, fingerprint: str) -> str:
+        return natural_row_id(
+            self.project.workbench_identity.project_id,
+            self._book_key(book), "semantic_mapping", str(fingerprint),
+        )
 
     def load(self, book: str, fingerprint: str) -> dict[str, Any] | None:
-        path = self.path_for(book, fingerprint)
-        if not path.exists():
-            return None
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else None
-        except Exception:
-            return None
+        found = self.project.workbench.payloads(
+            "semantic_mappings",
+            project_id=self.project.workbench_identity.project_id,
+            book_id=self._book_key(book),
+            equals={"fingerprint": str(fingerprint)},
+        )
+        return found[0] if found else None
 
-    def save(self, book: str, fingerprint: str, payload: dict[str, Any]) -> Path:
-        path = self.path_for(book, fingerprint)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        # Validate the exact bytes before replacement.
-        json.loads(tmp.read_text(encoding="utf-8"))
-        tmp.replace(path)
-        return path
+    def save(self, book: str, fingerprint: str, payload: dict[str, Any]) -> str:
+        identity = self.project.workbench_identity
+        row_id = self._row_id(book, fingerprint)
+        self.project.workbench._write(
+            "semantic_mappings", row_id,
+            project_id=identity.project_id, book_id=self._book_key(book),
+            payload=payload,
+            actor_id=identity.actor_id, device_id=identity.device_id,
+            expected_revision=None, op="upsert",
+            extra_columns={"fingerprint": str(fingerprint)},
+        )
+        return row_id
 
     def confirm(
         self, *, book: str, fingerprint: str, source_unit_id: str,
@@ -388,18 +416,21 @@ class SemanticMappingStore:
         """Return cached records containing a source unit at ``source_reference``.
 
         Intended for UI/debug endpoints.  Normal review execution should retain
-        the fingerprint directly and avoid scanning the companion directory.
+        the fingerprint directly and avoid scanning every mapping in the book.
+
+        Newest first, as the old mtime-ordered directory scan was.
         """
-        root = self.root / "semanticMappings" / str(book).lower()
-        if not root.exists():
-            return []
+        found = self.project.workbench.payloads(
+            "semantic_mappings",
+            project_id=self.project.workbench_identity.project_id,
+            book_id=self._book_key(book),
+            order_by="updated_at",
+        )
         out: list[dict[str, Any]] = []
-        for path in sorted(root.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
+        for payload in reversed(found):
+            units = payload.get("sourceUnits", [])
+            if not isinstance(units, list):
                 continue
-            units = payload.get("sourceUnits", []) if isinstance(payload, dict) else []
             if any(isinstance(u, dict) and str(u.get("source_reference") or "") == source_reference for u in units):
                 out.append(payload)
         return out

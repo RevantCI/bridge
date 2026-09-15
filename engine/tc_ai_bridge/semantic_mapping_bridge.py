@@ -204,7 +204,7 @@ def prepare_semantic_mappings_for_review(
             "searchedWindows": [],
         }
 
-    store = SemanticMappingStore(project.companion_dir())
+    store = SemanticMappingStore(project)
     try:
         run = SemanticMappingEngine(source_repo, client, max_neighbor_windows=max_neighbor_windows).map_units(
             target_index=target_index, source_units=units, store=store, force=force,

@@ -72,6 +72,7 @@ _PARATEXT_SYNC_STATE_KEY = 'paratext_live_sync_state'
 _PRE_CUTOVER_STORE_DIRS = (
     'decisions', 'qaDecisions', 'review', 'terminology', 'aiReview',
     'issueResolutions', 'alignmentHistory', 'alignmentDiagnostics',
+    'semanticMappings',
 )
 
 

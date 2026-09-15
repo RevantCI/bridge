@@ -10,7 +10,7 @@ from .semantic_mapping_bridge import project_passage_index
 def semantic_mappings_for_verse(project: Any, chapter: str, verse: str) -> dict[str, Any]:
     book = str(project.book_id).upper()
     ref = f"{book} {chapter}:{verse}"
-    store = SemanticMappingStore(project.companion_dir())
+    store = SemanticMappingStore(project)
     records = store.records_for_reference(book, ref)
     return {
         "book": book, "chapter": str(chapter), "verse": str(verse),
@@ -24,7 +24,7 @@ def confirm_semantic_mapping(
 ) -> dict[str, Any]:
     if edited_mapping is not None:
         edited_mapping = _validate_human_mapping(project, edited_mapping)
-    store = SemanticMappingStore(project.companion_dir())
+    store = SemanticMappingStore(project)
     event = store.confirm(
         book=str(project.book_id).upper(), fingerprint=fingerprint,
         source_unit_id=source_unit_id, decision=decision, reviewer=reviewer,

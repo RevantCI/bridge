@@ -6,7 +6,27 @@ from tc_ai_bridge.semantic_mapping import (
     PassageSearchBudget, SemanticMappingEngine,
     SemanticSourceRepository, SemanticMappingStore, mapping_state_for_review,
 )
+from tc_ai_bridge.tc_project import TranslationCoreProject
 from tc_ai_bridge.usfm_passages import UsfmPassageIndex
+
+def _project(root: Path, book: str = "PHP") -> TranslationCoreProject:
+    """A minimal real project: the store needs a workbench and an identity.
+
+    It used to take a bare directory, so `tmp_path` was enough. A workbench row
+    carries an actor and a device, and only the project can resolve those.
+    """
+    lower = book.lower()
+    (root / lower).mkdir(parents=True)
+    (root / ".apps" / "translationCore" / "alignmentData" / lower).mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps({
+        "project": {"id": lower, "name": book},
+        "target_language": {"id": "tam", "name": "tam"},
+        "resource": {"id": "test", "name": "Test"},
+        "tc_version": "8",
+    }), encoding="utf-8")
+    (root / lower / "1.json").write_text(json.dumps({"1": "target text"}), encoding="utf-8")
+    return TranslationCoreProject(root)
+
 
 class FakeClient:
     model="gpt-5.6-test"
@@ -142,9 +162,9 @@ def test_companion_store_cache_round_trip(stage3_db, tamil_php_usfm, tmp_path):
     repo=SemanticSourceRepository(stage3_db); unit=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationNotes",check_id="gjyv")
     idx=UsfmPassageIndex.from_path(tamil_php_usfm,book_hint="PHP")
     response=fixture_response(unit.id,list(unit.source_token_ids),"PHP 1:3","PHP 1:6","என் தேவனை")
-    store=SemanticMappingStore(tmp_path)
+    store=SemanticMappingStore(_project(tmp_path / "proj"))
     fake=FakeClient([response]); r1=SemanticMappingEngine(repo,fake,max_neighbor_windows=0).map_units(target_index=idx,source_units=[unit],store=store)
-    assert store.path_for("PHP",r1.fingerprint).exists()
+    assert store.load("PHP",r1.fingerprint) is not None
     fake2=FakeClient([]); r2=SemanticMappingEngine(repo,fake2,max_neighbor_windows=0).map_units(target_index=idx,source_units=[unit],store=store)
     assert r2.cache_hit is True and not fake2.calls
 
@@ -153,7 +173,7 @@ def test_expanded_unresolved_cache_skips_all_repeat_model_calls(stage3_db, tamil
     repo=SemanticSourceRepository(stage3_db); unit=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationNotes",check_id="gjyv")
     idx=UsfmPassageIndex.from_path(tamil_php_usfm,book_hint="PHP")
     unresolved={"mappings":[],"unresolved_source_units":[{"source_unit_id":unit.id,"reason":"AMBIGUOUS","detail":"competing candidates"}],"passage_assessment":"NEEDS_REVIEW"}
-    store=SemanticMappingStore(tmp_path)
+    store=SemanticMappingStore(_project(tmp_path / "proj"))
     first=FakeClient([unresolved,unresolved])
     r1=SemanticMappingEngine(repo,first,max_neighbor_windows=1).map_units(target_index=idx,source_units=[unit],store=store)
     assert len(first.calls) == 2 and r1.search_budget_exhausted
@@ -304,7 +324,7 @@ def test_human_mapping_confirmation_audit(stage3_db, tamil_php_usfm, tmp_path):
     repo=SemanticSourceRepository(stage3_db); unit=repo.unit_for_check(book="PHP",chapter=1,verse=3,tool="translationNotes",check_id="gjyv")
     idx=UsfmPassageIndex.from_path(tamil_php_usfm,book_hint="PHP")
     response=fixture_response(unit.id,list(unit.source_token_ids),"PHP 1:3","PHP 1:6","என் தேவனை")
-    store=SemanticMappingStore(tmp_path)
+    store=SemanticMappingStore(_project(tmp_path / "proj"))
     run=SemanticMappingEngine(repo,FakeClient([response]),max_neighbor_windows=0).map_units(target_index=idx,source_units=[unit],store=store)
     event=store.confirm(book="PHP",fingerprint=run.fingerprint,source_unit_id=unit.id,decision="confirmed",reviewer="human")
     assert event["decision"] == "confirmed"
