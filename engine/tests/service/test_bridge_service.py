@@ -843,7 +843,15 @@ def test_live_greek_room_and_status_stay_responsive_during_check_preparation(
     live_elapsed = time.monotonic() - started_at
 
     assert live["success"] is True
-    assert live_elapsed < 0.25
+    # The claim is that the live check did not queue behind the checker lock,
+    # which `hold_checker_lock` holds for 2s -- so anything that queued lands at
+    # ~2s, not at a few hundred milliseconds. The old 0.25 budget was a proxy
+    # for that tuned to one machine, and on CI (windows-latest, serial) it
+    # measured 0.250-0.375 across four runs while the property itself held every
+    # time. Windows' ~15.6ms timer tick is a real fraction of a 250ms budget, so
+    # that threshold sat inside the noise floor. 1.0 keeps the assertion
+    # unambiguous against a 2s queue without failing on a loaded runner. See #90.
+    assert live_elapsed < 1.0
     status = call(engine, "checks.status", {"jobId": started["jobId"]})["result"]
     assert status["state"] in {"queued", "running"}
     listed = call(engine, "check.listForVerse", {"chapter": "1", "verse": "1"})["result"]
