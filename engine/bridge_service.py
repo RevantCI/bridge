@@ -82,6 +82,7 @@ from tc_ai_bridge.logos_connector import LogosConnectorClient, LogosConnectorErr
 from tc_ai_bridge.navigation import NavigationSyncCoordinator
 from tc_ai_bridge.models import QAIssue, TokenRef, VerseAlignment
 from tc_ai_bridge.secret_store import AppSettings
+from tc_ai_bridge.workspace_repository import WorkspaceRepository
 from tc_ai_bridge.resource_materializer import materialize_book_checks
 from tc_ai_bridge.usfm import whitespace_tokens
 from tc_ai_bridge import versification as versification_tool
@@ -535,6 +536,11 @@ class BridgeEngine:
         self.project_registry = ProjectRegistry(
             settings_root / "project-registry.json", self.project_root,
         )
+        # The app-level workspace database (TEAM_ARCHITECTURE.md section 4).
+        # Owned here and injected into every project this engine opens, so
+        # the per-project workbench writes and the cross-project progress
+        # cache agree on which installation they belong to.
+        self.workspace = WorkspaceRepository(settings_root / "workspace.sqlite3")
 
     # -- lifecycle ------------------------------------------------------
 
@@ -562,7 +568,7 @@ class BridgeEngine:
         self._corpus_stats_by_book.clear()
         materialize_lazy_project(path)
         ensure_bridge_original_language(path)
-        candidate = TranslationCoreProject(path)
+        candidate = TranslationCoreProject(path, workspace=self.workspace)
         if project_id:
             existing = self.project_registry.get(project_id)
             if existing:
@@ -933,7 +939,7 @@ class BridgeEngine:
         existing checks project-wide.
         """
         materialize_lazy_project(book.path)
-        project = TranslationCoreProject(book.path)
+        project = TranslationCoreProject(book.path, workspace=self.workspace)
         project_id = str(project.summary.path)
         target = project.manifest.get("target_language", {})
         language_id = str(target.get("id") or "") if isinstance(target, dict) else ""
@@ -1003,7 +1009,9 @@ class BridgeEngine:
         reports: list[dict[str, Any]] = []
         for book in books:
             materialize_lazy_project(book.path)
-            reports.append(ReportService(TranslationCoreProject(book.path)).build_book_report())
+            reports.append(ReportService(
+                TranslationCoreProject(book.path, workspace=self.workspace)
+            ).build_book_report())
         return ReportService.build_collection_report(reports)
 
     # -- whole-collection QA report ---------------------------------------
@@ -1039,8 +1047,7 @@ class BridgeEngine:
             return str(resource["name"])
         return self.project.summary.book_name
 
-    @staticmethod
-    def _build_report_book(book: ReportBook) -> dict[str, Any]:
+    def _build_report_book(self, book: ReportBook) -> dict[str, Any]:
         """Runs on the report job's worker thread. Never materializes a lazy
         sibling: a book nobody has opened has had no checks, and reading it
         would turn 'generate a report' into 'normalize the whole Bible'."""
@@ -1050,7 +1057,7 @@ class BridgeEngine:
                 lazy=book.lazy, missing=book.missing,
             )
         try:
-            project = TranslationCoreProject(book.path)
+            project = TranslationCoreProject(book.path, workspace=self.workspace)
         except ProjectError as exc:
             return unopened_book_report(
                 book_id=book.book_id, book_name=book.book_name, path=book.path,
@@ -1159,7 +1166,7 @@ class BridgeEngine:
         lock = self._triage_lock
 
         def run_book(entry: TriageBook, progress: Any, cancel: threading.Event) -> dict[str, Any]:
-            project = TranslationCoreProject(entry.path)
+            project = TranslationCoreProject(entry.path, workspace=self.workspace)
 
             def record_usage() -> None:
                 settings.record_ai_usage(client.last_usage.total_tokens, client.last_cost_usd)
@@ -1189,7 +1196,7 @@ class BridgeEngine:
             return self.project
         for entry in self._report_books():
             if entry.book_id.lower() == wanted and not entry.missing and not entry.lazy:
-                return TranslationCoreProject(entry.path)
+                return TranslationCoreProject(entry.path, workspace=self.workspace)
         raise ProjectError(f"No opened book '{book}' in this collection.")
 
     def override_triage(self, book: str, finding_hash: str, verdict: str = "") -> dict[str, Any]:
@@ -1237,7 +1244,7 @@ class BridgeEngine:
         with self._triage_lock:
             for entry in self._triage_books(book):
                 try:
-                    project = TranslationCoreProject(entry.path)
+                    project = TranslationCoreProject(entry.path, workspace=self.workspace)
                 except ProjectError:
                     continue
                 if project.clear_triage_records():

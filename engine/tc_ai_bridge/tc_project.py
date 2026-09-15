@@ -17,6 +17,7 @@ from .usfm import strip_usfm, whitespace_tokens
 from .models import VerseAlignment
 from .transaction_journal import TransactionJournal
 from .workbench_repository import WorkbenchIdentity, WorkbenchRepository, natural_row_id
+from .workspace_repository import WorkspaceRepository
 from .paratext_notes import append_paratext_note, validate_notes_11, convert_comment_list_to_notes_11, convert_legacy_notes_11, EXTERNAL_NOTE_SOURCE
 from .alignment_reliability import structural_issues, alignment_fingerprint
 
@@ -79,7 +80,11 @@ _PRE_CUTOVER_STORE_DIRS = (
 
 
 class TranslationCoreProject:
-    def __init__(self, project_path: str | Path, *, identity: WorkbenchIdentity | None = None):
+    def __init__(
+        self, project_path: str | Path, *,
+        identity: WorkbenchIdentity | None = None,
+        workspace: WorkspaceRepository | None = None,
+    ):
         self.path = Path(project_path).resolve()
         manifest_path = self.path / 'manifest.json'
         if not manifest_path.exists():
@@ -105,6 +110,11 @@ class TranslationCoreProject:
         # otherwise, because working it out opens the workspace database and
         # most project operations never write anything.
         self._identity: WorkbenchIdentity | None = identity
+        # The app-level workspace database (users, devices, the progress
+        # cache). BridgeEngine owns one and injects it so every project it
+        # opens shares it; a project constructed directly resolves the
+        # installation default lazily, and only when something needs it.
+        self._workspace: WorkspaceRepository | None = workspace
         # Stage 4 attaches an advisory companion runtime after project identity
         # is resolved. Direct TranslationCoreProject users remain unchanged.
         self.passage_semantic_runtime: Any | None = None
@@ -143,6 +153,13 @@ class TranslationCoreProject:
         self.passage_semantic_runtime = runtime
 
     @property
+    def workspace(self) -> WorkspaceRepository:
+        if self._workspace is None:
+            from .secret_store import _default_app_root
+            self._workspace = WorkspaceRepository(_default_app_root() / 'workspace.sqlite3')
+        return self._workspace
+
+    @property
     def workbench_identity(self) -> WorkbenchIdentity:
         """Who is writing, and to which project, for every workbench row.
 
@@ -159,8 +176,7 @@ class TranslationCoreProject:
         attribution has to survive the reviewer renaming themselves.
         """
         if self._identity is None:
-            from .secret_store import AppSettings, _default_app_root
-            from .workspace_repository import WorkspaceRepository
+            from .secret_store import AppSettings
 
             project_id = ''
             try:
@@ -173,7 +189,7 @@ class TranslationCoreProject:
                     str(self.path).casefold().encode('utf-8')
                 ).hexdigest()[:32]
 
-            workspace = WorkspaceRepository(_default_app_root() / 'workspace.sqlite3')
+            workspace = self.workspace
             # Reuse the OS-account seeding V11-005 already settled, rather than
             # inventing a second source of "who is this person by default".
             user = workspace.get_or_create_local_user(AppSettings._seed_reviewer_name())
