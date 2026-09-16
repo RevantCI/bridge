@@ -48,6 +48,10 @@ export function manualOverrideMode(allowed: boolean): ReviewerMode {
 export const loadedChapters = writable<Record<string, boolean>>({});
 
 export const selectedVerse = writable<string | null>(null);
+/** Ctrl/Shift-click multi-selection in the verse list (#118), feeding the
+ *  Cross-verse alignment range picker. `selectedVerse` stays the single
+ *  active verse; this is a separate, chapter-scoped set of verse strings. */
+export const selectedVerseSet = writable<string[]>([]);
 
 // Clears everything keyed by the previously open book's chapter/verse
 // numbers. Chapter "1" in one book is unrelated to chapter "1" in another,
@@ -63,6 +67,7 @@ export function resetBookState(): void {
   aiCheckReviewsByVerse.set({});
   loadedChapters.set({});
   selectedVerse.set(null);
+  selectedVerseSet.set([]);
   checkingProgress.set({ running: false, percent: 0, label: "", jobId: "", state: "idle", error: "", scope: "chapter" });
 }
 

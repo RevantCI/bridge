@@ -8962,3 +8962,87 @@ Frontend: `npm run check` 0 errors / 0 warnings; `npm run test` 30 files, **402 
 (3 new); `npm run build` clean. No Rust change, so `cargo` was not run. Docs bumped in
 the same commit: CLAUDE.md (on-disk shape, ladder paragraph), ARCHITECTURE.md §3,
 TEAM_ARCHITECTURE.md §3.1 table and §4 sync note.
+
+## 2026-09-16 — #118: cross-verse alignment, slice 3 — range suggestions, open from a finding, multi-select
+
+Frontend only. The page from #116/#117 asked the reviewer to pick the range by hand;
+Bridge already knew better in three places, and this slice wires each of them in.
+
+### What was built
+
+- **Range pre-fill from the last Stage 6B run** (`src/lib/crossVerseSuggest.ts`).
+  `suggestCrossVerseRange(chapter)` reads `analysisJob.getScopeStatus` for
+  `{kind: "CURRENT_CHAPTER", chapter}`, takes the latest job's `LOCATION` stage run id,
+  loads the run and its target inventory through the two existing range getters, and
+  returns the chapter's verses that `CROSS_VERSE` relationships land in — resolved
+  through the target tokens' displayed references, the same route
+  `PassageAlignmentMode` takes. It never throws: no completed analysis, no location
+  stage, or any failed read means no suggestion. The page loads its default range
+  first, then widens it with the suggestion, shows "↔ Range widened with verse(s) …"
+  and a "Back to N ±1" control; an explicit range (multi-select or a finding) skips
+  the suggestion. The picker stays manual throughout.
+- **Open from a finding.** `QaFindingDetail` shows a "Cross-verse alignment ›" button
+  for `POSSIBLE_OMISSION` / `POSSIBLE_ADDITION` findings with references and dispatches
+  a `crossVerse` event (the component stays presentational); the QA queue's context menu
+  (`AlignmentQaMode`) gains a "Cross-verse alignment" item enabled for the same kinds.
+  Both go through `versesForReferences`, which splits `"BOOK c:v"` on the last space and
+  the first colon so `"PHP 1:2-3"` keeps its bridge string, keeps the first chapter's
+  verses only (the page is chapter-scoped), and then `requestCrossVerse(chapter, verses)`
+  in `alignmentUi.ts`. `App.svelte` resolves the request: it switches chapter through
+  `activateChapter` when the finding is elsewhere, then opens the page on those verses.
+- **Ctrl/Shift-click multi-select in `VerseList`.** A new chapter-scoped
+  `selectedVerseSet` store (`stores.ts`, reset in `resetBookState` and on every chapter
+  activation). Ctrl/Cmd-click toggles a verse in the set, seeded from the active verse;
+  Shift-click selects the run from the active verse to the clicked one by index in
+  `verseNums`, never by number, so bridges ride along; a plain click clears the set.
+  `selectedVerse` stays the single active verse in every case. Selected rows get an
+  accent bar, and the toolbar button reads "Cross-verse alignment (N)" and opens the
+  page on exactly those verses. One verse is not a range: the set empties below two.
+- `CrossVerseAlignmentModal` gained an `initialVerses` prop; `openCrossVerse(verse,
+  verses)` carries the set or the references into it via `crossVerseInitialVerses`.
+
+### Verified in the real app (dev build, 1366×768, Tamil IRV Genesis 1)
+
+Same harness as #116/#117 (dev build from the worktree, the #117 sidecars reused since the
+engine did not change, WebView2 remote debugging, real pointer sequences with modifier
+bits). The app restored straight into Genesis 1.
+
+- **Multi-select.** Plain click on 1:2; Ctrl-click on 1:4 → rows 1:2 and 1:4 marked, active
+  verse 1:4, toolbar "Cross-verse alignment (2)"; Shift-click on 1:1 → 1:1–1:4 marked,
+  active 1:1, "(4)"; Ctrl-click on 1:3 → toggled off, "(3)". The toolbar button then opened
+  the page on **verses 1–4 with chip 3 off** and only 1:1, 1:2 and 1:4 in both columns.
+  (A first attempt clicked while the session restore was still finishing and was reset by
+  `activateChapter`'s own verse selection; repeated once the editor had settled it behaved
+  as above — a timing artefact of the harness, not of the feature.)
+- **Open from a finding.** Alignment Review → QA tab reported GEN 1:1 not analyzed, so a
+  real "Current passage" analysis was run there (5 stages, 5 possible-omission findings).
+  Right-click on a `GEN 1:1 · Possible omission` row: the menu listed "Cross-verse
+  alignment" first, enabled, with "Apply proposed fix" disabled and the four decisions
+  below it; choosing it opened the page over the review screen on **1:1–1:2** (a single
+  reference falls back to anchor ±1). Selecting the row showed the detail pane's
+  "Cross-verse alignment ›" button beside "Add note only"; it opened the page the same way.
+- **Range suggestion.** A "Current chapter" analysis of GEN 1:1–1:31 was then run in the app
+  (completed with warnings, `SEARCH_INCOMPLETE` on most relationships: the 31-verse
+  lexical-only search hits its evaluation budget). Opening the page on 1:2 afterwards
+  showed the default 1–3 and **no widening**. That is the right answer, not a miss: the
+  semantic database holds 425 relationships for that run and **none carries
+  `CROSS_VERSE`** (Hebrew→Tamil with no embedding provider locates almost nothing), so
+  the suggestion has nothing to add. The widening itself is covered by the Vitest case
+  with a mocked run; a real-app widening needs a project whose Stage 6B run has
+  cross-verse relationships, which the Tamil PHP golden fixture has and Genesis does not.
+- The dev build migrated the real Genesis workbench to v3 again on open; the v2 file was
+  restored afterwards as in #117.
+
+### Deliberately not done
+
+No engine change (the sidecars from #117 were reused). No change to `selectedVerse`
+semantics, to the QA queue's filters, or to how findings are decided. Cross-chapter
+ranges are still out of scope: a finding whose references span chapters opens on the
+first chapter's verses. No golden or threshold change; Semantic/Passage tabs untouched.
+
+### Gates
+
+`npm run check` 0 errors / 0 warnings; `npm run test` 33 files, **419 passed** (17 new
+across `crossVerseSuggest`, `VerseListMultiSelect`, `QaFindingDetailCrossVerse` and two
+new `CrossVerseAlignmentModal` cases); `npm run build` clean. No engine or Rust change,
+so pytest and `cargo` were not run.

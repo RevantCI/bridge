@@ -14,6 +14,8 @@
   import type { QaDisposition, ReviewQueueOrder, ReviewerDecision } from "../types/qaReview";
   import type { CoverageDimension } from "../types/passageSemanticV1";
   import { REVIEWER_ACTIONS } from "../utils/reviewLabels";
+  import { requestCrossVerse } from "../alignmentUi";
+  import { versesForReferences } from "../crossVerseSuggest";
   import type { ReviewFilters } from "../reviewStores";
   import {
     addReviewerNote,
@@ -85,7 +87,20 @@
   let contextBusy = false;
   let contextRequest = 0;
 
+  $: contextFinding = contextMenu ? $reviewQueue.find((finding) => finding.id === contextMenu?.findingId) ?? null : null;
+  $: contextCrossVerse = Boolean(
+    contextFinding && ["POSSIBLE_OMISSION", "POSSIBLE_ADDITION"].includes(String(contextFinding.kind))
+      && (contextFinding.displayedReferences?.length ?? 0) > 0,
+  );
   $: contextActions = [
+    {
+      id: "crossVerse",
+      label: "Cross-verse alignment",
+      disabled: contextBusy || !contextCrossVerse,
+      title: contextCrossVerse
+        ? "Open the finding's verses side by side in the Cross-verse alignment page"
+        : "Only for possible omissions and additions",
+    },
     {
       id: "apply",
       label: "Apply proposed fix",
@@ -263,6 +278,11 @@
   async function onContextAction(event: CustomEvent<{ id: string }>): Promise<void> {
     if (!contextMenu || contextBusy) return;
     const findingId = contextMenu.findingId;
+    if (event.detail.id === "crossVerse") {
+      if (contextFinding) openCrossVerseFromReferences(contextFinding.displayedReferences ?? []);
+      closeFindingMenu();
+      return;
+    }
     if (event.detail.id === "apply") {
       if (!contextCorrection?.proposal || contextCorrection.disabledReason) return;
       contextBusy = true;
@@ -302,6 +322,19 @@
       } else {
         announce(result.message, "warn");
       }
+    }
+  }
+
+  /** #118: hand the finding's references to the Cross-verse alignment page;
+   *  App.svelte switches chapter first when they are not in the current one. */
+  function openCrossVerseFromReferences(references: string[]): void {
+    const target = versesForReferences(references);
+    if (!target) {
+      announce("This finding has no verse reference to open.", "warn");
+      return;
+    }
+    if (!requestCrossVerse(target.chapter, target.verses)) {
+      announce("Wait for background checking or saving to finish before opening cross-verse alignment.", "warn");
     }
   }
 
@@ -440,6 +473,7 @@
         on:next={() => stepSelection(1)}
         on:previous={() => stepSelection(-1)}
         on:reanalyzed={correctionReanalyzed}
+        on:crossVerse={(event) => openCrossVerseFromReferences(event.detail.references)}
       />
     </div>
   </div>

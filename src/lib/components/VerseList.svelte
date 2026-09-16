@@ -1,6 +1,8 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress } from "../stores";
+  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress } from "../stores";
+  import { rangeBetween } from "../crossVerseRange";
+  import { unionInChapterOrder } from "../crossVerseSuggest";
   import { buildSegments } from "../utils/highlight";
   import { parseVerseNotes, withNoteMarkers, type ParsedVerse, type VerseNote, type VerseNoteKind } from "../utils/usfmNotes";
   import VerseNotesPopup from "./VerseNotesPopup.svelte";
@@ -335,6 +337,35 @@
     onSelect(verse);
   }
 
+  /** Row click with modifiers (#118): Ctrl/Cmd toggles the verse in the
+   *  multi-selection that feeds the Cross-verse alignment range picker,
+   *  Shift selects the run from the active verse to this one (by index in
+   *  the chapter's verse list, never by number), a plain click clears the
+   *  set. `selectedVerse` stays the single active verse in every case. */
+  function selectFromRow(verse: string, event: MouseEvent): void {
+    const anchor = $selectedVerse;
+    if (event.shiftKey && anchor) {
+      const run = rangeBetween($verseNums, anchor, verse);
+      selectedVerseSet.set(run.length > 1 ? run : []);
+      onSelect(verse);
+      return;
+    }
+    if (event.ctrlKey || event.metaKey) {
+      const base = $selectedVerseSet.length > 0 ? $selectedVerseSet : (anchor ? [anchor] : []);
+      const next = base.includes(verse)
+        ? base.filter((v) => v !== verse)
+        : unionInChapterOrder($verseNums, base, [verse]);
+      selectedVerseSet.set(next.length > 1 ? next : []);
+      if (!base.includes(verse)) onSelect(verse);
+      return;
+    }
+    selectedVerseSet.set([]);
+    selectFromList(verse);
+  }
+
+  // The set is chapter-scoped; a chapter switch starts over.
+  $: $currentChapter, selectedVerseSet.set([]);
+
   /** Double-click is a second route to Edit verse, and so is the row's edit
    *  pencil (issue #73). startVerseEdit carries its own guards -- it returns
    *  false while a check, save or recheck is in flight -- and the verse must
@@ -398,13 +429,15 @@
       class:editing-row={isEditingThis}
       data-verse-key={key}
       class:active={$selectedVerse === v}
+      class:multi={$selectedVerseSet.includes(v)}
+      data-multi-selected={$selectedVerseSet.includes(v) ? "true" : undefined}
       class:approved={checkStatus === "succeeded" && openCount === 0}
       class:check-failed={checkStatus === "failed" || checkStatus === "cancelled"}
       role="button"
       tabindex="0"
       aria-haspopup="menu"
       aria-keyshortcuts="Shift+F10"
-      on:click={() => selectFromList(v)}
+      on:click={(event) => selectFromRow(v, event)}
       on:dblclick={() => beginEditFromList(v)}
       on:keydown={(e) => onVerseKeydown(e, v, key, menuFindingIds, findings)}
       on:contextmenu={(e) => openVerseMenu(e, v)}
@@ -576,6 +609,7 @@
   .alignment-state.complete { color: var(--success); }
   .alignment-state.partial { color: var(--warning); }
   .alignment-state.invalid { color: var(--danger); font-weight: 800; }
+  .verse.multi { box-shadow: inset 3px 0 0 var(--accent); background: var(--accent-bg); }
   .empty { color: var(--text-3); font-size: var(--fs-md); }
   .context-notice {
     position: fixed; left: 50%; bottom: 34px; z-index: 9000; transform: translateX(-50%);

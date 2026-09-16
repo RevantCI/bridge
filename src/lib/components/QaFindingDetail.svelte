@@ -35,6 +35,7 @@
     next: void;
     previous: void;
     reanalyzed: { result: CorrectionAffectedAnalysisResult };
+    crossVerse: { references: string[] };
   }>();
 
   let note = "";
@@ -55,6 +56,14 @@
   $: promotable = Boolean(
     finding && ["POSSIBLE_OMISSION", "POSSIBLE_ADDITION", "POSSIBLY_MISSING", "POSSIBLY_UNSUPPORTED"]
       .includes(String(finding.kind)),
+  );
+
+  /** #118: an omission here and an addition there are often one
+   *  cross-verse realization; these two kinds get a direct route to the
+   *  Cross-verse alignment page on the finding's own references. */
+  $: crossVerseCandidate = Boolean(
+    finding && ["POSSIBLE_OMISSION", "POSSIBLE_ADDITION"].includes(String(finding.kind))
+      && (finding.displayedReferences?.length ?? 0) > 0,
   );
 
   function decide(disposition: ReviewerDecision): void {
@@ -161,6 +170,17 @@
         <button type="button" class="secondary" disabled={busy || !note.trim()} on:click={submitNote}>
           Add note only
         </button>
+        {#if crossVerseCandidate && finding}
+          <button
+            type="button"
+            class="secondary"
+            disabled={busy}
+            title="Open these verses side by side to see whether the material moved to a neighbouring verse"
+            on:click={() => dispatch("crossVerse", { references: [...finding.displayedReferences] })}
+          >
+            Cross-verse alignment ›
+          </button>
+        {/if}
       </div>
 
       {#if decided}

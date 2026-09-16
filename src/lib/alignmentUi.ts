@@ -17,6 +17,12 @@ export const alignmentKey = writable("");
 export const crossVerseOpen = writable(false);
 /** The verse the page was opened on; it centres the default range. */
 export const crossVerseAnchor = writable("");
+/** Verses the page should start with instead of anchor ±1 (#118): the
+ *  editor's multi-selection, or a finding's references. Empty = default. */
+export const crossVerseInitialVerses = writable<string[]>([]);
+/** A request to open the page on a chapter that may not be the current one.
+ *  App.svelte resolves it: switch chapter if needed, then openCrossVerse. */
+export const crossVerseRequest = writable<{ chapter: string; verses: string[] } | null>(null);
 
 /** True while alignment data underneath an editor is unstable: a background
  * check run, an in-flight edit save, or a post-edit recheck. */
@@ -36,14 +42,24 @@ export function openAlignment(chapter: string, verse: string): boolean {
 
 /** Same guards as openAlignment. Closes the single-verse modal first: the
  * two editors write the same alignment files and must not be open together. */
-export function openCrossVerse(verse: string): boolean {
+export function openCrossVerse(verse: string, verses: readonly string[] = []): boolean {
   if (!verse || alignmentBusy()) return false;
   alignmentOpen.set(false);
+  crossVerseInitialVerses.set(verses.length > 1 ? [...verses] : []);
   crossVerseAnchor.set(verse);
   crossVerseOpen.set(true);
   return true;
 }
 
+/** From a finding (#118): the references may sit in another chapter, so the
+ *  request goes through App.svelte, which owns chapter navigation. */
+export function requestCrossVerse(chapter: string, verses: readonly string[]): boolean {
+  if (!chapter || verses.length === 0 || alignmentBusy()) return false;
+  crossVerseRequest.set({ chapter, verses: [...verses] });
+  return true;
+}
+
 export function closeCrossVerse(): void {
   crossVerseOpen.set(false);
+  crossVerseInitialVerses.set([]);
 }

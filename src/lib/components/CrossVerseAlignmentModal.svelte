@@ -22,17 +22,26 @@
     unrealizedSources,
   } from "../alignmentGroups";
   import { defaultRange, joinVerseId, rangeBetween, spanOf, splitVerseId, toggleVerse } from "../crossVerseRange";
+  import { suggestCrossVerseRange, unionInChapterOrder } from "../crossVerseSuggest";
   import LexiconPopup from "./LexiconPopup.svelte";
 
   export let chapter: string;
   /** The verse the page was opened on; the default range is this ±1. */
   export let verse: string;
   export let onClose: () => void;
+  /** Verses to start with instead of anchor ±1 (#118): the editor's
+   *  multi-selection or a finding's references. */
+  export let initialVerses: string[] = [];
 
   const BANK_NOTICE =
     "To link across verses, drop the word onto a source word of the other verse, not into its word bank.";
 
-  let selection: string[] = defaultRange($verseNums, verse);
+  let selection: string[] = initialVerses.length > 1
+    ? unionInChapterOrder($verseNums, initialVerses)
+    : defaultRange($verseNums, verse);
+  if (selection.length === 0) selection = defaultRange($verseNums, verse);
+  /** Verses the last Stage 6B run marked CROSS_VERSE that the picker added (#118). */
+  let suggested: string[] = [];
   let contexts: Record<string, AlignmentContext> = {};
   let chapterStatus: AlignmentCounts | null = null;
   let loading = true;
@@ -78,7 +87,29 @@
   $: ghostLabel = $dragState.tokenId ? tokenWord($dragState.tokenId) : "";
 
   onMount(() => drag.attach(window));
-  onMount(() => { void load(); });
+  onMount(() => { void loadThenSuggest(); });
+
+  /** Load the range, then widen it with the last analysis's cross-verse
+   *  verses if the page was opened on the default range. The suggestion is
+   *  advisory: it never narrows the range and the picker stays manual. */
+  async function loadThenSuggest() {
+    await load();
+    if (initialVerses.length > 1) return;
+    const suggestion = await suggestCrossVerseRange(chapter);
+    if (!suggestion) return;
+    const added = suggestion.verses.filter((v) => !selection.includes(v) && $verseNums.includes(v));
+    if (added.length === 0) return;
+    suggested = added;
+    selection = unionInChapterOrder($verseNums, selection, added);
+    await load();
+  }
+
+  function resetToDefaultRange() {
+    suggested = [];
+    selection = defaultRange($verseNums, verse);
+    gapFilterVerse = null;
+    void load();
+  }
 
   function tokenWord(compositeId: string): string {
     const { verse: v, id } = splitVerseId(compositeId);
@@ -135,6 +166,7 @@
   function setSpan(from: string, to: string) {
     const next = rangeBetween($verseNums, from, to);
     if (next.length === 0) return;
+    suggested = [];
     selection = next;
     gapFilterVerse = null;
     void load();
@@ -391,6 +423,13 @@
         </div>
       </div>
 
+      {#if suggested.length > 0}
+        <div class="suggestion">
+          ↔ Range widened with verse{suggested.length === 1 ? "" : "s"} {suggested.join(", ")}: the last analysis
+          located source material there across verses.
+          <button type="button" class="link" on:click={resetToDefaultRange} disabled={busy}>Back to {verse} ±1</button>
+        </div>
+      {/if}
       {#if notice}<div class="notice">{notice}</div>{/if}
       {#if error}<div class="error">{error}</div>{/if}
       {#if loading}<div class="reloading"><span class="spin" /> Updating range…</div>{/if}
@@ -595,6 +634,7 @@
   .status.invalid { color: var(--danger); background: var(--danger-bg); }
   .notice, .error { border-radius: 9px; padding: 8px 12px; margin-bottom: 8px; font-size: var(--fs-sm); line-height: 1.45; flex-shrink: 0; }
   .notice { background: #EAF7EF; color: var(--success); }
+  .suggestion { border-radius: 9px; padding: 8px 12px; margin-bottom: 8px; font-size: var(--fs-sm); background: var(--accent-bg); color: var(--accent); flex-shrink: 0; display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
   .error { background: #FFF0F0; color: var(--danger); }
 
   /* Two vertically scrolling columns: the range view never scrolls sideways (#72). */

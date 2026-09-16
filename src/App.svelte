@@ -7,7 +7,9 @@
   import ReviewPanel from "./lib/components/ReviewPanel.svelte";
   import AlignmentReview from "./lib/components/AlignmentReview.svelte";
   import CrossVerseAlignmentModal from "./lib/components/CrossVerseAlignmentModal.svelte";
-  import { closeCrossVerse, crossVerseAnchor, crossVerseOpen, openCrossVerse } from "./lib/alignmentUi";
+  import {
+    closeCrossVerse, crossVerseAnchor, crossVerseInitialVerses, crossVerseOpen, crossVerseRequest, openCrossVerse,
+  } from "./lib/alignmentUi";
   import { resetReviewState } from "./lib/reviewStores";
   import SettingsModal from "./lib/components/SettingsModal.svelte";
   import ExportModal from "./lib/components/ExportModal.svelte";
@@ -22,7 +24,7 @@
   import type { TriageOverrideVerdict } from "./lib/types/finding";
   import {
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
-    checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
+    checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, selectedVerseSet, checkingProgress, approvedCount, verseNums,
     verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState, reviewerMode,
     aiCheckReviewsByVerse, diagnosticsOpen, engineLog, appendEngineLog, navigationStatus,
   } from "./lib/stores";
@@ -771,6 +773,7 @@
   async function activateChapter(chapter: string, targetVerse?: string): Promise<void> {
     const sequence = ++chapterLoadSequence;
     currentChapter.set(chapter);
+    selectedVerseSet.set([]); // the multi-selection is chapter-scoped (#118)
     await ensureChapterData(chapter);
     if (sequence !== chapterLoadSequence || chapter !== $currentChapter) return;
     const verses = $chapterVerseNums[chapter] ?? [];
@@ -837,6 +840,16 @@
   async function runWholeBook() {
     const chapters = $project?.chapters ?? [];
     await beginChecks("book", chapters);
+  }
+
+  // #118: a finding may name verses of another chapter. Switch first (the
+  // page is chapter-scoped and closes itself on a chapter change), then open.
+  $: if ($crossVerseRequest && opened) void resolveCrossVerseRequest($crossVerseRequest);
+  async function resolveCrossVerseRequest(request: { chapter: string; verses: string[] }) {
+    crossVerseRequest.set(null);
+    if (request.chapter !== $currentChapter) await activateChapter(request.chapter, request.verses[0]);
+    if ($currentChapter !== request.chapter) return;
+    openCrossVerse(request.verses[0], request.verses);
   }
 
   function selectVerse(v: string) {
@@ -1020,11 +1033,13 @@
           </button>
           <button
             class="whole-book-btn"
-            on:click={() => openCrossVerse($selectedVerse ?? "")}
+            on:click={() => openCrossVerse($selectedVerse ?? "", $selectedVerseSet)}
             disabled={!$selectedVerse}
-            title="Align several verses of this chapter side by side"
+            title={$selectedVerseSet.length > 1
+              ? `Open the ${$selectedVerseSet.length} selected verses side by side`
+              : "Align several verses of this chapter side by side (Ctrl-click or Shift-click verses to pick them first)"}
           >
-            Cross-verse alignment
+            Cross-verse alignment{#if $selectedVerseSet.length > 1}&nbsp;({$selectedVerseSet.length}){/if}
           </button>
           <span class="grow" />
           <span title="Word-alignment status for this chapter">
@@ -1056,7 +1071,12 @@
 
   {#if $project && $crossVerseOpen && $crossVerseAnchor}
     {#key `${$project.path}:${$currentChapter}:${$crossVerseAnchor}`}
-      <CrossVerseAlignmentModal chapter={$currentChapter} verse={$crossVerseAnchor} onClose={closeCrossVerse} />
+      <CrossVerseAlignmentModal
+        chapter={$currentChapter}
+        verse={$crossVerseAnchor}
+        initialVerses={$crossVerseInitialVerses}
+        onClose={closeCrossVerse}
+      />
     {/key}
   {/if}
 

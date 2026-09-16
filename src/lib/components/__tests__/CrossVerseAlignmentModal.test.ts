@@ -11,6 +11,7 @@ import type {
 
 const {
   getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry, crossVerseLink, crossVerseUnlink,
+  analysisJobGetScopeStatus, semanticLocationGetRange, targetSemanticGetRange,
 } = vi.hoisted(() => ({
   getAlignmentRange: vi.fn(),
   realignWords: vi.fn(),
@@ -19,10 +20,16 @@ const {
   getLexiconEntry: vi.fn(),
   crossVerseLink: vi.fn(),
   crossVerseUnlink: vi.fn(),
+  analysisJobGetScopeStatus: vi.fn(),
+  semanticLocationGetRange: vi.fn(),
+  targetSemanticGetRange: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
-  bridge: { getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry, crossVerseLink, crossVerseUnlink },
+  bridge: {
+    getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry, crossVerseLink, crossVerseUnlink,
+    analysisJobGetScopeStatus, semanticLocationGetRange, targetSemanticGetRange,
+  },
 }));
 
 function token(id: string, word: string, extra: Partial<AlignmentToken> = {}): AlignmentToken {
@@ -111,16 +118,21 @@ function seed() {
   findingsByVerse.set({});
 }
 
+const V5 = context("5", ["ζωή"], ["life"], 0);
+
 beforeEach(() => {
   seed();
-  getAlignmentRange.mockImplementation(async (_chapter: string, verses: string[]) => rangeFor(verses));
+  getAlignmentRange.mockImplementation(async (_chapter: string, verses: string[]) =>
+    rangeFor(verses, { "1": V1, "2": V2, "3-4": V34, "5": V5 }));
   getLexiconEntry.mockResolvedValue({ languageId: "el-x-koine", segments: [{ meaning: "God", lemma: "θεός" }] });
   runVerseChecks.mockResolvedValue([{ id: "f1" }]);
+  // No completed analysis by default: the suggestion path stays quiet.
+  analysisJobGetScopeStatus.mockResolvedValue({ state: "NOT_ANALYZED", latestJob: null });
 });
 
-async function renderPage(verse = "2") {
+async function renderPage(verse = "2", initialVerses: string[] = []) {
   const onClose = vi.fn();
-  const utils = render(CrossVerseAlignmentModal, { props: { chapter: "1", verse, onClose } });
+  const utils = render(CrossVerseAlignmentModal, { props: { chapter: "1", verse, onClose, initialVerses } });
   await waitFor(() => expect(getAlignmentRange).toHaveBeenCalled());
   await waitFor(() => expect(screen.getAllByText("1:2").length).toBeGreaterThan(0));
   return { ...utils, onClose };
@@ -259,6 +271,36 @@ describe("CrossVerseAlignmentModal", () => {
     const chips = screen.getByRole("group", { name: "Verses in range" });
     await fireEvent.click(within(chips).getByRole("button", { name: "3-4" }));
     await waitFor(() => expect(getAlignmentRange).toHaveBeenLastCalledWith("1", ["2"]));
+  });
+
+  it("starts from the given verses instead of anchor ±1 when opened from a multi-selection or a finding (#118)", async () => {
+    await renderPage("2", ["5", "2"]);
+    expect(getAlignmentRange).toHaveBeenCalledWith("1", ["2", "5"]);
+    expect(screen.getByRole("heading", { name: /verses 2–5/ })).toBeInTheDocument();
+    // The picker's chips cover the span; only the given verses are on.
+    const chips = screen.getByRole("group", { name: "Verses in range" });
+    expect(within(chips).getByRole("button", { name: "3-4" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(chips).getByRole("button", { name: "5" })).toHaveAttribute("aria-pressed", "true");
+    // No suggestion is fetched for an explicit range.
+    expect(analysisJobGetScopeStatus).not.toHaveBeenCalled();
+  });
+
+  it("widens the default range with the last Stage 6B run's cross-verse verses and can go back (#118)", async () => {
+    analysisJobGetScopeStatus.mockResolvedValue({
+      state: "ANALYZED", latestJob: { stageStatuses: { LOCATION: { runId: "run-1" } } },
+    });
+    semanticLocationGetRange.mockResolvedValue({
+      targetInventoryId: "inv-1",
+      relationships: [{ properties: ["CROSS_VERSE"], targetTokenInstanceIds: ["t5"] }],
+    });
+    targetSemanticGetRange.mockResolvedValue({ tokens: [{ id: "t5", displayedReference: "PHP 1:5" }] });
+    await renderPage("2");
+    await waitFor(() => expect(getAlignmentRange).toHaveBeenLastCalledWith("1", ["1", "2", "3-4", "5"]));
+    expect(await screen.findByText(/Range widened with verse 5/)).toBeInTheDocument();
+    expect(screen.getAllByText("1:5")).toHaveLength(2);
+    await fireEvent.click(screen.getByRole("button", { name: "Back to 2 ±1" }));
+    await waitFor(() => expect(getAlignmentRange).toHaveBeenLastCalledWith("1", ["1", "2", "3-4"]));
+    expect(screen.queryByText(/Range widened/)).not.toBeInTheDocument();
   });
 
   it("closes itself when the chapter changes underneath it", async () => {
