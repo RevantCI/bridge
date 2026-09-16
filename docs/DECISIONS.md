@@ -119,4 +119,18 @@ tables. Long form: `docs/TEAM_ARCHITECTURE.md` §4, `docs/BUILD_LOG.md` 2026-09-
 **Revisit when:** never for the ladder itself; the *contents* are revisited when the hub
 adds `hub_credentials`.
 
+## 2026-09-16 — One local user per installation until after v1; the hub after v1
+
+**Decision:** Bridge keeps a single local user per installation (the OS-seeded name,
+editable in Settings) through the v1 release. No user picker at startup, no in-app
+user switching, no per-user or owner-annotated dashboard. Hub login and sync (#80)
+are taken up after v1. Identity plumbing (#78: required `actor_id`, roles enum,
+`authorize()`) still lands, because rows written without it cannot be re-attributed.
+**Because:** the maintainer wants v1 simple, and today's users are one person per
+laptop. Every workbench row already carries a stable `user_id` and `device_id`, so
+adding a picker later attributes new rows correctly without touching old ones.
+**Rules out:** for now, #97 (local login, switch user, owner column) — closed as
+deferred, not rejected; anything in the UI that assumes several users on one machine.
+**Revisit when:** v1 has shipped and a team shares a machine, or the hub slice starts.
+
 <!-- New entries go above this line. -->
