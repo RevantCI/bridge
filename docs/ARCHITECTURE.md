@@ -69,9 +69,10 @@ by `mod`; #102, #103 and #105 removed them, leaving 90 Rust commands and 90 clie
 `SIMPLIFICATION_AUDIT_2026-09.md`.
 
 **Per-method timeouts** live in `sidecar.rs` (`request_timeout_seconds`): 30 s default;
-`project.import` 300; `project.inspectImport`, `project.list`, `report.get`,
+`project.import` 300; `project.open`, `project.inspectImport`, `project.list`, `report.get`,
 `report.export`, `triage.results`, `correction.applyProposal` 180; `verse.runChecks` 150;
-model calls 260 to 300. `project.open` is not in the table.
+model calls 260 to 300. `project.open` joined the 180 class in #112 (step one); step two,
+building `PassageSemanticRuntime` lazily, is still open.
 
 ## 3. Storage
 

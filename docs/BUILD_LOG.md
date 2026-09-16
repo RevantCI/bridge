@@ -8676,3 +8676,19 @@ is still to do, so #110 stays open with that one item.
 
 `npm run check` 0 errors / 0 warnings; `npm run test` 26 files, **367 passed**;
 `npm run build` clean; `cargo check` clean; `cargo test` **9 passed**.
+
+## 2026-09-16 — #112 step one: `project.open` joins the 180 s timeout class
+
+`project.open` was absent from `request_timeout_seconds` and so got the 30 s
+default. After #99 it measures about 1 s for Genesis from source and about 4 s for a
+lazy sibling's first open on a fast machine, about 2x that in the installed app,
+and it is whole-file local I/O, the same shape as `project.inspectImport`. A false
+timeout here is the bad direction: Rust stops waiting while Python finishes
+opening, and the UI is left with no project. It is now 180, with a comment in the
+table saying why, an assertion in
+`large_project_discovery_and_inspection_have_bounded_headroom`, and
+`ARCHITECTURE.md`'s timeout paragraph updated.
+
+Step two (return project info after `TranslationCoreProject` loads and build
+`PassageSemanticRuntime` on a worker) changes what the UI sees during open and is
+not a no-impact change; it stays open on #112.

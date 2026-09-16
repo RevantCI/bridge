@@ -125,6 +125,17 @@ fn request_timeout_seconds(method: &str) -> u64 {
         // source fingerprints for duplicate detection. Project Home may also
         // discover a large pre-Beta-3 managed library on its first run.
         "project.inspectImport" | "project.list" => 180,
+        // Opening a book loads TranslationCoreProject and then builds the
+        // PassageSemanticRuntime synchronously (open and migrate the semantic
+        // DB, replay invalidations, sync text revisions and alignment state).
+        // After #99 that is about 1 s for Genesis from source and about 4 s
+        // for a lazy sibling's first open on a fast NVMe machine, and the
+        // installed app has measured about 2x the bench. It is whole-file
+        // local I/O, so a scanned, spinning or sync-backed disk multiplies
+        // it, and a false timeout here leaves the UI with no project while
+        // Python finishes opening one. Same class as inspectImport (#112
+        // step one; step two builds the runtime lazily).
+        "project.open" => 180,
         // The first check for a book starts the isolated structural
         // checker, whose own hard timeout is 120 seconds. Keep enough
         // headroom for process startup/report parsing.
@@ -496,6 +507,7 @@ mod tests {
     fn large_project_discovery_and_inspection_have_bounded_headroom() {
         assert_eq!(request_timeout_seconds("project.inspectImport"), 180);
         assert_eq!(request_timeout_seconds("project.list"), 180);
+        assert_eq!(request_timeout_seconds("project.open"), 180);
         assert_eq!(request_timeout_seconds("project.import"), 300);
         assert_eq!(request_timeout_seconds("ping"), 30);
     }
