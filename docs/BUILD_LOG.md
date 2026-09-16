@@ -8156,3 +8156,46 @@ the batch writer opens one connection for 500 records and none for an empty
 batch; the scan hands the repository exactly one batch and never the
 per-record method, and a second open of the same folder writes nothing.
 Frontend and `src-tauri/` untouched.
+
+### The 43 s, found: `synchronize_current_text`, one commit per verse
+
+The trace line answered it on the first run from source (scratch roots, hin-irv
+66 books, this laptop, app running):
+
+```
+[trace] project.import 66 book(s) total=35.13s inspect=1.49s classify=0.03s import_source=10.45s register=0.95s open_primary=22.20s
+[trace] project.open gen total=22.20s … semantic_runtime=21.60s … semantic_runtime[… current_text=20.78s … alignment_scan=0.53s]
+[trace] project.open exo total=22.22s materialize_lazy=4.69s … current_text=16.45s … alignment_scan=0.38s]   (first open)
+[trace] project.open exo total=2.99s  … current_text=2.52s …                                                (memoized re-open)
+```
+
+`PassageSemanticRuntime.synchronize_current_text` establishes a
+`current_target_revisions` row per verse on first open, and did it as one
+read connection plus one commit per verse: 1,533 verses of Genesis → 1,533
+fsyncs → 20.8 s. Even a memoized re-open paid 1,533 read connections (2.5 s).
+Exodus's first open at 22 s from source is inside the 30 s `project.open`
+timeout only on this machine with nothing else running; the live 5m11s vs
+2.6 min bench ratio says the installed app would have crossed it.
+
+Fix: read the book's revisions once (`current_target_revisions`, which the
+tombstone pass already called) into a dict, collect every new reference, and
+write them with `establish_target_revisions_bulk` — one transaction, one
+timestamp, the same upsert so it stays idempotent; `establish_target_revision`
+is now a one-element call to it. A verse whose text changed still takes the
+per-reference prepare/apply intent pair (the crash-safe path; rare on open).
+The tombstone pass iterates the pre-loop snapshot, which is equivalent: every
+row the loop touched has a reference in the current text and is skipped.
+
+After, same script, same machine:
+
+| Request | Before | After |
+|---|---|---|
+| `project.import`, 66 books | >300 s (timed out); 35.1 s with the scan batched | **8.6 s** |
+| `project.open` GEN inside the import | 5m11s live; 22.2 s | **1.1 s** |
+| `project.open` EXO, first open (3.3 s of it is the lazy materialization) | 22.2 s | **4.3 s** |
+| `project.open` EXO, re-open | 3.0 s | **0.36 s** |
+
+Gates: same engine areas plus `tests/jobs`, `-m "not slow"`, `-n auto`:
+**790 passed**. New test: a first open reads no verse individually and hands the
+repository exactly one establish batch of `len(current_target_text)` rows; a
+second open establishes nothing.

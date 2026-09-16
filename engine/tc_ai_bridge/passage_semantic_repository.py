@@ -1396,12 +1396,33 @@ class FoundationRepository:
         self, *, project_id: str, book: str, displayed_reference: str,
         text_hash: str, text_revision: str,
     ) -> None:
+        self.establish_target_revisions_bulk(
+            project_id=project_id, book=book,
+            revisions=[(displayed_reference, text_hash, text_revision)],
+        )
+
+    def establish_target_revisions_bulk(
+        self, *, project_id: str, book: str, revisions: list[tuple[str, str, str]],
+    ) -> None:
+        """Establish many ``(displayed_reference, text_hash, text_revision)`` rows
+        in one transaction, one timestamp.
+
+        The first open of a book establishes a revision for every verse it
+        has -- 1,533 for Genesis -- and one commit (one fsync) each measured
+        20.8 s of a 22 s open. The per-verse path above is now this with a
+        one-element list. Same upsert, so re-establishing is still idempotent.
+        """
+        if not revisions:
+            return
+        now = self._now()
         with self._connect() as conn:
-            conn.execute(
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany(
                 "INSERT INTO current_target_revisions VALUES(?,?,?,?,?,?) "
                 "ON CONFLICT(project_id,book,displayed_reference) DO UPDATE SET "
                 "text_hash=excluded.text_hash,text_revision=excluded.text_revision,updated_at=excluded.updated_at",
-                (project_id, book, displayed_reference, text_hash, text_revision, self._now()),
+                [(project_id, book, reference, text_hash, text_revision, now)
+                 for reference, text_hash, text_revision in revisions],
             )
             conn.commit()
 

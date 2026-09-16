@@ -437,6 +437,42 @@ def test_native_alignment_ambiguities_are_quarantined_without_rewrite(
     assert path.read_bytes() == original
 
 
+def test_first_open_establishes_every_verse_revision_in_one_batch(
+    tmp_path: Path, stage4_project: Path, monkeypatch,
+) -> None:
+    """A first open used one read connection and one commit per verse:
+    1,533 commits and 20.8 s for Genesis. It must read the book's revisions
+    once and establish everything new in one transaction; a second open
+    establishes nothing."""
+    from tc_ai_bridge.passage_semantic_repository import FoundationRepository
+
+    batches: list[int] = []
+    real_bulk = FoundationRepository.establish_target_revisions_bulk
+
+    def recording_bulk(self, **kwargs):
+        batches.append(len(kwargs["revisions"]))
+        return real_bulk(self, **kwargs)
+
+    monkeypatch.setattr(FoundationRepository, "establish_target_revisions_bulk", recording_bulk)
+    monkeypatch.setattr(
+        FoundationRepository, "current_target_revision",
+        lambda self, *a, **k: pytest.fail("synchronize_current_text must not read one verse at a time"),
+    )
+    engine = _engine(tmp_path)
+    _call(engine, "project.open", {"path": str(stage4_project)})
+    project = TranslationCoreProject(str(stage4_project))
+    verses = len(psr.current_target_text(project))
+    assert verses > 0
+    assert [n for n in batches if n] == [verses]
+    stored = engine.passage_semantic_runtime.repository.current_target_revisions(
+        engine.passage_semantic_runtime.project_id, engine.passage_semantic_runtime.book,
+    )
+    assert len(stored) == verses
+    batches.clear()
+    _call(engine, "project.open", {"path": str(stage4_project)})
+    assert [n for n in batches if n] == []
+
+
 def test_alignment_compatibility_scan_quarantines_in_one_batch(
     tmp_path: Path, stage4_project: Path, monkeypatch,
 ) -> None:

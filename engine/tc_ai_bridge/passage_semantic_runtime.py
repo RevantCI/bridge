@@ -647,15 +647,22 @@ class PassageSemanticRuntime:
         changed = 0
         established = 0
         current_text = current_target_text(self.project)
+        # One read of the book's revisions and one write for everything new,
+        # instead of a connection per verse to read and a commit per verse to
+        # establish: on a first open that was 1,533 commits for Genesis and
+        # 20.8 s of a 22 s project.open (the 30 s timeout is the ceiling).
+        # A verse whose text changed still goes through the per-reference
+        # prepare/apply intent below -- that pair is the crash-safe path and
+        # is rare on open (an edit made outside Bridge).
+        existing_rows = self.repository.current_target_revisions(self.project_id, self.book)
+        existing_by_reference = {str(row["displayedReference"]): row for row in existing_rows}
+        to_establish: list[tuple[str, str, str]] = []
         for reference, text in current_text.items():
             actual_hash = self.text_hash(text)
-            existing = self.repository.current_target_revision(self.project_id, self.book, reference)
+            existing = existing_by_reference.get(reference)
             revision = self.text_revision(reference, actual_hash)
             if existing is None:
-                self.repository.establish_target_revision(
-                    project_id=self.project_id, book=self.book, displayed_reference=reference,
-                    text_hash=actual_hash, text_revision=revision,
-                )
+                to_establish.append((reference, actual_hash, revision))
                 established += 1
             elif existing["textHash"] != actual_hash:
                 intent = self.repository.prepare_target_invalidation(
@@ -666,11 +673,17 @@ class PassageSemanticRuntime:
                     intent, actual_text_hash=actual_hash, text_revision=revision,
                 )
                 changed += 1
+        self.repository.establish_target_revisions_bulk(
+            project_id=self.project_id, book=self.book, revisions=to_establish,
+        )
         # External project changes can remove a reference without passing
         # through apply_scripture_edit(). Represent deletion as a tombstone
         # revision so its dependents cannot remain current or be served.
+        # `existing_rows` is the pre-loop snapshot: every row the loop above
+        # touched has a reference in `current_text` and is skipped here, so
+        # re-reading would see the same candidates.
         empty_hash = self.text_hash("")
-        for existing in self.repository.current_target_revisions(self.project_id, self.book):
+        for existing in existing_rows:
             reference = str(existing["displayedReference"])
             if reference in current_text or existing["textHash"] == empty_hash:
                 continue
