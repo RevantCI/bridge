@@ -132,7 +132,7 @@ from triage_jobs import (
     TriageJobNotFound,
 )
 
-BRIDGE_VERSION = "0.10.3"
+BRIDGE_VERSION = "0.11.0"
 
 # tc_ai_bridge's QAIssue.severity strings -> our shared Severity enum
 _SEVERITY_MAP = {
