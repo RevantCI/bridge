@@ -8646,3 +8646,33 @@ follows it in the same push as #104/#107.
 The full fast run that found it:
 `pytest -n auto -m "not slow"` **1008 passed, 1 failed** (this test), 0 other
 failures across #104 and #107.
+
+## 2026-09-16 — #110: the navigation poll makes no round-trip while sync is off
+
+Audit item B6. `App.svelte` ran `pollNavigation` every 800 ms for the app's
+lifetime, guarded only by an in-flight flag and `engineStatus === "ready"`; with
+neither Paratext nor Logos sync enabled the engine's coordinator returned at once
+(`navigation.py:368`), so each tick was a Rust → stdio → Python round-trip that
+did nothing except occupy the single-threaded dispatcher about 75 times a minute.
+
+The change is the smallest of the two the issue offered: the timer keeps ticking,
+but `pollNavigation` returns before the RPC when `$navigationStatus.enabled` is
+false. For that gate to have a real value, a new `refreshNavigationStatus()`
+(one `navigation.status` call, no connector probe) runs once when the engine
+reports ready and once after a sidecar respawn. Turning sync on later already
+works without more code: `SettingsModal.save()` calls `bridge.navigationStatus()`
+and sets the same store, so the next tick polls. Turning it off sets
+`enabled: false` the same way and the ticks go quiet again. Nothing changes while
+a connector is enabled; the connectors, `navigation.bridgeChanged` publishing and
+the candidate-handling path are untouched.
+
+**Not verified in the installed app.** The issue asks for a real-app check that
+enabling sync after startup begins polling. The reasoning above is from the code;
+the desktop walk-through (start with sync off, open a project, enable Paratext or
+Logos in Settings, confirm the connector shows connected and follows a reference)
+is still to do, so #110 stays open with that one item.
+
+### Gates (once for #110 and #112, both frontend/Rust)
+
+`npm run check` 0 errors / 0 warnings; `npm run test` 26 files, **367 passed**;
+`npm run build` clean; `cargo check` clean; `cargo test` **9 passed**.

@@ -185,8 +185,25 @@
     }
   }
 
+  // Refresh the navigation store from the engine without polling the
+  // connectors. Used once at engine-ready and after a respawn so the poll
+  // gate below has a real `enabled` value; SettingsModal does the same after
+  // a save, so turning sync on later starts the round-trips on the next tick.
+  async function refreshNavigationStatus(): Promise<void> {
+    try {
+      navigationStatus.set(await bridge.navigationStatus());
+    } catch (error) {
+      console.error("Could not read desktop navigation status", error);
+    }
+  }
+
   async function pollNavigation(): Promise<void> {
     if (navigationPollInFlight || engineStatus !== "ready") return;
+    // No connector enabled means the engine's coordinator returns at once
+    // (navigation.py's poll guard), so the only thing this tick would do is
+    // occupy the single-threaded dispatcher line ~75 times a minute (#110).
+    // The timer keeps ticking; it just does no RPC until sync is enabled.
+    if (!$navigationStatus.enabled) return;
     navigationPollInFlight = true;
     try {
       const state = await bridge.navigationPoll(navigationContext());
@@ -209,6 +226,7 @@
     try {
       await bridge.ping();
       engineStatus = "ready";
+      await refreshNavigationStatus();
     } catch {
       engineStatus = "error";
     }
@@ -263,6 +281,7 @@
       try {
         await bridge.ping();
         engineStatus = "ready";
+        await refreshNavigationStatus();
         try {
           const settings = await bridge.getSettings();
           reviewerMode.set(settings.reviewerMode);
