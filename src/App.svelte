@@ -11,7 +11,6 @@
   import ExportModal from "./lib/components/ExportModal.svelte";
   import ProjectDashboard from "./lib/components/ProjectDashboard.svelte";
   import DiagnosticsPanel from "./lib/components/DiagnosticsPanel.svelte";
-  import SemanticMappingValidation from "./lib/components/SemanticMappingValidation.svelte";
   import ProjectReportScreen from "./lib/components/ProjectReportScreen.svelte";
   import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, ProjectReport, QaFinding } from "./lib/types/finding";
   import type {
@@ -23,7 +22,6 @@
     project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, checkingProgress, approvedCount, verseNums,
     verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState, reviewerMode,
-    allowManualOverride,
     aiCheckReviewsByVerse, diagnosticsOpen, engineLog, appendEngineLog, navigationStatus,
   } from "./lib/stores";
   import { editingChapter, editingVerse, editSaving } from "./lib/verseEditor";
@@ -40,7 +38,6 @@
   let dropError = "";
   let chapterLoadSequence = 0;
   let showingDashboard = false;
-  let showingSemanticValidation = false;
   // Alignment Review is a top-level surface alongside the editor, not a
   // replacement for ReviewPanel's per-verse alignment modal.
   let showingAlignmentReview = false;
@@ -138,7 +135,7 @@
       const [, bookId, chapter, verse] = match;
       const original = {
         path: $project.path, chapter: $currentChapter, verse: $selectedVerse,
-        dashboard: showingDashboard, validation: showingSemanticValidation, review: showingAlignmentReview,
+        dashboard: showingDashboard, review: showingAlignmentReview,
       };
       const destination = $project.bookId.toUpperCase() === bookId.toUpperCase()
         ? { path: $project.path }
@@ -163,14 +160,12 @@
             await activateChapter(original.chapter, original.verse);
           }
           showingDashboard = original.dashboard;
-          showingSemanticValidation = original.validation;
           showingAlignmentReview = original.review;
         }
         await rejectNavigation(candidate.requestId, `${source} moved to ${candidate.reference}, which is not present in this Bridge project.`);
         return;
       }
       showingDashboard = false;
-      showingSemanticValidation = false;
       showingAlignmentReview = false;
       await activateChapter(chapter, verse);
       navigationStatus.set(await bridge.navigationResolve(
@@ -314,7 +309,6 @@
     resetReviewState();
     project.set(null);
     opened = false;
-    showingSemanticValidation = false;
     showingAlignmentReview = false;
     showingReport = false;
     stopReportPolling();
@@ -357,7 +351,6 @@
   }
 
   function openDashboard(): void {
-    showingSemanticValidation = false;
     showingAlignmentReview = false;
     showingReport = false;
     showingDashboard = true;
@@ -376,7 +369,6 @@
   }
 
   function openReportScreen(): void {
-    showingSemanticValidation = false;
     showingAlignmentReview = false;
     showingReport = true;
     if (!qaReport && !qaReportJob) void generateReport();
@@ -562,28 +554,6 @@
     await navigateToFinding(chapter, verse);
   }
 
-  const VALIDATION_BOOK_IDS = new Set(["LUK", "PHP"]);
-
-  async function openSemanticValidation(): Promise<void> {
-    if (!$allowManualOverride) return;
-    const currentBookId = $project?.bookId?.toUpperCase() ?? "";
-    if (!VALIDATION_BOOK_IDS.has(currentBookId)) {
-      const validationBook = $project?.importedProjects?.find((book) => (
-        VALIDATION_BOOK_IDS.has(book.bookId?.toUpperCase())
-      ));
-      if (validationBook && !(await switchBook(validationBook.path, false))) return;
-    }
-    showingDashboard = false;
-    showingSemanticValidation = true;
-  }
-
-  async function switchValidationBook(path: string): Promise<void> {
-    if (!$project || path === $project.path) return;
-    if (!(await switchBook(path, false))) {
-      throw new Error(bookOpenError || "The validation book could not be opened.");
-    }
-  }
-
   async function enterBookFromDashboard(path: string): Promise<void> {
     // switchBook() no-ops when path === $project.path, which is exactly the
     // first-open interstitial case (enterCurrentProject was never called
@@ -598,9 +568,9 @@
   }
 
   // Clicking a book row (not its Open button) previews that book's report in
-  // the dashboard's right panel without leaving the dashboard — same
-  // switchBook(path, false) seam openSemanticValidation/switchValidationBook
-  // already use to activate a sibling book with no editor navigation.
+  // the dashboard's right panel without leaving the dashboard — the
+  // switchBook(path, false) seam activates a sibling book with no editor
+  // navigation.
   async function previewBookOnDashboard(path: string): Promise<void> {
     if ($project && path === $project.path) return;
     if (await switchBook(path, false)) void loadReport();
@@ -798,7 +768,6 @@
   // chapter:verse and close the dashboard so the editor is visible.
   async function navigateToFinding(chapter: string, verse: string): Promise<void> {
     showingDashboard = false;
-    showingSemanticValidation = false;
     showingAlignmentReview = false;
     showingReport = false;
     await activateChapter(chapter, verse);
@@ -899,18 +868,13 @@
   // recompute bookSummary reactively when findings/loadedChapters change
   $: void $findingsByVerse, void $checkStatusByVerse, void $loadedChapters, (bookSummary = bookApprovedSummary());
 
-  $: if (!$allowManualOverride && showingSemanticValidation) {
-    showingSemanticValidation = false;
-    showingDashboard = true;
-  }
   $: screen = (
     !opened ? "home"
       : showingAlignmentReview ? "review"
-      : showingSemanticValidation ? "validation"
       : showingReport ? "report"
       : showingDashboard ? "dashboard"
       : "editor"
-  ) as "home" | "dashboard" | "validation" | "review" | "editor" | "report";
+  ) as "home" | "dashboard" | "review" | "editor" | "report";
   $: projectName = $project?.projectName || $project?.bibleName || $project?.bookName || "";
   $: dashboardSubtitle = [
     $project?.targetLanguage,
@@ -993,9 +957,6 @@
       reportLoading={reportLoading}
       reportError={reportError}
       onNavigateToFinding={navigateToFinding}
-      advancedMode={$allowManualOverride}
-      onOpenSemanticValidation={openSemanticValidation}
-      onRequestAdvancedMode={() => openSettings("quality")}
     />
   {:else if screen === "report"}
     <ProjectReportScreen
@@ -1023,16 +984,6 @@
         chapter={$currentChapter}
         verse={$selectedVerse}
         onClose={() => (showingAlignmentReview = false)}
-      />
-    {/key}
-  {:else if screen === "validation"}
-    {#key $project?.path}
-      <SemanticMappingValidation
-        onClose={openDashboard}
-        onNavigate={navigateToFinding}
-        books={$project?.importedProjects ?? []}
-        currentBookPath={$project?.path ?? ""}
-        onBookChange={switchValidationBook}
       />
     {/key}
   {:else}

@@ -18,9 +18,6 @@
   export let reportLoading = false;
   export let reportError = "";
   export let onNavigateToFinding: (chapter: string, verse: string) => void = () => {};
-  export let advancedMode = false;
-  export let onOpenSemanticValidation: () => void = () => {};
-  export let onRequestAdvancedMode: () => void = () => {};
 
   let bookSearch = "";
 
@@ -78,16 +75,6 @@
       {:else}
         <div class="book-heading" />
       {/if}
-      <div class="validation-entry">
-        <button
-          class="validation-button"
-          class:requires-advanced={!advancedMode}
-          on:click={advancedMode ? onOpenSemanticValidation : onRequestAdvancedMode}
-        >
-          {advancedMode ? "Validate semantic mappings" : "Enable semantic validation"}
-        </button>
-        {#if !advancedMode}<small>Requires "Allow manual override" in Settings</small>{/if}
-      </div>
     </div>
   </div>
 
@@ -356,10 +343,6 @@
   .fill.checked { background: var(--pass); }
   .small-button { border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); color: var(--text); padding: 6px 10px; cursor: pointer; font-size: var(--fs-2xs); flex-shrink: 0; }
   .small-button.primary { border-color: var(--accent); color: var(--accent); }
-  .validation-button { border: 1px solid var(--accent); border-radius: 7px; background: var(--accent-bg); color: var(--accent); padding: 8px 11px; cursor: pointer; font-size: var(--fs-2xs); font-weight: 700; flex-shrink: 0; }
-  .validation-entry { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
-  .validation-entry small { color: var(--text-3); font-size: var(--fs-3xs); }
-  .validation-button.requires-advanced { border-color: var(--border-strong); background: var(--surface); color: var(--text-2); }
   .small-button:disabled { opacity: .55; cursor: not-allowed; }
   @media (max-width: 900px) {
     .panels { flex-direction: column; overflow-y: auto; }

@@ -86,8 +86,6 @@ fn main() {
             commands::ai_review_cancel,
             commands::ai_review_retry,
             commands::ai_review_list_chapter,
-            commands::semantic_validation_list,
-            commands::semantic_validation_decide,
             commands::passage_semantic_status,
             commands::passage_semantic_project_metadata,
             commands::passage_semantic_current_passage,

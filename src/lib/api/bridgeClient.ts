@@ -4,7 +4,7 @@ import type {
   CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, LexiconEntryResponse, NativeCheckListResponse,
   NativeCheckTool, NavigationSyncState, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
   IssueResolutionHandoffResult, IssueResolutionListResponse, IssueResolutionRecord,
-  ProjectReport, CollectionReport, SemanticValidationCorrection, SemanticValidationQueue,
+  ProjectReport, CollectionReport,
 } from "../types/finding";
 import type {
   DecideFindingResult,
@@ -490,22 +490,6 @@ export const bridge = {
 
   listAIReviewsForChapter(chapter: string): Promise<AIReviewChapterResponse> {
     return call("ai_review_list_chapter", { chapter });
-  },
-
-  listSemanticValidationCandidates(): Promise<SemanticValidationQueue> {
-    return call("semantic_validation_list");
-  },
-
-  decideSemanticValidationCandidate(
-    candidateId: string,
-    decision: "confirmed" | "rejected" | "corrected" | "unsure",
-    reviewer: string,
-    note = "",
-    correctedMapping?: SemanticValidationCorrection,
-  ): Promise<{ saved: boolean; event: Record<string, unknown> }> {
-    return call("semantic_validation_decide", {
-      candidateId, decision, reviewer, note, correctedMapping,
-    });
   },
 
   passageSemanticStatus(): Promise<PassageSemanticRuntimeStatus> {

@@ -14,11 +14,11 @@ import {
   nativeChecksByVerse, aiCheckReviewsByVerse, verseKey, verseTexts,
 } from "./stores";
 
-// Same "BOOK C:V" shape SemanticMappingValidation.svelte's navigate() parses;
-// reused rather than re-invented so both call sites treat verse bridges
-// ("3-4") and lettered segments ("3a") the same way — the group stops before
-// a bridge's trailing "-4" (matching how the rest of the UI keys verses),
-// while letters stay attached to the verse group.
+// The "BOOK C:V" shape the engine's displayed references use. Verse bridges
+// ("3-4") and lettered segments ("3a") are treated the way the rest of the UI
+// keys verses — the group stops before a bridge's trailing "-4", while letters
+// stay attached to the verse group. (The semantic-validation screen that once
+// shared this regex was removed in #100.)
 const DISPLAYED_REFERENCE = /^[A-Z0-9]+\s+([^:]+):([^\s-]+)/i;
 
 /**
