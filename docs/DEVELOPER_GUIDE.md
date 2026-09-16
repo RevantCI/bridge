@@ -218,7 +218,7 @@ because the numbered phases and stages are complete.
 
 > This subsection is retained as an audit snapshot. Its “next” instructions
 > describe the repository on 2026-08-31 and are superseded by §2.1 and the
-> latest sections of `HANDOFF.md`.
+> latest sections of `BUILD_LOG.md` (`HANDOFF.md` is archived, #107).
 
 Start from `main` at `933d48c` (`feat(dashboard): split project dashboard into
 book list and report panels`) or a later descendant. The working tree was clean
@@ -492,7 +492,7 @@ or positioning behaviour in the component, and only the action list in a caller:
 | `VerseList.svelte`, on the verse row itself (`verseMenu` state, issue #69) | Not finding-scoped — this is the fallback for a verse with nothing to right-click | **AI review ▸ Verse/Chapter/Book** (one level of flyout) / **Edit verse** | Not a decision — triggers `startVerseEdit()` (shared, `verseEditor.ts`) or `requestAIReview()` (new, `aiReviewUi.ts`) directly |
 
 An action can carry a `submenu: FindingMenuAction[]` (added for #69, installed-
-acceptance-verified 2026-09-12 — `docs/V1_1_ACCEPTANCE_01.md`): clicking it
+acceptance-verified 2026-09-12 — `docs/archive/V1_1_ACCEPTANCE_01.md`): clicking it
 opens a second `.finding-menu` instead of dispatching `action`, positioned off
 the parent item (flips to its left if it wouldn't fit on the right); a leaf
 inside dispatches `action` exactly like a top-level item, so a caller never

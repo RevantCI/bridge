@@ -24,7 +24,7 @@ from .word_alignment_evidence import (
 )
 
 
-# V11-000a (docs/V11-000_STAGE6B_ALIGNMENT_SPIKE.md): consulting completed
+# V11-000a (docs/archive/V11-000_STAGE6B_ALIGNMENT_SPIKE.md): consulting completed
 # translationCore Word Alignment as location evidence changes what a LOCATED
 # outcome can be based on, so this is a real engine version bump, not a
 # tuning change -- it auto-stales every existing analysis job and Stage 9B.4

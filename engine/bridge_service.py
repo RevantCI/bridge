@@ -1741,7 +1741,7 @@ class BridgeEngine:
         # does not go through _finish_alignment_mutation, so it must refresh
         # the alignment invalidation memo itself -- otherwise a location run
         # published after this call is over-invalidated the next time the
-        # project is reopened (docs/V11-000a_REVIEW_FIX_PROMPT.md F6).
+        # project is reopened (docs/archive/V11-000a_REVIEW_FIX_PROMPT.md F6).
         if self.passage_semantic_runtime is not None:
             self.passage_semantic_runtime.synchronize_alignment_state()
         self._corpus_stats_by_book.pop(str(self.project.path), None)

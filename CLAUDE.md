@@ -264,7 +264,7 @@ prune superseded rows to save space.
 `engine/tc_ai_bridge/passage_semantic_repository.py`). There is no `migrations/`
 directory and no `.sql` files — the schema and every `_MIGRATION_V1` … `_V16`
 block live in that one module, applied in order. Any change needs: a version
-bump, a new forward migration block, and a note in `docs/HANDOFF.md`. The
+bump, a new forward migration block, and a note in `docs/BUILD_LOG.md`. The
 repository refuses to open a database newer than it understands, and never
 downgrades. Never edit the schema in place.
 

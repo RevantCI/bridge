@@ -90,7 +90,7 @@ pre-Verify state).
    Tamil `இல்லை` (or open the seeded `A-passed-controlled` /
    `B-failed-controlled` projects at
    `%TEMP%\...\v11-acceptance-0.9.6\` and re-run from
-   `docs/STAGE_9B4_ACCEPTANCE.md` Cases A/B).
+   `docs/archive/STAGE_9B4_ACCEPTANCE.md` Cases A/B).
 3. Record: source reference, target reference, displayed source text,
    displayed target text exactly as rendered, Stage 7 result, Stage 8
    result.
@@ -134,7 +134,7 @@ Scripture only changes via an explicit, human-approved correction
 ## Case C — Stage 9B.4 correction-loop regression
 
 Reused the existing Stage 9B.4 acceptance fixture/procedure
-(`docs/STAGE_9B4_ACCEPTANCE.md`, `scripts/seed_correction_acceptance.py`,
+(`docs/archive/STAGE_9B4_ACCEPTANCE.md`, `scripts/seed_correction_acceptance.py`,
 `scripts/inspect_correction_application.py`) rather than duplicating it,
 per instructions — this is a real regression check of the same production
 flow the fix must not break, not a new spec.
@@ -151,7 +151,7 @@ flow the fix must not break, not a new spec.
   `correctedAcknowledgement: false` — correct pre-Verify state.
 
 **PENDING — human, installed build:** run the full click-by-click procedure
-in `docs/STAGE_9B4_ACCEPTANCE.md` (Verify correction on A/B, confirm
+in `docs/archive/STAGE_9B4_ACCEPTANCE.md` (Verify correction on A/B, confirm
 PASSED/FAILED, restart persistence, Case C's confirm→correct→apply→
 re-analyze→verify→UNCERTAIN flow) against the seeded projects under the new
 comparator. What must still hold, unchanged from that document:

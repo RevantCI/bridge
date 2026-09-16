@@ -1,5 +1,5 @@
 """V11-000a: Stage 6B word-alignment evidence -- source/target resolvers and
-precedent projection. See docs/V11-000_STAGE6B_ALIGNMENT_SPIKE.md.
+precedent projection. See docs/archive/V11-000_STAGE6B_ALIGNMENT_SPIKE.md.
 
 The target-resolver tests below are the tokenization-disagreement cases the
 implementation prompt asked to write first, explicitly: a bare verse
@@ -69,7 +69,7 @@ def test_source_resolution_ignores_strongs_five_digit_variant_padding() -> None:
 
 # --- R1 (review fix): exact-NFC matching, no casefold ----------------------
 #
-# docs/V11-000a_REVIEW_FIX_PROMPT.md F1: tokenize_target_text and tC's own
+# docs/archive/V11-000a_REVIEW_FIX_PROMPT.md F1: tokenize_target_text and tC's own
 # aligner both count occurrence/occurrences over the exact NFC string, case
 # included. Casefolding the word comparison ties together tokens the
 # counting already told apart, produces a spurious len()!=1 ambiguity, and
@@ -376,7 +376,7 @@ def test_alignment_precedents_for_range_drops_a_group_with_an_unresolvable_targe
 
 # --- R3 (review fix): a verse-bridge alignment group is out of scope -------
 #
-# docs/V11-000a_REVIEW_FIX_PROMPT.md F3: the module docstring already
+# docs/archive/V11-000a_REVIEW_FIX_PROMPT.md F3: the module docstring already
 # promised this ("a tC alignment group stored under a verse-bridge key is
 # out of scope for this pass"), but nothing enforced it. Confirmed
 # empirically (not assumed) that a bridge's displayed reference reaches

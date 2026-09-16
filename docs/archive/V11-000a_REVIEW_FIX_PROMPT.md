@@ -149,8 +149,8 @@ For a book-range Stage 6B run that is O(verses) full-chapter parses.
 
 You are applying review fixes to **V11-000a** (commit `e3ff0de` on `main`:
 Stage 6B consults completed Word Alignment) in the Bridge repository. Read
-`docs/V11-000_STAGE6B_ALIGNMENT_SPIKE.md` and
-`docs/V11-000a_REVIEW_FIX_PROMPT.md` Part A first; the constraints in the
+`docs/archive/V11-000_STAGE6B_ALIGNMENT_SPIKE.md` and
+`docs/archive/V11-000a_REVIEW_FIX_PROMPT.md` Part A first; the constraints in the
 spike doc's Part B still bind. Three required fixes, two optional. Nothing
 here changes the design — the review found the design sound.
 
@@ -323,7 +323,7 @@ version moves — `LOCATION_ENGINE_VERSION` stays at `v2`, schema stays v14.
 - No path added or changed here writes under
   `.apps/translationCore/alignmentData/` or `tools/wordAlignment/`.
 - `docs/BUILD_LOG.md` gets a short entry naming F1–F3 and what changed;
-  `docs/HANDOFF.md` §44.12 gets one sentence noting the review fixes.
+  `docs/archive/HANDOFF.md` §44.12 gets one sentence noting the review fixes.
 
 ## Stop and report if
 
@@ -356,7 +356,7 @@ fix(engine): exact-NFC token matching, atomic WORD_ALIGNMENT edge, bridge guard 
 
 Body should name F1–F3 from this document and say that
 `ALIGNMENT_EVIDENCE_VERSION` moved to `v2` and why. O1 / O2, if done, go in
-separate commits after it. Commit this document (`docs/V11-000a_REVIEW_FIX_PROMPT.md`)
+separate commits after it. Commit this document (`docs/archive/V11-000a_REVIEW_FIX_PROMPT.md`)
 alongside so the history shows what the fix answers.
 
 Leave the commit unpushed for review.
@@ -403,7 +403,7 @@ That is over-invalidation of a run computed against the *current* alignment
 state, caused by the memo lagging the disk. Fail-safe, but it means: apply
 correction → re-analyze → verify → close → reopen → the whole book's
 analysis is stale again. This is the "restart persistence (close/reopen
-Bridge) holds" row of `docs/V1_1_UNICODE_ACCEPTANCE.md` Case C, and it
+Bridge) holds" row of `docs/archive/V1_1_UNICODE_ACCEPTANCE.md` Case C, and it
 would fail it.
 
 `synchronize_alignment_state` has exactly two callers: runtime

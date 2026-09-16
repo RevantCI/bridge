@@ -80,7 +80,7 @@ Carried forward unchanged from 0.9.4:
   duplicate-classification mismatch.
 - The Windows installer is unsigned and may show a SmartScreen warning.
 - Windows x64 is the verified target; macOS and Linux remain unverified.
-- Installed Stage 9B.4 A/B/C acceptance (`docs/STAGE_9B4_ACCEPTANCE.md`) has
+- Installed Stage 9B.4 A/B/C acceptance (`docs/archive/STAGE_9B4_ACCEPTANCE.md`) has
   still not been run end to end by a tester.
 
 ## Windows installer

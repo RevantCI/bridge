@@ -5,7 +5,7 @@ V11-000a. Projects same-verse tC alignment groups into the same
 `human_approved_lexical_precedents()` already returns, so
 `SemanticLocationEngine._score_candidate` can score a WORD_ALIGNMENT
 component the same way it scores HUMAN_PRECEDENT -- see
-`docs/V11-000_STAGE6B_ALIGNMENT_SPIKE.md` for the full investigation this
+`docs/archive/V11-000_STAGE6B_ALIGNMENT_SPIKE.md` for the full investigation this
 implements.
 
 Read-only, in one direction only: nothing here ever writes to
@@ -54,7 +54,7 @@ def _norm(value: str) -> str:
     aligner both count `occurrence`/`occurrences` over the exact NFC string,
     case included, so a casefolded word comparison matches tokens that were
     counted separately upstream, produces a spurious tie, and drops the
-    group (found in review; see docs/V11-000a_REVIEW_FIX_PROMPT.md F1).
+    group (found in review; see docs/archive/V11-000a_REVIEW_FIX_PROMPT.md F1).
     Lemma is not part of that (word, occurrence) join -- it only adds to the
     reinforcement score among candidates that already passed it -- so
     casefolding it is safe.
@@ -133,7 +133,7 @@ def resolve_target_token_id(
     that is exactly the space `occurrence`/`occurrences` were counted in, so
     matching case-insensitively would tie together tokens the counting
     already told apart and drop the group (F1,
-    docs/V11-000a_REVIEW_FIX_PROMPT.md). No casefold fallback: a tC word
+    docs/archive/V11-000a_REVIEW_FIX_PROMPT.md). No casefold fallback: a tC word
     whose case differs from the current text is `ALIGN_TARGET_MISMATCH`
     (`local_checks.py:36-40`), not a case Bridge should resolve anyway.
     """

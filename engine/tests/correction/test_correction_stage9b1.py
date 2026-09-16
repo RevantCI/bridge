@@ -222,7 +222,7 @@ def _intent(runtime: _Runtime) -> CorrectionIntent:
 def test_human_authored_proposal_works_offline_and_defaults_to_approved(tmp_path: Path) -> None:
     """V11-003 (#57): a human-authored proposal needs no Edit->Save round-trip
     to become reviewed -- it is already self-review by its own author (see
-    docs/V11-003_ISSUE57_PROMPT.md Part A)."""
+    docs/archive/V11-003_ISSUE57_PROMPT.md Part A)."""
     runtime = _Runtime(tmp_path / "semantic.sqlite3")
     service = CorrectionWordingService(runtime, NoCorrectionSuggestionProvider())
     before = TEXT

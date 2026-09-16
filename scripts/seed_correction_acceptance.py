@@ -1,7 +1,7 @@
 """Seed the three Stage 9B.4 installed-acceptance projects (A / B / C).
 
 Run this from the repository, then open the printed folders in the installed
-Bridge and follow ``docs/STAGE_9B4_ACCEPTANCE.md``.
+Bridge and follow ``docs/archive/STAGE_9B4_ACCEPTANCE.md``.
 
 What each case is, stated plainly, because the difference matters:
 
@@ -405,7 +405,7 @@ def main() -> int:
             print(f"    {key}: {summary[key]}")
         print()
     print(f"manifest: {manifest}")
-    print("Follow docs/STAGE_9B4_ACCEPTANCE.md for the click-by-click script.")
+    print("Follow docs/archive/STAGE_9B4_ACCEPTANCE.md for the click-by-click script.")
     return 0
 
 

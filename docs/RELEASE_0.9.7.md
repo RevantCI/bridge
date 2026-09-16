@@ -72,7 +72,7 @@ git diff --check                            passed
 Installed acceptance (Cases A-D)            PENDING — to be run by the maintainer against
                                              this release's published installer; see
                                              docs/ACCEPTANCE_TEST_GUIDE.md Step 5 and
-                                             docs/V1_1_UNICODE_ACCEPTANCE.md for the
+                                             docs/archive/V1_1_UNICODE_ACCEPTANCE.md for the
                                              procedure and results table.
 ```
 

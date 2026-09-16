@@ -2449,7 +2449,7 @@ class TranslationCoreProject:
         # alignment state, but a subsequent reopen's fresh
         # PassageSemanticRuntime -- comparing current disk state against a
         # memo that never advanced -- incorrectly stales it (see
-        # docs/V11-000a_REVIEW_FIX_PROMPT.md F6).
+        # docs/archive/V11-000a_REVIEW_FIX_PROMPT.md F6).
         if self.passage_semantic_runtime is not None:
             self.passage_semantic_runtime.synchronize_alignment_state()
         semantic_invalidation: dict[str, Any] = {}

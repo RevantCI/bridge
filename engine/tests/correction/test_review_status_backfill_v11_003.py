@@ -4,7 +4,7 @@ without an Edit->Save round-trip.
 W1 (the default for new proposals) is covered in test_correction_stage9b1.py
 alongside the rest of proposal creation. This file covers W2: the lazy,
 idempotent reseed of existing UNREVIEWED + HUMAN_AUTHORED proposals that
-predate the W1 fix. See docs/V11-003_ISSUE57_PROMPT.md.
+predate the W1 fix. See docs/archive/V11-003_ISSUE57_PROMPT.md.
 """
 from __future__ import annotations
 

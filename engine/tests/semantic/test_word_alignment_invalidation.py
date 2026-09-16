@@ -1,6 +1,6 @@
 """V11-000a: completing/invalidating a tC Word Alignment stales the Stage 6B
 runs that depend on it -- in the same session, not only after a restart.
-See docs/V11-000_STAGE6B_ALIGNMENT_SPIKE.md, work item 5.
+See docs/archive/V11-000_STAGE6B_ALIGNMENT_SPIKE.md, work item 5.
 """
 from __future__ import annotations
 
@@ -220,7 +220,7 @@ def test_editing_a_verse_refreshes_the_alignment_memo_so_a_fresh_reopen_finds_no
     location run published later in the same session already reflects the
     post-edit state, but a freshly reopened runtime -- comparing current
     disk state against a memo that never advanced -- incorrectly stales it.
-    This is the reproduction from docs/V11-000a_REVIEW_FIX_PROMPT.md F6; it
+    This is the reproduction from docs/archive/V11-000a_REVIEW_FIX_PROMPT.md F6; it
     fails on 370be9c.
     """
     runtime = _runtime(tmp_path)

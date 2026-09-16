@@ -343,5 +343,5 @@ table, and any UI, remain ss7's.
 
 `CLAUDE.md` (on-disk shape gains the workbench DB; "schema changes are migrations" covers
 two ladders; the single-user premise becomes "optional team"), `docs/DECISIONS.md`,
-`docs/ARCHITECTURE.md`, `docs/HANDOFF.md`, `docs/BUILD_LOG.md` — each updated with the
+`docs/ARCHITECTURE.md`, `docs/BUILD_LOG.md` — each updated with the
 commit that changes the behaviour it describes, not afterwards.

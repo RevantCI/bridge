@@ -5886,7 +5886,7 @@ human-approved lexical groups. Recorded as an open product gap; not fixed here.
 ## What the acceptance package therefore is
 
 `scripts/seed_correction_acceptance.py` builds three projects, and
-`docs/STAGE_9B4_ACCEPTANCE.md` is the click-by-click script.
+`docs/archive/STAGE_9B4_ACCEPTANCE.md` is the click-by-click script.
 
 ```text
 A  PASSED     controlled verification fixture   DIMENSION_PRESERVED, COVERAGE_COVERED
@@ -5937,13 +5937,13 @@ reports 0.9.4 and accepts the lock.
 
 # Current continuation handoff refresh (2026-09-08)
 
-Updated `docs/HANDOFF.md` §37.10 with the exact repository, installed candidate,
+Updated `docs/archive/HANDOFF.md` §37.10 with the exact repository, installed candidate,
 last regression-gate, read-only Stage 9B.3c evidence, Stage 9B.4 acceptance, and
 stop-boundary state needed by the next developer. No source code, Scripture,
 acceptance fixture, database, build metadata, or application behavior changed.
 
 The next authorized operational boundary remains the installed 0.9.4 A/B/C
-acceptance described in `docs/STAGE_9B4_ACCEPTANCE.md`. Version 0.9.4 remains a
+acceptance described in `docs/archive/STAGE_9B4_ACCEPTANCE.md`. Version 0.9.4 remains a
 candidate and has not been released.
 
 # Stage 9B.4 acceptance-fixture queue-visibility repair (2026-09-08)
@@ -6394,7 +6394,7 @@ self-check); `git show --stat` on all three V1.1 commits confirmed none touch
 `project_registry.py`/`project_import.py`, so this is a pre-existing,
 out-of-scope issue, not a V1.1 regression — likely local project-registry
 state accumulated across repeated dev-machine runs, not investigated
-further. Full acceptance-case detail lives in `docs/V1_1_UNICODE_ACCEPTANCE.md`.
+further. Full acceptance-case detail lives in `docs/archive/V1_1_UNICODE_ACCEPTANCE.md`.
 
 ## Real Tamil-negation acceptance fixture (V1.1 Case A)
 
@@ -6502,7 +6502,7 @@ git diff --check             passed
 
 Schema (`v14`), verification policy (`correction-verification-policy-v2`),
 and app version (`0.9.6`) are unchanged. Nothing was committed or pushed as
-part of building/testing this work; `docs/HANDOFF.md` §44.10 records the
+part of building/testing this work; `docs/archive/HANDOFF.md` §44.10 records the
 same summary. Full Python/Greek Room and Rust suites were not rerun this
 session (explicitly deferred, not silently skipped) — the last confirmed
 full-Python run this cycle was 1063 passed / 1 skipped / 0 failed, and nothing
@@ -6816,7 +6816,7 @@ workflow.
 (`.\scripts\build-sidecars.ps1`, real Wildebeest 0.9.2) and ran
 `npm run tauri build` from `d354b23` — a first release compile (no prior
 `target/release`), 6m40s. App version stayed `0.9.6`, unchanged, same
-convention as the prior `docs/V1_1_UNICODE_ACCEPTANCE.md` build; there was
+convention as the prior `docs/archive/V1_1_UNICODE_ACCEPTANCE.md` build; there was
 no pre-existing release artifact in this local `target/` to protect this
 time, so the NSIS output was simply copied to a second, distinctly-named
 file rather than needing the backup/restore dance that build required.
@@ -6831,7 +6831,7 @@ runs serial too) **1112 passed, 0 failed, 0 skipped**, 19m10s; `cargo test`
 mismatch the V1.1 Unicode acceptance build already disclosed — confirmed via
 `git show --stat` that neither `9baac8c` nor `d354b23` touches
 `project_registry.py`/`project_import.py`, so this is not a new regression.
-Full checkpoint metadata is in `docs/V1_1_ACCEPTANCE_01.md`.
+Full checkpoint metadata is in `docs/archive/V1_1_ACCEPTANCE_01.md`.
 
 **Installed acceptance, same day.** The reviewer ran the checklist above
 against this installer and recorded PASS for both #69 and #70, plus six
@@ -6843,8 +6843,8 @@ reviewer), V11-001 (editor refresh after a correction applies, fixed
 2026-09-11 above, now installed-confirmed), and V11-002/V11-006 (history
 actor attribution, and the `providerMetadata` truthiness defect that
 produced literal `undefined · undefined` rows). Full detail is in
-`docs/V1_1_ACCEPTANCE_01.md`. Still outstanding: the
-`docs/V1_1_UNICODE_ACCEPTANCE.md` Cases A–D walkthrough, blocked behind #54
+`docs/archive/V1_1_ACCEPTANCE_01.md`. Still outstanding: the
+`docs/archive/V1_1_UNICODE_ACCEPTANCE.md` Cases A–D walkthrough, blocked behind #54
 (Stage 6B does not consult completed Word Alignment for cross-language
 location) — not attempted in this pass, and #57/#58/#61/#62/#63 remain open
 from the same round.
@@ -6852,7 +6852,7 @@ from the same round.
 ## V11-000a: Stage 6B consults completed Word Alignment as location evidence
 (2026-09-12)
 
-Implements `docs/V11-000_STAGE6B_ALIGNMENT_SPIKE.md`'s Part B against
+Implements `docs/archive/V11-000_STAGE6B_ALIGNMENT_SPIKE.md`'s Part B against
 same-verse source→target links only (cross-verse — the harder half, needing
 the embedding-provider direction — stays on #54). No weight or threshold was
 retuned: the pre-existing `HUMAN_PRECEDENT` component already proved 0.65 is
@@ -7007,7 +7007,7 @@ here), and any embedding-provider work.
 ## V11-000a review fixes: exact-NFC matching, atomic WORD_ALIGNMENT edge,
 verse-bridge guard, alignment-memo refresh (2026-09-12)
 
-Review of `e3ff0de` (`docs/V11-000a_REVIEW_FIX_PROMPT.md` Part A) found the
+Review of `e3ff0de` (`docs/archive/V11-000a_REVIEW_FIX_PROMPT.md` Part A) found the
 design sound but flagged three real defects (F1-F3), fixed in a first pass.
 A second review pass of that fix, before it was ever pushed, found one more
 (F6) — this entry covers all four. No weight, threshold,
@@ -7137,7 +7137,7 @@ deferred to their own commits, only after these land.
 ## V11-003 / #57: a human-authored proposal needs no Edit->Save round-trip
 (2026-09-12)
 
-Implements `docs/V11-003_ISSUE57_PROMPT.md`'s Part B. `mayApply` in
+Implements `docs/archive/V11-003_ISSUE57_PROMPT.md`'s Part B. `mayApply` in
 `CorrectionReviewPanel.svelte` was already correctly gated on
 `proposalReviewed` (`reviewStatus` is `HUMAN_MODIFIED` or `HUMAN_APPROVED`);
 the bug was that a brand-new human-authored proposal landed `UNREVIEWED`
@@ -8553,3 +8553,36 @@ Group A of the simplification audit (A7). `showSource` in `stores.ts` was a
 `SemanticMappingValidation` gating the issue also listed. If #67 (show the
 original-language text in the editor) wants a source toggle, it adds one that is
 wired. Gates: the batch run recorded under #103.
+
+## 2026-09-16 — #107: six point-in-time docs and `HANDOFF.md` move to `docs/archive/`
+
+Group A of the simplification audit (A8). `docs/archive/` now holds
+`V11-000_STAGE6B_ALIGNMENT_SPIKE`, `V11-000a_REVIEW_FIX_PROMPT`,
+`V11-003_ISSUE57_PROMPT`, `V1_1_UNICODE_ACCEPTANCE`, `V1_1_ACCEPTANCE_01`,
+`STAGE_9B4_ACCEPTANCE` and `HANDOFF.md`, moved with `git mv` so their history
+follows, plus a one-table `README.md` saying what each was. `HANDOFF.md` carries
+an "archived" banner; it is kept verbatim because code comments and this log cite
+its section numbers (§31, §39 …).
+
+The obligation moved: `CLAUDE.md`'s "schema changes are migrations" rule now
+routes the note to `docs/BUILD_LOG.md`, `CONTRIBUTING.md`'s Friday rhythm updates
+`BUILD_LOG.md`, `DEVELOPER_GUIDE.md`'s audit-snapshot pointer and
+`TEAM_ARCHITECTURE.md`'s list of docs-to-update no longer name `HANDOFF.md`.
+
+Inbound links were re-pointed mechanically (`docs/<name>.md` →
+`docs/archive/<name>.md`) across every tracked `.md`, `.py`, `.yml`, `.ts`,
+`.svelte` and `.mjs` file except `SIMPLIFICATION_AUDIT_2026-09.md`, which
+describes the pre-move state on purpose. That touched `BUILD_LOG.md` (its own
+history), `QA_TEST_MATRIX.md`, `DEVELOPER_GUIDE.md`, the 0.9.5 and 0.9.7 release
+notes, `scripts/seed_correction_acceptance.py`, seven engine modules and tests
+whose comments cite the review docs, and the archived docs' links to each other.
+Two bare `HANDOFF.md §39` citations (`correction_verification.py`,
+`test_correction_stage9b4.py`) now say `docs/archive/HANDOFF.md`. About 5.9k
+lines leave the `docs/` reading path; nothing is deleted.
+
+### Gates (once for #107 and #104)
+
+`pytest -n auto -m "not slow"` from `engine/`: **1008 passed, 1 failed** in
+2m45s. The failure was not this change's: `test_correction_stage9b3a.py` read
+the Rust wire file #103 deleted (see the #103 follow-up entry below). Every
+Python file whose comments were re-pointed here imported and ran.

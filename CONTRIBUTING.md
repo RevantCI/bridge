@@ -122,7 +122,7 @@ straight to main.
 
 ## 6. The weekly rhythm
 
-- **Friday, 30 minutes.** Maintainer updates `docs/HANDOFF.md` with what changed, what's
+- **Friday, 30 minutes.** Maintainer updates `docs/BUILD_LOG.md` with what changed, what's
   in flight, and what the next person would need to know. Records any decisions made
   that week in `docs/DECISIONS.md`.
 - **Friday triage.** New issues get labelled, or closed with a reason.

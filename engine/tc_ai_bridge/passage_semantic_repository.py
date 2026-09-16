@@ -1065,7 +1065,7 @@ ON correction_verifications(finding_id, created_at);
 # V11-003 (#57): a human-authored correction proposal is now approved by
 # default when created -- no AI wording, no separate Edit->Save round-trip
 # needed just to earn "Review application" (see
-# docs/V11-003_ISSUE57_PROMPT.md). An existing UNREVIEWED + HUMAN_AUTHORED
+# docs/archive/V11-003_ISSUE57_PROMPT.md). An existing UNREVIEWED + HUMAN_AUTHORED
 # proposal is lazily reseeded to HUMAN_APPROVED the next time it is read
 # (FoundationRepository.correction_proposal /
 # correction_proposals_for_finding), and that reseed is audited with its own
@@ -4420,7 +4420,7 @@ class FoundationRepository:
         """V11-003 (#57): a manually authored proposal created before this fix
         landed is stuck UNREVIEWED, so "Review application" never appears even
         though this is already self-review by the proposal's own author --
-        see docs/V11-003_ISSUE57_PROMPT.md. Lazily reseed it to HUMAN_APPROVED
+        see docs/archive/V11-003_ISSUE57_PROMPT.md. Lazily reseed it to HUMAN_APPROVED
         the first time it is read through either `correction_proposal` or
         `correction_proposals_for_finding` -- both call this one choke point,
         so a proposal can never be reachable reseeded through one and

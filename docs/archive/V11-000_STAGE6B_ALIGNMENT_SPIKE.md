@@ -258,7 +258,7 @@ You are implementing **V11-000a** in the Bridge repository: make Stage 6B
 consult completed translationCore Word Alignment as location evidence, for
 same-verse source→target links only.
 
-**Read first, and treat as binding:** `docs/HANDOFF.md` §§6, 20, 21, 30, 31,
+**Read first, and treat as binding:** `docs/archive/HANDOFF.md` §§6, 20, 21, 30, 31,
 39; `CLAUDE.md` (especially the staleness rule ~L213-227, the schema rule
 ~L229-241, and the golden rule ~L300-313); the module docstring at
 `engine/tc_ai_bridge/correction_verification.py:421-426`.
@@ -404,7 +404,7 @@ Alignment must become a first-class upstream input:
   (`passage_semantic_repository.py:53`), a `_MIGRATION_V15` rung, a backfill
   of alignment edges for existing projects (precedent:
   `_MIGRATION_V13:1002-1011`), an additive-migration test in the style of
-  `test_correction_stage9b4.py:1448-1522`, a `docs/HANDOFF.md` note, and
+  `test_correction_stage9b4.py:1448-1522`, a `docs/archive/HANDOFF.md` note, and
   updates to the five tests asserting `== 14`.
 
 **Prefer a design that does not need a schema bump.** If v15 turns out to be

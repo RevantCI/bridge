@@ -193,7 +193,7 @@ _POSITIVE_COVERAGE = {
 _ABSENT_COVERAGE = {SourceCoverage.MISSING.value}
 # Coverage Stage 8 looked at and could not resolve.  These are candidates
 # awaiting a human, not conclusions: promoting POSSIBLY_MISSING to a failure
-# here would be exactly the auto-promotion HANDOFF.md §39 forbids.  NOT_CHECKED
+# here would be exactly the auto-promotion docs/archive/HANDOFF.md §39 forbids.  NOT_CHECKED
 # is deliberately absent -- it means Stage 8 made no coverage claim at all, which
 # must not veto positive dimension evidence.
 _UNRESOLVED_COVERAGE = {

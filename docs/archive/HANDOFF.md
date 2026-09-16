@@ -1,8 +1,14 @@
+> **Archived 2026-09-16 (#107).** This file is no longer updated. It duplicated
+> `docs/BUILD_LOG.md`, which is the authoritative, continuously appended record;
+> schema-change notes and stage status go there now. The section numbers (§6, §20,
+> §31, §39 …) are still cited from code comments and from `BUILD_LOG.md`, which is
+> why the file is kept verbatim rather than deleted.
+
 # Bridge — Passage-Aware Semantic Alignment & Translation QA: Continuation Handoff
 
 This file is the **stage-by-stage status and continuation-prompt record** for
 Bridge's passage-aware semantic alignment and Scripture translation-QA
-effort. It is checked into the repo (`docs/HANDOFF.md`) and updated in place
+effort. It is checked into the repo (`docs/archive/HANDOFF.md`) and updated in place
 as each stage lands — unlike a one-off dated snapshot, treat this as living
 documentation, alongside [`BUILD_LOG.md`](BUILD_LOG.md) (granular engineering
 narrative) and [`passage-aware-semantic-alignment.md`](passage-aware-semantic-alignment.md)
@@ -2722,7 +2728,7 @@ time broke it in three places.
 ## The acceptance package
 
 `python scripts/seed_correction_acceptance.py <dest>` builds three projects;
-`docs/STAGE_9B4_ACCEPTANCE.md` is the click-by-click script.
+`docs/archive/STAGE_9B4_ACCEPTANCE.md` is the click-by-click script.
 
 ```text
 A  PASSED     controlled verification fixture   DIMENSION_PRESERVED, COVERAGE_COVERED
@@ -2763,7 +2769,7 @@ unauthorized. The PASSED product gap above needs its own scope.
 
 This is the current continuation point for the next developer. Treat it as the
 short operational companion to §37.9 and
-`docs/STAGE_9B4_ACCEPTANCE.md`; the architecture and hard constraints elsewhere
+`docs/archive/STAGE_9B4_ACCEPTANCE.md`; the architecture and hard constraints elsewhere
 in this document remain authoritative.
 
 ## Repository and release state
@@ -2851,7 +2857,7 @@ On explicit approval to run installed acceptance:
    python scripts/seed_correction_acceptance.py C:\bridge-acceptance
    ```
 
-4. Follow `docs/STAGE_9B4_ACCEPTANCE.md` without abbreviating the restart,
+4. Follow `docs/archive/STAGE_9B4_ACCEPTANCE.md` without abbreviating the restart,
    idempotency, Scripture-preservation, history, or Word Alignment checks.
 5. Run the read-only inspector after each case and retain its output with the
    acceptance report:
@@ -3062,7 +3068,7 @@ engine/tests/semantic/test_source_semantic_inventory_stage5.py
 engine/tests/correction/test_correction_case_c_production.py
 src/lib/components/CorrectionReviewPanel.svelte
 src/lib/components/__tests__/CorrectionReviewPanel.test.ts
-docs/HANDOFF.md
+docs/archive/HANDOFF.md
 ```
 
 ## Regression and gates
@@ -3125,7 +3131,7 @@ manifest: C:\bridge-acceptance-stage9b4-fix\acceptance-manifest.json
 ```
 
 Resume only the real Case C installed acceptance using
-`docs/STAGE_9B4_ACCEPTANCE.md`. The expected no-provider result remains
+`docs/archive/STAGE_9B4_ACCEPTANCE.md`. The expected no-provider result remains
 `UNCERTAIN`/`PROVIDER_LIMITED`; do not change verdict policy. The release hold
 in this repair record was subsequently superseded by the owner's explicit safe
 0.9.6 authorization in §37.14. The v1 stabilization hold remains.
@@ -3285,7 +3291,7 @@ When this file is used to start a new conversation:
    Stage 9B.4 Cases A and B passed. The real Case C blocker and terminal-state
    UI defect are repaired as recorded in §37.13; the immediate boundary is to
    rerun only Case C from the fresh package documented there, following
-   `docs/STAGE_9B4_ACCEPTANCE.md`.
+   `docs/archive/STAGE_9B4_ACCEPTANCE.md`.
 6. Do not start export/Scripture Burrito work (§38), the production-provider
    gap, or broader v1 stabilization until installed acceptance is reviewed and
    the next scope is explicitly approved.
@@ -3631,7 +3637,7 @@ The next safe operational sequence was:
 4. test real Tamil and other available multilingual projects, including old
    semantic caches; **partially done** — a real-pipeline Tamil-negation
    fixture now exists (44.10), but the full installed, human-driven GUI
-   walkthrough across Cases A-D in `docs/V1_1_UNICODE_ACCEPTANCE.md` is
+   walkthrough across Cases A-D in `docs/archive/V1_1_UNICODE_ACCEPTANCE.md` is
    still pending;
 5. confirm fresh fingerprints, preserved human decisions, byte-identical
    Scripture during analysis, exact Stage 9B correction safety, and unchanged
@@ -3655,7 +3661,7 @@ release, so the original was backed up before the build and restored
 byte-for-byte afterward (sha256
 `c7328d6c0bd48c570b0a24391630744d6f0449cf7fe6217ecf4f6ef0bc7d0c3d`, verified
 identical before/after). Full detail, all four acceptance cases, and the
-pending human GUI checklist are in `docs/V1_1_UNICODE_ACCEPTANCE.md`.
+pending human GUI checklist are in `docs/archive/V1_1_UNICODE_ACCEPTANCE.md`.
 
 **Real Tamil-negation acceptance fixture (V1.1 Case A).** The original
 Case A/B/C acceptance fixtures (`scripts/seed_correction_acceptance.py`)
@@ -3701,7 +3707,7 @@ chunk warning). Schema, verification policy, and app version all remain
 unchanged (`v14`, `correction-verification-policy-v2`, `0.9.6`).
 
 Not yet done: the human-driven installed GUI walkthrough of
-`docs/V1_1_UNICODE_ACCEPTANCE.md`'s Cases A-D, and any V1.2 scoping.
+`docs/archive/V1_1_UNICODE_ACCEPTANCE.md`'s Cases A-D, and any V1.2 scoping.
 
 ## 44.11 V1.1 acceptance 01: #69/#70 and six V11 fixes installed-verified (2026-09-12)
 
@@ -3718,9 +3724,9 @@ including through correction application), V11-001 (editor refresh after a
 correction applies, §44.10 above), and V11-002/V11-006 (history actor
 attribution, including the `providerMetadata` truthiness defect that
 produced literal `undefined` rows). Full evidence and per-row detail:
-`docs/V1_1_ACCEPTANCE_01.md`.
+`docs/archive/V1_1_ACCEPTANCE_01.md`.
 
-**Still PENDING, not touched by this pass:** the `docs/V1_1_UNICODE_ACCEPTANCE.md`
+**Still PENDING, not touched by this pass:** the `docs/archive/V1_1_UNICODE_ACCEPTANCE.md`
 Cases A-D human walkthrough remains blocked behind #54 (Stage 6B does not
 consult completed Word Alignment for cross-language location). #57, #58,
 #61, #62, and #63 also remain open from the same V11 round — none of the
@@ -3731,7 +3737,7 @@ six are resolved by this entry.
 Same-verse source->target links from a completed tC alignment now feed Stage
 6B as a `WORD_ALIGNMENT` location-evidence component (weight 0.65, same
 number as the pre-existing `HUMAN_PRECEDENT`) -- the tractable half of #54,
-per `docs/V11-000_STAGE6B_ALIGNMENT_SPIKE.md`'s own split recommendation.
+per `docs/archive/V11-000_STAGE6B_ALIGNMENT_SPIKE.md`'s own split recommendation.
 Cross-verse location (the harder half, needing the embedding-provider
 direction) is explicitly untouched and stays on #54. New module
 `tc_ai_bridge/word_alignment_evidence.py`: source/target token resolvers
@@ -3751,7 +3757,7 @@ pass: the new enum member had to be added to
 alongside the Python enum. Full detail: `docs/BUILD_LOG.md`'s same-dated
 entry.
 
-**Update, same day:** review (`docs/V11-000a_REVIEW_FIX_PROMPT.md`) found the
+**Update, same day:** review (`docs/archive/V11-000a_REVIEW_FIX_PROMPT.md`) found the
 design sound but four real defects across two passes -- a casefolding bug
 that dropped evidence for any cased pair, a non-atomic dependency-edge
 write, an unenforced verse-bridge exclusion, and (found reviewing that same
@@ -3769,7 +3775,7 @@ round-trip (2026-09-12)
 A manually written correction proposal now defaults to `HUMAN_APPROVED`
 (`correction_wording.py`'s `_build_proposal`) instead of `UNREVIEWED` --
 Edit->Save was a pointless ceremony, since nothing already checked that the
-editor and the author differ (`docs/V11-003_ISSUE57_PROMPT.md` Part A).
+editor and the author differ (`docs/archive/V11-003_ISSUE57_PROMPT.md` Part A).
 Existing `UNREVIEWED` + `HUMAN_AUTHORED` proposals are lazily, idempotently
 reseeded to `HUMAN_APPROVED` the next time they're read
 (`FoundationRepository.correction_proposal` /

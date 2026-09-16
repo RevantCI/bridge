@@ -100,7 +100,7 @@ union member and a Vitest case. Worth relabelling.
 You are implementing **V11-003 / #57** in the Bridge repository: a manually
 written correction proposal must be usable without an Edit→Save round-trip.
 
-Read `docs/V11-003_ISSUE57_PROMPT.md` Part A first — the product decision is
+Read `docs/archive/V11-003_ISSUE57_PROMPT.md` Part A first — the product decision is
 already made, with the reasoning and the rejected alternatives. Do not
 relitigate it. Read `CLAUDE.md` and treat its staleness and schema rules as
 binding.

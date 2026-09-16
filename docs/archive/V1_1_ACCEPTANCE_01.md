@@ -9,7 +9,7 @@ origin/main             d354b23092a259b9031779b72422e3570a4dd051 (in sync)
 release baseline        v0.9.6 at b0de092
 commits since baseline  28 (this acceptance pass covers #69/#70 specifically;
                         the other 26 are prior, separately-verified work —
-                        see docs/BUILD_LOG.md / docs/HANDOFF.md for each)
+                        see docs/BUILD_LOG.md / docs/archive/HANDOFF.md for each)
 this session's commits  9baac8c feat(editor): make the verse alignment glyph
                                  clickable, colored by completion (#70)
                         d354b23 feat(editor): add a verse right-click menu
@@ -21,7 +21,7 @@ verification policy     correction-verification-policy-v2
 
 This build has **not** been pushed as a tag or released. Application version
 was **not** changed — it remains `0.9.6` (public release baseline), same
-convention as `docs/V1_1_UNICODE_ACCEPTANCE.md`'s prior acceptance build. The
+convention as `docs/archive/V1_1_UNICODE_ACCEPTANCE.md`'s prior acceptance build. The
 installer below is a distinct local artifact, not a new release.
 
 ## Installer
@@ -183,7 +183,7 @@ truthiness defect (an empty object being truthy, producing
 
 This acceptance pass covers #69, #70, and the six V11 fixes above only. It
 does **not** close the Case A–D semantic acceptance in
-`docs/V1_1_UNICODE_ACCEPTANCE.md`, which remains blocked behind #54 (Stage
+`docs/archive/V1_1_UNICODE_ACCEPTANCE.md`, which remains blocked behind #54 (Stage
 6B does not consult completed Word Alignment for cross-language location).
 
 ### Still open from the same acceptance pass
@@ -202,7 +202,7 @@ Not resolved by this pass, and not claimed as such:
 ## Known pre-existing issue (disclosed, not new)
 
 `smoke_sidecars.py` against the freshly rebuilt frozen `bridge-engine.exe`
-failed the same assertion `docs/V1_1_UNICODE_ACCEPTANCE.md` already
+failed the same assertion `docs/archive/V1_1_UNICODE_ACCEPTANCE.md` already
 disclosed: re-checking an already-registered project via
 `project.inspectImport` returns `classification: "possibleDuplicate"`
 instead of `"exactDuplicate"`. `git show --stat` on both of this session's
@@ -217,5 +217,5 @@ Automated regression: **clean** — 0 failures across every gate run against
 this checkpoint (1112 engine + Greek Room, 335 frontend, 12 Rust). Installed,
 human-driven acceptance: **PASS** for #69, #70, and the six V11 fixes above,
 against `Bridge_V1.1-acceptance-01_x64-setup.exe` on 2026-09-12. The
-`docs/V1_1_UNICODE_ACCEPTANCE.md` Cases A–D walkthrough remains **PENDING**,
+`docs/archive/V1_1_UNICODE_ACCEPTANCE.md` Cases A–D walkthrough remains **PENDING**,
 blocked behind #54 — not attempted in this pass, and not claimed.

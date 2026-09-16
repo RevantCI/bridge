@@ -780,7 +780,7 @@ def test_one_to_null_possibly_missing_abstains_instead_of_failing(tmp_path: Path
 
     Stage 8 left coverage unresolved, so there is no positive current evidence
     either way. Calling this FAILED would assert an absence Stage 8 declined to
-    conclude -- the auto-promotion HANDOFF.md section 39 forbids.
+    conclude -- the auto-promotion docs/archive/HANDOFF.md section 39 forbids.
     """
     runtime, application, service, _job = _verified(
         tmp_path, source_text="τῷ θεῷ μου", target_text="",
@@ -1341,7 +1341,7 @@ def test_protocol_verify_acknowledge_and_restart_on_the_managed_project(
     # real tC backend). Since the V11-000a review fix F6,
     # apply_scripture_edit refreshes the alignment invalidation memo itself
     # as part of that same call, so no manual synchronize_alignment_state()
-    # is needed here -- see docs/V11-000a_REVIEW_FIX_PROMPT.md F6 for why an
+    # is needed here -- see docs/archive/V11-000a_REVIEW_FIX_PROMPT.md F6 for why an
     # earlier version of this test that called it by hand was masking a real
     # over-invalidation bug rather than reflecting realistic sequencing.
     runs = _publish_evidence(
