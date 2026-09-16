@@ -9,8 +9,15 @@ become one Idea issue.*
 
 **Decisions already taken by the maintainer (2026-09-16):** rank by both developer velocity
 and runtime speed; **drop the Stage 3 semantic-mapping stack and the AI alignment-proposal
-path** (#23 is off the roadmap); **keep triage** and fix #94 instead; replace the old
-`ARCHITECTURE.md` with a current-state map (done in the same commit as this file).
+path** (#23 closed as not planned); **keep triage** and fix #94 instead; **keep Logos** (B5,
+it is required); **hold B7** (the Semantic and Passage tabs) until the cross-verse alignment
+page is built and accepted, since that work supersedes those views; **fold the report entry
+points** (B4); replace the old `ARCHITECTURE.md` with a current-state map (done in the same
+commit as this file).
+
+**Issues filed from this audit (2026-09-16):** A1 #101 · A2 #102 · A3 #103 · A4 #104 ·
+A5 #105 · A6 is #93 (pre-existing) · A7 #106 · A8 #107 · B4 #108 · B1+B2 #109.
+Not filed: B5 (keep), B6, B7 (held), B8, B9, and the §4/§5 fixes.
 
 ## 1. What is slowing every feature down
 
@@ -66,10 +73,10 @@ path** (#23 is off the roadmap); **keep triage** and fix #94 instead; replace th
 | B1 | **Stage 3 semantic-mapping stack**: `semantic_mapping.py` 867, `semantic_mapping_bridge.py` 319, `semantic_mapping_service.py` 69, `semantic_review_policy.py` 164, `semantic_validation_service.py` 333, `semantic_alignment_guard.py` 124; the 119 MB `engine/resources/semantic_mapping/bridge_semantic_source_v0.3.sqlite` shipped via `tauri.conf.json` `bundle.resources`; workbench tables `semantic_mappings` and `semantic_validation_runs` (`workbench_repository.py:227,241`); the `stage3db` marker; two `_PRE_CUTOVER_STORE_DIRS` entries | **Decided: remove.** Honest loss: `ai_client.py:592-617` feeds Stage 3 mappings into the tN/tW AI-review prompt and `:818` applies `apply_semantic_review_policy_all` as a gate on which checks the model may mark. AI review loses passage-level source context and that gate | AI-review prompt context and policy gate | about 2.3k LOC, about 70% of the installer, 2 tables, 3 test files | M |
 | B2 | **AI alignment proposals**: `alignment.aiPropose` / `alignment.aiApplyProposal` (`bridge_service.py:1919`), `alignment_reliability.py` 428, `propose_alignment` in `ai_client.py`, their sidecar timeout entries | **Decided: remove.** No UI caller. Close #23 with a note. Do B1 and B2 in one issue: the guard is the seam between them | the auto-align direction | about 600 LOC, 2 methods | S |
 | B3 | **Triage** (`triage.py` 620, `triage_prompts.py` 220, `triage_jobs.py` 242, report-screen overlay, `triage_verdicts` table) | **Decided: keep.** Fix #94 with a collection-level cache, the way `listBookProgress` reads `project_progress_cache` | none | none | S to M |
-| B4 | Four collection-report entry points: live `project.report` (dashboard) and `report.*` (report screen); dead `project.collectionReport` and `project.sweep*`. `reporting.py` (203) is the sole importer of `analytics.py`, `psalms_qa.py`, `git_service.py`, `team.py`. Preserve the no-cache-warming rule in `build_project_report`'s docstring (`bridge_service.py:989-1000`) | needs a decision on whether the dashboard keeps its own per-book panel | none if the dashboard exception queue is re-derived from the report builder | about 600 LOC | M |
-| B5 | **Logos**: `logos_connector.py` 281 plus its PowerShell helper; reachable only through `navigation.*` and the Settings toggle (`SettingsModal.svelte:228`); the two direct `logos.*` commands are dead. Paratext is the product direction (#42, #52) | needs a yes/no | Logos verse sync | about 350 LOC | S |
+| B4 | Four collection-report entry points: live `project.report` (dashboard) and `report.*` (report screen); dead `project.collectionReport` and `project.sweep*`. `reporting.py` (203) is the sole importer of `analytics.py`, `psalms_qa.py`, `git_service.py`, `team.py`. Preserve the no-cache-warming rule in `build_project_report`'s docstring (`bridge_service.py:989-1000`) | **Decided: fold** (#108) | none if the dashboard exception queue is re-derived from the report builder | about 600 LOC | M |
+| B5 | **Logos**: `logos_connector.py` 281 plus its PowerShell helper; reachable through `navigation.*` and the Settings toggle (`SettingsModal.svelte:228`); only the two direct `logos.*` commands are dead (they go with A3, #103) | **Decided: keep.** Logos sync is required | none | none | — |
 | B6 | **Navigation poll**: run `pollNavigation` only while a connection is enabled, or push from the engine's probe thread as a Tauri event | verified `App.svelte:193-194, 243` | none | about 75 sidecar round-trips per minute | S |
-| B7 | **Alignment Review Semantic and Passage tabs** (`SemanticAlignmentMode` 298, `PassageAlignmentMode` 258, `VirtualPassageStream` 205): read-only re-presentations of the finding that QA mode already shows through `EvidenceInspector` | needs a yes/no | two alternative views of the same relationship | about 760 LOC of UI, 2 client methods | M |
+| B7 | **Alignment Review Semantic and Passage tabs** (`SemanticAlignmentMode` 298, `PassageAlignmentMode` 258, `VirtualPassageStream` 205): read-only re-presentations of the finding that QA mode already shows through `EvidenceInspector` | **Held** until the cross-verse alignment page is built and accepted; that page supersedes these views, so decide then | two alternative views of the same relationship | about 760 LOC of UI, 2 client methods | M |
 | B8 | **Five job-runner copies into one generic manager**, keeping `analysis_jobs.py` separate (#12) | engineering, low product risk; preserve each kind's one-at-a-time conflict rule | none | about 900 LOC net | M |
 | B9 | **Team and roles scaffolding** ahead of #45/#46: `team.py`, `team_members` and `team_assignments` tables, `security.py`, `session.py` | depends on whether #44 to #47 stay on the roadmap | none today | small | S |
 
@@ -123,16 +130,16 @@ path** (#23 is off the roadmap); **keep triage** and fix #94 instead; replace th
 
 ## 6. Suggested order, one issue each
 
-1. #100 extended by A1.
-2. B1 and B2 together (Stage 3 and the AI-alignment path share `semantic_alignment_guard`).
-3. A2 and A5.
-4. A3, including `passage_semantic_wire.rs`.
-5. A8 (docs archive).
-6. B6 (navigation poll).
+1. #100, then #101 (A1).
+2. #109 (B1 and B2 together; Stage 3 and the AI-alignment path share `semantic_alignment_guard`).
+3. #102 (A2) and #105 (A5).
+4. #103 (A3, including `passage_semantic_wire.rs`).
+5. #107 (A8, docs archive) and #106 (A7).
+6. B6 (navigation poll, not yet filed).
 7. #94.
 8. §4.1 lazy runtime, after reading the traces.
 9. #82.
-10. B8, B4, then A6/#93.
+10. B8, #108 (B4), #104 (A4), then #93 (A6).
 
 ## 7. Draft issue bodies for Group A (Idea template)
 
