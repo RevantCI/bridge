@@ -52,7 +52,7 @@ class ReportService:
         entirely from the existing progress rollup (project.load_progress_
         rollup(), written by BridgeEngine._on_check_job_complete) -- no new
         persistence. A verse absent from the rollup was never run through
-        checks.start/project.sweepStart and is NOT_CHECKED, regardless of
+        checks.start and is NOT_CHECKED, regardless of
         whether it would look fine if it were. Among checked verses: an
         OPEN finding is an unresolved ISSUE; a NEEDS_DISCUSSION finding
         (with no OPEN one) is REVIEW_REQUIRED; everything else a checked
@@ -111,8 +111,8 @@ class ReportService:
         summary. Takes finished report dicts rather than TranslationCoreProject
         instances so ReportService itself stays single-project like every
         other class in tc_ai_bridge; the caller (BridgeEngine) already knows
-        how to enumerate collection siblings (see project_sweep.py's
-        _sibling_sweep_books, the same resolution reused here)."""
+        how to enumerate collection siblings (see BridgeEngine's
+        _materialized_collection_books, the same resolution reused here)."""
         verse_counts: Counter = Counter()
         severity_counts: Counter = Counter()
         books: list[dict[str, Any]] = []

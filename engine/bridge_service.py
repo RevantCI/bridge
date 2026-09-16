@@ -100,9 +100,6 @@ from tc_ai_bridge.triage import (
     OVERRIDE_VERDICTS,
     run_book_triage,
 )
-from tc_ai_bridge.verse_evidence import resolve_verse_evidence
-from tc_ai_bridge.semantic_mapping_service import semantic_mappings_for_verse, confirm_semantic_mapping
-from tc_ai_bridge.semantic_mapping_bridge import prepare_semantic_mappings_for_review
 from tc_ai_bridge.semantic_review_policy import native_tc_apply_allowed
 from check_jobs import (
     CheckJobConflict,
@@ -117,13 +114,6 @@ from ai_review_jobs import (
     AIReviewJobManager,
     AIReviewJobNotFound,
     AIReviewJobSpec,
-)
-from project_sweep import (
-    ProjectSweepManager,
-    SweepBook,
-    SweepConflict,
-    SweepError,
-    SweepNotFound,
 )
 from report_jobs import (
     ReportBook,
@@ -290,9 +280,6 @@ class Methods:
     PROJECT_DELETE = "project.delete"
     PROJECT_SCAN = "project.scan"
     PROJECT_REPORT = "project.report"
-    PROJECT_SWEEP_START = "project.sweepStart"
-    PROJECT_SWEEP_STATUS = "project.sweepStatus"
-    PROJECT_SWEEP_CANCEL = "project.sweepCancel"
     PROJECT_COLLECTION_REPORT = "project.collectionReport"
     # Whole-collection QA report (qa_report.py + report_jobs.py): a
     # background build polled by status, fetched once with get, and an
@@ -323,7 +310,6 @@ class Methods:
     CHECKS_RETRY = "checks.retry"
 
     VERSE_GET = "verse.get"
-    VERSE_EVIDENCE = "verse.evidence"
     VERSE_RUN_CHECKS = "verse.runChecks"
     VERSE_DECIDE = "verse.decide"
     VERSE_EDIT = "verse.edit"
@@ -351,13 +337,6 @@ class Methods:
     EXPORT_ALIGNED = "export.aligned"
     EXPORT_NON_ALIGNED = "export.nonAligned"
 
-    VERSIFICATION_DETECT = "versification.detect"
-    VERSIFICATION_ORG_REF = "versification.orgRef"
-    VERSIFICATION_BACK_MAP = "versification.backVersificationMap"
-
-    ALIGNMENT_CORPUS_STATS_SUMMARY = "alignment.corpusStats.summary"
-    ALIGNMENT_CORPUS_STATS_FOR_VERSE = "alignment.corpusStats.forVerse"
-
     ALIGNMENT_AI_PROPOSE = "alignment.aiPropose"
     ALIGNMENT_AI_APPLY_PROPOSAL = "alignment.aiApplyProposal"
 
@@ -368,9 +347,6 @@ class Methods:
     AI_REVIEW_RETRY = "ai.review.retry"
     AI_REVIEW_LIST_CHAPTER = "ai.review.listForChapter"
 
-    SEMANTIC_MAPPING_GET_FOR_VERSE = "semanticMapping.getForVerse"
-    SEMANTIC_MAPPING_CONFIRM = "semanticMapping.confirm"
-    SEMANTIC_MAPPING_RERUN_FOR_VERSE = "semanticMapping.rerunForVerse"
     PASSAGE_SEMANTIC_STATUS = "passageSemantic.status"
     PASSAGE_SEMANTIC_PROJECT_METADATA = "passageSemantic.getProjectMetadata"
     PASSAGE_SEMANTIC_CURRENT_PASSAGE = "passageSemantic.getCurrentPassage"
@@ -483,11 +459,6 @@ class BridgeEngine:
         # Not invalidated by verse.edit — see _usfm_findings_for_book.
         self._usfm_findings_by_book: dict[str, list[QaFinding]] = {}
         self._usfm_errors_by_book: dict[str, str] = {}
-        # Versification detection is cheap (in-memory dict scans against
-        # already-loaded schema data, not a subprocess) but still whole-book
-        # work, so it's cached per project path the same way USFM findings
-        # are, computed lazily on first request rather than on every open.
-        self._versification_by_book: dict[str, dict[str, Any]] = {}
         # Names/transliteration spelling-consistency is also inherently
         # whole-book (there's nothing to compare a single verse's spelling
         # against), so it's cached the same way as USFM findings — not
@@ -526,7 +497,6 @@ class BridgeEngine:
         self._correction_application_service: CorrectionApplicationService | None = None
         self._correction_affected_analysis_service: CorrectionAffectedAnalysisService | None = None
         self._correction_verification_service: CorrectionVerificationService | None = None
-        self._project_sweep = ProjectSweepManager()
         self._report_jobs = ReportJobManager()
         self._triage_jobs = TriageJobManager()
         # Guards each book's triage store against a triage.override arriving
@@ -588,7 +558,6 @@ class BridgeEngine:
     def open_project(self, path: str, project_id: str = "") -> dict[str, Any]:
         self._usfm_findings_by_book.clear()
         self._usfm_errors_by_book.clear()
-        self._versification_by_book.clear()
         self._names_findings_by_book.clear()
         self._names_errors_by_book.clear()
         self._consistency_findings_by_book.clear()
@@ -998,10 +967,12 @@ class BridgeEngine:
         self._require_project()
         return ReportService(self.project).build_book_report()
 
-    def _sibling_sweep_books(self) -> list[SweepBook]:
-        """Every book in the currently open collection, or just the current
-        book when it isn't part of a multi-book collection — same sibling
-        resolution list_book_progress already uses."""
+    def _materialized_collection_books(self) -> list[ReportBook]:
+        """Every book in the currently open collection whose directory exists,
+        or just the current book when it isn't part of a multi-book collection
+        -- same sibling resolution list_book_progress already uses. Unlike
+        _report_books, a registered but missing sibling is skipped rather than
+        listed."""
         self._require_project()
         siblings = collection_projects(str(self.project.path))
         if not siblings:
@@ -1009,99 +980,27 @@ class BridgeEngine:
                 "path": str(self.project.path), "bookId": self.project.book_id,
                 "bookName": self.project.summary.book_name, "lazy": False,
             }]
-        books: list[SweepBook] = []
+        books: list[ReportBook] = []
         for entry in siblings:
             path = str(entry.get("path") or "")
             if not Path(path).is_dir():
-                continue  # a registered but missing sibling — nothing to sweep
-            books.append(SweepBook(
+                continue
+            books.append(ReportBook(
                 path=path, book_id=str(entry.get("bookId") or ""),
                 book_name=str(entry.get("bookName") or ""),
             ))
         return books
 
-    def _run_layer1_checks_for_book(self, book: SweepBook) -> tuple[list[dict[str, Any]], Optional[str]]:
-        """USFM structure + names/spelling consistency + per-verse Wildebeest
-        — the Layer-1 deterministic checks already used by verse.runChecks,
-        run here against a freshly constructed TranslationCoreProject for
-        ONE sibling book. Deliberately never touches self.project (the
-        engine-wide 'open in the UI' slot), so this can run in the sweep's
-        background thread while the user keeps editing whatever book they
-        actually have open. Versification detection is intentionally not
-        included: nothing in this codebase turns a versification mismatch
-        into a QaFinding today (see versification_org_ref/back_map — those
-        only normalize references), so 'checking' it here would mean
-        inventing a new finding shape, out of scope for wiring up the
-        existing checks project-wide.
-        """
-        materialize_lazy_project(book.path)
-        project = TranslationCoreProject(book.path, workspace=self.workspace)
-        project_id = str(project.summary.path)
-        target = project.manifest.get("target_language", {})
-        language_id = str(target.get("id") or "") if isinstance(target, dict) else ""
-
-        findings: list[QaFinding] = list(self._usfm_findings_for_book(project=project))
-        findings.extend(self._names_findings_for_book(project=project))
-
-        text_map = self._book_verse_text_map(project)
-        for ref, text in text_map.items():
-            chapter, _, verse = ref.partition(":")
-            gr_findings = self.greek_room.check_verse(
-                project_id=project_id, lang_code=language_id,
-                ref=f"{project.book_id} {chapter}:{verse}", text=text, checks=["wildebeest"],
-            )
-            for f in gr_findings:
-                # Same stabilization as _run_verse_checks_for_project's
-                # greekroom branch — keeps ids identical to what opening
-                # this book normally and running checks verse-by-verse
-                # would produce, so a sweep finding and a live-editor
-                # finding for the same issue are the same finding.
-                f.id = _stable_finding_id(
-                    chapter=chapter, verse=verse, engine=f.engine, check_type=f.check_type,
-                    disambiguator=f"{f.start_offset}:{f.end_offset}:{f.original_text}",
-                )
-            findings.extend(gr_findings)
-
-        by_verse: dict[tuple[str, str], list[QaFinding]] = {}
-        for f in findings:
-            by_verse.setdefault((str(f.chapter), str(f.verse)), []).append(f)
-        for (chapter, verse), verse_findings in by_verse.items():
-            prior_decisions = project.qa_decisions_for_verse(chapter, verse)
-            for f in verse_findings:
-                record = prior_decisions.get(f.id)
-                if record:
-                    try:
-                        f.status = FindingStatus(record.get("decision", "open"))
-                    except ValueError:
-                        pass
-                    f.human_comment = record.get("note") or None
-
-        return [f.to_dict() for f in findings], None
-
-    def start_project_sweep(self) -> dict[str, Any]:
-        """Kick off a background Layer-1 sweep across every book in the
-        current collection. One sweep at a time (see ProjectSweepManager);
-        does not conflict with a concurrent checks.* chapter/book job — a
-        separate lock domain by design."""
-        books = self._sibling_sweep_books()
-        return self._project_sweep.start(books, run_book=self._run_layer1_checks_for_book)
-
-    def project_sweep_status(self, job_id: str = "") -> dict[str, Any]:
-        return self._project_sweep.status(job_id)
-
-    def cancel_project_sweep(self, job_id: str = "") -> dict[str, Any]:
-        return self._project_sweep.cancel(job_id)
-
     def build_collection_report(self) -> dict[str, Any]:
         """Project-level rollup across every book in the current collection
-        -- builds each sibling's own build_book_report() (same reused
-        TranslationCoreProject construction as _run_layer1_checks_for_book)
-        and aggregates them with ReportService.build_collection_report.
+        -- builds each sibling's own build_book_report() against a freshly
+        constructed TranslationCoreProject (never self.project) and
+        aggregates them with ReportService.build_collection_report.
         Synchronous: fine for a handful of books, but this does not solve
         the whole-Bible performance question (see issue #17) -- a 66-book
         collection sequentially building 66 full reports in one request
         could run long."""
-        books = self._sibling_sweep_books()
+        books = self._materialized_collection_books()
         reports: list[dict[str, Any]] = []
         for book in books:
             materialize_lazy_project(book.path)
@@ -1114,7 +1013,7 @@ class BridgeEngine:
 
     def _report_books(self) -> list[ReportBook]:
         """Every sibling in the open collection, lazy and missing ones
-        included -- unlike _sibling_sweep_books, the report must list a book
+        included -- unlike _materialized_collection_books, the report must list a book
         that was never opened (as 'not checked') rather than skip it."""
         self._require_project()
         siblings = collection_projects(str(self.project.path))
@@ -1392,30 +1291,6 @@ class BridgeEngine:
             "alignment": alignment.to_dict(),
             "alignmentStatus": self._alignment_verse_status(self.project, chapter, verse),
         }
-
-    def get_verse_evidence(self, chapter: str, verse: str) -> dict[str, Any]:
-        """Resolve one shared VerseEvidence for this verse (target text/
-        tokens, source tokens, alignment, translation-helps evidence, human
-        decisions — see tc_ai_bridge/verse_evidence.py's own docstring for
-        what this does and doesn't replace) and attach the two pieces that
-        module can't see on its own: current QaFindings and any cached AI
-        review result, since only BridgeEngine composes both GreekRoomEngine
-        and tc_ai_bridge."""
-        self._require_project()
-        project = self.project
-        evidence = resolve_verse_evidence(
-            project, chapter, verse,
-            resource_versions=self._pinned_resource_versions(project),
-        )
-        findings = self.run_verse_checks(chapter, verse, ["local", "greekroom"])
-        ai_review_state = project.ai_review_cache_status(chapter, verse)
-        cached_ai_review = project.load_ai_review_result(chapter, verse) if ai_review_state == "current" else None
-
-        result = evidence.to_dict()
-        result["findings"] = [f.to_dict() for f in findings]
-        result["aiReviewState"] = ai_review_state
-        result["aiReview"] = cached_ai_review
-        return result
 
     def get_chapter_verse_data(self, chapter: str) -> dict[str, Any]:
         """Bulk fetch: text + alignment for every verse in a chapter, in
@@ -2278,27 +2153,6 @@ class BridgeEngine:
             "stale": sum(1 for state in states.values() if state == "stale"),
             "missing": sum(1 for state in states.values() if state == "missing"),
         }
-
-    def semantic_mapping_get_for_verse(self, chapter: str, verse: str) -> dict[str, Any]:
-        self._require_project()
-        return semantic_mappings_for_verse(self.project, chapter, verse)
-
-    def semantic_mapping_confirm(
-        self, fingerprint: str, source_unit_id: str, decision: str,
-        reviewer: str = "", note: str = "", edited_mapping: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        self._require_project()
-        return confirm_semantic_mapping(
-            self.project,
-            fingerprint=fingerprint, source_unit_id=source_unit_id, decision=decision,
-            reviewer=reviewer, note=note, edited_mapping=edited_mapping,
-        )
-
-    def semantic_mapping_rerun_for_verse(self, chapter: str, verse: str) -> dict[str, Any]:
-        self._require_project()
-        return prepare_semantic_mappings_for_review(
-            project=self.project, client=self._ai_client(), chapter=chapter, verse=verse, force=True,
-        )
 
     # -- passage-semantic runtime foundation -----------------------------
 
@@ -3716,97 +3570,6 @@ class BridgeEngine:
                     result[f"{chapter}:{verse}"] = text
         return result
 
-    def detect_versification(self) -> dict[str, Any]:
-        """Sniff which of the six standard schemas this book's verse
-        numbering best matches, e.g. distinguishing an 'eng'-numbered Psalter
-        from an 'org' one. Cached per project path — cheap (in-memory dict
-        scans, not a subprocess) but still whole-book work, so this is
-        computed once on first request rather than on every project.open."""
-        self._require_project()
-        book_key = str(self.project.path)
-        cached = self._versification_by_book.get(book_key)
-        if cached is not None:
-            return cached
-        if not versification_tool.is_available():
-            result = {"available": False}
-        else:
-            verses = self._book_verse_text_map(self.project)
-            result = versification_tool.detect_schema(self.project.book_id, verses)
-            result["available"] = True
-        self._versification_by_book[book_key] = result
-        return result
-
-    def versification_org_ref(self, chapter: str, verse: str, schema: str = "") -> dict[str, Any]:
-        """Normalize one chapter:verse into its 'org' (Hebrew/Greek) ref.
-        Defaults to the project's own detected schema when none is given."""
-        self._require_project()
-        effective_schema = schema or self.detect_versification().get("bestSchema") or "eng"
-        return versification_tool.to_org_ref(
-            self.project.book_id, chapter, verse, effective_schema,
-        )
-
-    def versification_back_map(self, schema: str = "") -> dict[str, Any]:
-        """org ref -> project-schema ref for every org verse in this book,
-        so callers can display/export references the way the project
-        actually numbers them."""
-        self._require_project()
-        effective_schema = schema or self.detect_versification().get("bestSchema") or "eng"
-        return {
-            "schema": effective_schema,
-            "map": versification_tool.back_versification_map(self.project.book_id, effective_schema),
-        }
-
-    # -- alignment corpus statistics (Phase 6) -----------------------------
-
-    def _corpus_stats_for_book(self) -> corpus_stats_tool.CorpusStatsTable:
-        self._require_project()
-        book_key = str(self.project.path)
-        cached = self._corpus_stats_by_book.get(book_key)
-        if cached is not None:
-            return cached
-        table = corpus_stats_tool.build_corpus_stats(self.project, include_collection=True)
-        self._corpus_stats_by_book[book_key] = table
-        return table
-
-    def corpus_stats_summary(self) -> dict[str, Any]:
-        """Aggregate counts over every completed verse in the open book's
-        whole collection (see alignment_statistics.build_corpus_stats) —
-        cheap introspection so a caller can tell whether there's enough
-        approved data yet for per-verse stats to be meaningful."""
-        table = self._corpus_stats_for_book()
-        return {
-            "booksScanned": table.books_scanned,
-            "versesScanned": table.verses_scanned,
-            "distinctSourceTypes": len(table.source_counts),
-            "distinctTargetTypes": len(table.target_counts),
-            "distinctPairs": len(table.pair_counts),
-            "totalLinkInstances": table.total_pairs,
-        }
-
-    def corpus_stats_for_verse(self, chapter: str, verse: str) -> dict[str, Any]:
-        """Corpus-wide count/probability/PMI (and, when Uroman + the
-        vendored Smart Edit Distance are available, a phonetic-boosted
-        probability for sparse pairs) for every top<->bottom link in one
-        verse's CURRENT alignment groups. Works on a verse that isn't
-        complete yet — useful while still aligning it, to see how the
-        current groupings compare to the rest of the corpus. Read-only:
-        never mutates the alignment, and never counts the verse's OWN links
-        against itself beyond however build_corpus_stats already counted
-        them if this same verse happens to be complete (no leave-one-out
-        adjustment — this reports, it doesn't iteratively retrain)."""
-        self._require_project()
-        table = self._corpus_stats_for_book()
-        alignment = self.project.load_verse_alignment(chapter, verse)
-        pairs: list[dict[str, Any]] = []
-        for group in alignment.alignments:
-            if not group.top_words or not group.bottom_words:
-                continue
-            for top in group.top_words:
-                for bottom in group.bottom_words:
-                    stats = table.pair_stats(top.word, bottom.word)
-                    pairs.append(stats.to_dict())
-        return {"chapter": str(chapter), "verse": str(verse), "pairs": pairs}
-
     # -- settings ---------------------------------------------------------
 
     def get_settings(self) -> dict[str, Any]:
@@ -3880,12 +3643,6 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.scan_project())
             if m == Methods.PROJECT_REPORT:
                 return EngineResponse.ok(request.id, result=self.build_project_report())
-            if m == Methods.PROJECT_SWEEP_START:
-                return EngineResponse.ok(request.id, result=self.start_project_sweep())
-            if m == Methods.PROJECT_SWEEP_STATUS:
-                return EngineResponse.ok(request.id, result=self.project_sweep_status(p.get("jobId", "")))
-            if m == Methods.PROJECT_SWEEP_CANCEL:
-                return EngineResponse.ok(request.id, result=self.cancel_project_sweep(p.get("jobId", "")))
             if m == Methods.PROJECT_COLLECTION_REPORT:
                 return EngineResponse.ok(request.id, result=self.build_collection_report())
             if m == Methods.REPORT_GENERATE:
@@ -3950,8 +3707,6 @@ class BridgeEngine:
                 )
             if m == Methods.VERSE_GET:
                 return EngineResponse.ok(request.id, result=self.get_verse(p["chapter"], p["verse"]))
-            if m == Methods.VERSE_EVIDENCE:
-                return EngineResponse.ok(request.id, result=self.get_verse_evidence(p["chapter"], p["verse"]))
             if m == Methods.VERSE_RUN_CHECKS:
                 findings = self.run_verse_checks(p["chapter"], p["verse"], p.get("checks", ["local", "greekroom"]))
                 return EngineResponse.ok(request.id, findings=findings)
@@ -4031,22 +3786,6 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.export_aligned(p["outputPath"]))
             if m == Methods.EXPORT_NON_ALIGNED:
                 return EngineResponse.ok(request.id, result=self.export_non_aligned(p["outputPath"]))
-            if m == Methods.VERSIFICATION_DETECT:
-                return EngineResponse.ok(request.id, result=self.detect_versification())
-            if m == Methods.VERSIFICATION_ORG_REF:
-                return EngineResponse.ok(request.id, result=self.versification_org_ref(
-                    p["chapter"], p["verse"], p.get("schema", ""),
-                ))
-            if m == Methods.VERSIFICATION_BACK_MAP:
-                return EngineResponse.ok(
-                    request.id, result=self.versification_back_map(p.get("schema", "")),
-                )
-            if m == Methods.ALIGNMENT_CORPUS_STATS_SUMMARY:
-                return EngineResponse.ok(request.id, result=self.corpus_stats_summary())
-            if m == Methods.ALIGNMENT_CORPUS_STATS_FOR_VERSE:
-                return EngineResponse.ok(request.id, result=self.corpus_stats_for_verse(
-                    p["chapter"], p["verse"],
-                ))
             if m == Methods.ALIGNMENT_AI_PROPOSE:
                 return EngineResponse.ok(request.id, result=self.propose_ai_alignment(
                     p["chapter"], p["verse"], p.get("mode", "gap_fill"),
@@ -4077,20 +3816,6 @@ class BridgeEngine:
             if m == Methods.AI_REVIEW_LIST_CHAPTER:
                 return EngineResponse.ok(
                     request.id, result=self.list_ai_reviews_for_chapter(p["chapter"]),
-                )
-            if m == Methods.SEMANTIC_MAPPING_GET_FOR_VERSE:
-                return EngineResponse.ok(
-                    request.id, result=self.semantic_mapping_get_for_verse(p["chapter"], p["verse"]),
-                )
-            if m == Methods.SEMANTIC_MAPPING_CONFIRM:
-                return EngineResponse.ok(request.id, result=self.semantic_mapping_confirm(
-                    str(p.get("fingerprint") or ""), str(p.get("sourceUnitId") or ""),
-                    str(p.get("decision") or ""), p.get("reviewer", ""), p.get("note", ""),
-                    p.get("editedMapping"),
-                ))
-            if m == Methods.SEMANTIC_MAPPING_RERUN_FOR_VERSE:
-                return EngineResponse.ok(
-                    request.id, result=self.semantic_mapping_rerun_for_verse(p["chapter"], p["verse"]),
                 )
             if m == Methods.PASSAGE_SEMANTIC_STATUS:
                 return EngineResponse.ok(request.id, result=self.passage_semantic_status())
@@ -4482,12 +4207,6 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "ai_job_conflict", str(exc))
         except AIReviewJobError as exc:
             return EngineResponse.fail(request.id, "ai_job_error", str(exc))
-        except SweepNotFound as exc:
-            return EngineResponse.fail(request.id, "sweep_not_found", str(exc))
-        except SweepConflict as exc:
-            return EngineResponse.fail(request.id, "sweep_conflict", str(exc))
-        except SweepError as exc:
-            return EngineResponse.fail(request.id, "sweep_error", str(exc))
         except ReportJobNotFound as exc:
             return EngineResponse.fail(request.id, "report_not_found", str(exc))
         except ReportJobConflict as exc:

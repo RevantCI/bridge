@@ -1,8 +1,8 @@
 """
-Tests for tc_ai_bridge/verse_evidence.py — the new VerseEvidence composing
-object (issue #5 of the Full Bible QA Orchestrator milestone) and its
-BridgeEngine-level wiring (verse.evidence), which attaches QaFindings and
-cached AI review state on top of the pure tc_ai_bridge resolution.
+Tests for tc_ai_bridge/verse_evidence.py — the VerseEvidence composing
+object (issue #5 of the Full Bible QA Orchestrator milestone). Its
+BridgeEngine-level wiring (the verse.evidence protocol method) was removed
+in #102: no Tauri command ever reached it.
 
 Uses the same real fixture-project shape as test_bridge_service.py's
 fixture_project (Ruth, target text Tamil) rather than mocking
@@ -14,14 +14,8 @@ import json
 
 import pytest
 
-from bridge_service import BridgeEngine
-from greek_room_engine.protocol import EngineRequest
 from tc_ai_bridge.tc_project import TranslationCoreProject
 from tc_ai_bridge.verse_evidence import resolve_verse_evidence
-
-
-def call(engine, method, params=None):
-    return engine.handle_request(EngineRequest(id="t", method=method, params=params or {})).to_dict()
 
 
 @pytest.fixture
@@ -107,28 +101,3 @@ def test_verse_evidence_to_dict_uses_camel_case_protocol_shape(fixture_project):
     ):
         assert key in d, f"missing {key}"
 
-
-def test_verse_evidence_protocol_method_attaches_findings_and_ai_review(fixture_project):
-    """BridgeEngine.get_verse_evidence is the only place that can attach
-    cross-engine QaFindings and AI review state on top of the pure
-    tc_ai_bridge VerseEvidence — this proves that composition, not just
-    the pure resolver in isolation."""
-    engine = BridgeEngine()
-    call(engine, "project.open", {"path": str(fixture_project)})
-
-    result = call(engine, "verse.evidence", {"chapter": "1", "verse": "1"})
-    assert result["success"] is True
-    evidence = result["result"]
-
-    assert evidence["bookId"] == "rut"
-    assert len(evidence["sourceTokens"]) == 19
-    assert "தேவன்" in evidence["targetText"]
-    assert isinstance(evidence["findings"], list)
-    assert evidence["aiReviewState"] in {"missing", "current", "stale"}
-    assert evidence["aiReview"] is None  # no AI review has ever run in this fixture
-
-
-def test_verse_evidence_requires_open_project():
-    engine = BridgeEngine()
-    result = call(engine, "verse.evidence", {"chapter": "1", "verse": "1"})
-    assert result["success"] is False

@@ -293,36 +293,6 @@ def main() -> int:
             ):
                 raise SystemExit(f"Frozen duplicate classification failed: {duplicate}")
 
-            versification_detect = request("versification-detect", "versification.detect", {})
-            if (
-                not versification_detect.get("success")
-                or not versification_detect["result"].get("bestSchema")
-            ):
-                raise SystemExit(
-                    f"Frozen versification detection failed: {versification_detect}"
-                )
-            versification_org_ref = request(
-                "versification-org-ref",
-                "versification.orgRef",
-                {"chapter": "1", "verse": "1", "schema": "eng"},
-            )
-            if (
-                not versification_org_ref.get("success")
-                or versification_org_ref["result"].get("orgRef") != "TIT 1:1"
-            ):
-                raise SystemExit(
-                    f"Frozen versification orgRef failed: {versification_org_ref}"
-                )
-            versification_back_map = request(
-                "versification-back-map",
-                "versification.backVersificationMap",
-                {"schema": "eng"},
-            )
-            if not versification_back_map.get("success"):
-                raise SystemExit(
-                    f"Frozen versification backVersificationMap failed: {versification_back_map}"
-                )
-
             names_check = request(
                 "names-check",
                 "verse.runChecks",
@@ -359,18 +329,6 @@ def main() -> int:
             )
             if not completed.get("success") or completed["result"].get("completionState") != "completed":
                 raise SystemExit(f"Frozen alignment completion failed: {completed}")
-
-            corpus_summary = request("corpus-stats-summary", "alignment.corpusStats.summary", {})
-            if not corpus_summary.get("success") or corpus_summary["result"].get("versesScanned") != 1:
-                raise SystemExit(f"Frozen corpus stats summary failed: {corpus_summary}")
-            corpus_for_verse = request(
-                "corpus-stats-for-verse", "alignment.corpusStats.forVerse", {"chapter": "1", "verse": "1"},
-            )
-            if not corpus_for_verse.get("success"):
-                raise SystemExit(f"Frozen corpus stats forVerse failed: {corpus_for_verse}")
-            pairs = corpus_for_verse["result"].get("pairs", [])
-            if not pairs or pairs[0].get("jointCount") != 1 or pairs[0].get("translationProbability") != 1.0:
-                raise SystemExit(f"Frozen corpus stats forVerse returned unexpected data: {corpus_for_verse}")
 
             # No API key is configured in this smoke test (no real network call is made or
             # needed) — this exists to confirm ai_client.py/alignment_engine.py's new imports

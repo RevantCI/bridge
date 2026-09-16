@@ -8361,3 +8361,72 @@ Run in a fresh worktree with the Stage 3 DB, sidecar exes and resources copied
 in first (the four git-ignored artifacts noted under #100):
 `pytest -n auto -m "not slow"` from `engine/`: **1022 passed** in 2m53s, 0 failed.
 No frontend or Rust change, so those gates were not run.
+
+## 2026-09-16 — #102: the 13 engine methods with no Tauri command are removed
+
+Group A of the simplification audit (A2). `project.sweepStart/Status/Cancel`,
+`semanticMapping.getForVerse/confirm/rerunForVerse`,
+`versification.detect/orgRef/backVersificationMap`,
+`alignment.corpusStats.summary/forVerse` and `verse.evidence` had no
+`#[tauri::command]`, so no frontend could reach them. Their `Methods` constants,
+handler methods, dispatcher branches and the three `Sweep*` exception mappings are
+gone, and `engine/project_sweep.py` (170 lines) with them. `bridge_service.py` is
+309 lines shorter.
+
+### What the re-verification changed about the plan
+
+- **`project_sweep.py` was not used only by the sweep methods.** Its `SweepBook`
+  dataclass was the return type of `_sibling_sweep_books`, which
+  `build_collection_report` (`project.collectionReport`, engine side kept for
+  #108) also calls. The helper is now `_materialized_collection_books` and returns
+  `report_jobs.ReportBook`, the same three fields plus two defaults; the
+  distinction from `_report_books` (skip a missing sibling vs. list it as not
+  checked) is unchanged. `_run_layer1_checks_for_book`, the sweep's worker
+  callback, had no other caller and went with the sweep.
+- **The corpus-stats cache stays.** `_corpus_stats_by_book` and its invalidation
+  in `_save_alignment`/`complete_alignment` are read by the live
+  inconsistent-rendering finding (`_consistency_findings_for_book`), not only by
+  the two removed RPC readers. Only `_corpus_stats_for_book`,
+  `corpus_stats_summary` and `corpus_stats_for_verse` were deleted. A side effect
+  worth knowing: the RPC path built its table with `include_collection=True` and
+  the finding path without, under the same cache key, so whichever ran first
+  decided what the other saw. That ambiguity is gone with the RPC path.
+- **`versification_tool` stays imported** in `bridge_service.py` for the
+  `VersificationUnavailable` mapping in `handle_request`: the Stage 4 runtime
+  (`passage_semantic_runtime.py:442,774`) calls the library inside dispatched
+  requests. `detect_versification` and the `_versification_by_book` cache had no
+  caller left and were removed.
+- **`test_versification_concurrency.py` is untouched.** It drives
+  `tc_ai_bridge.versification` directly in a fresh subprocess, not the RPC.
+- **`verse_evidence.py` now has no importer outside tests.** The audit called it
+  load-bearing on the strength of `bridge_service.py:103`, which was exactly the
+  import the `verse.evidence` handler needed. The module stays as the task
+  required; filed as its own Idea issue rather than deleted here.
+- **The semantic-mapping imports** (`semantic_mapping_service`,
+  `semantic_mapping_bridge`) left `bridge_service.py` with the three handlers.
+  Both modules stay for #109.
+
+### Tests and scripts that followed
+
+Nine protocol tests removed: four sweep tests and `wait_for_sweep` in
+`test_bridge_service.py`, the two versification protocol tests with the Psalm 3
+fixture (the same shift is still asserted at module level in
+`tests/versification/`), the two `verse.evidence` tests (the four pure-resolver
+tests stay), and `test_corpus_stats_protocol_summary_and_for_verse`.
+`test_corpus_stats_cache_invalidated_when_a_verse_is_newly_completed` was
+rewritten to observe `_corpus_stats_by_book` through the finding path instead of
+the RPC, so the invalidation lines keep a test. `scripts/smoke_sidecars.py` lost
+its versification and corpus-stats blocks. `QA_TEST_MATRIX.md` rows A10 and A11
+are `RETIRED (#102)`; A12 still covers the library. Docstrings in `reporting.py`,
+`qa_report.py` and `report_jobs.py` that pointed at `project_sweep.py` were
+reworded.
+
+### Gates
+
+`pytest -n auto -m "not slow"` from `engine/`: **1013 passed**, 0 failed, in
+2m16s (1022 before, minus the nine removed tests). `pyflakes` on the touched
+files reports only two unused imports (`os` in `bridge_service.py`, `shutil` in
+`test_bridge_service.py`) that were already present at HEAD. No frontend or Rust
+change; those gates were not run. `smoke_sidecars.py` was not run against a
+frozen build (that needs `build-sidecars.ps1`; the next release build exercises
+it).

@@ -1,9 +1,10 @@
 """Background whole-collection QA report build.
 
-Modeled on project_sweep.ProjectSweepManager and deliberately its own lock
-domain: generating a report must never be refused because a Layer-1 sweep
-or a chapter check job happens to be running, and vice versa. Like the
-sweep, the worker builds its own TranslationCoreProject per sibling book
+Modeled on the whole-collection Layer-1 sweep manager (project_sweep.py,
+removed in #102: no Tauri command reached it) and deliberately its own lock
+domain: generating a report must never be refused because a chapter check
+job happens to be running, and vice versa. The worker builds its own
+TranslationCoreProject per sibling book
 and never touches BridgeEngine.project, so the reviewer can keep working
 in whatever book they have open while the report builds.
 

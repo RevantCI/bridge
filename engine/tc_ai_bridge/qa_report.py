@@ -5,8 +5,8 @@ screen's book list.
 
 Reads only persisted state. It never runs a check, never calls a model and
 never touches BridgeEngine.project: report_jobs.ReportJobManager builds one
-TranslationCoreProject per sibling book on a background thread, the same
-isolation project_sweep.py uses, so a 66-book collection cannot block the
+TranslationCoreProject per sibling book on a background thread, so a
+66-book collection cannot block the
 single-threaded stdio dispatcher (see BridgeEngine.build_project_report for
 the ~800-verse incident that rule comes from). A book that was never opened
 (lazy sibling) is reported as not checked without being materialized.

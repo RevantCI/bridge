@@ -165,22 +165,6 @@ def test_multi_book_collection_aggregates_normalized_siblings_and_skips_lazy(tmp
     assert table.pair_counts[("אֱלֹהִ֑ים", "தேவன்")] == 2
 
 
-def test_corpus_stats_protocol_summary_and_for_verse(fixture_project):
-    engine = BridgeEngine()
-    call(engine, "project.open", {"path": str(fixture_project)})
-
-    summary = call(engine, "alignment.corpusStats.summary")["result"]
-    assert summary["versesScanned"] == 1
-    assert summary["distinctPairs"] == 1
-    assert summary["totalLinkInstances"] == 1
-
-    for_verse = call(engine, "alignment.corpusStats.forVerse", {"chapter": "1", "verse": "1"})["result"]
-    assert for_verse["pairs"][0]["sourceWord"] == "אֱלֹהִ֑ים"
-    assert for_verse["pairs"][0]["targetWord"] == "தேவன்"
-    assert for_verse["pairs"][0]["jointCount"] == 1
-    assert for_verse["pairs"][0]["translationProbability"] == pytest.approx(1.0)
-
-
 def test_corpus_stats_cache_invalidated_when_a_verse_is_newly_completed(tmp_path):
     root = tmp_path / "rut"
     _write_book(root, "rut", {
@@ -195,16 +179,22 @@ def test_corpus_stats_cache_invalidated_when_a_verse_is_newly_completed(tmp_path
     engine = BridgeEngine()
     call(engine, "project.open", {"path": str(root)})
 
-    before = call(engine, "alignment.corpusStats.summary")["result"]
-    assert before["versesScanned"] == 0
+    # The corpus-stats table is read by the live inconsistent-rendering
+    # finding (BridgeEngine._consistency_findings_for_book) and cached per
+    # project path; the protocol readers that used to expose it went in #102,
+    # so the cache is observed directly here.
+    engine._consistency_findings_for_book()
+    before = engine._corpus_stats_by_book[str(root)]
+    assert before.verses_scanned == 0
 
-    context = call(engine, "alignment.get", {"chapter": "1", "verse": "1"})["result"]
     completed = call(engine, "alignment.complete", {"chapter": "1", "verse": "1"})
     assert completed["success"] is True
+    assert str(root) not in engine._corpus_stats_by_book  # invalidated by the mutation
 
-    after = call(engine, "alignment.corpusStats.summary")["result"]
-    assert after["versesScanned"] == 1
-    assert after["totalLinkInstances"] == 1
+    engine._consistency_findings_for_book()
+    after = engine._corpus_stats_by_book[str(root)]
+    assert after.verses_scanned == 1
+    assert after.total_pairs == 1
 
 
 def test_sed_boost_present_for_real_uroman_and_smart_edit_distance():
