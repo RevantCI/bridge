@@ -320,6 +320,7 @@ class Methods:
     CHECK_CLEAR_SELECTION = "check.clearSelection"
 
     ALIGNMENT_GET = "alignment.get"
+    ALIGNMENT_GET_RANGE = "alignment.getRange"
     ALIGNMENT_STATUS = "alignment.status"
     ALIGNMENT_REALIGN = "alignment.realign"
     ALIGNMENT_UNALIGN = "alignment.unalign"
@@ -1471,7 +1472,17 @@ class BridgeEngine:
                 verses[f"{ch}:{verse}"] = status
         return {"chapter": str(chapter), "counts": counts, "verses": verses}
 
-    def _alignment_context(self, chapter: str, verse: str) -> dict[str, Any]:
+    def _alignment_context(
+        self, chapter: str, verse: str, *, chapter_counts: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
+        """Build the full alignment view for one verse.
+
+        `chapter_counts` lets a caller that already holds
+        `alignment_status(chapter)["counts"]` pass it in instead of having
+        every verse rescan the whole chapter (alignment.getRange does this
+        once for N verses). Left as None, the chapter is scanned here exactly
+        as before.
+        """
         self._require_project()
         alignment = self.project.load_verse_alignment(chapter, verse)
         inventory = make_inventory(alignment)
@@ -1549,6 +1560,22 @@ class BridgeEngine:
                     if token.signature in inventory.bottom_sig_to_id
                 ],
             })
+        # Per-verse gap counts, computed from the groups above. A source token
+        # counts as matched only when some group holds it *and* that group has
+        # at least one target word; a target token counts as matched when any
+        # group holds it (wordBank tokens are in the inventory but no group).
+        matched_top_ids: set[str] = set()
+        matched_bottom_ids: set[str] = set()
+        for group_view in groups:
+            if group_view["bottomIds"]:
+                matched_top_ids.update(group_view["topIds"])
+            matched_bottom_ids.update(group_view["bottomIds"])
+        gaps = {
+            "sourceUnmatched": sum(1 for token_id in inventory.top_ids if token_id not in matched_top_ids),
+            "targetUnmatched": sum(
+                1 for token_id in inventory.bottom_ids if token_id not in matched_bottom_ids
+            ),
+        }
         source_direction = "rtl" if any(
             token.strong.upper().startswith("H") or token.morph.startswith("He,")
             for token in alignment.all_top()
@@ -1577,12 +1604,47 @@ class BridgeEngine:
             ),
             "sourceDirection": source_direction, "targetDirection": target_direction,
             "issues": issues, "canComplete": can_complete,
+            "gaps": gaps,
             "history": self.project.alignment_history(chapter, verse)[:20],
-            "chapterStatus": self.alignment_status(chapter)["counts"],
+            "chapterStatus": (
+                chapter_counts if chapter_counts is not None
+                else self.alignment_status(chapter)["counts"]
+            ),
         }
 
     def get_alignment(self, chapter: str, verse: str) -> dict[str, Any]:
         return self._alignment_context(chapter, verse)
+
+    def get_alignment_range(self, chapter: str, verses: list[str]) -> dict[str, Any]:
+        """alignment.getRange: the alignment.get context for several verses of
+        one chapter in a single round-trip (#116, cross-verse alignment view).
+
+        Verse strings are opaque -- bridges ("3-4") and lettered segments
+        ("3a") are real input (CLAUDE.md gotcha 12) and are passed through
+        unchanged, never parsed as integers. Caller order is preserved;
+        duplicates keep their first occurrence. The chapter status is
+        computed once and shared by every context instead of being rescanned
+        per verse.
+        """
+        self._require_project()
+        chapter = str(chapter)
+        if not isinstance(verses, list) or not verses:
+            raise ProjectError("alignment.getRange requires a non-empty list of verses.")
+        if chapter not in self.project.chapters():
+            raise ProjectError(f"Chapter {chapter} does not exist in this project.")
+        known = set(self.project.verses(chapter))
+        ordered: list[str] = []
+        for raw in verses:
+            verse = str(raw)
+            if verse not in known:
+                raise ProjectError(f"Verse {chapter}:{verse} does not exist in this project.")
+            if verse not in ordered:
+                ordered.append(verse)
+        counts = self.alignment_status(chapter)["counts"]
+        contexts = [
+            self._alignment_context(chapter, verse, chapter_counts=counts) for verse in ordered
+        ]
+        return {"chapter": chapter, "verses": contexts, "chapterStatus": counts}
 
     def get_lexicon_entry(self, strong: str, morph: str) -> dict[str, Any]:
         """Look up lexicon glosses + decoded morphology for one source token.
@@ -3707,6 +3769,10 @@ class BridgeEngine:
             if m == Methods.ALIGNMENT_GET:
                 return EngineResponse.ok(
                     request.id, result=self.get_alignment(p["chapter"], p["verse"]),
+                )
+            if m == Methods.ALIGNMENT_GET_RANGE:
+                return EngineResponse.ok(
+                    request.id, result=self.get_alignment_range(p["chapter"], p.get("verses", [])),
                 )
             if m == Methods.LEXICON_GET_ENTRY:
                 return EngineResponse.ok(

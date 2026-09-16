@@ -6,6 +6,8 @@
   import VerseList from "./lib/components/VerseList.svelte";
   import ReviewPanel from "./lib/components/ReviewPanel.svelte";
   import AlignmentReview from "./lib/components/AlignmentReview.svelte";
+  import CrossVerseAlignmentModal from "./lib/components/CrossVerseAlignmentModal.svelte";
+  import { closeCrossVerse, crossVerseAnchor, crossVerseOpen, openCrossVerse } from "./lib/alignmentUi";
   import { resetReviewState } from "./lib/reviewStores";
   import SettingsModal from "./lib/components/SettingsModal.svelte";
   import ExportModal from "./lib/components/ExportModal.svelte";
@@ -1016,6 +1018,14 @@
           <button class="whole-book-btn" on:click={() => (showingAlignmentReview = true)}>
             Alignment Review
           </button>
+          <button
+            class="whole-book-btn"
+            on:click={() => openCrossVerse($selectedVerse ?? "")}
+            disabled={!$selectedVerse}
+            title="Align several verses of this chapter side by side"
+          >
+            Cross-verse alignment
+          </button>
           <span class="grow" />
           <span title="Word-alignment status for this chapter">
             Alignment: {alignmentChapterSummary.complete} complete · {alignmentChapterSummary.partial} partial
@@ -1042,6 +1052,12 @@
         {#if $engineLog.some((entry) => entry.level === "error")}<span class="error-dot" />{/if}
       </button>
     </div>
+  {/if}
+
+  {#if $project && $crossVerseOpen && $crossVerseAnchor}
+    {#key `${$project.path}:${$currentChapter}:${$crossVerseAnchor}`}
+      <CrossVerseAlignmentModal chapter={$currentChapter} verse={$crossVerseAnchor} onClose={closeCrossVerse} />
+    {/key}
   {/if}
 
   {#if $settingsOpen}

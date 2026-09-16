@@ -4,6 +4,7 @@ import type {
   AlignmentAiProposal,
   AlignmentAiProposeResponse,
   AlignmentContext,
+  AlignmentRange,
   AlignmentStatusResponse,
   BookProgressEntry,
   CheckJobSnapshot,
@@ -168,6 +169,7 @@ export type EngineMethod =
   | "alignment.aiApplyProposal"
   | "alignment.aiPropose"
   | "alignment.get"
+  | "alignment.getRange"
   | "alignment.realign"
   | "alignment.restore"
   | "alignment.status"
@@ -494,6 +496,12 @@ export const bridge = {
 
   getAlignment(chapter: string, verse: string): Promise<AlignmentContext> {
     return call("alignment.get", { chapter, verse });
+  },
+
+  /** One context per verse for the Cross-verse alignment page (#116);
+   *  `verses` are the opaque strings from verseNums, in the order wanted back. */
+  getAlignmentRange(chapter: string, verses: string[]): Promise<AlignmentRange> {
+    return call("alignment.getRange", { chapter, verses });
   },
 
   getLexiconEntry(strong: string, morph: string): Promise<LexiconEntryResponse> {

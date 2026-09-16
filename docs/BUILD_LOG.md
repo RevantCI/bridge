@@ -8745,3 +8745,103 @@ exercise it anyway.
 `cargo check` clean; `cargo test` **9 passed**. `npm run check` 0 errors /
 0 warnings; `npm run test` 27 files, **374 passed** (7 new); `npm run build`
 clean. No engine change.
+
+## 2026-09-16 — #116: the Cross-verse alignment page, slice 1 (range view, same-verse editing, gap overview)
+
+The first of the four cross-verse slices (#116 → #119), started once #115 had landed so
+the new engine method cost one handler, one `EngineMethod` member and one wrapper —
+no Rust change, no `cargo` gate. The maintainer's design defaults from the brief were
+taken as fixed: same-verse drops go through the existing `alignment.realign` /
+`alignment.unalign`; a cross-verse drop is refused with a notice until the link
+store lands (#117); verse numbers are the opaque strings from `verseNums`, ordered
+by index into the chapter list, never parsed; drag is pointer-based and shared.
+
+### What was built
+
+- **`alignment.getRange(chapter, verses[])`** (`bridge_service.py`). Validates every
+  verse string against the chapter (unknown → `project_error`), preserves caller
+  order, de-duplicates, and composes one `_alignment_context` per verse. The
+  context function gained a keyword-only `chapter_counts` so the range computes
+  `alignment_status(chapter)` **once** instead of once per verse (the per-call
+  rescan at the old `:1582` made a range O(N²) in verses). Every context — the
+  single-verse `alignment.get` too — now carries `gaps: {sourceUnmatched,
+  targetUnmatched}`: top tokens in no group with a bottom word, bottom tokens in
+  no group.
+- **`src/lib/alignmentDrag.ts`**: the pointer drag state machine that lived in
+  `AlignmentModal.svelte` (`createPointerDrag` → a Svelte store, `start/move/up`,
+  `attach(window)`, `consumeSuppressedClick`). Drop targets are still the two
+  data attributes; their *values* are opaque to the module, which is what lets
+  the range page put `"verse|H001"` in a column and the verse in a bank while the
+  old modal keeps `H001` and `"true"`. `document.elementFromPoint` is injectable
+  so the state machine is testable under jsdom.
+- **`src/lib/alignmentGroups.ts`**: the pure group algebra both editors share
+  (`groupForTarget`, `alignedTargetsFor`, `unalignedTargets`, `unmatchedSources`,
+  `gapCounts`, and `bottomIdsAfterDrop` — the "resend the column's existing words"
+  rule that `realign` needs).
+- **`AlignmentModal.svelte`** consumes both modules; no behaviour change intended,
+  and a "Cross-verse alignment ›" link under its title.
+- **`CrossVerseAlignmentModal.svelte`**: range picker (from/to selects over
+  `$verseNums` plus toggle chips for the span), gap strip (per verse: status,
+  source/target counts; click filters both columns to that verse's gaps), two
+  vertically scrolling columns — source rows with lemma, lexicon tooltip and
+  `LexiconPopup` on click and a drop cell each; per-verse word banks in verse
+  order. A same-verse drop or click-drop calls `realignWords` / `unalignWords`
+  and then reruns `runVerseChecks(["alignment","greekroom"])` for that verse and
+  updates `alignmentStatusByVerse` / `checkStatusByVerse` / `findingsByVerse`,
+  exactly as the single-verse modal does. It closes itself if the chapter changes.
+- **Entry points**: a "Cross-verse alignment" button in the editor toolbar next to
+  "Alignment Review" (`App.svelte`), and the link in the single-verse modal; both
+  go through `openCrossVerse` in `alignmentUi.ts`, which applies the same guards
+  as `openAlignment` and closes the single-verse modal first.
+- `src/lib/crossVerseRange.ts`: `defaultRange` (selected ±1 by index),
+  `rangeBetween`, `toggleVerse`, `spanOf`, and the `"verse|id"` composite helpers.
+
+### Verified in the real app (dev build, 1366×768)
+
+`npm run tauri dev` from the worktree with the freshly built sidecars, window sized
+to 1366×768 (viewport 1352×731 CSS px), driven through WebView2's remote-debugging
+port so the drags were real `Input.dispatchMouseEvent` pointer sequences, not
+synthetic DOM events. Project: the imported Tamil IRV collection, Genesis 1.
+
+- Toolbar button present; with 1:2 selected the page opened on **1:1–1:3**
+  (chips 1, 2, 3 on). Gap strip read v.1 7/5, v.2 14/12, v.3 6/6 — matching the
+  alignment file on disk. Both columns scroll vertically only: each `.scroll`
+  reported `scrollWidth == clientWidth` (690 and 549), and the document had no
+  horizontal overflow at 1352 px.
+- **Same-verse drag**: `பூமியானது` from the 1:2 word bank onto the `וְ⁠הָ⁠אָ֗רֶץ`
+  cell of 1:2. The cell highlighted while the pointer was over it (`.drop-hover`
+  on `2|H001`), the release saved, the notice read "Alignment saved. Local and
+  Greek Room checks for 1:2 are current.", v.2 went to `partial` 13/11, the bank
+  word greyed, the verse-list glyph for 1:2 turned `partial`, and
+  `alignmentData/gen/1.json` verse 2 held the new group.
+- **Cross-verse drag**: `ஒழுங்கற்றதாகவும்` from 1:2 onto the first cell of 1:1. The
+  1:1 cell highlighted, the release showed the "saved in the next slice (#117)"
+  notice, no engine call was made, and verse 1 on disk was unchanged.
+- **Old modal regression**: "⇄ Align words" for 1:2 rendered on the shared drag
+  module; a real drag onto its second column saved and both cells showed their
+  words. Its new link closed it and opened the page on 1:1–1:3.
+- The dev project was returned to its original state with "Restore selected" on
+  the oldest backup (verse 2: 0 groups with bottom words, 12 in the bank).
+
+Observed while doing that, and **not** from this change: pressing "Undo last change"
+twice in a row re-applies the change, because each undo writes a `restore` history
+row whose backup is the pre-undo state and the next undo restores that latest
+backup. Filed as #122 rather than fixed here.
+
+### Deliberately not done
+
+No cross-verse persistence, no `completionState` change, no aligned USFM change, no
+change to the Semantic or Passage tabs of Alignment Review (still held), no golden
+or threshold change. The single-verse modal keeps its horizontal interlinear row
+(#72); the range page's vertical layout is the answer to #72 for this surface only.
+
+### Gates
+
+Engine: `pytest tests/alignment/test_alignment_get_range.py -v` **7 passed**;
+`pytest -n auto tests/alignment tests/service -m "not slow"` **166 passed** (58 s);
+`pytest -n auto -m "not slow"` **1016 passed** in 2 m 58 s (12 cores). Frozen pair:
+`scripts/smoke_sidecars.py` passed apart from the known pre-existing
+`project.inspectImport` duplicate-classification mismatch. Frontend: `npm run
+check` 0 errors / 0 warnings; `npm run test` 30 files, **399 passed** (32 new across
+`alignmentDrag`, `crossVerseRange`, `CrossVerseAlignmentModal`); `npm run build`
+clean. No Rust change, so `cargo` was not run.

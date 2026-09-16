@@ -5,7 +5,12 @@
     alignmentStatusByVerse, checkStatusByVerse, currentChapter, findingsByVerse,
     verseKey,
   } from "../stores";
-  import type { AlignmentContext, AlignmentGroupView, AlignmentToken } from "../types/finding";
+  import type { AlignmentContext, AlignmentToken } from "../types/finding";
+  import { createPointerDrag } from "../alignmentDrag";
+  import { openCrossVerse } from "../alignmentUi";
+  import {
+    alignedTargetsFor, bottomIdsAfterDrop, groupForTarget, occurrenceLabel as occurrence, unalignedTargets,
+  } from "../alignmentGroups";
   import LexiconPopup from "./LexiconPopup.svelte";
 
   export let chapter: string;
@@ -25,24 +30,20 @@
   // click a column (or the word bank) to drop it there — same one-step
   // "drop" semantics as dragging, just keyboard/click operable.
   let pickedUpId: string | null = null;
-  let dragOverColumn: string | null = null;
-  let dragOverBank = false;
 
-  // Pointer-based (not native HTML5) drag-and-drop. Tauri's window-level
-  // dragDropEnabled — real, load-bearing for the "drop a file to import"
-  // feature in ImportScreen.svelte/App.svelte — intercepts the browser's
-  // native drag events before the page ever sees them, so draggable/
-  // dragstart/dragover/drop are silently inert inside this webview.
-  // Pointer events aren't part of that native drag protocol, so a
-  // from-scratch pointer-tracked drag with a floating ghost works instead.
-  let dragTokenId: string | null = null;
-  let dragStart: { x: number; y: number } | null = null;
-  let dragMoved = false;
-  let ghostPos = { x: 0, y: 0 };
-  let suppressClickId: string | null = null;
-  const DRAG_THRESHOLD = 6;
+  // Pointer-based drag lives in alignmentDrag.ts (shared with the cross-verse
+  // page, #116); see that file for why it is not native HTML5 drag-and-drop.
+  // `data-drop-column` carries the source token id, `data-drop-bank` is "true".
+  const drag = createPointerDrag({
+    onDragStart: () => { pickedUpId = null; }, // a real drag supersedes click-to-pick-up mode
+    onDrop: ({ tokenId, column, bank }) => {
+      if (column) dropOntoColumn(tokenId, column);
+      else if (bank) returnToBank(tokenId);
+    },
+  });
+  const dragState = drag.state;
 
-  $: ghostLabel = dragTokenId ? (context?.bottomTokens.find((t) => t.id === dragTokenId)?.word ?? "") : "";
+  $: ghostLabel = $dragState.tokenId ? (context?.bottomTokens.find((t) => t.id === $dragState.tokenId)?.word ?? "") : "";
 
   // Resolved lexicon gloss per source token id, for the hover tooltip (item b).
   // Fetched once on load — source tokens don't change across alignment edits.
@@ -50,14 +51,7 @@
 
   onMount(load);
 
-  onMount(() => {
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-  });
+  onMount(() => drag.attach(window));
 
   async function load() {
     loading = true;
@@ -94,35 +88,11 @@
     meaningByToken = { ...meaningByToken };
   }
 
-  /** "(1/2)" for a repeated word; the caller checks occurrences > 1 before rendering it. */
-  function occurrence(token: AlignmentToken): string {
-    return `(${token.occurrence}/${token.occurrences})`;
-  }
-
   function sourceTitle(token: AlignmentToken): string {
     return meaningByToken[token.id] || [token.lemma, token.strong, token.morph].filter(Boolean).join(" · ");
   }
 
-  function targetGroup(id: string): string {
-    if (!context) return "";
-    return context.groups.find((group) => group.bottomIds.includes(id))?.id ?? "";
-  }
-
-  function groupForSource(sourceId: string): AlignmentGroupView | undefined {
-    return context?.groups.find((group) => group.topIds.includes(sourceId));
-  }
-
-  function alignedTargetsFor(sourceId: string): AlignmentToken[] {
-    if (!context) return [];
-    const group = groupForSource(sourceId);
-    if (!group) return [];
-    return group.bottomIds
-      .map((id) => context!.bottomTokens.find((b) => b.id === id))
-      .filter((item): item is AlignmentToken => Boolean(item));
-  }
-
-  $: unalignedTokens = context ? context.bottomTokens.filter((item) => !targetGroup(item.id)) : [];
-  $: unalignedCount = unalignedTokens.length;
+  $: unalignedCount = context ? unalignedTargets(context).length : 0;
 
   async function refreshChecks(updated: AlignmentContext, message: string) {
     context = updated;
@@ -159,22 +129,19 @@
   }
 
   // Every drop/click-drop realigns the source column's FULL target set
-  // (existing members + the newly placed word) — realign() replaces
-  // whatever group the given top id belongs to, so this must include the
-  // words already there or they'd be bumped back to the word bank.
+  // (existing members + the newly placed word); bottomIdsAfterDrop explains why.
   function dropOntoColumn(targetId: string, sourceId: string) {
     if (!context) return;
-    const destGroup = groupForSource(sourceId);
-    if (destGroup?.bottomIds.includes(targetId)) return; // already in this column
-    const existingBottomIds = (destGroup?.bottomIds ?? []).filter((id) => id !== targetId);
+    const bottomIds = bottomIdsAfterDrop(context, sourceId, targetId);
+    if (!bottomIds) return; // already in this column
     void mutate(
-      () => bridge.realignWords(chapter, verse, [sourceId], [...existingBottomIds, targetId], context!.alignment),
+      () => bridge.realignWords(chapter, verse, [sourceId], bottomIds, context!.alignment),
       "Alignment saved.",
     );
   }
 
   function returnToBank(targetId: string) {
-    if (!context || !targetGroup(targetId)) return;
+    if (!context || !groupForTarget(context, targetId)) return;
     void mutate(
       () => bridge.unalignWords(chapter, verse, [targetId], context!.alignment),
       "Returned to word bank.",
@@ -183,7 +150,7 @@
 
   function handleWordClick(id: string) {
     if (busy) return;
-    if (suppressClickId === id) { suppressClickId = null; return; }
+    if (drag.consumeSuppressedClick(id)) return;
     pickedUpId = pickedUpId === id ? null : id;
   }
 
@@ -202,49 +169,8 @@
   }
 
   function startPointerTrack(event: PointerEvent, id: string) {
-    if (busy || event.button !== 0) return;
-    dragTokenId = id;
-    dragStart = { x: event.clientX, y: event.clientY };
-    dragMoved = false;
-  }
-
-  function updateHoverTargetFromPoint(x: number, y: number) {
-    const el = document.elementFromPoint(x, y);
-    const columnEl = el?.closest<HTMLElement>("[data-drop-column]");
-    const bankEl = el?.closest<HTMLElement>("[data-drop-bank]");
-    dragOverColumn = columnEl?.dataset.dropColumn ?? null;
-    dragOverBank = Boolean(bankEl);
-  }
-
-  function handlePointerMove(event: PointerEvent) {
-    if (!dragTokenId || !dragStart) return;
-    const dx = event.clientX - dragStart.x;
-    const dy = event.clientY - dragStart.y;
-    if (!dragMoved && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
-      dragMoved = true;
-      pickedUpId = null; // a real drag supersedes click-to-pick-up mode
-    }
-    if (dragMoved) {
-      ghostPos = { x: event.clientX, y: event.clientY };
-      updateHoverTargetFromPoint(event.clientX, event.clientY);
-    }
-  }
-
-  function handlePointerUp(): void {
-    if (!dragTokenId) return;
-    const id = dragTokenId;
-    const moved = dragMoved;
-    const dropColumn = dragOverColumn;
-    const dropBank = dragOverBank;
-    dragTokenId = null;
-    dragStart = null;
-    dragMoved = false;
-    dragOverColumn = null;
-    dragOverBank = false;
-    if (!moved) return; // the browser's own click event will fire next and handle pick-up
-    suppressClickId = id;
-    if (dropColumn) dropOntoColumn(id, dropColumn);
-    else if (dropBank) returnToBank(id);
+    if (busy) return;
+    drag.start(event, id);
   }
 
   function undo() {
@@ -272,6 +198,13 @@
       <div>
         <div class="eyebrow">WORD ALIGNMENT</div>
         <h2>{chapter}:{verse} — align source and target words</h2>
+        <button
+          type="button"
+          class="cross-verse-link"
+          on:click={() => { onClose(); openCrossVerse(verse); }}
+          disabled={busy}
+          title="See this verse beside its neighbours"
+        >Cross-verse alignment ›</button>
       </div>
       <button class="close" on:click={onClose} disabled={busy} aria-label="Close alignment editor">×</button>
     </header>
@@ -327,7 +260,7 @@
               </button>
               <div
                 class="target-cell"
-                class:drop-hover={dragOverColumn === src.id}
+                class:drop-hover={$dragState.overColumn === src.id}
                 data-drop-column={src.id}
                 dir={context.targetDirection}
                 role="button"
@@ -336,7 +269,7 @@
                 on:click={() => handleColumnClick(src.id)}
                 on:keydown={(event) => (event.key === "Enter" || event.key === " ") && (event.preventDefault(), handleColumnClick(src.id))}
               >
-                {#each alignedTargetsFor(src.id) as item (item.id)}
+                {#each alignedTargetsFor(context, src.id) as item (item.id)}
                   <div class="token target aligned-card" title={`Aligned to ${src.word}`}>
                     <span class="word">{item.word}{#if item.occurrences > 1}<span class="occ">{occurrence(item)}</span>{/if}</span>
                     <button
@@ -365,7 +298,7 @@
           </div>
           <div
             class="tokens bank-tokens"
-            class:drop-hover={dragOverBank}
+            class:drop-hover={$dragState.overBank !== null}
             data-drop-bank="true"
             dir={context.targetDirection}
             role="button"
@@ -375,7 +308,7 @@
             on:keydown={(event) => (event.key === "Enter" || event.key === " ") && (event.preventDefault(), handleBankAreaClick())}
           >
             {#each context.bottomTokens as item (item.id)}
-              {#if targetGroup(item.id)}
+              {#if groupForTarget(context, item.id)}
                 <span class="token target already-aligned" title={`Already aligned`}><span class="word">{item.word}{#if item.occurrences > 1}<span class="occ">{occurrence(item)}</span>{/if}</span></span>
               {:else}
                 <button
@@ -422,8 +355,8 @@
   />
 {/if}
 
-{#if dragTokenId && dragMoved}
-  <div class="drag-ghost" style="left:{ghostPos.x}px; top:{ghostPos.y}px;">{ghostLabel}</div>
+{#if $dragState.tokenId && $dragState.moved}
+  <div class="drag-ghost" style="left:{$dragState.ghost.x}px; top:{$dragState.ghost.y}px;">{ghostLabel}</div>
 {/if}
 
 <style>
@@ -437,6 +370,8 @@
   button:hover:not(:disabled) { border-color: var(--accent); }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .close { border: 0; font-size: var(--fs-5xl); padding: 0 5px; color: var(--text-2); }
+  .cross-verse-link { border: 0; background: none; padding: 4px 0 0; color: var(--accent); font-size: var(--fs-xs); font-weight: 600; }
+  .cross-verse-link:hover:not(:disabled) { text-decoration: underline; }
   .loading { padding: 36px; display: flex; gap: 10px; justify-content: center; color: var(--text-2); }
   .spin { width: 12px; height: 12px; border: 2px solid var(--accent-bg); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }

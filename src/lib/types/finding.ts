@@ -207,6 +207,14 @@ export interface AlignmentCounts {
   invalid: number;
 }
 
+/** Per-verse gap counts (#116): source tokens with no target word, target
+ *  words in no group. Computed by the engine; alignmentGroups.gapCounts is
+ *  the client-side mirror. */
+export interface AlignmentGaps {
+  sourceUnmatched: number;
+  targetUnmatched: number;
+}
+
 export interface AlignmentContext {
   chapter: string;
   verse: string;
@@ -223,6 +231,15 @@ export interface AlignmentContext {
   issues: string[];
   canComplete: boolean;
   history: AlignmentHistoryEntry[];
+  chapterStatus: AlignmentCounts;
+  gaps: AlignmentGaps;
+}
+
+/** alignment.getRange: one context per requested verse, in the caller's
+ *  order, with the chapter counts computed once. */
+export interface AlignmentRange {
+  chapter: string;
+  verses: AlignmentContext[];
   chapterStatus: AlignmentCounts;
 }
 
