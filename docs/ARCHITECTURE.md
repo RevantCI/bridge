@@ -143,7 +143,6 @@ flowchart LR
     S3m["semantic_mapping.py and the 119 MB source DB<br/>workbench semantic_mappings table"]
     S3m -. "prompt context and policy gate" .-> AIR
     S3m -. "cross-verse guard" .-> AAP["alignment.aiPropose<br/>no UI caller"]
-    S3m --> SV["semanticValidation.*<br/>removal in progress (#100)"]
   end
   subgraph Overlay["AI overlays (online, optional, human-invoked)"]
     TR["triage: false-positive score per Greek Room finding<br/>report screen only"]
@@ -170,7 +169,6 @@ flowchart TB
   Home["home: ImportScreen<br/>project list, import wizard, file drop"] --> Dash
   Dash["dashboard: ProjectDashboard<br/>book list with progress, per-book project.report panel"] --> Report["report: ProjectReportScreen<br/>collection-wide report.generate, filters, charts, export, triage overlay"]
   Dash --> Editor["editor: VerseList + ReviewPanel"]
-  Dash --> Val["validation: SemanticMappingValidation<br/>(#100, being removed)"]
   Editor --> AR["review: AlignmentReview shell<br/>tabs Word, Semantic, Passage, QA"]
   Editor --> AM["AlignmentModal (Align words)<br/>translationCore-compatible word alignment"]
   AR --> AM
@@ -199,7 +197,7 @@ running, and cancel-wait every 400 ms.
 | Stages 4 to 8 | `passage_semantic_repository.py` 5070, `passage_semantic_runtime.py` 1364, `passage_semantic_models.py` 1171, `source_semantic_inventory.py` 779, `target_semantic_inventory.py` 392, `semantic_location.py` 853, `meaning_analysis.py` 560, `qa_audit.py` 822, `analysis_jobs.py` 724 |
 | Stage 9A review | `qa_review.py` 412, `review_policy.py`, `qa_target_hash.py` |
 | Stage 9B correction | `correction_eligibility.py` 570, `correction_wording.py` 694, `correction_application.py` 306, `correction_application_recovery.py` 232, `correction_affected_analysis.py` 269, `correction_verification.py` 1036 |
-| Stage 3 semantic mapping (removal decided) | `semantic_mapping.py` 867, `semantic_mapping_bridge.py` 319, `semantic_mapping_service.py`, `semantic_review_policy.py` 164, `semantic_validation_service.py` 333, `semantic_corpus_discovery.py` 403 |
+| Stage 3 semantic mapping (removal decided) | `semantic_mapping.py` 867, `semantic_mapping_bridge.py` 319, `semantic_mapping_service.py`, `semantic_review_policy.py` 164, `semantic_corpus_discovery.py` 403 (the validation queue on top of it was removed in #100) |
 | AI (optional, online) | `ai_client.py` 911, `triage.py` 620, `triage_prompts.py` 220 |
 | Connectors | `paratext_connector.py`, `paratext_notes.py` 420, `paratext_api.py`, `logos_connector.py` 281, `navigation.py` 446 |
 | Storage and durability | `workbench_repository.py` 1162, `workspace_repository.py` 489, `transaction_journal.py` 177 |
