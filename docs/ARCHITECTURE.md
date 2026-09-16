@@ -1,8 +1,14 @@
-# translationCore AI Bridge — Architecture
+# Bridge — Architecture (current state)
 
-## Core principle
+*Rewritten 2026-09-16 against commit `83221fd`, after the workbench database cutover
+(#75, #76, #77). Every number and path below was read from the code on that day, not from
+older docs. The pre-cutover version of this file, with the original design rationale and
+the beta roadmap, is in git history (`git show 83221fd:docs/ARCHITECTURE.md`); the roadmap
+now lives only in `DEVELOPER_GUIDE.md`, and the detailed narrative in `BUILD_LOG.md`.*
 
-> Our application owns the workflow, UI, project state, human decisions and AI.
+## 1. Core principle (unchanged since the first design)
+
+> Bridge owns the workflow, UI, project state, human decisions and AI.
 > Greek Room is a local, offline QA/NLP engine underneath it.
 
 Three-way division of responsibility, never blurred:
@@ -11,208 +17,220 @@ Three-way division of responsibility, never blurred:
 - **AI** says: "Here is what it may mean in this passage."
 - **Human** says: "This is what the translation should be."
 
-AI findings never rewrite Scripture or alignment. Everything funnels through
-an explicit review state. In Basic mode, Bridge may synchronize an exact tC
-tN/tW target selection only after deterministic token-identity, evidence, and
-confidence gates pass; it cannot replace an imported or human selection.
+Nothing auto-applies to Scripture. Every finding carries an explicit review status. The one
+authorized Scripture writer is Stage 9B's apply step behind a human confirmation. Offline
+operation is a product invariant: the only network-shaped code (`ai_client.py`, the Paratext
+registry client) is optional and human-invoked, never on the import, open or check path.
 
-## Stack decision: Tauri (not Electron, not Python+Tkinter)
+## 2. Process boundary and the RPC path
 
-- **vs. Electron**: Tauri uses the OS's native webview instead of bundling
-  Chromium — smaller binary, faster cold start, lower idle memory. Matters
-  for an all-day desktop tool on modest field hardware.
-- **vs. Python+Tkinter**: the wireframe is a real product UI (colored status
-  badges, inline findings, tabbed panels) that a native widget toolkit
-  fights rather than enables. A Tauri frontend is a web app (React), which
-  also gives a direct path to a future web deployment — Tkinter has none.
-- **Trade-off accepted**: Rust has a learning curve if the team has none;
-  most day-to-day work stays in the Python engine and React frontend layers
-  though, not the (intentionally thin) Rust shell.
-
-## Process boundary
-
-```
-Bridge.exe                      (Tauri/Rust shell + Svelte frontend)
-        │
-        │ spawns once at startup, JSON-lines over stdin/stdout
-        ▼
-bridge-engine                    (PyInstaller-bundled Python sidecar)
-        │
-        ▼
-   Wildebeest / standalone USFM checker / translationCore project logic
-```
-
-The sidecar starts once and stays alive for the whole session — NLP
-resources (Wildebeest corpus properties, Uroman tables, etc.) are loaded
-once, not per call. **Verified 2026-08-21** (see `docs/BUILD_LOG.md`'s
-Phase 5 research breadcrumb): `uroman.Uroman()` construction takes ~1.8-2.1s
-on real hardware to load its full romanization table set, after which
-`romanize_string()` calls measured effectively instant — this recommendation
-was real and worth following, not just an assumed best practice.
-
-**Never integrated directly**: Greek Room's `ephesus/` web API (Docker,
-database, its own web UI). We only use the underlying check modules.
-
-## Protocol
-
-Transport-agnostic JSON request/response, defined once in
-`engine/greek_room_engine/protocol.py`:
-
-```json
-// request
-{ "id": "...", "method": "verse.check", "params": { ... } }
-
-// response
-{ "id": "...", "success": true, "findings": [ QaFinding, ... ] }
+```mermaid
+flowchart LR
+  subgraph Desktop["Bridge.exe (Tauri 2, Rust shell + Svelte frontend)"]
+    UI["Svelte frontend<br/>30 components, 11.6k LOC<br/>App.svelte 1127 LOC, no router (screen = five booleans)"]
+    TS["bridgeClient.ts<br/>140 methods, 972 LOC"]
+    RS["commands.rs<br/>140 tauri commands, 2117 LOC"]
+    SC["sidecar.rs<br/>JSON lines over stdio, per-method timeouts (default 30 s)"]
+    UI --> TS --> RS --> SC
+  end
+  SC -- "stdin / stdout" --> ENG
+  subgraph Sidecar["bridge-engine (PyInstaller, one process per session, single-threaded dispatcher)"]
+    ENG["bridge_service.py BridgeEngine<br/>148 Methods, 668-line if-chain dispatcher, 4545 LOC"]
+    JOBS["background job runners<br/>check, ai_review, triage, report, analysis"]
+    TC["tc_ai_bridge/<br/>77 modules, 34.5k LOC"]
+    GR["greek_room_engine/<br/>adapters: Wildebeest, USFM, Names"]
+    ENG --> JOBS
+    ENG --> TC
+    ENG --> GR
+  end
+  GR -- "subprocess" --> USFMX["bridge-usfm-checker.exe<br/>vendored 4k-line Greek Room script"]
+  TC -. "optional, human-invoked" .-> AI["ai_client.py<br/>OpenAI Responses API"]
+  TC -. "optional" .-> PT["Paratext<br/>named pipe, notes XML, C# plugin"]
+  TC -. "optional" .-> LG["Logos<br/>PowerShell helper"]
 ```
 
-- **Desktop transport**: stdio, via `transport/stdio_transport.py` (Python
-  side) and `src-tauri/src/sidecar.rs` (Rust side, correlates responses to
-  requests by `id` using oneshot channels).
-- **Web transport (future)**: `transport/http_transport.py` wraps the same
-  `GreekRoomEngine.handle_request()` behind an HTTP endpoint (e.g. FastAPI).
-  The frontend's `src/api/engineClient.ts` already branches on `isTauri` to
-  select `DesktopTransport` vs `HttpTransport` — extending web support means
-  standing up the HTTP wrapper, not redesigning the protocol or rewriting
-  UI components.
+**How a request travels.** A component calls `bridge.someMethod()` in
+`src/lib/api/bridgeClient.ts`; that invokes one `#[tauri::command]` in
+`src-tauri/src/commands.rs`; the command hands the dotted method name and params to
+`sidecar.rs`, which writes one JSON line to the sidecar's stdin and correlates the reply by
+`id`; `bridge_service.py`'s `handle_request` matches the name against the `Methods` class
+and calls one `BridgeEngine` method. The dispatcher is single-threaded, so a slow handler
+delays every other request behind it (`build_project_report`'s docstring records one such
+case). Long-running work therefore goes through a background job runner and the UI polls
+its status.
 
-## The `QaFinding` model
+**Cost of the shape.** Every RPC is defined four times: engine constant + handler +
+dispatcher branch, a Rust command, a TS client method, and TS types (`finding.ts` 884 LOC,
+`passageSemanticV1.ts` 860 LOC). Adding a method means four edits and a Rust rebuild. As of
+2026-09-16, 50 of the 140 wired methods have no UI caller, 13 more engine methods have no
+Rust command at all, and `src-tauri/src/passage_semantic_wire.rs` (1491 LOC of typed
+mirrors) is referenced only by `mod` in `main.rs` and its own tests. See
+`SIMPLIFICATION_AUDIT_2026-09.md`.
 
-Single universal result shape (`engine/greek_room_engine/models/finding.py`,
-mirrored in `src/types/finding.ts`). Every checker — Wildebeest, OWL, USFM,
-alignment stats, or a future AI explainer — normalizes into this. The UI
-never needs to special-case which engine produced a finding.
+**Per-method timeouts** live in `sidecar.rs` (`request_timeout_seconds`): 30 s default;
+`project.import` 300; `project.inspectImport`, `project.list`, `report.get`,
+`report.export`, `triage.results`, `correction.applyProposal` 180; `verse.runChecks` 150;
+model calls 260 to 300. `project.open` is not in the table.
 
-## Adapter boundary — why it matters
+## 3. Storage
 
-Greek Room is Alpha (`pyproject.toml` currently at `0.0.20`, with visible
-package-layout churn). Our app **never** imports Greek Room's internal
-modules directly. Every engine gets a thin `CheckAdapter` subclass
-(`engine/greek_room_engine/adapters/`) that:
+```mermaid
+flowchart TB
+  subgraph App["LOCALAPPDATA/Bridge/data (app level)"]
+    WS["workspace.sqlite3, schema v2<br/>users, devices, projects, project_progress_cache, settings_kv"]
+    SJ["settings.json (DPAPI-wrapped secrets only)"]
+  end
+  subgraph Proj["PROJECT/ (one folder per book; siblings of a multi-book import linked by collection.json)"]
+    M["manifest.json, BOOK.usfm, BOOK/CHAPTER.json<br/>(translationCore project shape)"]
+    subgraph TCdir[".apps/translationCore/ (owned by translationCore, kept compatible)"]
+      AD["alignmentData/BOOK/CHAPTER.json"]
+      IDX["index/translationNotes, index/translationWords"]
+      CD["checkData/ and tools/wordAlignment/completed, invalid"]
+    end
+    subgraph AIdir[".apps/translationCoreAI/ (Bridge-private)"]
+      WB["bridge-workbench.sqlite3, schema v2, 20 tables<br/>human_decisions, issue_resolutions, ai_review_results, alignment_history,<br/>alignment_diagnostics, check_findings, check_cache, triage_verdicts,<br/>progress_chapters, progress_findings, progress_totals, metrics_events, metrics_counters,<br/>semantic_mappings, semantic_validation_runs, project_state, team_members,<br/>team_assignments, file_backups, change_log (append-only, trigger-guarded)"]
+      SEM["passageSemantic/bridge-semantic.sqlite3, schema v16, 49 tables<br/>Stage 4 foundation: token_lineages, token_instances, passage_records,<br/>record_dependencies, pending_invalidations, source_resource_locks<br/>Stage 5 to 8 run tables, 9A review_records and analysis_jobs,<br/>9B correction_proposals, _events, _intents, _verifications"]
+      TX["transactions/ (pre-write journal), backups/, paratextNotes/"]
+    end
+    subgraph Bdir[".bridge/ (plain JSON, read before any database exists)"]
+      BJ["project.json, import.json, collection.json, lazy-import.json, original-manifest.json"]
+    end
+  end
+  subgraph Res["engine/resources/ (bundled, read-only, about 170 MB)"]
+    R1["semantic_mapping/bridge_semantic_source_v0.3.sqlite, 119 MB (Stage 3)"]
+    R2["en/translationHelps, 44 MB (tN, tW, TWL, tA)"]
+    R3["hbo/ UHB 4.4 MB, el-x-koine/ UGNT 1.8 MB, lexicons"]
+  end
+```
 
-1. Normalizes that engine's native output into `QaFinding[]`
-2. Fails soft (`is_available()`) rather than crashing the whole request if
-   the upstream package isn't installed
-3. Isolates us from upstream's internal churn — when Greek Room updates, we
-   pin an exact upstream commit, run a regression corpus, and only then
-   bump the adapter
+Three independent schema ladders, each with its own version constant and migration blocks
+in one module: `passage_semantic_repository.py` (`DATABASE_SCHEMA_VERSION = 16`),
+`workbench_repository.py` (`WORKBENCH_SCHEMA_VERSION = 2`), `workspace_repository.py`
+(`WORKSPACE_SCHEMA_VERSION = 2`). A bump on one is never a bump on another. The
+pre-cutover JSON store directories are listed in `tc_project.py`'s `_PRE_CUTOVER_STORE_DIRS`;
+a project carrying any of them refuses to open and is re-imported (no migration, by the
+2026-09-14 pre-release decision).
 
-`WildebeestAdapter` currently ships with a **mock fallback** so protocol,
-caching, and UI work isn't blocked on the real `wildebeest` pip package
-being wired in yet. Swap in the real import (see the `_WILDEBEEST_AVAILABLE`
-branch) when ready — `is_available()` deliberately returns `True` either
-way, but `using_real_engine()` tells you (and the UI, via `engine.info`)
-which mode is actually active.
+**What opens a project** (`BridgeEngine.open_project`, phase-timed as `[trace] project.open`
+on stderr): materialize a lazy import, ensure the original-language packs, construct
+`TranslationCoreProject` (which opens and migrates the workbench DB), register the project,
+recover incomplete journal transactions, sync the dashboard progress cache, construct
+`PassageSemanticRuntime` (opens and migrates the semantic DB, replays pending invalidations,
+establishes current text revisions, syncs the source lock and alignment state), then build
+the correction services. After #99 (2026-09-16) a first open of Genesis from source measures
+about 1 s and a lazy sibling's first open about 4 s; before it, per-verse fsyncs made the
+same step take minutes. Any runtime failure degrades the open to `RECOVERY_REQUIRED` rather
+than failing it.
 
-## Roadmap (from the original design doc)
+## 4. QA pipelines and AI overlays
 
-| Version | Scope | Status |
-|---|---|---|
-| **v0.7.5** | `GreekRoomEngine` sidecar, stable JSON protocol, `QaFinding` model, Wildebeest (mock fallback). | ✅ Built |
-| v0.8.0-beta.2 | Real sidecar/UI core loop, fast multi-book import, background QA jobs, persistent decisions and edits, standalone USFM checker, manual word-alignment editor, aligned/non-aligned USFM export. | Complete |
-| v0.8.0-beta.3 | Stable project registry and identities, Project Home, duplicate-safe import decisions, global native drag-and-drop, missing-project repair, and portable multi-book collections. | Complete |
-| **v0.8.0-beta.4** | Project inspection timeout/performance hotfix, legacy collection grouping, pytest isolation, and collection-aware duplicate classification with explicit match reasons. | Milestone 2.1 complete; installed GUI acceptance pending |
-| **v0.8.0-beta.5** | Pinned, offline UHB v3.0.0/UGNT v0.34 source-token packs; safe raw-import initialization/recovery; license, attribution, and reproducible provenance. | Milestone 3A complete; installed GUI acceptance pending |
-| **v0.8.0-beta.6** | Dedicated translationNotes/translationWords review with Basic and Advanced modes, inline occurrence-aware highlights, evidence tooltips, and editable tN/tW decisions. | Milestone 3B.2 implementation complete; installed GUI acceptance pending |
-| **v0.8.0-beta.7** | Non-blocking tN/tW review loading during background checks, automatic retry/preparation state, lower status-poll pressure, and stale chapter-load protection. | Beta 6 acceptance hotfix; installed GUI retest passed 2026-08-26 |
-| **v0.8.0-beta.8** | Schema-constrained, evidence-grounded tN/tW AI review; cancellable verse/chapter/book processing; conservative Basic-mode synchronization; editable Advanced-mode proposals; current/stale persisted AI evaluations. | Installed acceptance found batch resume and chapter-hydration gaps; superseded by Beta 9 |
-| **v0.8.0-beta.9** | Retry resumes only failed/unfinished AI-review verses, completed chapter/book results hydrate after restart, cancellation invalidates incomplete work, per-verse failures are visible, and project collections are grouped with safe managed-project deletion. | Installed acceptance passed core recovery; first-open live-check queue timeout and unclear stale-review state found |
-| **v0.8.0-beta.10** | Greek-Room-only live checks bypass translation-help preparation locking so status/list remain responsive on first open; edited verses explicitly show stale AI review with a one-click rerun action. | Installed acceptance passed first-open responsiveness and stale lifecycle; cross-reference AI job display and Translation Helps jitter found |
-| **v0.8.0-beta.11** | AI job progress, completion and errors are scoped to their verse/chapter/project; off-reference jobs remain background work; Translation Helps reserves a stable loading surface during navigation. | Installed GUI acceptance passed |
-| **v0.8.0-beta.12 / Milestone 3B.4** | Persisted tN/tW issue resolution with exact target text, correction, evidence and reviewer note; crash-safe idempotent Paratext Notes handoff; live project-identity-gated note creation; automatic stale/recheck/resolved/reflagged lifecycle with append-only audit; explicit Advanced-mode acceptance of AI proposals. | Installed acceptance passed core lifecycle; contradictory pass/Nothing-to-Select proposal found |
-| **v0.8.0-beta.13** | Requires exact target selections for applicable AI-reviewed tN/tW checks; safely recovers a uniquely quoted target phrase and keeps ambiguous omissions pending instead of storing a false Nothing-to-Select decision. | Hotfix implementation and focused regressions pass; installed acceptance pending |
-| **v0.8.0-beta.14** | Adds language-aware semantic passage mapping for source meanings realized in the same, nearby, split, reordered, or implicit target context; keeps cross-verse decisions out of translationCore's verse-local selection state. | 304 source tests, frozen smoke, Rust/frontend gates and NSIS packaging pass; installed acceptance pending |
-| **v0.8.0-beta.15 validation workflow** | Advanced-mode ranked IRVTam validation queue; exact-USFM-gated confirm/correct actions; reject/discussion decisions; append-only reviewer audit; restart persistence; confidence/relationship calibration. | Implementation and source gates pass; 15–20 human decisions and installed acceptance pending before packaging |
-| v0.8.x | Stabilization: installed-build UX/accessibility and large-project performance acceptance. | Next |
-| v0.9.0 | Versification plus Uroman/Smart Edit Distance name consistency. | ✅ Built |
-| v0.9.x | Alignment Intelligence — AI proposals and UAlign-derived statistics from human-approved alignments. | ✅ Built (statistics 2026-08-24 backend/protocol-only; AI proposals 2026-08-24 with UI — see docs/BUILD_LOG.md's Phase 7 section) |
-| v1.0.x | Paratext/Logos live navigation, AI explain, and optional AI + Greek Room synthesis. | Drag-and-drop import and ai.explain ✅ Built. Opt-in, brokered Bridge/Paratext/Logos navigation is wired with non-blocking polling, loop suppression, edit guards, cross-book routing, reconnect catch-up, and single-window ownership. Installed Paratext state/outbound navigation and live Logos 53.1 inbound/outbound navigation are verified. See docs/BUILD_LOG.md and the connector READMEs. |
+```mermaid
+flowchart LR
+  subgraph GRq["Greek Room and local checks (per verse, offline, auto-started on first chapter entry)"]
+    W["Wildebeest"] --> F
+    U["USFM structural checker"] --> F
+    N["Names (Uroman, smart edit distance)"] --> F
+    L["local_checks, tN/tW knowledge_base,<br/>alignment consistency"] --> F
+    F["QaFinding<br/>stable sha1 id"] --> RP["ReviewPanel: Accept / Ignore<br/>FindingStatus in the workbench DB"]
+  end
+  subgraph S58["Stages 4 to 8: passage-semantic pipeline (deterministic, offline)"]
+    S5["5 source inventory<br/>UHB / UGNT"] --> S6B
+    S6A["6A target inventory<br/>built independently of 5"] --> S6B
+    S6B["6B passage-aware location"] --> S7["7 meaning preservation"] --> S8["8 QA audit<br/>omission, addition, shift..."]
+    S8 --> S9A["9A qaReview queue<br/>human dispositions"] --> S9B["9B correction<br/>propose, apply, verify, CORRECTED"]
+  end
+  subgraph S3["Stage 3 semantic mapping (older, model-driven, parallel; removal decided 2026-09-16)"]
+    S3m["semantic_mapping.py and the 119 MB source DB<br/>workbench semantic_mappings table"]
+    S3m -. "prompt context and policy gate" .-> AIR
+    S3m -. "cross-verse guard" .-> AAP["alignment.aiPropose<br/>no UI caller"]
+    S3m --> SV["semanticValidation.*<br/>removal in progress (#100)"]
+  end
+  subgraph Overlay["AI overlays (online, optional, human-invoked)"]
+    TR["triage: false-positive score per Greek Room finding<br/>report screen only"]
+    AIR["ai.review: tN/tW AI review<br/>ReviewPanel third tab"]
+    CP["9B correction wording"]
+  end
+```
 
-### Stage 3 adaptive passage search
+Two review vocabularies coexist on purpose because they sit on two data sources. The
+ReviewPanel writes engine `FindingStatus` values against Greek Room findings; the QA mode of
+Alignment Review writes Stage 9A dispositions against `qa_findings` in the semantic DB.
+"Accept finding" in the first means the opposite of "Accept translation as correct" in the
+second (`VerseList.svelte` documents this). Stage numbering: 6B is location and 7 is meaning;
+the test file names are the source of truth.
 
-Stage 3 seeds retrieval from the current USFM structural passage, sentence, or
-paragraph and then expands by adjacent structural-window layers. Limits on
-model calls, windows, segments, and characters are computational budgets only;
-there is no global ±N-verse linguistic rule. Exhaustion produces
-`needs_extended_passage_review`, never `MISSING`, `OMISSION`, or translationCore
-Nothing-to-Select.
+Each stage's refusals are load-bearing and are stated in its module docstring: Stage 5 never
+reads target text; 6A is never seeded from 5; 7 never relocates; 8 never re-runs 6B or
+re-judges 7; 9B.4 never re-judges 7 and never sets `CORRECTED` on `PASSED` alone.
 
-Mappings are content-fingerprinted companion records. Exact target quotes are
-re-located and verified against the imported USFM; model offsets are not
-trusted. A Basic-mode native selection additionally requires a preserved,
-high-confidence, unambiguous same-verse mapping whose verified quote exactly
-matches the proposed translationCore selection and has no contradictory QA
-evidence. Advanced mode keeps all mappings advisory until an explicit human
-action. Cross-verse, split, merged, implicit, uncertain, and exhausted mappings
-never enter translationCore's verse-local selection structures.
+## 5. UI surface map
 
-## Phase 1 outcome: BridgeEngine
+```mermaid
+flowchart TB
+  Home["home: ImportScreen<br/>project list, import wizard, file drop"] --> Dash
+  Dash["dashboard: ProjectDashboard<br/>book list with progress, per-book project.report panel"] --> Report["report: ProjectReportScreen<br/>collection-wide report.generate, filters, charts, export, triage overlay"]
+  Dash --> Editor["editor: VerseList + ReviewPanel"]
+  Dash --> Val["validation: SemanticMappingValidation<br/>(#100, being removed)"]
+  Editor --> AR["review: AlignmentReview shell<br/>tabs Word, Semantic, Passage, QA"]
+  Editor --> AM["AlignmentModal (Align words)<br/>translationCore-compatible word alignment"]
+  AR --> AM
+  Editor --> RPt["ReviewPanel tabs: Greek Room / tN-tW-Alignment (TranslationHelpsReview) / AI review"]
+  AR --> QA["AlignmentQaMode (Stage 9A)<br/>QaFindingList, QaFindingDetail, EvidenceInspector, CorrectionReviewPanel (9B)"]
+  Top["TopBar: Projects, book and chapter navigation, Sync, Generate report, Export, Settings"]
+```
 
-`engine/bridge_service.py` is the actual sidecar dispatcher now (see `main.py`). It composes:
+Global chrome: `TopBar.svelte`; modals `SettingsModal` (AI, quality, connections, resources,
+security panes), `ExportModal`, `DiagnosticsPanel` (engine log), `LexiconPopup`,
+`VerseNotesPopup`, `FindingContextMenu`. State lives in `stores.ts` (chapter/verse-keyed
+maps, `verseKey()`), `reviewStores.ts` (Stage 9A queue), `alignmentUi.ts`, `verseEditor.ts`.
 
-- `GreekRoomEngine` — offline QA adapters (unchanged from v0.7.5)
-- `tc_ai_bridge` — the existing 29 business-logic modules, copied in unmodified except for excluding `ui.py` and `__main__.py` (confirmed via import test that nothing else depends on those two files)
+**Polling.** App.svelte polls the sidecar for: navigation sync every 800 ms for the app's
+lifetime (guarded only by in-flight and engine-ready, not by whether a connection is
+enabled), check jobs every 750 ms, QA report jobs every 500 ms, triage every 1000 ms while
+running, and cancel-wait every 400 ms.
 
-Key implementation notes discovered while wiring this up (worth knowing before extending it further):
+## 6. Engine subsystems (tc_ai_bridge/)
 
-- `TranslationCoreProject.summary` is a **property**, not a method.
-- `TranslationCoreProject.__init__` already creates its own `self.journal` (a `TransactionJournal` scoped to the right `companion_dir()`) — don't create a second one.
-- Decision persistence already exists and is correct: `record_qa_decision()` / `qa_decisions_for_verse()` write atomic, audited JSON under `companion_dir()/qaDecisions/...`. `BridgeEngine.decide_verse()` calls these directly rather than reinventing an in-memory store.
-- All of this was verified against a **real fixture project** built directly from reading `TranslationCoreProject`'s actual parsing code (see `tests/service/test_bridge_service.py`), not assumed — including a real transaction-journal backup being created on `verse.edit` and a real QA-decision JSON file landing on disk on `verse.decide`.
+| Subsystem | Main modules (LOC) |
+|---|---|
+| Project I/O and import | `tc_project.py` 2980, `project_import.py` 992, `project_registry.py` 531, `usfm.py`, `usfm_passages.py` 308 |
+| translationCore compatibility and resources | `resource_materializer.py` 364, `original_language_resources.py` 288, `lexicon_resources.py` 196, `knowledge_base.py` 450, `local_checks.py`, `plugins.py` 251 |
+| Word alignment | `alignment_engine.py` 204, `aligned_usfm.py` 166, `word_alignment_evidence.py` 284, `alignment_statistics.py` 372 (backs the consistency finding), `alignment_reliability.py` 428 and `semantic_alignment_guard.py` 124 (AI proposals; removal decided) |
+| Stages 4 to 8 | `passage_semantic_repository.py` 5070, `passage_semantic_runtime.py` 1364, `passage_semantic_models.py` 1171, `source_semantic_inventory.py` 779, `target_semantic_inventory.py` 392, `semantic_location.py` 853, `meaning_analysis.py` 560, `qa_audit.py` 822, `analysis_jobs.py` 724 |
+| Stage 9A review | `qa_review.py` 412, `review_policy.py`, `qa_target_hash.py` |
+| Stage 9B correction | `correction_eligibility.py` 570, `correction_wording.py` 694, `correction_application.py` 306, `correction_application_recovery.py` 232, `correction_affected_analysis.py` 269, `correction_verification.py` 1036 |
+| Stage 3 semantic mapping (removal decided) | `semantic_mapping.py` 867, `semantic_mapping_bridge.py` 319, `semantic_mapping_service.py`, `semantic_review_policy.py` 164, `semantic_validation_service.py` 333, `semantic_corpus_discovery.py` 403 |
+| AI (optional, online) | `ai_client.py` 911, `triage.py` 620, `triage_prompts.py` 220 |
+| Connectors | `paratext_connector.py`, `paratext_notes.py` 420, `paratext_api.py`, `logos_connector.py` 281, `navigation.py` 446 |
+| Storage and durability | `workbench_repository.py` 1162, `workspace_repository.py` 489, `transaction_journal.py` 177 |
+| Reporting | `qa_report.py` 828, `reporting.py` 203, `analytics.py`, `metrics.py` |
+| Versification | `versification.py` 333 (imports the vendored Greek Room library directly) |
 
-Protocol methods implemented so far: `ping`, `engine.info`, `project.open`,
-`project.list`, `project.forget`, `project.scan`, `project.inspectImport`, `project.import`, `chapter.verses`,
-`chapter.verseData`, `checks.start/status/cancel/retry`, `verse.get/runChecks/decide/edit`,
-`alignment.get/status/realign/unalign/save/complete/undo/backups/restore`,
-`alignment.corpusStats.summary/forVerse`, `alignment.aiPropose/aiApplyProposal`,
-`ai.explain`, `ai.review.start/status/cancel/retry`,
-`semanticMapping.getForVerse/confirm/rerunForVerse`,
-`semanticValidation.list/decide`,
-`paratext.getState/setReference`, `logos.getState/setReference`,
-`navigation.status/poll/bridgeChanged/resolve`,
-`versification.detect/orgRef/backVersificationMap`,
-`settings.get/set`, `export.aligned`, and `export.nonAligned`.
+Greek Room adapters live in `engine/greek_room_engine/adapters/`; the two vendored upstream
+trees are `engine/vendor/greekroom-usfm/` (run as a separate executable) and
+`engine/vendor/greekroom-versification/` (imported as a library). Each has a `NOTICE.md`.
 
-The navigation coordinator now uses `navigation.py`'s `NavigationBroker` and
-`NavigationOwnership`. Connector operations run on a bounded background probe, while the
-protocol returns cached status/candidates immediately; this preserves responsiveness of the
-single-threaded stdio dispatcher when Paratext or Logos is unavailable. Still not wired (real
-logic exists in `tc_ai_bridge` but no protocol method calls it yet): Git service, reporting, and
-terminology/Psalms QA. These are phase-appropriate follow-ups per the table above.
+## 7. Adapter boundary and the QaFinding model
 
-## Explicit non-goals (for now)
+Bridge never imports Greek Room's internal modules directly. Every engine gets a thin
+`CheckAdapter` subclass that normalizes native output into `QaFinding[]`
+(`engine/greek_room_engine/models/finding.py`, mirrored in `src/lib/types/finding.ts`), fails
+soft via `is_available()` when the upstream package is missing, and pins an exact upstream
+commit. `WildebeestAdapter` degrades to a mock on Python 3.13 (see CLAUDE.md). Finding ids are
+a stable sha1 of chapter, verse, engine, check type and disambiguator, so review decisions
+survive re-running checks.
 
-- No automatic file modification. Suggestions only; "Apply" is a
-  post-v0.7.5 feature requiring undo entries + re-verification of flagged
-  text before writing.
-- No neural retraining. "Human approvals become corpus evidence" means
-  local statistical recomputation (fertility, PMI, frequency), not model
-  training.
-- No dependency on an AI API for core QA. Greek Room checks must work with
-  zero internet connectivity; only the optional "Explain with AI" layer is
-  online.
+## 8. Explicit non-goals
 
-## What still needs a real decision
+- No automatic file modification outside Stage 9B's human-confirmed apply.
+- No neural retraining; "human approvals become corpus evidence" means local statistics.
+- No dependency on an AI API for core QA; Greek Room checks and the Stage 4 to 8 pipeline
+  run with zero connectivity.
+- No second Scripture writer, no server or login on a translator's runtime path.
 
-- **Decided 2026-09-11, not yet built:** the single-window, single-user, file-based
-  premise described above is being extended — not replaced — by a per-project
-  workbench SQLite for Bridge-private state, a user + device identity on every write,
-  and an optional team hub for syncing review state. See `docs/TEAM_ARCHITECTURE.md`
-  and the three 2026-09-11 entries in `docs/DECISIONS.md`. Offline-first and the
-  translationCore on-disk contract are unchanged by that plan.
-- Exact upstream Greek Room commit to pin (`third_party/greek-room/UPSTREAM_COMMIT.txt`)
-- License inventory before distribution (Greek Room is BSD-3-Clause at the
-  repo root but the `greekroom` package classifier says Apache — reconcile
-  before shipping; Uroman has its own attribution requirement — **verified
-  2026-08-21**: both the PyPI wheel and upstream's own `pyproject.toml`
-  classify it "Apache Software License", but the actual bundled
-  `LICENSE.txt` is not Apache 2.0 text — it's a custom MIT-style permissive
-  license requiring a specific acknowledgment sentence in any publication
-  using it. Same classifier-drift pattern as `greekroom`, not a new problem
-  shape. See `docs/BUILD_LOG.md`'s Phase 5 breadcrumb.)
-- Real `wildebeest`/`greekroom` pip packages need to be added to
-  `engine/pyproject.toml` and the mock fallback in `WildebeestAdapter`
-  replaced/validated against real output
-- Rust/Tauri toolchain wasn't available in the scaffolding environment —
-  `cargo build` in `src-tauri/` has not been verified to compile; do this
-  first on a real dev machine
+## 9. Where the direction is recorded
+
+`DEVELOPER_GUIDE.md` (roadmap, what is actually done), `BUILD_LOG.md` (the session record),
+`DECISIONS.md` (dated decisions), `TEAM_ARCHITECTURE.md` (#44 to #47 direction; its §3 and §4
+describe what the code does, §5 to §8 are still design), `SIMPLIFICATION_AUDIT_2026-09.md`
+(what is slowing the codebase and what to remove).

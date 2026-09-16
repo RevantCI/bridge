@@ -545,7 +545,8 @@ Three rules a new contributor will otherwise get wrong:
 
 | Doc | Covers |
 |---|---|
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Full design rationale, protocol shape, `QaFinding` model. |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Current-state architecture (2026-09-16): process boundary and RPC path, the three databases, QA pipelines, UI surface map, engine subsystems, `QaFinding` model. |
+| [`SIMPLIFICATION_AUDIT_2026-09.md`](SIMPLIFICATION_AUDIT_2026-09.md) | What is slowing development and runtime, ranked removal candidates with blast radius, and the decisions taken on them. |
 | [`BUILD_LOG.md`](BUILD_LOG.md) | Session-by-session build log — the ground truth for anything this guide summarizes. Also the current gotcha list and known-gaps list, verified as of each update. |
 | [`IMPORTS.md`](IMPORTS.md) | Import pipeline design: supported inputs, normalized project schema, duplicate-safety logic, provenance. |
 | [`ALIGNMENT.md`](ALIGNMENT.md) | Manual word-alignment protocol, persistence, completion states. |

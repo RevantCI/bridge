@@ -473,9 +473,10 @@ references, session-by-session narrative). Read it when the guide's summary
 isn't enough, and **keep appending to it** as work progresses — it's the
 record `DEVELOPER_GUIDE.md` gets distilled from, not a doc to let go stale.
 
-`docs/ARCHITECTURE.md` has the original design rationale (some file paths
-there are stale — prefer `BUILD_LOG.md` and the actual code when they
-disagree). `docs/ALIGNMENT.md` and `docs/IMPORTS.md` document the
+`docs/ARCHITECTURE.md` is the current-state map (rewritten 2026-09-16 against
+the code: process boundary, the three databases, pipelines, UI surfaces,
+subsystems). `docs/SIMPLIFICATION_AUDIT_2026-09.md` records what is slowing the
+codebase down and what is slated for removal. `docs/ALIGNMENT.md` and `docs/IMPORTS.md` document the
 manual-alignment and import subsystems respectively. `docs/QA_TEST_MATRIX.md`
 is the release gate — a feature isn't release-ready because its unit tests
 pass; check the matrix's source/frozen/desktop rows.

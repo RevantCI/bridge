@@ -8199,3 +8199,46 @@ Gates: same engine areas plus `tests/jobs`, `-m "not slow"`, `-n auto`:
 **790 passed**. New test: a first open reads no verse individually and hands the
 repository exactly one establish batch of `len(current_target_text)` rows; a
 second open establishes nothing.
+
+## 2026-09-16 — simplification audit and a current-state ARCHITECTURE.md
+
+Prompted by the maintainer asking what is causing development delay and runtime
+slowness, and which features can go (they had just filed #100 for the Validate
+semantic mappings screen), and asking for an architecture picture now that the
+workbench cutover is done. Docs only; no code changed.
+
+**Method.** Three read-only sweeps against `83221fd` — every frontend surface and
+which `bridge.*` method each calls; every engine module, protocol method, table
+and file store; size, test-cost and performance signals — then each claim
+re-checked with `grep`/`wc`, then an independent second ranking of the removal
+candidates. The second pass caught two errors in the first draft: #99 was
+already fixed at HEAD (the draft still quoted the pre-fix "2 min per book"
+figure), and `passage_semantic_wire.rs` (1491 lines) turned out to be referenced
+only by `mod` in `main.rs` and its own tests.
+
+**Written.** `docs/ARCHITECTURE.md` replaced with a current-state map (process
+boundary and the four-layer RPC path, the three databases and the remaining
+file trees, the QA pipelines and AI overlays, the UI surface map, engine
+subsystems), Mermaid diagrams. `docs/SIMPLIFICATION_AUDIT_2026-09.md` records
+the causes, the ranked candidates in three groups (dead today / needs one
+decision / load-bearing keep), the runtime and velocity fixes that are not
+removals, a suggested order, and draft Idea bodies for the safe group. CLAUDE.md
+and DEVELOPER_GUIDE.md pointers updated. The pre-cutover ARCHITECTURE.md is at
+`git show 83221fd:docs/ARCHITECTURE.md`.
+
+**Headline numbers.** 148 protocol methods; 50 wired but uncalled by any
+component, 13 with no Rust command at all. Stage 3 semantic mapping is a second
+semantic stack (about 2.3k LOC, a 119 MB bundled SQLite that is 70% of the
+resource bundle, two workbench tables) whose remaining consumers after #100 are
+the tN/tW AI-review prompt and a guard on an AI-alignment method the UI never
+calls. Five identical background-job runners. 38 of 72 engine test files import
+`bridge_service`. `docs/` is 20.8k lines.
+
+**Decisions taken by the maintainer during the audit.** Rank by both developer
+velocity and runtime speed. Remove Stage 3 and the AI alignment-proposal path
+(#23 is off the roadmap). Keep triage; fix #94. Replace `ARCHITECTURE.md` rather
+than keep two architecture docs.
+
+**Not done here, on purpose.** No issues filed (the draft bodies are in the audit
+doc for the maintainer to file), no code or resource deleted, no golden touched,
+no test run (nothing they gate changed).
