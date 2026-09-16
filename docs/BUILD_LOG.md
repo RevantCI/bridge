@@ -8620,3 +8620,29 @@ Run once for #107 and #104 together: `pytest -n auto -m "not slow"` from
 `engine/`, **1008 passed, 1 failed** (2m45s); the failure was #103's, see the
 next entry. 1013 before, minus the three benchmark tests removed here, minus
 the one failing test, plus none added.
+
+## 2026-09-16 — #103 follow-up: one engine test read the deleted Rust mirror
+
+The audit's claim that `passage_semantic_wire.rs` was "referenced only by `mod`
+in `main.rs` and its own tests" was wrong by one reference:
+`tests/correction/test_correction_stage9b3a.py::test_application_and_strict_context_validate_against_canonical_schema`
+read the file as text and asserted that eight `pub` fields of the Rust
+`CorrectionApplicationIntent` mirror existed. Rust never deserialized that type
+(the audit's point stands), so the assertion was checking a mirror nothing used.
+The test now checks the JSON schema and the TypeScript mirror only, with a comment
+saying why the Rust half went.
+
+Why the batch gates missed it: #103 changed no Python, so the #105/#103/#106
+batch ran the frontend and Rust gates but not pytest, and pytest was where the
+reference lived. The failure surfaced on the next engine run (#104/#107). Lesson
+for the next cross-layer deletion: a `grep` for the file's *path* across the whole
+repo, not just its module name, and run every gate for a batch regardless of
+which layer changed. `279b6e6` is on `main` with the failing test; the fix
+follows it in the same push as #104/#107.
+
+### Gates
+
+`pytest tests/correction/test_correction_stage9b3a.py`: **34 passed** in 22s.
+The full fast run that found it:
+`pytest -n auto -m "not slow"` **1008 passed, 1 failed** (this test), 0 other
+failures across #104 and #107.

@@ -357,21 +357,14 @@ def test_application_and_strict_context_validate_against_canonical_schema() -> N
     assert set(strict_context) == set(schema["$defs"]["StrictScriptureEditContext"]["required"])
     assert intent["applicationState"] in schema["$defs"]["CorrectionApplicationState"]["enum"]
     assert intent["actor"]["actorType"] in schema["$defs"]["ActorType"]["enum"]
-    root = REPO_ROOT
-    typescript = (root / "src" / "lib" / "types" / "correctionReview.ts").read_text(
-        encoding="utf-8"
-    )
-    rust = (root / "src-tauri" / "src" / "passage_semantic_wire.rs").read_text(
+    # The TypeScript mirror must carry every required field. The Rust mirror
+    # (src-tauri/src/passage_semantic_wire.rs) used to be checked here too; it
+    # was removed in #103 because no Rust command ever deserialized it.
+    typescript = (REPO_ROOT / "src" / "lib" / "types" / "correctionReview.ts").read_text(
         encoding="utf-8"
     )
     for field_name in schema["$defs"]["CorrectionApplicationIntent"]["required"]:
         assert f"{field_name}:" in typescript
-    for rust_field in (
-        "application_id", "expected_proposal_revision", "expected_start_code_point",
-        "replacement_text_snapshot", "application_state", "state_revision",
-        "recovery_metadata", "result_metadata",
-    ):
-        assert f"pub {rust_field}:" in rust
 
 
 def test_strict_writer_context_is_available_only_as_an_explicit_keyword() -> None:
