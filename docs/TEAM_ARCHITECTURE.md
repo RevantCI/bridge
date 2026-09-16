@@ -80,7 +80,8 @@ where a query filters on them today.
 | `human_decisions` | `decisions/`, `qaDecisions/`, `review/`, `terminology/` | `kind IN (check, qa, verse_status, terminology)`, `book_id, chapter, verse, key`, `decision` |
 | `issue_resolutions` | `issueResolutions/` | `resolution_id`, `status`, `recheck_status`, `paratext_status`; compacted in-record `history` stays in payload, lifecycle events go to `change_log` |
 | `ai_review_results` | `aiReview/` | `(book_id, chapter, verse)`, `input_fingerprint`, `generated_at` |
-| `alignment_history` | `alignmentHistory/` | id = today's filename (so `restore_verse_alignment_history` keeps working); `backup_path` points at files that stay on disk |
+| `alignment_history` | `alignmentHistory/` | id = today's filename (so `restore_verse_alignment_history` keeps working); `backup_path` points at files that stay on disk; a cross-verse link change (#117) writes a row here with no `backup_path`, so it is in the history but never offered for restore |
+| `alignment_cross_verse_links` (v3, #117) | nothing -- tC `alignmentData` is verse-local and cannot hold it | `chapter, verse, source_signature, target_chapter, target_verse, target_signature` (tC token signatures, never positional ids), `state IN (active, invalid)`; UNIQUE on the pair per project/book |
 | `alignment_diagnostics` | `alignmentDiagnostics/` | append-only |
 | `team_assignments`, `team_members` | `team/` | assignee becomes a `user_id` once `workspace.users` exists |
 | `semantic_mappings` | `semanticMappings/` | `(book_id, fingerprint)` |
@@ -228,8 +229,10 @@ the design is for -- every sibling opened -- is the one to read the table for.
 **Sync readiness landed with it:** `unsynced(project_id, after_seq)`, `mark_synced`,
 `export_events`/`import_events` as JSON lines, with `base_revision` conflicts returned to
 the caller rather than stored. Workbench v2 added `change_log.columns_json` because a row
-image without its lifted columns could not be rebuilt elsewhere. `sync_conflicts` as a
-table, and any UI, remain ss7's.
+image without its lifted columns could not be rebuilt elsewhere. Workbench v3 (#117) added
+`alignment_cross_verse_links`; being in `MUTABLE_TABLES` it rides export/import unchanged,
+and its `crossVerseLink` / `crossVerseUnlink` / `crossVerseInvalidate` domain events travel as
+events. `sync_conflicts` as a table, and any UI, remain ss7's.
 
 ## 5. Identity and roles
 

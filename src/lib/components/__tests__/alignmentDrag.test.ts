@@ -126,6 +126,12 @@ describe("alignmentGroups", () => {
     expect(gapCounts(context)).toEqual({ sourceUnmatched: 2, targetUnmatched: 2 });
   });
 
+  it("nets cross-verse links out of the gaps (#117) without touching what is draggable", () => {
+    const linked = { ...context, crossVerseAccountedIds: ["T003"], crossVerseRealizedIds: ["H003"] };
+    expect(unalignedTargets(linked).map((t) => t.id)).toEqual(["T003", "T004"]);
+    expect(gapCounts(linked)).toEqual({ sourceUnmatched: 1, targetUnmatched: 1 });
+  });
+
   it("resends the destination column's existing words on a drop, and refuses a no-op drop", () => {
     expect(bottomIdsAfterDrop(context, "H001", "T003")).toEqual(["T001", "T002", "T003"]);
     expect(bottomIdsAfterDrop(context, "H003", "T003")).toEqual(["T003"]);

@@ -4,18 +4,22 @@
   // bank down the right, a gap overview across the top. In this slice a
   // drop is accepted only within the same verse and goes through the
   // existing alignment.realign / alignment.unalign; a drop across verses
-  // does nothing yet (#117 adds the Bridge-private link store). The tC
-  // alignment data stays strictly verse-local throughout.
+  // records a Bridge-private cross-verse link (#117) in the workbench
+  // database. The tC alignment data stays strictly verse-local throughout:
+  // the linked source token's group stays empty and the target word stays
+  // in its own verse's word bank; only the annotations change.
   import { onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import {
     alignmentStatusByVerse, checkStatusByVerse, currentChapter, findingsByVerse, verseKey, verseNums,
   } from "../stores";
-  import type { AlignmentContext, AlignmentCounts, AlignmentToken } from "../types/finding";
+  import type {
+    AlignmentContext, AlignmentCounts, AlignmentToken, CrossVerseLink, CrossVerseLinkResult,
+  } from "../types/finding";
   import { createPointerDrag } from "../alignmentDrag";
   import {
-    alignedTargetsFor, bottomIdsAfterDrop, groupForTarget, occurrenceLabel as occurrence, unalignedTargets,
-    unmatchedSources,
+    alignedTargetsFor, bottomIdsAfterDrop, groupForTarget, occurrenceLabel as occurrence, unaccountedTargets,
+    unrealizedSources,
   } from "../alignmentGroups";
   import { defaultRange, joinVerseId, rangeBetween, spanOf, splitVerseId, toggleVerse } from "../crossVerseRange";
   import LexiconPopup from "./LexiconPopup.svelte";
@@ -25,8 +29,8 @@
   export let verse: string;
   export let onClose: () => void;
 
-  const CROSS_VERSE_NOTICE =
-    "Cross-verse links are saved in the next slice (#117). Nothing changed: translationCore alignment stays verse-local.";
+  const BANK_NOTICE =
+    "To link across verses, drop the word onto a source word of the other verse, not into its word bank.";
 
   let selection: string[] = defaultRange($verseNums, verse);
   let contexts: Record<string, AlignmentContext> = {};
@@ -207,13 +211,53 @@
     void mutate(v, () => bridge.unalignWords(chapter, v, [bottomId], context.alignment), "Returned to word bank.");
   }
 
-  /** Routes a token ("verse|T001") dropped on a column ("verse|H001"). */
+  /** A cross-verse link or unlink returns both verses' contexts; each is
+   *  patched in and rechecked, exactly like a same-verse save. */
+  async function mutateCross(action: () => Promise<CrossVerseLinkResult>, message: string) {
+    if (busy) return;
+    busy = true;
+    error = "";
+    notice = "";
+    try {
+      const result = await action();
+      await refreshChecks(result.source.verse, result.source, message);
+      await refreshChecks(result.target.verse, result.target, message);
+    } catch (value) {
+      error = value instanceof Error ? value.message : String(value);
+    } finally {
+      busy = false;
+    }
+  }
+
+  function linkAcross(sourceVerse: string, topId: string, targetVerse: string, bottomId: string) {
+    void mutateCross(
+      () => bridge.crossVerseLink(
+        { chapter, verse: sourceVerse, topId },
+        { chapter, verse: targetVerse, bottomId },
+      ),
+      "Cross-verse link saved.",
+    );
+  }
+
+  function unlink(link: CrossVerseLink) {
+    void mutateCross(() => bridge.crossVerseUnlink(link.id), "Cross-verse link removed.");
+  }
+
+  function linksForSource(context: AlignmentContext, topId: string): CrossVerseLink[] {
+    return context.crossVerseLinks.filter((link) => link.sourceTopId === topId);
+  }
+
+  function linkForBottom(context: AlignmentContext, bottomId: string): CrossVerseLink | undefined {
+    return context.crossVerseLinks.find((link) => link.targetBottomId === bottomId && link.state === "active");
+  }
+
+  /** Routes a token ("verse|T001") dropped on a column ("verse|H001"): the
+   *  same verse realigns through tC, another verse records a Bridge link. */
   function dropOnColumn(tokenKey: string, columnKey: string) {
     const token = splitVerseId(tokenKey);
     const column = splitVerseId(columnKey);
     if (token.verse !== column.verse) {
-      error = "";
-      notice = CROSS_VERSE_NOTICE;
+      linkAcross(column.verse, column.id, token.verse, token.id);
       return;
     }
     alignWithin(token.verse, column.id, token.id);
@@ -223,7 +267,7 @@
     const token = splitVerseId(tokenKey);
     if (token.verse !== bankVerse) {
       error = "";
-      notice = CROSS_VERSE_NOTICE;
+      notice = BANK_NOTICE;
       return;
     }
     returnToBank(token.verse, token.id);
@@ -261,11 +305,11 @@
   }
 
   function sourceRows(context: AlignmentContext): AlignmentToken[] {
-    return gapFilterVerse ? unmatchedSources(context) : context.topTokens;
+    return gapFilterVerse ? unrealizedSources(context) : context.topTokens;
   }
 
   function bankTokens(context: AlignmentContext): AlignmentToken[] {
-    return gapFilterVerse ? unalignedTargets(context) : context.bottomTokens;
+    return gapFilterVerse ? unaccountedTargets(context) : context.bottomTokens;
   }
 
   function activate(event: KeyboardEvent, action: () => void) {
@@ -324,6 +368,7 @@
             class="gap"
             class:active={gapFilterVerse === v}
             class:clean={gaps.sourceUnmatched === 0 && gaps.targetUnmatched === 0}
+            class:accounted={contexts[v].fullyAccounted}
             aria-pressed={gapFilterVerse === v}
             on:click={() => toggleGapFilter(v)}
             title={gapFilterVerse === v ? "Show all words again" : `Show only the gaps in verse ${v}`}
@@ -332,6 +377,9 @@
             <span class="status {contexts[v].status}">{contexts[v].status}</span>
             <span>{gaps.sourceUnmatched} source word{gaps.sourceUnmatched === 1 ? "" : "s"} with no counterpart</span>
             <span>{gaps.targetUnmatched} target word{gaps.targetUnmatched === 1 ? "" : "s"} with no counterpart</span>
+            {#if contexts[v].crossVerseAccounted + contexts[v].crossVerseRealized > 0}
+              <span class="linked-note">↔ {contexts[v].crossVerseAccounted + contexts[v].crossVerseRealized} linked across verses{#if contexts[v].fullyAccounted} · nothing left unaccounted{/if}</span>
+            {/if}
           </button>
         {/each}
         <div class="gap-total">
@@ -397,9 +445,30 @@
                             title="Return to the word bank"
                           >×</button>
                         </span>
-                      {:else}
-                        <span class="placeholder" aria-hidden="true">·</span>
                       {/each}
+                      {#each linksForSource(context, src.id) as link (link.id)}
+                        <span
+                          class="token target linked-card"
+                          class:invalid={link.state === "invalid"}
+                          title={link.state === "invalid"
+                            ? (link.invalidReason ?? "This link no longer applies.")
+                            : `Realized in verse ${link.target.verse} by ${link.target.word}. Bridge-private link; translationCore alignment is unchanged.`}
+                        >
+                          <span class="word">{link.target.word}</span>
+                          <small>{link.state === "invalid" ? "link invalid" : "realized in"} v.{link.target.verse}</small>
+                          <button
+                            type="button"
+                            class="unalign-x"
+                            on:click|stopPropagation={() => unlink(link)}
+                            disabled={busy}
+                            aria-label={`Remove cross-verse link from ${src.word} to ${link.target.word} in verse ${link.target.verse}`}
+                            title="Remove this cross-verse link"
+                          >×</button>
+                        </span>
+                      {/each}
+                      {#if alignedTargetsFor(context, src.id).length === 0 && linksForSource(context, src.id).length === 0}
+                        <span class="placeholder" aria-hidden="true">·</span>
+                      {/if}
                     </div>
                   </div>
                 {:else}
@@ -433,7 +502,24 @@
                 >
                   {#each bankTokens(context) as item (item.id)}
                     {@const tokenKey = joinVerseId(v, item.id)}
-                    {#if groupForTarget(context, item.id)}
+                    {@const accountedBy = linkForBottom(context, item.id)}
+                    {#if accountedBy}
+                      <span
+                        class="token target accounted"
+                        title={`Realizes ${accountedBy.source.word} from verse ${accountedBy.source.verse}. Bridge-private link; this word stays in the word bank for translationCore.`}
+                      >
+                        <span class="word">{item.word}{#if item.occurrences > 1}<span class="occ">{occurrence(item)}</span>{/if}</span>
+                        <small>↔ v.{accountedBy.source.verse}</small>
+                        <button
+                          type="button"
+                          class="unalign-x"
+                          on:click|stopPropagation={() => unlink(accountedBy)}
+                          disabled={busy}
+                          aria-label={`Remove cross-verse link from ${accountedBy.source.word} in verse ${accountedBy.source.verse} to ${item.word}`}
+                          title="Remove this cross-verse link"
+                        >×</button>
+                      </span>
+                    {:else if groupForTarget(context, item.id)}
                       <span class="token target already-aligned" title="Already aligned in this verse">
                         <span class="word">{item.word}{#if item.occurrences > 1}<span class="occ">{occurrence(item)}</span>{/if}</span>
                       </span>
@@ -499,6 +585,8 @@
   .gap { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 6px 10px; border-radius: 9px; background: var(--warning-bg); color: var(--warning); border-color: transparent; min-width: 190px; }
   .gap.clean { background: #EAF7EF; color: var(--success); }
   .gap.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .gap.accounted { background: var(--accent-bg); color: var(--accent); }
+  .linked-note { font-weight: 700; }
   .gap-verse { font-weight: 800; color: var(--text); }
   .gap-total { display: flex; flex-direction: column; justify-content: center; gap: 3px; color: var(--text-2); padding: 0 6px; margin-left: auto; text-align: right; }
   .status { border-radius: 999px; padding: 1px 7px; background: var(--surface-2); font-weight: 700; font-size: var(--fs-2xs); color: var(--text-2); }
@@ -536,6 +624,14 @@
   .already-aligned { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-3); padding: 6px 9px; border-radius: 7px; cursor: default; }
   .aligned-card { flex-direction: row; align-items: center; gap: 4px; min-width: 0; border: 1px solid var(--border-strong); border-radius: 7px; padding: 4px 6px 4px 9px; background: #EFF7FF; color: var(--text); }
   .aligned-card .word { font-size: var(--fs-sm); }
+  .linked-card, .accounted {
+    flex-direction: row; align-items: center; gap: 5px; min-width: 0; border: 1px dashed var(--accent);
+    border-radius: 7px; padding: 4px 6px 4px 9px; background: var(--accent-bg); color: var(--text);
+  }
+  .linked-card .word, .accounted .word { font-size: var(--fs-sm); }
+  .linked-card small, .accounted small { font-size: var(--fs-3xs); color: var(--accent); font-weight: 700; white-space: nowrap; }
+  .linked-card.invalid { border-color: var(--danger); background: var(--danger-bg); }
+  .linked-card.invalid small { color: var(--danger); }
   .unalign-x { border: 0; background: none; padding: 0; width: 16px; height: 16px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--text-2); font-size: var(--fs-md); flex-shrink: 0; }
   .unalign-x:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
   .bank { display: flex; flex-wrap: wrap; gap: 6px; min-height: 44px; align-content: flex-start; border-radius: 8px; padding: 4px; }

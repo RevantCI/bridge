@@ -6,6 +6,7 @@ import type {
   AlignmentContext,
   AlignmentRange,
   AlignmentStatusResponse,
+  CrossVerseLinkResult,
   BookProgressEntry,
   CheckJobSnapshot,
   DesktopConnectorState,
@@ -168,6 +169,8 @@ export type EngineMethod =
   | "ai.review.status"
   | "alignment.aiApplyProposal"
   | "alignment.aiPropose"
+  | "alignment.crossVerse.link"
+  | "alignment.crossVerse.unlink"
   | "alignment.get"
   | "alignment.getRange"
   | "alignment.realign"
@@ -502,6 +505,19 @@ export const bridge = {
    *  `verses` are the opaque strings from verseNums, in the order wanted back. */
   getAlignmentRange(chapter: string, verses: string[]): Promise<AlignmentRange> {
     return call("alignment.getRange", { chapter, verses });
+  },
+
+  /** Bridge-private cross-verse link (#117): nothing in alignmentData changes.
+   *  Ids are this load's positional ids; the engine stores signatures. */
+  crossVerseLink(
+    source: { chapter: string; verse: string; topId: string },
+    target: { chapter: string; verse: string; bottomId: string },
+  ): Promise<CrossVerseLinkResult> {
+    return call("alignment.crossVerse.link", { source, target });
+  },
+
+  crossVerseUnlink(linkId: string): Promise<CrossVerseLinkResult> {
+    return call("alignment.crossVerse.unlink", { linkId });
   },
 
   getLexiconEntry(strong: string, morph: string): Promise<LexiconEntryResponse> {

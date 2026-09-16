@@ -8845,3 +8845,120 @@ Engine: `pytest tests/alignment/test_alignment_get_range.py -v` **7 passed**;
 check` 0 errors / 0 warnings; `npm run test` 30 files, **399 passed** (32 new across
 `alignmentDrag`, `crossVerseRange`, `CrossVerseAlignmentModal`); `npm run build`
 clean. No Rust change, so `cargo` was not run.
+
+## 2026-09-16 — #117: cross-verse alignment, slice 2 — the Bridge-private link store, link/unlink, status, invalidation
+
+The rule this slice rests on is the one `semantic_alignment_guard.py` states:
+translationCore alignment groups are verse-local, and Bridge never fakes a cross-verse
+link inside them. `_validate_alignment_identity` enforces it structurally on every save.
+So a reviewer's judgement that a source token of verse 1 is realized in verse 2's target
+text now lives in `bridge-workbench.sqlite3`, and nowhere in `alignmentData/`. The tC
+group for the source token stays empty, the target word stays in its own verse's word
+bank, and `completionState` never turns complete for either verse.
+
+### What was built
+
+- **Workbench v2 → v3** (`workbench_repository.py`, `_MIGRATION_V3`): table
+  `alignment_cross_verse_links` with the nine common columns plus lifted `chapter, verse,
+  source_signature, target_chapter, target_verse, target_signature, state`, two scope
+  indexes and a UNIQUE index on the pair per project/book. Added to `MUTABLE_TABLES`, so
+  it rides `_write` / `_delete` / export / import unchanged and the two per-table
+  parametrised tests cover it for free. Migration test in the established style
+  (`test_workbench_v2_to_v3_adds_the_cross_verse_link_table_and_keeps_v2_data`: build v2
+  from the raw v1+v2 scripts, insert a row and an event, open, assert v3, old data
+  readable, `pre-workbench-v3-*` backup taken, new table writable, UNIQUE enforced).
+- **`tc_ai_bridge/cross_verse_links.py`** (`CrossVerseLinkStore`, reached as
+  `project.cross_verse_links`): `link`, `unlink`, `links_for_verse` (both directions),
+  `invalidate_missing_targets`. Identity is the pair of tC token signatures
+  (`word U+241F occurrence U+241F occurrences`) plus chapter and verse on both sides; the
+  positional `H001`/`T001` ids are resolved on the way in and back on the way out and are
+  never stored. Every change is three writes: the row (its change_log row image comes
+  with it), a domain event (`crossVerseLink` / `crossVerseUnlink` /
+  `crossVerseInvalidate`), and an `alignment_history` row **without** `backupPath`, so it
+  is in the history and invisible to `alignment.restore`, which only restores files.
+  Re-linking an `invalid` pair reactivates it; re-linking an `active` pair is refused.
+- **`alignment.crossVerse.link` / `.unlink`** (`bridge_service.py`). Params
+  `{source: {chapter, verse, topId}, target: {chapter, verse, bottomId}}` and
+  `{linkId}`; both return `{link, source: context, target: context}`. Refused
+  (`alignment_error`): same verse on both ends, source token already has a target word in
+  its own verse, target word already grouped in its own verse, target word absent from
+  the current text, stale id. Unknown chapter/verse or missing fields are
+  `project_error`. `WorkbenchConflict` / `WorkbenchValidationError` now map to
+  `revision_conflict` / `workbench_validation_error` instead of falling to
+  `internal_error`.
+- **Status semantics.** Every alignment context now carries `crossVerseLinks` (with
+  this verse's resolved `sourceTopId` / `targetBottomId`), `crossVerseAccountedIds`,
+  `crossVerseRealizedIds`, the two counts, and `fullyAccounted`. `gaps` is net of active
+  links. `status` and `completionState` are **unchanged** and keep telling the tC truth:
+  a fully-accounted verse still reads `partial`/`untouched` and `pending`, `canComplete`
+  stays false because its word bank is not empty. The editors drop the "not fully
+  aligned" flag from `fullyAccounted`, not from `status`. A fifth status value was
+  considered and rejected here: it would ripple into `qa_report.py`'s alignment counts and
+  the report types, which is outside this slice.
+- **Invalidation.** `apply_scripture_edit` computes the target signatures the reconcile
+  step dropped and, as the last step inside its journal try-block, marks every active
+  link pointing at one of them `invalid` (with a reason). A failed edit therefore rolls
+  back before any link is touched; a word that survives the edit under the same
+  signature keeps its link. The result reports `crossVerseLinksInvalidated`.
+- **Page and modal.** A drop across verses now calls `crossVerseLink` (source = the
+  column's verse and token, target = the dragged word), patches both verses' contexts and
+  reruns each verse's local checks; the source row shows a dashed "realized in v.N" chip
+  with a remove control, the target word stays in its bank greyed with "↔ v.N" and a
+  remove control, both calling `crossVerseUnlink`; an invalid link shows "link invalid"
+  with the reason as its tooltip; the gap strip adds "↔ N linked across verses". Dropping
+  into another verse's word bank is refused with guidance. The single-verse Align Words
+  modal counts only unaccounted words in its flag, appends "N word(s) linked across
+  verses", greys accounted bank words with "↔", and shows a dedicated line when
+  everything left is linked.
+- **Not called yet:** `synchronize_alignment_state()` after a link change. Its memo keys
+  on the tC alignment digest, which a link does not change, so the call would be a
+  no-op; #119 extends the digest and wires the staleness edge properly.
+
+### Verified in the real app (dev build, 1366×768, Tamil IRV Genesis 1)
+
+Same harness as #116: `npm run tauri dev` from the worktree with freshly built sidecars,
+WebView2 remote debugging, real pointer sequences.
+
+- Opening the collection migrated the real Genesis workbench database from v2 to v3
+  (`backups/pre-workbench-v3-...` appeared beside the existing `pre-workbench-v2-...`),
+  and the project opened normally. After the check the v2 file was put back from the copy
+  taken beforehand, so the installed 0.10.3 app, which refuses a v3 database, still opens
+  it.
+- Page on 1:1–1:3; gap strip 7/5, 14/12, 6/6 as on disk.
+- **Cross-verse drag**: the first 1:2 word bank token onto the first source cell of 1:1.
+  The 1:1 cell highlighted (`1|H001`), the release saved, the notice read "Cross-verse
+  link saved. Local and Greek Room checks for 1:2 are current.", v.1 became 6/5 and v.2
+  14/11 with "↔ 1 linked across verses" on both, the 1:1 cell showed the word with
+  "realized in v.2" and a remove control, the 1:2 bank showed the same word greyed with
+  "↔ v.1" and 11 words still draggable, and both verse-list glyphs stayed `untouched`. In
+  `bridge-workbench.sqlite3`: one row keyed by the two token signatures with state
+  `active`, change_log `upsert` (rev 1) + `crossVerseLink` (no revision), one
+  `alignment_history` row for 1:1 with operation `crossVerseLink`.
+  `alignmentData/gen/1.json`: verse 1 still 0 groups with bottom words / bank 5, verse 2
+  still 0 / 12 — untouched.
+- **Align Words for 1:2** flagged "11 target words still need a source word" plus "1
+  word linked across verses (Bridge-private; completion stays with translationCore)",
+  showed the accounted word greyed with "↔", and offered 11 draggable words.
+- **Unlink** from the page's remove control on the 1:1 chip: notice "Cross-verse link
+  removed.", gaps back to 7/5 and 14/12, 0 rows, events `upsert, crossVerseLink, delete,
+  crossVerseUnlink`.
+
+### Deliberately not done
+
+No change to tC `completionState`, `canComplete`, or aligned USFM export. No fifth
+alignment status value (see above); `VerseList` and the chapter summary keep showing the
+tC work state. No Stage 6B evidence or staleness wiring (#119). No range pre-fill, finding
+entry point or multi-select (#118). No golden or threshold change. No Semantic/Passage tab
+change.
+
+### Gates
+
+Engine: `tests/alignment/test_alignment_cross_verse.py` **8 passed**;
+`tests/persistence/test_workbench_sync.py` + `test_workbench_repository.py` +
+`tests/alignment/test_alignment_get_range.py` **99 passed** together (26 s);
+`pytest -n auto tests/alignment tests/service tests/persistence tests/project_io -m "not slow"`
+**390 passed** (81 s); `pytest -n auto -m "not slow"` **1027 passed** in 2 m 45 s.
+Frontend: `npm run check` 0 errors / 0 warnings; `npm run test` 30 files, **402 passed**
+(3 new); `npm run build` clean. No Rust change, so `cargo` was not run. Docs bumped in
+the same commit: CLAUDE.md (on-disk shape, ladder paragraph), ARCHITECTURE.md §3,
+TEAM_ARCHITECTURE.md §3.1 table and §4 sync note.

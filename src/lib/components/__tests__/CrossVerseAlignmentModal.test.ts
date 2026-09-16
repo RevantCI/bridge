@@ -5,18 +5,24 @@ import CrossVerseAlignmentModal from "../CrossVerseAlignmentModal.svelte";
 import {
   alignmentStatusByVerse, chapterVerseNums, checkStatusByVerse, currentChapter, findingsByVerse,
 } from "../../stores";
-import type { AlignmentContext, AlignmentRange, AlignmentToken } from "../../types/finding";
+import type {
+  AlignmentContext, AlignmentRange, AlignmentToken, CrossVerseLink, CrossVerseLinkResult,
+} from "../../types/finding";
 
-const { getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry } = vi.hoisted(() => ({
+const {
+  getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry, crossVerseLink, crossVerseUnlink,
+} = vi.hoisted(() => ({
   getAlignmentRange: vi.fn(),
   realignWords: vi.fn(),
   unalignWords: vi.fn(),
   runVerseChecks: vi.fn(),
   getLexiconEntry: vi.fn(),
+  crossVerseLink: vi.fn(),
+  crossVerseUnlink: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
-  bridge: { getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry },
+  bridge: { getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry, crossVerseLink, crossVerseUnlink },
 }));
 
 function token(id: string, word: string, extra: Partial<AlignmentToken> = {}): AlignmentToken {
@@ -53,6 +59,12 @@ function context(verse: string, sources: string[], targets: string[], aligned: n
       sourceUnmatched: groups.filter((g) => g.bottomIds.length === 0).length,
       targetUnmatched: targets.length - aligned,
     },
+    crossVerseLinks: [],
+    crossVerseAccountedIds: [],
+    crossVerseRealizedIds: [],
+    crossVerseAccounted: 0,
+    crossVerseRealized: 0,
+    fullyAccounted: false,
   };
 }
 
@@ -60,8 +72,34 @@ const V1 = context("1", ["θεός"], ["God"], 1);
 const V2 = context("2", ["λόγος", "ἦν"], ["word", "was"], 1);
 const V34 = context("3-4", ["φῶς"], ["light", "shone"], 0);
 
-function rangeFor(verses: string[]): AlignmentRange {
-  const all: Record<string, AlignmentContext> = { "1": V1, "2": V2, "3-4": V34 };
+/** The link the engine would record for "was" (1:2) dropped on φῶς (1:3-4). */
+const LINK: CrossVerseLink = {
+  id: "link-1", bookId: "php",
+  source: { chapter: "1", verse: "3-4", word: "φῶς", occurrence: 1, occurrences: 1, signature: "φῶς␟1␟1", strong: "G2316" },
+  target: { chapter: "1", verse: "2", word: "was", occurrence: 1, occurrences: 1, signature: "was␟1␟1" },
+  state: "active", createdAt: "t", updatedAt: "t", actorId: "human",
+  sourceTopId: null, targetBottomId: null,
+};
+
+function linked(): CrossVerseLinkResult {
+  return {
+    link: LINK,
+    source: {
+      ...V34,
+      crossVerseLinks: [{ ...LINK, sourceTopId: "H001" }],
+      crossVerseRealizedIds: ["H001"], crossVerseRealized: 1,
+      gaps: { sourceUnmatched: 0, targetUnmatched: 2 },
+    },
+    target: {
+      ...V2,
+      crossVerseLinks: [{ ...LINK, targetBottomId: "T002" }],
+      crossVerseAccountedIds: ["T002"], crossVerseAccounted: 1,
+      gaps: { sourceUnmatched: 1, targetUnmatched: 0 },
+    },
+  };
+}
+
+function rangeFor(verses: string[], all: Record<string, AlignmentContext> = { "1": V1, "2": V2, "3-4": V34 }): AlignmentRange {
   return { chapter: "1", verses: verses.map((v) => all[v]), chapterStatus: V1.chapterStatus };
 }
 
@@ -88,6 +126,11 @@ async function renderPage(verse = "2") {
   return { ...utils, onClose };
 }
 
+async function pickUp(word: string, verse: string) {
+  const bank = screen.getByLabelText(`Word bank of verse ${verse}`);
+  await fireEvent.click(within(bank).getByRole("button", { name: word }));
+}
+
 describe("CrossVerseAlignmentModal", () => {
   it("opens on the selected verse ±1 and shows every verse in both columns plus the gap overview", async () => {
     await renderPage("2");
@@ -108,8 +151,7 @@ describe("CrossVerseAlignmentModal", () => {
     realignWords.mockResolvedValue({ ...V2, status: "complete", gaps: { sourceUnmatched: 0, targetUnmatched: 0 } });
     await renderPage("2");
     // Click-to-pick-up is the same one-step drop the pointer drag delivers.
-    const bank2 = screen.getByLabelText("Word bank of verse 2");
-    await fireEvent.click(within(bank2).getByRole("button", { name: "was" }));
+    await pickUp("was", "2");
     await fireEvent.click(screen.getByLabelText(/Align picked-up word to λόγος in verse 2/));
     await waitFor(() => expect(realignWords).toHaveBeenCalledTimes(1));
     expect(realignWords).toHaveBeenCalledWith("1", "2", ["H001"], ["T001", "T002"], V2.alignment);
@@ -118,26 +160,73 @@ describe("CrossVerseAlignmentModal", () => {
     expect(get(checkStatusByVerse)["1:2"]).toBe("succeeded");
     expect(get(findingsByVerse)["1:2"]).toEqual([{ id: "f1" }]);
     expect(unalignWords).not.toHaveBeenCalled();
+    expect(crossVerseLink).not.toHaveBeenCalled();
   });
 
-  it("a cross-verse drop calls nothing and says the link is saved in the next slice", async () => {
+  it("a cross-verse drop records a Bridge-private link (#117), patches both verses and rechecks each", async () => {
+    crossVerseLink.mockResolvedValue(linked());
     await renderPage("2");
-    const bank2 = screen.getByLabelText("Word bank of verse 2");
-    await fireEvent.click(within(bank2).getByRole("button", { name: "was" }));
+    await pickUp("was", "2");
     await fireEvent.click(screen.getByLabelText(/Align picked-up word to φῶς in verse 3-4/));
-    expect(await screen.findByText(/saved in the next slice/)).toBeInTheDocument();
+    await waitFor(() => expect(crossVerseLink).toHaveBeenCalledTimes(1));
+    // Source is the column (verse 3-4's φῶς), target is the dragged word (verse 2's "was").
+    expect(crossVerseLink).toHaveBeenCalledWith(
+      { chapter: "1", verse: "3-4", topId: "H001" },
+      { chapter: "1", verse: "2", bottomId: "T002" },
+    );
     expect(realignWords).not.toHaveBeenCalled();
-    expect(unalignWords).not.toHaveBeenCalled();
-    expect(runVerseChecks).not.toHaveBeenCalled();
+    await waitFor(() => expect(runVerseChecks).toHaveBeenCalledWith("1", "3-4", ["alignment", "greekroom"]));
+    await waitFor(() => expect(runVerseChecks).toHaveBeenCalledWith("1", "2", ["alignment", "greekroom"]));
+    expect(await screen.findByText(/Cross-verse link saved/)).toBeInTheDocument();
+
+    // The source row shows where the token is realized ...
+    const cell = screen.getByLabelText(/Target words aligned to φῶς in verse 3-4/);
+    expect(within(cell).getByText("was")).toBeInTheDocument();
+    expect(within(cell).getByText(/realized in v\.2/)).toBeInTheDocument();
+    // ... the word stays in its own verse's bank, marked and no longer draggable ...
+    const bank2 = screen.getByLabelText("Word bank of verse 2");
+    expect(within(bank2).queryByRole("button", { name: "was" })).not.toBeInTheDocument();
+    expect(within(bank2).getByText("↔ v.3-4")).toBeInTheDocument();
+    expect(within(bank2).getByTitle(/Realizes φῶς from verse 3-4/)).toBeInTheDocument();
+    // ... and the gap strip counts it as linked, not as a gap. tC status is untouched.
+    const strip = screen.getByLabelText("Gap overview");
+    expect(within(strip).getAllByText(/1 linked across verses/)).toHaveLength(2);
+    expect(within(strip).getByText(/Range: 1 source · 2 target unmatched/)).toBeInTheDocument();
+    expect(get(alignmentStatusByVerse)["1:2"]).toBe("partial");
   });
 
-  it("dropping a word on another verse's word bank is also refused", async () => {
+  it("the × on a linked chip or an accounted word removes the link through alignment.crossVerse.unlink", async () => {
+    getAlignmentRange.mockImplementation(async (_c: string, verses: string[]) =>
+      rangeFor(verses, { "1": V1, "2": linked().target, "3-4": linked().source }));
+    crossVerseUnlink.mockResolvedValue({ link: LINK, source: V34, target: V2 });
     await renderPage("2");
+    await fireEvent.click(screen.getByRole("button", { name: /Remove cross-verse link from φῶς to was in verse 2/ }));
+    await waitFor(() => expect(crossVerseUnlink).toHaveBeenCalledWith("link-1"));
+    expect(await screen.findByText(/Cross-verse link removed/)).toBeInTheDocument();
     const bank2 = screen.getByLabelText("Word bank of verse 2");
-    await fireEvent.click(within(bank2).getByRole("button", { name: "was" }));
+    expect(within(bank2).getByRole("button", { name: "was" })).toBeInTheDocument();
+  });
+
+  it("shows an invalidated link with its reason and lets it be removed", async () => {
+    const invalid: CrossVerseLink = { ...LINK, state: "invalid", invalidReason: "was is no longer in the text of 1:2.", sourceTopId: "H001" };
+    getAlignmentRange.mockImplementation(async (_c: string, verses: string[]) =>
+      rangeFor(verses, { "1": V1, "2": V2, "3-4": { ...V34, crossVerseLinks: [invalid] } }));
+    await renderPage("2");
+    const cell = screen.getByLabelText(/Target words aligned to φῶς in verse 3-4/);
+    expect(within(cell).getByText(/link invalid v\.2/)).toBeInTheDocument();
+    expect(within(cell).getByTitle("was is no longer in the text of 1:2.")).toBeInTheDocument();
+    // An invalid link accounts for nothing: φῶς is still a gap.
+    const strip = screen.getByLabelText("Gap overview");
+    expect(within(strip).getAllByText("1 source word with no counterpart")).toHaveLength(2);
+  });
+
+  it("dropping a word into another verse's word bank is refused with guidance", async () => {
+    await renderPage("2");
+    await pickUp("was", "2");
     await fireEvent.click(screen.getByLabelText(/word bank of verse 1$/i));
-    expect(await screen.findByText(/saved in the next slice/)).toBeInTheDocument();
+    expect(await screen.findByText(/not into its word bank/)).toBeInTheDocument();
     expect(unalignWords).not.toHaveBeenCalled();
+    expect(crossVerseLink).not.toHaveBeenCalled();
   });
 
   it("the × on an aligned card unaligns within its own verse", async () => {

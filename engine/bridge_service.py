@@ -64,6 +64,7 @@ from tc_ai_bridge.analysis_jobs import (
     AnalysisJobNotFound,
 )
 from tc_ai_bridge.local_checks import run_local_qa
+from tc_ai_bridge.workbench_repository import WorkbenchConflict, WorkbenchValidationError
 from tc_ai_bridge.alignment_engine import (
     AlignmentError, apply_proposal, make_inventory, realign, unalign_bottom,
     validate_preparation_proposal,
@@ -321,6 +322,8 @@ class Methods:
 
     ALIGNMENT_GET = "alignment.get"
     ALIGNMENT_GET_RANGE = "alignment.getRange"
+    ALIGNMENT_CROSS_VERSE_LINK = "alignment.crossVerse.link"
+    ALIGNMENT_CROSS_VERSE_UNLINK = "alignment.crossVerse.unlink"
     ALIGNMENT_STATUS = "alignment.status"
     ALIGNMENT_REALIGN = "alignment.realign"
     ALIGNMENT_UNALIGN = "alignment.unalign"
@@ -1591,11 +1594,39 @@ class BridgeEngine:
             and bool(alignment.alignments)
             and all(group.top_words and group.bottom_words for group in alignment.alignments)
         )
+        # #117: Bridge-private cross-verse links touching this verse. They never
+        # enter `groups` (tC alignment stays verse-local); they only annotate.
+        # A target word accounted for by a link, or a source token realized in
+        # another verse, stops counting as a gap here, and `fullyAccounted`
+        # is what lets the editors drop the "not fully aligned" flag while
+        # `status` / `completionState` keep telling the tC truth.
+        cross = self._cross_verse_annotations(str(chapter), str(verse), inventory)
+        matched_top = {tid for g in groups if g["bottomIds"] for tid in g["topIds"]}
+        grouped_bottom = {bid for g in groups for bid in g["bottomIds"]}
+        remaining_sources = [
+            tid for tid in inventory.top_ids
+            if tid not in matched_top and tid not in cross["realizedIds"]
+        ]
+        remaining_targets = [
+            bid for bid in inventory.bottom_ids
+            if bid not in grouped_bottom and bid not in cross["accountedIds"]
+        ]
+        gaps = {"sourceUnmatched": len(remaining_sources), "targetUnmatched": len(remaining_targets)}
+        fully_accounted = (
+            not remaining_sources and not remaining_targets
+            and bool(cross["accountedIds"] or cross["realizedIds"])
+        )
         return {
             "chapter": str(chapter), "verse": str(verse),
             "alignment": alignment.to_dict(),
             "topTokens": top_tokens, "bottomTokens": bottom_tokens, "groups": groups,
             "status": work_state,
+            "crossVerseLinks": cross["links"],
+            "crossVerseAccountedIds": cross["accountedIds"],
+            "crossVerseRealizedIds": cross["realizedIds"],
+            "crossVerseAccounted": len(cross["accountedIds"]),
+            "crossVerseRealized": len(cross["realizedIds"]),
+            "fullyAccounted": fully_accounted,
             "completionState": self.project.word_alignment_state(chapter, verse),
             "sourceAvailable": source_available,
             "sourceMessage": "" if source_available else (
@@ -1645,6 +1676,99 @@ class BridgeEngine:
             self._alignment_context(chapter, verse, chapter_counts=counts) for verse in ordered
         ]
         return {"chapter": chapter, "verses": contexts, "chapterStatus": counts}
+
+    def _cross_verse_annotations(self, chapter: str, verse: str, inventory) -> dict[str, Any]:
+        """Links touching one verse, with this verse's positional ids resolved
+        from the stored signatures (ids are never persisted, #117)."""
+        links = []
+        accounted_ids: list[str] = []
+        realized_ids: list[str] = []
+        for link in self.project.cross_verse_links.links_for_verse(chapter, verse):
+            source, target = link.get("source", {}), link.get("target", {})
+            entry = dict(link)
+            entry["sourceTopId"] = None
+            entry["targetBottomId"] = None
+            if source.get("chapter") == chapter and source.get("verse") == verse:
+                entry["sourceTopId"] = inventory.top_sig_to_id.get(source.get("signature", ""))
+            if target.get("chapter") == chapter and target.get("verse") == verse:
+                entry["targetBottomId"] = inventory.bottom_sig_to_id.get(target.get("signature", ""))
+            if link.get("state") == "active":
+                if entry["sourceTopId"]:
+                    realized_ids.append(entry["sourceTopId"])
+                if entry["targetBottomId"]:
+                    accounted_ids.append(entry["targetBottomId"])
+            links.append(entry)
+        return {"links": links, "accountedIds": accounted_ids, "realizedIds": realized_ids}
+
+    def _cross_verse_ref(self, ref: Any, id_key: str) -> tuple[str, str, str]:
+        if not isinstance(ref, dict):
+            raise ProjectError("A cross-verse link needs source and target as {chapter, verse, id} objects.")
+        chapter, verse, token_id = str(ref.get("chapter") or ""), str(ref.get("verse") or ""), str(ref.get(id_key) or "")
+        if not chapter or not verse or not token_id:
+            raise ProjectError(f"A cross-verse link end needs chapter, verse and {id_key}.")
+        if chapter not in self.project.chapters():
+            raise ProjectError(f"Chapter {chapter} does not exist in this project.")
+        if verse not in set(self.project.verses(chapter)):
+            raise ProjectError(f"Verse {chapter}:{verse} does not exist in this project.")
+        return chapter, verse, token_id
+
+    def _cross_verse_result(self, link: dict[str, Any]) -> dict[str, Any]:
+        source, target = link["source"], link["target"]
+        return {
+            "link": link,
+            "source": self._alignment_context(source["chapter"], source["verse"]),
+            "target": self._alignment_context(target["chapter"], target["verse"]),
+        }
+
+    def link_cross_verse(self, source: Any, target: Any) -> dict[str, Any]:
+        """Record that a source token of one verse is realized by a target word
+        of another verse (#117). Refused when either token is already aligned
+        within its own verse, when both ends are the same verse (that is what
+        alignment.realign is for), or when the target word is not in the
+        current text. Nothing in alignmentData/ changes.
+        """
+        self._require_project()
+        s_chapter, s_verse, top_id = self._cross_verse_ref(source, "topId")
+        t_chapter, t_verse, bottom_id = self._cross_verse_ref(target, "bottomId")
+        if (s_chapter, s_verse) == (t_chapter, t_verse):
+            raise AlignmentError(
+                "Both words are in the same verse; align them in that verse instead of linking across verses."
+            )
+        s_alignment = self.project.load_verse_alignment(s_chapter, s_verse)
+        s_inventory = make_inventory(s_alignment)
+        s_token = s_inventory.top_ids.get(top_id)
+        if s_token is None:
+            raise AlignmentError("The source token id is not in that verse any more. Reload before linking.")
+        for group in s_alignment.alignments:
+            if group.bottom_words and any(t.signature == s_token.signature for t in group.top_words):
+                raise AlignmentError(
+                    f"{s_token.word} is already aligned within {s_chapter}:{s_verse}; unalign it there first."
+                )
+        t_alignment = self.project.load_verse_alignment(t_chapter, t_verse)
+        t_inventory = make_inventory(t_alignment)
+        t_token = t_inventory.bottom_ids.get(bottom_id)
+        if t_token is None:
+            raise AlignmentError("The target word id is not in that verse any more. Reload before linking.")
+        if any(t.signature == t_token.signature for t in t_alignment.aligned_bottom()):
+            raise AlignmentError(
+                f"{t_token.word} is already aligned within {t_chapter}:{t_verse}; unalign it there first."
+            )
+        current = {t.signature for t in self._target_token_inventory(self.project.target_verse_text(t_chapter, t_verse))}
+        if t_token.signature not in current:
+            raise AlignmentError(
+                f"{t_token.word} is no longer in the text of {t_chapter}:{t_verse}."
+            )
+        link = self.project.cross_verse_links.link(
+            s_chapter, s_verse, s_token, t_chapter, t_verse, t_token,
+        )
+        return self._cross_verse_result(link)
+
+    def unlink_cross_verse(self, link_id: str) -> dict[str, Any]:
+        self._require_project()
+        if not link_id:
+            raise ProjectError("A cross-verse unlink needs the link id.")
+        link = self.project.cross_verse_links.unlink(link_id)
+        return self._cross_verse_result(link)
 
     def get_lexicon_entry(self, strong: str, morph: str) -> dict[str, Any]:
         """Look up lexicon glosses + decoded morphology for one source token.
@@ -3774,6 +3898,14 @@ class BridgeEngine:
                 return EngineResponse.ok(
                     request.id, result=self.get_alignment_range(p["chapter"], p.get("verses", [])),
                 )
+            if m == Methods.ALIGNMENT_CROSS_VERSE_LINK:
+                return EngineResponse.ok(request.id, result=self.link_cross_verse(
+                    p.get("source"), p.get("target"),
+                ))
+            if m == Methods.ALIGNMENT_CROSS_VERSE_UNLINK:
+                return EngineResponse.ok(request.id, result=self.unlink_cross_verse(
+                    str(p.get("linkId") or ""),
+                ))
             if m == Methods.LEXICON_GET_ENTRY:
                 return EngineResponse.ok(
                     request.id, result=self.get_lexicon_entry(p.get("strong", ""), p.get("morph", "")),
@@ -4257,6 +4389,10 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "analysis_job_conflict", str(exc))
         except AnalysisJobError as exc:
             return EngineResponse.fail(request.id, "analysis_job_error", str(exc))
+        except WorkbenchConflict as exc:
+            return EngineResponse.fail(request.id, "revision_conflict", str(exc))
+        except WorkbenchValidationError as exc:
+            return EngineResponse.fail(request.id, "workbench_validation_error", str(exc))
         except FoundationConflict as exc:
             # Optimistic concurrency: a human review decision written against a
             # revision that has since moved is rejected, never merged blindly.

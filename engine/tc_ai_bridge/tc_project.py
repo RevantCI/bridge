@@ -121,6 +121,7 @@ class TranslationCoreProject:
         self.journal = TransactionJournal(self.path, self.companion_dir())
         self._refuse_pre_cutover_project()
         self.workbench = WorkbenchRepository(self.companion_dir() / 'bridge-workbench.sqlite3')
+        self._cross_verse_links = None  # CrossVerseLinkStore, built on first use (#117)
         # Identity for every workbench write. Injectable so a test can stamp a
         # known actor without touching app-level state; resolved lazily
         # otherwise, because working it out opens the workspace database and
@@ -1238,6 +1239,26 @@ class TranslationCoreProject:
         except Exception as e:
             self.journal.rollback(tx, str(e)); raise
         return backup
+
+    @property
+    def cross_verse_links(self):
+        """The Bridge-private cross-verse link store (#117), over this project's
+        workbench database. Lazy: most project operations never touch it."""
+        if self._cross_verse_links is None:
+            from .cross_verse_links import CrossVerseLinkStore
+            self._cross_verse_links = CrossVerseLinkStore(self)
+        return self._cross_verse_links
+
+    @staticmethod
+    def _bottom_signatures(raw: dict[str, Any]) -> set[str]:
+        """Every target-token signature a raw tC verse holds, grouped or banked."""
+        out: set[str] = set()
+        for group in raw.get('alignments', []) or []:
+            for token in group.get('bottomWords', []) or []:
+                out.add(f"{token.get('word','')}\u241f{token.get('occurrence',1)}\u241f{token.get('occurrences',1)}")
+        for token in raw.get('wordBank', []) or []:
+            out.add(f"{token.get('word','')}\u241f{token.get('occurrence',1)}\u241f{token.get('occurrences',1)}")
+        return out
 
     def _record_alignment_history(
         self,
@@ -2391,6 +2412,14 @@ class TranslationCoreProject:
                 raise
         self.journal.mark_writing(journal_tx)
         new_alignment = self._reconcile_alignment_after_target_edit(chapter, verse, new_text)
+        # #117: a target word that the edit removed may be the target of a
+        # cross-verse link; those links are marked invalid inside the same
+        # journal transaction (below), so a failed edit leaves them untouched.
+        removed_signatures = (
+            self._bottom_signatures(self.load_alignment_chapter(chapter).get(str(verse), {}))
+            - self._bottom_signatures(new_alignment)
+        )
+        invalidated_links: list[dict[str, Any]] = []
         if context_id is None:
             context_id = {'reference': {'bookId': self.book_id, 'chapter': int(chapter) if str(chapter).isdigit() else str(chapter), 'verse': int(verse) if str(verse).isdigit() else str(verse)}, 'tool': 'translationCoreAI', 'groupId': 'human-scripture-edit'}
         edit_record = {
@@ -2421,6 +2450,10 @@ class TranslationCoreProject:
                             e['verseEdits'] = True; changed=True
                     if changed:
                         _write_json_atomic(ip, arr); touched.append(str(ip))
+            if removed_signatures:
+                invalidated_links = self.cross_verse_links.invalidate_missing_targets(
+                    chapter, verse, removed_signatures,
+                )
         except Exception as e:
             if semantic_intent and self.passage_semantic_runtime is not None:
                 try:
@@ -2473,7 +2506,7 @@ class TranslationCoreProject:
             )
         except Exception:
             pass
-        return {'oldText': old_text, 'newText': new_text, 'backup': str(backup), 'verseEdit': str(edit_path), 'alignmentInvalid': str(invalid), 'indexesTouched': touched, 'semanticInvalidation': semantic_invalidation, 'journalTransactionId': journal_tx.transaction_id}
+        return {'oldText': old_text, 'newText': new_text, 'backup': str(backup), 'verseEdit': str(edit_path), 'alignmentInvalid': str(invalid), 'indexesTouched': touched, 'semanticInvalidation': semantic_invalidation, 'journalTransactionId': journal_tx.transaction_id, 'crossVerseLinksInvalidated': [link['id'] for link in invalidated_links]}
 
     def record_qa_decision(self, chapter: str | int, verse: str | int, issue_key: str, decision: str, note: str = '', issue: dict[str, Any] | None = None) -> str:
         iso, _ = self._timestamp()

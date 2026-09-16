@@ -215,6 +215,42 @@ export interface AlignmentGaps {
   targetUnmatched: number;
 }
 
+/** One end of a Bridge-private cross-verse link (#117): a tC token signature
+ *  plus its verse. Positional ids are resolved per verse, never stored. */
+export interface CrossVerseLinkEnd {
+  chapter: string;
+  verse: string;
+  word: string;
+  occurrence: number;
+  occurrences: number;
+  signature: string;
+  strong?: string;
+  lemma?: string;
+  morph?: string;
+}
+
+export interface CrossVerseLink {
+  id: string;
+  bookId: string;
+  source: CrossVerseLinkEnd;
+  target: CrossVerseLinkEnd;
+  state: "active" | "invalid";
+  invalidReason?: string;
+  createdAt: string;
+  updatedAt: string;
+  actorId: string;
+  /** Set when the source is in the verse this context describes. */
+  sourceTopId: string | null;
+  /** Set when the target is in the verse this context describes. */
+  targetBottomId: string | null;
+}
+
+export interface CrossVerseLinkResult {
+  link: CrossVerseLink;
+  source: AlignmentContext;
+  target: AlignmentContext;
+}
+
 export interface AlignmentContext {
   chapter: string;
   verse: string;
@@ -232,7 +268,18 @@ export interface AlignmentContext {
   canComplete: boolean;
   history: AlignmentHistoryEntry[];
   chapterStatus: AlignmentCounts;
+  /** Gaps net of cross-verse links: a linked word is no longer a gap. */
   gaps: AlignmentGaps;
+  crossVerseLinks: CrossVerseLink[];
+  /** Bottom ids of this verse whose word is the target of an active link. */
+  crossVerseAccountedIds: string[];
+  /** Top ids of this verse whose token is realized in another verse. */
+  crossVerseRealizedIds: string[];
+  crossVerseAccounted: number;
+  crossVerseRealized: number;
+  /** Every remaining gap is covered by a link. `status` and `completionState`
+   *  still tell the translationCore truth: the verse is not complete. */
+  fullyAccounted: boolean;
 }
 
 /** alignment.getRange: one context per requested verse, in the caller's

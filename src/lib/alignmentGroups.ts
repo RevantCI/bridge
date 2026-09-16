@@ -3,7 +3,8 @@
 // so both surfaces agree on what "aligned", "unaligned" and "gap" mean.
 import type { AlignmentContext, AlignmentGroupView, AlignmentToken } from "./types/finding";
 
-type GroupsView = Pick<AlignmentContext, "groups" | "topTokens" | "bottomTokens">;
+type GroupsView = Pick<AlignmentContext, "groups" | "topTokens" | "bottomTokens">
+  & Partial<Pick<AlignmentContext, "crossVerseAccountedIds" | "crossVerseRealizedIds">>;
 
 /** The group a target (bottom) token belongs to, if any. */
 export function groupForTarget(context: GroupsView, bottomId: string): AlignmentGroupView | undefined {
@@ -38,16 +39,30 @@ export function unmatchedSources(context: GroupsView): AlignmentToken[] {
   });
 }
 
+/** Unaligned target tokens that no cross-verse link accounts for either (#117):
+ *  what the "not fully aligned" flag counts. */
+export function unaccountedTargets(context: GroupsView): AlignmentToken[] {
+  const accounted = new Set(context.crossVerseAccountedIds ?? []);
+  return unalignedTargets(context).filter((token) => !accounted.has(token.id));
+}
+
+/** Unmatched source tokens that are not realized in another verse either. */
+export function unrealizedSources(context: GroupsView): AlignmentToken[] {
+  const realized = new Set(context.crossVerseRealizedIds ?? []);
+  return unmatchedSources(context).filter((token) => !realized.has(token.id));
+}
+
 export interface GapCounts {
   sourceUnmatched: number;
   targetUnmatched: number;
 }
 
-/** Client-side mirror of the engine's per-verse `gaps` (alignment.getRange). */
+/** Client-side mirror of the engine's per-verse `gaps` (alignment.getRange),
+ *  net of cross-verse links like the engine's. */
 export function gapCounts(context: GroupsView): GapCounts {
   return {
-    sourceUnmatched: unmatchedSources(context).length,
-    targetUnmatched: unalignedTargets(context).length,
+    sourceUnmatched: unrealizedSources(context).length,
+    targetUnmatched: unaccountedTargets(context).length,
   };
 }
 

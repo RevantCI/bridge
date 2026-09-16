@@ -20,6 +20,7 @@ from tc_ai_bridge.workbench_repository import (
     WORKBENCH_SCHEMA_VERSION,
     WorkbenchRepository,
     _MIGRATION_V1,
+    _MIGRATION_V2,
 )
 from tests.persistence.test_workbench_repository import _REQUIRED_EXTRA_COLUMNS, _write
 
@@ -187,7 +188,7 @@ def test_workbench_v1_to_v2_keeps_v1_rows_readable_and_the_log_immutable(tmp_pat
         conn.close()
 
     repo = WorkbenchRepository(path)
-    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 2
+    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 3
     assert json.loads(repo.get("check_cache", "c1")["payload_json"]) == {"v": 1}
     [event] = _events(repo)
     assert event["columns_json"] is None and event["event_id"] == "e1"
@@ -206,3 +207,57 @@ def test_workbench_v1_to_v2_keeps_v1_rows_readable_and_the_log_immutable(tmp_pat
     # And a later write on the upgraded database records its lifted columns.
     _write(repo, "human_decisions", "h1")
     assert json.loads(_events(repo)[-1]["columns_json"]) == {"kind": "qa", "key": "k1"}
+
+
+def test_workbench_v2_to_v3_adds_the_cross_verse_link_table_and_keeps_v2_data(tmp_path):
+    """v3 (#117) adds `alignment_cross_verse_links`. A v2 database must come up
+    at v3 with its rows and events intact, the backup taken, the new table
+    writable through the ordinary `_write` path (so it is a mutable table with
+    the nine common columns), and its UNIQUE pair index enforced."""
+    path = tmp_path / "bridge-workbench.sqlite3"
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, schema_id TEXT NOT NULL, applied_at TEXT NOT NULL)"
+        )
+        conn.executescript(
+            "BEGIN;\n" + _MIGRATION_V1
+            + "\nINSERT INTO schema_migrations(version,schema_id,applied_at) VALUES(1,'bridge-workbench-v1','t');\n"
+            + _MIGRATION_V2
+            + "\nINSERT INTO schema_migrations(version,schema_id,applied_at) VALUES(2,'bridge-workbench-v1','t');\nCOMMIT;"
+        )
+        conn.execute(
+            "INSERT INTO alignment_history(id,project_id,book_id,revision,actor_id,device_id,created_at,updated_at,"
+            "payload_json,chapter,verse,backup_path) VALUES('a1','proj-1','rut',1,'human','dev-1','t','t',"
+            "'{\"operation\":\"realign\"}','1','2','backups/x.json')"
+        )
+        conn.execute(
+            "INSERT INTO change_log(event_id,project_id,book_id,table_name,row_key,op,base_revision,new_revision,"
+            "actor_id,device_id,created_at,payload_json,columns_json) VALUES('e1','proj-1','rut','alignment_history',"
+            "'a1','upsert',NULL,1,'human','dev-1','t','{}','{\"chapter\":\"1\"}')"
+        )
+        conn.commit()
+        assert "alignment_cross_verse_links" not in {
+            row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        conn.close()
+
+    repo = WorkbenchRepository(path)
+    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 3
+    assert json.loads(repo.get("alignment_history", "a1")["payload_json"]) == {"operation": "realign"}
+    [event] = _events(repo)
+    assert event["event_id"] == "e1" and json.loads(event["columns_json"]) == {"chapter": "1"}
+    assert list((tmp_path / "backups").glob("pre-workbench-v3-*"))
+
+    lifted = {
+        "chapter": "1", "verse": "3", "source_signature": "a\u241f1\u241f1",
+        "target_chapter": "1", "target_verse": "6", "target_signature": "b\u241f1\u241f1", "state": "active",
+    }
+    _write(repo, "alignment_cross_verse_links", "l1", payload={"state": "active"}, extra_columns=lifted)
+    row = repo.get("alignment_cross_verse_links", "l1")
+    assert row is not None and row["target_verse"] == "6" and row["state"] == "active"
+    assert json.loads(_events(repo)[-1]["columns_json"]) == lifted
+    # The pair is unique per project/book: a second row for the same pair is refused.
+    with pytest.raises(sqlite3.IntegrityError):
+        _write(repo, "alignment_cross_verse_links", "l2", payload={"state": "active"}, extra_columns=lifted)

@@ -29,7 +29,7 @@ from typing import Any, Iterator
 import uuid
 
 
-WORKBENCH_SCHEMA_VERSION = 2
+WORKBENCH_SCHEMA_VERSION = 3
 WORKBENCH_SCHEMA_ID = "bridge-workbench-v1"
 
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -58,6 +58,7 @@ MUTABLE_TABLES: tuple[str, ...] = (
     "metrics_events",
     "metrics_counters",
     "file_backups",
+    "alignment_cross_verse_links",
 )
 
 
@@ -448,9 +449,50 @@ BEGIN
 END;
 """
 
+# v3 (#117, cross-verse alignment): Bridge-private cross-verse links.
+# translationCore alignment groups are verse-local, and Bridge never fakes a
+# cross-verse link inside them (semantic_alignment_guard.py, HANDOFF ss39), so
+# a reviewer's judgement that a source token of one verse is realized in
+# another verse's target text has nowhere to live in `alignmentData/`. It
+# lives here. A link is keyed by tC token signatures
+# (`word U+241F occurrence U+241F occurrences`) plus chapter and verse on both
+# sides -- never by the positional H001/T001 ids `make_inventory` regenerates
+# on every load. `state` is 'active', or 'invalid' once a target edit removed
+# the word the link pointed at. The UNIQUE index makes the pair idempotent;
+# NULLs are distinct to SQLite, so the generic per-table tests that write rows
+# without lifted columns still pass. See cross_verse_links.py.
+_MIGRATION_V3 = r"""
+CREATE TABLE alignment_cross_verse_links (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    book_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+    actor_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    chapter TEXT,
+    verse TEXT,
+    source_signature TEXT,
+    target_chapter TEXT,
+    target_verse TEXT,
+    target_signature TEXT,
+    state TEXT
+);
+CREATE INDEX ix_alignment_cross_verse_links_source
+    ON alignment_cross_verse_links(project_id, book_id, chapter, verse);
+CREATE INDEX ix_alignment_cross_verse_links_target
+    ON alignment_cross_verse_links(project_id, book_id, target_chapter, target_verse);
+CREATE UNIQUE INDEX ux_alignment_cross_verse_links_pair
+    ON alignment_cross_verse_links(project_id, book_id, chapter, verse, source_signature,
+                                   target_chapter, target_verse, target_signature);
+"""
+
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, _MIGRATION_V1),
     (2, _MIGRATION_V2),
+    (3, _MIGRATION_V3),
 )
 
 

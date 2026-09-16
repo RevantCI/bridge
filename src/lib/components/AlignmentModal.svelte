@@ -9,7 +9,7 @@
   import { createPointerDrag } from "../alignmentDrag";
   import { openCrossVerse } from "../alignmentUi";
   import {
-    alignedTargetsFor, bottomIdsAfterDrop, groupForTarget, occurrenceLabel as occurrence, unalignedTargets,
+    alignedTargetsFor, bottomIdsAfterDrop, groupForTarget, occurrenceLabel as occurrence, unaccountedTargets,
   } from "../alignmentGroups";
   import LexiconPopup from "./LexiconPopup.svelte";
 
@@ -92,7 +92,13 @@
     return meaningByToken[token.id] || [token.lemma, token.strong, token.morph].filter(Boolean).join(" · ");
   }
 
-  $: unalignedCount = context ? unalignedTargets(context).length : 0;
+  // #117: a word that a cross-verse link accounts for is still in the tC word
+  // bank (translationCore alignment is verse-local) but is no longer a gap.
+  $: unalignedCount = context ? unaccountedTargets(context).length : 0;
+  $: accountedIds = new Set(context?.crossVerseAccountedIds ?? []);
+  $: accountedNote = context && context.crossVerseAccounted + context.crossVerseRealized > 0
+    ? `${context.crossVerseAccounted + context.crossVerseRealized} word${context.crossVerseAccounted + context.crossVerseRealized === 1 ? "" : "s"} linked across verses (Bridge-private; completion stays with translationCore).`
+    : "";
 
   async function refreshChecks(updated: AlignmentContext, message: string) {
     context = updated;
@@ -231,7 +237,10 @@
           ⚑ Not fully aligned — {unalignedCount} target word{unalignedCount === 1 ? "" : "s"} still
           {unalignedCount === 1 ? "needs" : "need"} a source word. Drag or click a word bank item below, then a
           column, to align it.
+          {#if accountedNote}<span class="accounted-note">{accountedNote}</span>{/if}
         </div>
+      {:else if context.fullyAccounted}
+        <div class="accounted-flag">↔ {accountedNote}</div>
       {:else if context.status === "invalid"}
         <div class="alignment-flag">⚑ Alignment has structural issues — see below.</div>
       {/if}
@@ -308,7 +317,9 @@
             on:keydown={(event) => (event.key === "Enter" || event.key === " ") && (event.preventDefault(), handleBankAreaClick())}
           >
             {#each context.bottomTokens as item (item.id)}
-              {#if groupForTarget(context, item.id)}
+              {#if accountedIds.has(item.id)}
+                <span class="token target already-aligned accounted" title="Accounted for by a cross-verse link (see Cross-verse alignment)"><span class="word">{item.word}{#if item.occurrences > 1}<span class="occ">{occurrence(item)}</span>{/if}</span><small>↔</small></span>
+              {:else if groupForTarget(context, item.id)}
                 <span class="token target already-aligned" title={`Already aligned`}><span class="word">{item.word}{#if item.occurrences > 1}<span class="occ">{occurrence(item)}</span>{/if}</span></span>
               {:else}
                 <button
@@ -383,6 +394,10 @@
   .source-warning, .issues, .notice, .error, .alignment-flag { border-radius: 9px; padding: 10px 12px; margin-bottom: 12px; font-size: var(--fs-sm); line-height: 1.45; }
   .source-warning { display: flex; flex-direction: column; gap: 3px; background: var(--warning-bg); color: var(--warning); }
   .alignment-flag { background: var(--warning-bg); color: var(--warning); font-weight: 600; }
+  .accounted-note { display: block; margin-top: 4px; font-weight: 400; color: var(--text-2); }
+  .accounted-flag { border-radius: 9px; padding: 10px 12px; margin-bottom: 12px; font-size: var(--fs-sm); background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  .already-aligned.accounted { border-style: dashed; border-color: var(--accent); flex-direction: row; gap: 5px; }
+  .already-aligned.accounted small { color: var(--accent); font-weight: 700; }
   .issues { background: #FFF5F5; color: var(--danger); }
   .notice { background: #EAF7EF; color: var(--success); }
   .error { background: #FFF0F0; color: var(--danger); }
