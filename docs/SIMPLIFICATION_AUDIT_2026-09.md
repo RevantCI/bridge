@@ -16,8 +16,10 @@ points** (B4); replace the old `ARCHITECTURE.md` with a current-state map (done 
 commit as this file).
 
 **Issues filed from this audit (2026-09-16):** A1 #101 · A2 #102 · A3 #103 · A4 #104 ·
-A5 #105 · A6 is #93 (pre-existing) · A7 #106 · A8 #107 · B4 #108 · B1+B2 #109.
-Not filed: B5 (keep), B6, B7 (held), B8, B9, and the §4/§5 fixes.
+A5 #105 · A6 is #93 (pre-existing) · A7 #106 · A8 #107 · B4 #108 · B1+B2 #109 · B6 #110 ·
+B9 #111 · §4.1 lazy runtime #112 · §4.2 connection reuse #113 · §4.3 auto-check #114 ·
+§5.2 collapse the RPC layers #115. B8 is #12 (pre-existing). §5.1 is #82 and §5.3 is #74.
+Not filed: B5 (keep), B7 (held behind the cross-verse alignment page, #116 to #119).
 
 ## 1. What is slowing every feature down
 
