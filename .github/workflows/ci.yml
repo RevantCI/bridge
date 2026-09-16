@@ -201,13 +201,13 @@ jobs:
           pip install -c constraints-py312-windows.txt -e ".[dev]"
       # ~120MB, over GitHub's single-file push limit and not tracked by LFS, so it
       # lives as a release asset (see docs/DEVELOPER_SETUP.md and release.yml, which
-      # does the same thing). Without it 16 Stage 3 tests in
-      # test_semantic_mapping_stage3.py and test_semantic_corpus_discovery.py fail with
-      # SemanticMappingError: they construct SemanticSourceRepository with an explicit
-      # path and so bypass the conftest fixture that points everything else at a
-      # deliberately nonexistent DB.
+      # does the same thing). Without it the Stage 3 tests in
+      # test_semantic_mapping_stage3.py fail with SemanticMappingError: they construct
+      # SemanticSourceRepository with an explicit path and so bypass the conftest
+      # fixture that points everything else at a deliberately nonexistent DB.
       #
-      # Confirmed by run 34588971270: 16 failed, 1047 passed without this step.
+      # Confirmed by run 34588971270: 16 failed, 1047 passed without this step
+      # (that count included test_semantic_corpus_discovery.py, removed in #101).
       - name: Download Stage 3 semantic-source DB
         env:
           GH_TOKEN: ${{ github.token }}

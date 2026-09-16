@@ -8339,3 +8339,25 @@ because two things a fresh checkout lacks showed up as failures first:
   pure deletion of a copy step, and a full PyInstaller build would have
   contended with the release build running in the other session. The next
   release build exercises it.
+
+## 2026-09-16 — #101: `semantic_corpus_discovery.py` and its test are removed
+
+Group A of the simplification audit (A1). #100 had already deleted
+`scripts/generate_irvtam_mapping_candidates.py`; what remained was the generator
+module itself, `engine/tc_ai_bridge/semantic_corpus_discovery.py` (403 lines), and
+`engine/tests/semantic/test_semantic_corpus_discovery.py` (79 lines, one of the
+`_SLOW_FILES` at about 70 s, `stage3db`-marked).
+
+Re-verified against HEAD before deleting: the test file was the only importer
+anywhere under `engine/` (`grep -rn semantic_corpus_discovery`), and no other test
+referenced its names. Removed with it: the two `conftest.py` entries
+(`_SLOW_FILES`, `_FILE_MARKERS`), the file's mention in `ci.yml`'s comment on why
+the Stage 3 DB is downloaded, and its cell in `ARCHITECTURE.md`'s module table.
+The `stage3db` marker and the Stage 3 engine stay (#109 is not started).
+
+### Gates
+
+Run in a fresh worktree with the Stage 3 DB, sidecar exes and resources copied
+in first (the four git-ignored artifacts noted under #100):
+`pytest -n auto -m "not slow"` from `engine/`: **1022 passed** in 2m53s, 0 failed.
+No frontend or Rust change, so those gates were not run.

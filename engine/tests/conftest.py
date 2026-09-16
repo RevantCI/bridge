@@ -34,7 +34,7 @@ _DIRECTORY_MARKERS = {
     "resources": ("resources",),
 }
 # `slow` is applied per file, to the files whose tests average more than ~5 s.
-# Measured 2026-09-11 (serial baseline, docs/BUILD_LOG.md #74): these eleven files
+# Measured 2026-09-11 (serial baseline, docs/BUILD_LOG.md #74): these files
 # plus the two subprocess files hold ~2,700 of the suite's ~3,700 test-seconds, almost
 # all of it fixture *setup* that rebuilds the Stage 5-8 pipeline for every test (#82).
 _SLOW_FILES = (
@@ -47,7 +47,6 @@ _SLOW_FILES = (
     "test_qa_audit_stage8.py",                   # 169 s / 30
     "test_resource_materializer.py",             # 129 s / 10
     "test_ai_review_stale_after_apply.py",       #  96 s / 4
-    "test_semantic_corpus_discovery.py",         #  70 s / 5
     "test_knowledge_base_ta.py",                 #  54 s / 4
     "test_correction_case_c_production.py",      #  49 s / 1
 )
@@ -55,7 +54,6 @@ _FILE_MARKERS = {
     "test_stdio_e2e.py": ("subprocess", "slow"),
     "test_versification_concurrency.py": ("subprocess", "slow"),
     "test_semantic_mapping_stage3.py": ("stage3db",),
-    "test_semantic_corpus_discovery.py": ("stage3db",),
     "test_correction_acceptance_queue_visibility.py": ("external",),
     "test_correction_acceptance_scripts.py": ("external",),
     "test_correction_case_c_production.py": ("external",),

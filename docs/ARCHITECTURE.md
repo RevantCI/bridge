@@ -197,7 +197,7 @@ running, and cancel-wait every 400 ms.
 | Stages 4 to 8 | `passage_semantic_repository.py` 5070, `passage_semantic_runtime.py` 1364, `passage_semantic_models.py` 1171, `source_semantic_inventory.py` 779, `target_semantic_inventory.py` 392, `semantic_location.py` 853, `meaning_analysis.py` 560, `qa_audit.py` 822, `analysis_jobs.py` 724 |
 | Stage 9A review | `qa_review.py` 412, `review_policy.py`, `qa_target_hash.py` |
 | Stage 9B correction | `correction_eligibility.py` 570, `correction_wording.py` 694, `correction_application.py` 306, `correction_application_recovery.py` 232, `correction_affected_analysis.py` 269, `correction_verification.py` 1036 |
-| Stage 3 semantic mapping (removal decided) | `semantic_mapping.py` 867, `semantic_mapping_bridge.py` 319, `semantic_mapping_service.py`, `semantic_review_policy.py` 164, `semantic_corpus_discovery.py` 403 (the validation queue on top of it was removed in #100) |
+| Stage 3 semantic mapping (removal decided) | `semantic_mapping.py` 867, `semantic_mapping_bridge.py` 319, `semantic_mapping_service.py`, `semantic_review_policy.py` 164 (the validation queue on top of it was removed in #100, the corpus-discovery generator in #101) |
 | AI (optional, online) | `ai_client.py` 911, `triage.py` 620, `triage_prompts.py` 220 |
 | Connectors | `paratext_connector.py`, `paratext_notes.py` 420, `paratext_api.py`, `logos_connector.py` 281, `navigation.py` 446 |
 | Storage and durability | `workbench_repository.py` 1162, `workspace_repository.py` 489, `transaction_journal.py` 177 |
