@@ -80,7 +80,6 @@ fn main() {
             commands::lexicon_get_entry,
             commands::alignment_ai_propose,
             commands::alignment_ai_apply_proposal,
-            commands::ai_explain,
             commands::ai_review_start,
             commands::ai_review_status,
             commands::ai_review_cancel,

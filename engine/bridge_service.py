@@ -340,7 +340,6 @@ class Methods:
     ALIGNMENT_AI_PROPOSE = "alignment.aiPropose"
     ALIGNMENT_AI_APPLY_PROPOSAL = "alignment.aiApplyProposal"
 
-    AI_EXPLAIN_VERSE = "ai.explain"
     AI_REVIEW_START = "ai.review.start"
     AI_REVIEW_STATUS = "ai.review.status"
     AI_REVIEW_CANCEL = "ai.review.cancel"
@@ -1818,39 +1817,6 @@ class BridgeEngine:
         validate_preparation_proposal(current, proposal)
         proposed = apply_proposal(current, proposal)
         return self._save_alignment(chapter, verse, proposed, expected_original, "ai_propose_apply")
-
-    def explain_verse(self, chapter: str, verse: str) -> dict[str, Any]:
-        """ai.explain: one-click AI preparation of a verse's translationCore checks
-        for the human final reviewer (ai_client.OpenAIResponsesClient.prepare_verse_review).
-        AI reads translationNotes/translationWords/translationAcademy evidence, proposes
-        target-word selections for each check, and performs whole-verse QA — all backed by
-        real evidence_catalog citations. Nothing is written to project files: the human
-        reviewer sees this as a preparation to confirm/reject, same "AI says what it may
-        mean, human decides" boundary as everywhere else in Bridge. Requires both an
-        original-language source (to build the alignment inventory) and a configured API
-        key; needs real translationNotes/translationWords/translationAcademy evidence to be
-        materialized for grounded results — a project still 'requires-resource-index' will
-        simply get thin evidence, not an error, matching how run_full_review degrades."""
-        self._require_project()
-        client = self._ai_client()
-        alignment = self.project.load_verse_alignment(chapter, verse)
-        proposal, review_alignment, reviews, issues, summary, meta = client.prepare_verse_review(
-            self.project, chapter, verse, alignment,
-        )
-        self.settings.record_ai_usage(
-            int(meta.get("total_tokens_for_prepare", 0) or 0), float(meta.get("estimated_cost_usd", 0.0) or 0.0),
-        )
-        return {
-            "summary": summary,
-            "checkReviews": [r.to_dict() for r in reviews],
-            "qaIssues": [i.to_dict() for i in issues],
-            "alignmentProposal": proposal,
-            "alignmentWasAIProposed": bool(proposal is not None),
-            "usage": {
-                "totalTokens": int(meta.get("total_tokens_for_prepare", 0) or 0),
-                "estimatedCostUSD": round(float(meta.get("estimated_cost_usd", 0.0) or 0.0), 6),
-            },
-        }
 
     @staticmethod
     def _safe_ai_selection_reason(review: Any) -> str:
@@ -3794,8 +3760,6 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.apply_ai_alignment_proposal(
                     p["chapter"], p["verse"], p["proposal"], p["expectedOriginal"],
                 ))
-            if m == Methods.AI_EXPLAIN_VERSE:
-                return EngineResponse.ok(request.id, result=self.explain_verse(p["chapter"], p["verse"]))
             if m == Methods.AI_REVIEW_START:
                 return EngineResponse.ok(request.id, result=self.start_ai_review_job(
                     p.get("scope", "verse"), p.get("chapter", ""), p.get("verse", ""),

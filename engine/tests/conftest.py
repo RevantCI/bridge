@@ -42,7 +42,7 @@ _SLOW_FILES = (
     "test_qa_target_hash_contract_stage8_9b.py", # 465 s / 9
     "test_meaning_failure_eligibility_stage9b.py",  # 377 s / 72
     "test_source_semantic_inventory_stage5.py",  # 254 s / 16
-    "test_ai_explain.py",                        # 203 s / 11
+    "test_ai_review_protocol.py",                # 203 s / 11 (as test_ai_explain.py; 9 tests since #105)
     "test_semantic_location_stage6b.py",         # 195 s / 14
     "test_qa_audit_stage8.py",                   # 169 s / 30
     "test_resource_materializer.py",             # 129 s / 10

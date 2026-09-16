@@ -342,21 +342,6 @@ def main() -> int:
             if ai_propose.get("success") or ai_propose.get("error", {}).get("code") != "ai_error":
                 raise SystemExit(f"Frozen alignment.aiPropose did not fail cleanly with ai_error: {ai_propose}")
 
-            # Same reasoning as ai-propose-no-key above: confirms ai.explain's imports
-            # (knowledge_base.py, the now-bundled translationAcademy resource tree) are
-            # real and importable inside the frozen executable. This fixture project has
-            # no application-storage resources/ folder of its own (it's hand-built, not
-            # created via project.import's real materialization flow), so
-            # TranslationHelpsKnowledgeBase's constructor legitimately raises
-            # knowledge_base_error before ai_client.py ever reaches its own missing-API-key
-            # check — both are real, clean failures proving the bundle is intact; only an
-            # internal_error/crash would indicate a real packaging gap.
-            ai_explain = request(
-                "ai-explain-no-key", "ai.explain", {"chapter": "1", "verse": "1"},
-            )
-            if ai_explain.get("success") or ai_explain.get("error", {}).get("code") not in ("ai_error", "knowledge_base_error"):
-                raise SystemExit(f"Frozen ai.explain did not fail cleanly: {ai_explain}")
-
             # A developer machine may or may not have the companion running.
             # Either a well-formed live state or the connector's clean unavailable
             # error proves the frozen import/dispatch path is intact.

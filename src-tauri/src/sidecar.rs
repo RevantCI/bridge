@@ -134,8 +134,6 @@ fn request_timeout_seconds(method: &str) -> u64 {
         "alignment.aiPropose" | "correction.createProposal" | "correction.regenerateProposal" => {
             260
         }
-        // ai.explain can make up to two sequential real model calls.
-        "ai.explain" => 300,
         // Logos starts a persistent -STA PowerShell helper on first use.
         "logos.getState" | "logos.setReference" => 20,
         // A whole-Bible report payload (tens of thousands of rows) takes a

@@ -6,7 +6,7 @@ already computes internally, instead of only returning it as a discarded
 `alignmentProposal` field.
 
 `prepare_verse_review` itself (the alignment-proposal half) already has
-real coverage in test_ai_alignment_propose.py and test_ai_explain.py; a
+real coverage in test_ai_alignment_propose.py and test_ai_review_protocol.py; a
 full end-to-end run additionally needs a translationCore-shaped
 `resources/en/translationHelps` install for `TranslationHelpsKnowledgeBase`,
 which is unrelated to what's new here. So `prepare_verse_review` itself is

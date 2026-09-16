@@ -64,7 +64,7 @@ class VerseEvidence:
 
     # translationCore checking-tool entries (tN/tW) with their resolved
     # evidence text, straight from evidence_pack_for_verse's own 'checks'
-    # list — same shape ai.explain sends the model, not re-derived here.
+    # list — same shape ai.review sends the model, not re-derived here.
     translation_helps: list[dict[str, Any]]
     reference_bibles: list[dict[str, Any]]
     resource_provenance: dict[str, Any]

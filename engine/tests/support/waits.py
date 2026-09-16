@@ -10,7 +10,8 @@ local run actually meets:
   core, so a job that finishes in milliseconds in isolation can be starved well
   past 10 s -- reproduced twice locally on different tests (#85);
 * on a GitHub ``windows-latest`` runner the same 10 s budget expired *serially*
-  (#85 again: CI run 34806216124, ``test_ai_explain.py``), so scaling by worker
+  (#85 again: CI run 34806216124, ``test_ai_explain.py``, since renamed
+  ``test_ai_review_protocol.py``), so scaling by worker
   count alone is not enough -- the floor has to be generous in absolute terms.
 
 Raising these budgets is close to free. Every one of these loops returns as soon

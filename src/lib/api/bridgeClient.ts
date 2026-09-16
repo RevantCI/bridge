@@ -1,5 +1,5 @@
 import type {
-  AiExplainResult, AIReviewChapterResponse, AIReviewJobSnapshot, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
+  AIReviewChapterResponse, AIReviewJobSnapshot, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
   AlignmentStatusResponse, BookProgressEntry, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
   CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, LexiconEntryResponse, NativeCheckListResponse,
   NativeCheckTool, NavigationSyncState, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
@@ -462,11 +462,6 @@ export const bridge = {
     chapter: string, verse: string, proposal: AlignmentAiProposal, expectedOriginal: VerseAlignment,
   ): Promise<AlignmentContext> {
     return call("alignment_ai_apply_proposal", { chapter, verse, proposal, expectedOriginal });
-  },
-
-  /** Read-only AI preparation of a verse's checks — nothing is written to project files. */
-  aiExplainVerse(chapter: string, verse: string): Promise<AiExplainResult> {
-    return call("ai_explain", { chapter, verse });
   },
 
   startAIReview(

@@ -838,23 +838,6 @@ pub async fn alignment_ai_apply_proposal(
         .await
 }
 
-/// One-click AI preparation of a verse's checks for the human reviewer. Read-only:
-/// nothing is written to project files. Can take a real model call's worth of time,
-/// see sidecar.rs's per-method timeout table.
-#[tauri::command]
-pub async fn ai_explain(
-    sidecar: State<'_, EngineSidecar>,
-    chapter: String,
-    verse: String,
-) -> Result<Value, String> {
-    sidecar
-        .send_request(
-            "ai.explain",
-            serde_json::json!({ "chapter": chapter, "verse": verse }),
-        )
-        .await
-}
-
 #[tauri::command]
 pub async fn ai_review_start(
     sidecar: State<'_, EngineSidecar>,

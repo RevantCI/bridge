@@ -8430,3 +8430,55 @@ files reports only two unused imports (`os` in `bridge_service.py`, `shutil` in
 change; those gates were not run. `smoke_sidecars.py` was not run against a
 frozen build (that needs `build-sidecars.ps1`; the next release build exercises
 it).
+
+## 2026-09-16 — #105: the `ai.explain` path is removed; its gate tests move to `ai.review`
+
+Group A of the simplification audit (A5). `ai.explain` (`explain_verse`) was a
+synchronous, thinner duplicate of what the `ai.review` job does per verse: both
+called `prepare_verse_review` and returned its check reviews. No component called
+`bridge.aiExplainVerse`. Removed: the `Methods` constant, the handler and
+dispatcher branch, the `ai_explain` Tauri command and its `main.rs` registration,
+the `"ai.explain" => 300` timeout entry in `sidecar.rs`, the `aiExplainVerse`
+client method, and the `ai-explain-no-key` block in `scripts/smoke_sidecars.py`.
+
+### What the re-verification changed about the plan
+
+- **The test file was not an `ai.explain` test file.** `tests/ai/test_ai_explain.py`
+  held eleven tests; five called `ai.explain`, six drove `ai.review.start`, the
+  Tamil plugin guidance and `gate_check_reviews`, and two other files imported its
+  fixtures (`imported_titus_project`, `_grounded_fake_transport`,
+  `_wait_for_ai_job`). Deleting it would have removed live coverage. It is now
+  `tests/ai/test_ai_review_protocol.py` with nine tests. Two `ai.explain`-only
+  tests (missing API key; evidence-backed run) went. The other three exercised
+  `prepare_verse_review`'s selection-consistency gate (recover the exact quoted
+  target, keep an ambiguous pass pending, never turn a problem into
+  nothing-to-select) and only used `ai.explain` as the way in; they now run the
+  live `ai.review.start` job and read `latestResult.result.checkReviews`, the same
+  `AICheckReview.to_dict()` rows. Assertions are unchanged.
+- **The 203 s does not go away.** That figure was the whole file, and almost all of
+  it is the shared `imported_titus_project` fixture (a real import plus
+  materialization), which the nine remaining tests still need. Only two tests'
+  worth of setup is saved. The `_SLOW_FILES` entry follows the rename.
+- **`AiExplainResult` stays in `finding.ts`.** `ReviewPanel.svelte` uses it as the
+  display type for the `ai.review` job result; only `bridgeClient.ts`'s import of
+  it went with the method. Its name is now misleading; left for #103 or a rename
+  when the panel is next touched.
+- **The smoke block's stated purpose was already covered.** It existed to prove
+  `knowledge_base.py` is importable inside the frozen executable.
+  `bridge_service.py` imports `KnowledgeBaseError` at module level, so the frozen
+  `ping` proves the same thing. QA matrix rows A22 and A23 are `RETIRED (#105)`.
+- Two historical docstrings (`resource_materializer.py:269`,
+  `test_resource_materializer.py:170`) still say a gap was found "while
+  investigating ai.explain". That is what happened; left as history.
+
+### Gates
+
+- Engine: `pytest tests/ai/test_ai_review_protocol.py tests/alignment/test_ai_review_stale_after_apply.py`
+  (both `slow`, so run explicitly): **13 passed** in 3m34s.
+  `pytest -n auto -m "not slow"`: **1013 passed**, 0 failed (4m08s, slowed by the
+  concurrent cargo build).
+- Frontend: `npm run check` 0 errors / 0 warnings; `npm run test` 26 files,
+  **367 passed**; `npm run build` clean.
+- Shell: `cargo check` clean (5m52s, cold target). `cargo test` ran once for the
+  batch of Rust-touching issues (#105, #103, #106); its result is under the #103
+  entry below.
