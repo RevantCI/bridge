@@ -74,11 +74,13 @@ import type {
 } from "../utils/reportStats";
 
 /**
- * Thin wrapper around Tauri's invoke() calling the real commands defined
- * in src-tauri/src/commands.rs, which forward to BridgeEngine over the
- * sidecar (engine/bridge_service.py). This file is the ONLY place that
- * imports @tauri-apps/api — swapping to an HTTP transport for a future
- * web build means rewriting this file only, not any component.
+ * Thin wrapper around Tauri's invoke(). Every BridgeEngine protocol method
+ * (engine/bridge_service.py) goes through the one generic `engine_call`
+ * command in src-tauri/src/commands.rs, which forwards the method name and
+ * params to the sidecar unchanged (#115); the handful of named commands left
+ * are native OS dialogs and the sidecar's own log. This file is the ONLY
+ * place that imports @tauri-apps/api — swapping to an HTTP transport for a
+ * future web build means rewriting this file only, not any component.
  */
 
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -153,17 +155,113 @@ interface EngineEnvelope<T> {
   error?: { code: string; message: string };
 }
 
-async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  const envelope = await invoke<EngineEnvelope<T>>(cmd, args);
+/** Every engine protocol method the client can name. Adding a method here
+ * and a `bridge.*` wrapper below is the whole client-side cost of a new RPC;
+ * the engine's dispatcher and sidecar.rs's timeout table key on the same
+ * string. A typo fails to compile instead of failing at runtime. */
+export type EngineMethod =
+  | "ai.review.cancel"
+  | "ai.review.listForChapter"
+  | "ai.review.retry"
+  | "ai.review.start"
+  | "ai.review.status"
+  | "alignment.aiApplyProposal"
+  | "alignment.aiPropose"
+  | "alignment.get"
+  | "alignment.realign"
+  | "alignment.restore"
+  | "alignment.status"
+  | "alignment.unalign"
+  | "alignment.undo"
+  | "analysisJob.cancel"
+  | "analysisJob.getScopeStatus"
+  | "analysisJob.start"
+  | "analysisJob.status"
+  | "chapter.verseData"
+  | "chapter.verses"
+  | "check.clearSelection"
+  | "check.listForVerse"
+  | "check.saveSelection"
+  | "check.validateSelection"
+  | "checks.cancel"
+  | "checks.retry"
+  | "checks.start"
+  | "checks.status"
+  | "correction.acknowledgeCorrected"
+  | "correction.applyProposal"
+  | "correction.createProposal"
+  | "correction.editProposal"
+  | "correction.getApplicationStatus"
+  | "correction.getEligibility"
+  | "correction.getProposal"
+  | "correction.getProposalHistory"
+  | "correction.getReviewContext"
+  | "correction.getVerification"
+  | "correction.listForFinding"
+  | "correction.reanalyzeAffected"
+  | "correction.regenerateProposal"
+  | "correction.rejectProposal"
+  | "correction.verifyApplication"
+  | "engine.info"
+  | "export.aligned"
+  | "export.nonAligned"
+  | "issueResolution.list"
+  | "issueResolution.queueParatext"
+  | "issueResolution.retryParatext"
+  | "issueResolution.save"
+  | "lexicon.getEntry"
+  | "navigation.bridgeChanged"
+  | "navigation.poll"
+  | "navigation.resolve"
+  | "navigation.status"
+  | "paratext.getState"
+  | "ping"
+  | "project.delete"
+  | "project.forget"
+  | "project.import"
+  | "project.inspectImport"
+  | "project.list"
+  | "project.listBookProgress"
+  | "project.open"
+  | "project.report"
+  | "qaReview.addNote"
+  | "qaReview.decideFinding"
+  | "qaReview.getFinding"
+  | "qaReview.getQueue"
+  | "report.cancel"
+  | "report.export"
+  | "report.generate"
+  | "report.get"
+  | "report.status"
+  | "semanticLocation.getRange"
+  | "settings.get"
+  | "settings.set"
+  | "targetSemantic.getRange"
+  | "triage.cancel"
+  | "triage.override"
+  | "triage.results"
+  | "triage.run"
+  | "triage.status"
+  | "verse.decide"
+  | "verse.edit"
+  | "verse.get"
+  | "verse.runChecks";
+
+/** Send one engine request through `engine_call` and unwrap the envelope.
+ * Keys with `undefined` values are dropped by JSON serialization, and the
+ * engine's dispatcher fills the same defaults the old per-method Rust
+ * forwarders did, so callers pass their argument objects straight through. */
+async function call<T>(method: EngineMethod, params?: Record<string, unknown>): Promise<T> {
+  const envelope = await invoke<EngineEnvelope<T>>("engine_call", { method, params: params ?? {} });
   if (!envelope.success) {
-    throw new Error(envelope.error?.message ?? `${cmd} failed`);
+    throw new Error(envelope.error?.message ?? `${method} failed`);
   }
   return (envelope.result ?? (envelope as unknown)) as T;
 }
 
 export const bridge = {
   ping(): Promise<{ pong: boolean }> {
-    return call("engine_ping");
+    return call("ping");
   },
 
   onFileDrop,
@@ -171,7 +269,7 @@ export const bridge = {
   onEngineRespawned,
 
   engineInfo(): Promise<EngineInfo> {
-    return call("engine_info");
+    return call("engine.info");
   },
 
   engineLogRecent(limit?: number): Promise<EngineLogEntry[]> {
@@ -187,27 +285,27 @@ export const bridge = {
   },
 
   openProject(path: string, projectId?: string): Promise<ProjectInfo> {
-    return call("project_open", { path, projectId });
+    return call("project.open", { path, projectId });
   },
 
   listProjects(): Promise<{ projects: RegisteredProject[] }> {
-    return call("project_list");
+    return call("project.list");
   },
 
   listBookProgress(): Promise<{ books: BookProgressEntry[] }> {
-    return call("project_list_book_progress");
+    return call("project.listBookProgress");
   },
 
   forgetProject(projectId: string): Promise<{ forgotten: boolean }> {
-    return call("project_forget", { projectId });
+    return call("project.forget", { projectId });
   },
 
   deleteProject(projectId: string): Promise<{ deleted: boolean; managed: boolean }> {
-    return call("project_delete", { projectId });
+    return call("project.delete", { projectId });
   },
 
   projectReport(): Promise<ProjectReport> {
-    return call("project_report");
+    return call("project.report");
   },
 
   // --- Whole-collection QA report (engine/tc_ai_bridge/qa_report.py) -------
@@ -215,19 +313,19 @@ export const bridge = {
   // writes the rows the report screen has filtered down to.
 
   reportGenerate(): Promise<ReportJobSnapshot> {
-    return call("report_generate");
+    return call("report.generate");
   },
 
   reportStatus(jobId: string): Promise<ReportJobSnapshot> {
-    return call("report_status", { jobId });
+    return call("report.status", { jobId });
   },
 
   reportGet(jobId: string): Promise<ReportGetResponse> {
-    return call("report_get", { jobId });
+    return call("report.get", { jobId });
   },
 
   reportCancel(jobId: string): Promise<ReportJobSnapshot> {
-    return call("report_cancel", { jobId });
+    return call("report.cancel", { jobId });
   },
 
   /** `rows` are the export-shaped rows from reportStats.exportRows, not raw
@@ -237,7 +335,7 @@ export const bridge = {
     outputPath: string, format: "csv" | "tsv", rows: ExportRow[],
     columns: ReportExportColumn[],
   ): Promise<ReportExportResult> {
-    return call("report_export", { outputPath, format, rows, columns });
+    return call("report.export", { outputPath, format, rows, columns });
   },
 
   // --- AI triage (engine/tc_ai_bridge/triage.py) --------------------------
@@ -246,91 +344,93 @@ export const bridge = {
   // survive a restart, and a cancelled run keeps whatever it already paid for.
 
   triageRun(book = "", force = false): Promise<TriageRunResponse> {
-    return call("triage_run", { book, force });
+    return call("triage.run", { book, force });
   },
 
   triageStatus(jobId: string): Promise<TriageJobSnapshot> {
-    return call("triage_status", { jobId });
+    return call("triage.status", { jobId });
   },
 
   triageCancel(jobId: string): Promise<TriageJobSnapshot> {
-    return call("triage_cancel", { jobId });
+    return call("triage.cancel", { jobId });
   },
 
   /** An empty verdict clears the override and returns the finding to the model. */
   triageOverride(book: string, hash: string, verdict: TriageOverrideVerdict | ""): Promise<TriageOverrideResponse> {
-    return call("triage_override", { book, hash, verdict });
+    return call("triage.override", { book, hash, verdict });
   },
 
   triageResults(book = ""): Promise<TriageResultsResponse> {
-    return call("triage_results", { book });
+    return call("triage.results", { book });
   },
 
   inspectImport(path: string, metadata?: ImportMetadata): Promise<ImportPreview> {
-    return call("project_inspect_import", { path, metadata });
+    return call("project.inspectImport", { path, metadata });
   },
 
   importProject(path: string, metadata: ImportMetadata, allowDuplicate = false): Promise<ProjectInfo> {
-    return call("project_import", { path, metadata, allowDuplicate });
+    return call("project.import", { path, metadata, allowDuplicate });
   },
 
   chapterVerses(chapter: string): Promise<{ verses: string[] }> {
-    return call("chapter_verses", { chapter });
+    return call("chapter.verses", { chapter });
   },
 
   chapterVerseData(chapter: string): Promise<{ chapter: string; verses: Record<string, VerseData> }> {
-    return call("chapter_verse_data", { chapter });
+    return call("chapter.verseData", { chapter });
   },
 
   getVerse(chapter: string, verse: string): Promise<VerseData> {
-    return call("verse_get", { chapter, verse });
+    return call("verse.get", { chapter, verse });
   },
 
   async runVerseChecks(chapter: string, verse: string, checks: string[]): Promise<QaFinding[]> {
-    const envelope = await invoke<EngineEnvelope<unknown>>("verse_run_checks", { chapter, verse, checks });
-    if (!envelope.success) throw new Error(envelope.error?.message ?? "verse_run_checks failed");
+    const envelope = await invoke<EngineEnvelope<unknown>>("engine_call", {
+      method: "verse.runChecks", params: { chapter, verse, checks },
+    });
+    if (!envelope.success) throw new Error(envelope.error?.message ?? "verse.runChecks failed");
     return envelope.findings ?? [];
   },
 
   startChecks(scope: "chapter" | "book", chapters: string[], checks: string[]): Promise<CheckJobSnapshot> {
-    return call("checks_start", { scope, chapters, checks });
+    return call("checks.start", { scope, chapters, checks });
   },
 
   checkStatus(jobId: string): Promise<CheckJobSnapshot> {
-    return call("checks_status", { jobId });
+    return call("checks.status", { jobId });
   },
 
   cancelChecks(jobId: string): Promise<CheckJobSnapshot> {
-    return call("checks_cancel", { jobId });
+    return call("checks.cancel", { jobId });
   },
 
   retryChecks(jobId: string): Promise<CheckJobSnapshot> {
-    return call("checks_retry", { jobId });
+    return call("checks.retry", { jobId });
   },
 
   decideVerse(
     chapter: string, verse: string, findingId: string,
     status: string, comment?: string,
   ): Promise<Record<string, unknown>> {
-    return call("verse_decide", { chapter, verse, findingId, status, comment });
+    return call("verse.decide", { chapter, verse, findingId, status, comment });
   },
 
   editVerse(chapter: string, verse: string, newText: string): Promise<{
     committed: boolean;
     issueResolutionsNeedingRecheck: number;
   }> {
-    return call("verse_edit", { chapter, verse, newText });
+    return call("verse.edit", { chapter, verse, newText });
   },
 
   listChecksForVerse(chapter: string, verse: string): Promise<NativeCheckListResponse> {
-    return call("check_list_for_verse", { chapter, verse });
+    return call("check.listForVerse", { chapter, verse });
   },
 
   validateCheckSelection(
     chapter: string, verse: string, tool: NativeCheckTool, groupId: string, checkId: string,
     selections: CheckTargetSelection[], nothingToSelect: boolean,
   ): Promise<CheckSelectionValidation> {
-    return call("check_validate_selection", {
+    return call("check.validateSelection", {
       chapter, verse, tool, groupId, checkId, selections, nothingToSelect,
     });
   },
@@ -341,7 +441,7 @@ export const bridge = {
     provenance: "human" | "bridge_ai", expectedFingerprint: string,
     metadata: Record<string, unknown> = {},
   ): Promise<CheckSelectionMutation> {
-    return call("check_save_selection", {
+    return call("check.saveSelection", {
       chapter, verse, tool, groupId, checkId, selections, nothingToSelect,
       provenance, expectedFingerprint, metadata,
     });
@@ -352,13 +452,13 @@ export const bridge = {
     provenance: "human" | "bridge_ai", expectedFingerprint: string,
     metadata: Record<string, unknown> = {},
   ): Promise<CheckSelectionMutation> {
-    return call("check_clear_selection", {
+    return call("check.clearSelection", {
       chapter, verse, tool, groupId, checkId, provenance, expectedFingerprint, metadata,
     });
   },
 
   listIssueResolutions(chapter: string, verse: string): Promise<IssueResolutionListResponse> {
-    return call("issue_resolution_list", { chapter, verse });
+    return call("issueResolution.list", { chapter, verse });
   },
 
   saveIssueResolution(
@@ -372,7 +472,7 @@ export const bridge = {
       evidence: Array<Record<string, unknown> | string>;
     },
   ): Promise<IssueResolutionRecord> {
-    return call("issue_resolution_save", {
+    return call("issueResolution.save", {
       chapter, verse, tool: check.tool, groupId: check.groupId, checkId: check.checkId,
       expectedFingerprint: check.expectedFingerprint, ...values,
     });
@@ -381,7 +481,7 @@ export const bridge = {
   queueIssueResolutionForParatext(
     chapter: string, verse: string, resolutionId: string, expectedProjectId = "",
   ): Promise<IssueResolutionHandoffResult> {
-    return call("issue_resolution_queue_paratext", {
+    return call("issueResolution.queueParatext", {
       chapter, verse, resolutionId, expectedProjectId,
     });
   },
@@ -389,116 +489,116 @@ export const bridge = {
   retryIssueResolutionParatext(
     chapter: string, verse: string, resolutionId: string,
   ): Promise<IssueResolutionHandoffResult> {
-    return call("issue_resolution_retry_paratext", { chapter, verse, resolutionId });
+    return call("issueResolution.retryParatext", { chapter, verse, resolutionId });
   },
 
   getAlignment(chapter: string, verse: string): Promise<AlignmentContext> {
-    return call("alignment_get", { chapter, verse });
+    return call("alignment.get", { chapter, verse });
   },
 
   getLexiconEntry(strong: string, morph: string): Promise<LexiconEntryResponse> {
-    return call("lexicon_get_entry", { strong, morph });
+    return call("lexicon.getEntry", { strong, morph });
   },
 
   alignmentStatus(chapter?: string): Promise<AlignmentStatusResponse> {
-    return call("alignment_status", chapter ? { chapter } : {});
+    return call("alignment.status", chapter ? { chapter } : {});
   },
 
   realignWords(
     chapter: string, verse: string, topIds: string[], bottomIds: string[],
     expectedOriginal: VerseAlignment,
   ): Promise<AlignmentContext> {
-    return call("alignment_realign", { chapter, verse, topIds, bottomIds, expectedOriginal });
+    return call("alignment.realign", { chapter, verse, topIds, bottomIds, expectedOriginal });
   },
 
   unalignWords(
     chapter: string, verse: string, bottomIds: string[], expectedOriginal: VerseAlignment,
   ): Promise<AlignmentContext> {
-    return call("alignment_unalign", { chapter, verse, bottomIds, expectedOriginal });
+    return call("alignment.unalign", { chapter, verse, bottomIds, expectedOriginal });
   },
 
   undoAlignment(
     chapter: string, verse: string, expectedOriginal: VerseAlignment,
   ): Promise<AlignmentContext> {
-    return call("alignment_undo", { chapter, verse, expectedOriginal });
+    return call("alignment.undo", { chapter, verse, expectedOriginal });
   },
 
   restoreAlignment(
     chapter: string, verse: string, historyId: string, expectedOriginal: VerseAlignment,
   ): Promise<AlignmentContext> {
-    return call("alignment_restore", { chapter, verse, historyId, expectedOriginal });
+    return call("alignment.restore", { chapter, verse, historyId, expectedOriginal });
   },
 
   /** Read-only: nothing is written to project files. See aiApplyAlignmentProposal. */
   aiProposeAlignment(chapter: string, verse: string, mode: "gap_fill" | "audit" = "gap_fill"): Promise<AlignmentAiProposeResponse> {
-    return call("alignment_ai_propose", { chapter, verse, mode });
+    return call("alignment.aiPropose", { chapter, verse, mode });
   },
 
   aiApplyAlignmentProposal(
     chapter: string, verse: string, proposal: AlignmentAiProposal, expectedOriginal: VerseAlignment,
   ): Promise<AlignmentContext> {
-    return call("alignment_ai_apply_proposal", { chapter, verse, proposal, expectedOriginal });
+    return call("alignment.aiApplyProposal", { chapter, verse, proposal, expectedOriginal });
   },
 
   startAIReview(
     scope: "verse" | "chapter" | "book", chapter: string, verse: string,
     mode: "basic" | "advanced",
   ): Promise<AIReviewJobSnapshot> {
-    return call("ai_review_start", { scope, chapter, verse, mode });
+    return call("ai.review.start", { scope, chapter, verse, mode });
   },
 
   aiReviewStatus(jobId: string): Promise<AIReviewJobSnapshot> {
-    return call("ai_review_status", { jobId });
+    return call("ai.review.status", { jobId });
   },
 
   cancelAIReview(jobId: string): Promise<AIReviewJobSnapshot> {
-    return call("ai_review_cancel", { jobId });
+    return call("ai.review.cancel", { jobId });
   },
 
   retryAIReview(jobId: string): Promise<AIReviewJobSnapshot> {
-    return call("ai_review_retry", { jobId });
+    return call("ai.review.retry", { jobId });
   },
 
   listAIReviewsForChapter(chapter: string): Promise<AIReviewChapterResponse> {
-    return call("ai_review_list_chapter", { chapter });
+    return call("ai.review.listForChapter", { chapter });
   },
 
   targetSemanticGetRange(inventoryId: string): Promise<TargetSemanticInventory> {
-    return call("target_semantic_get_range", { inventoryId });
+    return call("targetSemantic.getRange", { inventoryId });
   },
 
   semanticLocationGetRange(runId: string): Promise<SemanticLocationRun> {
-    return call("semantic_location_get_range", { runId });
+    return call("semanticLocation.getRange", { runId });
   },
 
   paratextGetState(): Promise<DesktopConnectorState> {
-    return call("paratext_get_state");
+    return call("paratext.getState");
   },
 
   navigationStatus(context?: string): Promise<NavigationSyncState> {
-    return call("navigation_status", { context });
+    return call("navigation.status", { context });
   },
 
   navigationPoll(context?: string): Promise<NavigationSyncState> {
-    return call("navigation_poll", { context });
+    return call("navigation.poll", { context });
   },
 
   navigationBridgeChanged(reference: string): Promise<NavigationSyncState> {
-    return call("navigation_bridge_changed", { reference });
+    return call("navigation.bridgeChanged", { reference });
   },
 
   navigationResolve(
     requestId: string, accepted: boolean, bridgeReference?: string, context?: string,
   ): Promise<NavigationSyncState> {
-    return call("navigation_resolve", { requestId, accepted, bridgeReference, context });
+    return call("navigation.resolve", { requestId, accepted, bridgeReference, context });
   },
 
   getSettings(): Promise<SettingsData> {
-    return call("settings_get");
+    return call("settings.get");
   },
 
   setSettings(params: Record<string, unknown>): Promise<SettingsData> {
-    return call("settings_set", { params });
+    return call("settings.set", params);
   },
 
   pickSavePath(defaultName: string): Promise<string | null> {
@@ -506,11 +606,11 @@ export const bridge = {
   },
 
   exportAligned(outputPath: string): Promise<{ written: boolean; path: string; chapters: number }> {
-    return call("export_aligned", { outputPath });
+    return call("export.aligned", { outputPath });
   },
 
   exportNonAligned(outputPath: string): Promise<{ written: boolean; path: string; chapters: number }> {
-    return call("export_non_aligned", { outputPath });
+    return call("export.nonAligned", { outputPath });
   },
 
   // --- Stage 8 QA audit (analysis; read-only) -------------------------------
@@ -518,7 +618,7 @@ export const bridge = {
   // --- Stage 9A human review (decisions only; never edits Scripture) --------
 
   qaReviewGetQueue(filters: ReviewQueueFilters = {}): Promise<ReviewQueuePage> {
-    return call("qa_review_get_queue", {
+    return call("qaReview.getQueue", {
       book: filters.book,
       chapter: filters.chapter,
       canonicalReferences: filters.canonicalReferences,
@@ -535,7 +635,7 @@ export const bridge = {
   },
 
   qaReviewGetFinding(findingId: string): Promise<QaFindingDetail> {
-    return call("qa_review_get_finding", { findingId });
+    return call("qaReview.getFinding", { findingId });
   },
 
   /**
@@ -555,7 +655,7 @@ export const bridge = {
       expectedTargetContentHashes?: string[];
     } = {},
   ): Promise<DecideFindingResult> {
-    return call("qa_review_decide_finding", {
+    return call("qaReview.decideFinding", {
       findingId,
       disposition,
       expectedEntityRevision,
@@ -568,21 +668,21 @@ export const bridge = {
   qaReviewAddNote(
     entityType: ReviewEntityType, entityId: string, note: string,
   ): Promise<{ history: ReviewRecord[] }> {
-    return call("qa_review_add_note", { entityType, entityId, note });
+    return call("qaReview.addNote", { entityType, entityId, note });
   },
 
   // --- Stage 9B correction proposal review / explicit-human application ----
 
   correctionGetEligibility(findingId: string): Promise<CorrectionEligibility> {
-    return call("correction_get_eligibility", { findingId });
+    return call("correction.getEligibility", { findingId });
   },
 
   correctionGetReviewContext(findingId: string): Promise<CorrectionReviewContext> {
-    return call("correction_get_review_context", { findingId });
+    return call("correction.getReviewContext", { findingId });
   },
 
   correctionGetProposal(proposalId: string): Promise<CorrectionProposal> {
-    return call("correction_get_proposal", { proposalId });
+    return call("correction.getProposal", { proposalId });
   },
 
   correctionListForFinding(
@@ -593,7 +693,7 @@ export const bridge = {
     applications: CorrectionApplicationIntent[];
     correctionWritesBlocked: boolean;
   }> {
-    return call("correction_list_for_finding", { findingId });
+    return call("correction.listForFinding", { findingId });
   },
 
   correctionCreateProposal(options: {
@@ -604,7 +704,7 @@ export const bridge = {
     requestSuggestion?: boolean;
     actorId?: string;
   }): Promise<CorrectionProposal> {
-    return call("correction_create_proposal", options);
+    return call("correction.createProposal", options);
   },
 
   correctionEditProposal(proposalId: string, options: {
@@ -613,7 +713,7 @@ export const bridge = {
     expectedProposalRevision: number;
     actorId?: string;
   }): Promise<CorrectionProposal> {
-    return call("correction_edit_proposal", { proposalId, ...options });
+    return call("correction.editProposal", { proposalId, ...options });
   },
 
   correctionRejectProposal(proposalId: string, options: {
@@ -621,20 +721,20 @@ export const bridge = {
     actorId?: string;
     note?: string;
   }): Promise<CorrectionProposal> {
-    return call("correction_reject_proposal", { proposalId, ...options });
+    return call("correction.rejectProposal", { proposalId, ...options });
   },
 
   correctionRegenerateProposal(proposalId: string, options: {
     expectedProposalRevision: number;
     actorId?: string;
   }): Promise<CorrectionProposal> {
-    return call("correction_regenerate_proposal", { proposalId, ...options });
+    return call("correction.regenerateProposal", { proposalId, ...options });
   },
 
   correctionGetProposalHistory(
     proposalId: string,
   ): Promise<{ proposalId: string; events: CorrectionProposalEvent[] }> {
-    return call("correction_get_proposal_history", { proposalId });
+    return call("correction.getProposalHistory", { proposalId });
   },
 
   correctionApplyProposal(options: {
@@ -645,11 +745,11 @@ export const bridge = {
     applicationId: string;
     actor: { actorType: "HUMAN"; actorId: string };
   }): Promise<CorrectionApplicationIntent> {
-    return call("correction_apply_proposal", options);
+    return call("correction.applyProposal", options);
   },
 
   correctionGetApplicationStatus(applicationId: string): Promise<CorrectionApplicationIntent> {
-    return call("correction_get_application_status", { applicationId });
+    return call("correction.getApplicationStatus", { applicationId });
   },
 
   correctionReanalyzeAffected(options: {
@@ -657,7 +757,7 @@ export const bridge = {
     requestedBy: string;
     retry?: boolean;
   }): Promise<CorrectionAffectedAnalysisResult> {
-    return call("correction_reanalyze_affected", options);
+    return call("correction.reanalyzeAffected", options);
   },
 
   // Stage 9B.4: verification is decided by the backend. The UI renders the
@@ -666,11 +766,11 @@ export const bridge = {
     applicationId: string;
     requestedBy: string;
   }): Promise<CorrectionVerificationState> {
-    return call("correction_verify_application", options);
+    return call("correction.verifyApplication", options);
   },
 
   correctionGetVerification(applicationId: string): Promise<CorrectionVerificationState> {
-    return call("correction_get_verification", { applicationId });
+    return call("correction.getVerification", { applicationId });
   },
 
   correctionAcknowledgeCorrected(options: {
@@ -681,7 +781,7 @@ export const bridge = {
     actor: { actorType: "HUMAN"; actorId: string };
     note?: string;
   }): Promise<CorrectionVerificationState> {
-    return call("correction_acknowledge_corrected", options);
+    return call("correction.acknowledgeCorrected", options);
   },
 
   // Stage 9A.4 orchestrates the frozen Stage 5--8 engines. Starting a job is
@@ -690,18 +790,18 @@ export const bridge = {
     requestedScope: AnalysisScope,
     expectedAnalysisFingerprint: string,
   ): Promise<AnalysisJobSnapshot> {
-    return call("analysis_job_start", { requestedScope, expectedAnalysisFingerprint });
+    return call("analysisJob.start", { requestedScope, expectedAnalysisFingerprint });
   },
 
   analysisJobStatus(jobId: string): Promise<AnalysisJobSnapshot> {
-    return call("analysis_job_status", { jobId });
+    return call("analysisJob.status", { jobId });
   },
 
   analysisJobCancel(jobId: string): Promise<AnalysisJobSnapshot> {
-    return call("analysis_job_cancel", { jobId });
+    return call("analysisJob.cancel", { jobId });
   },
 
   analysisJobGetScopeStatus(requestedScope: AnalysisScope): Promise<AnalysisScopeStatus> {
-    return call("analysis_job_get_scope_status", { requestedScope });
+    return call("analysisJob.getScopeStatus", { requestedScope });
   },
 };

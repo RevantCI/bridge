@@ -28,8 +28,8 @@ registry client) is optional and human-invoked, never on the import, open or che
 flowchart LR
   subgraph Desktop["Bridge.exe (Tauri 2, Rust shell + Svelte frontend)"]
     UI["Svelte frontend<br/>30 components, 11.6k LOC<br/>App.svelte 1127 LOC, no router (screen = five booleans)"]
-    TS["bridgeClient.ts<br/>140 methods, 972 LOC"]
-    RS["commands.rs<br/>140 tauri commands, 2117 LOC"]
+    TS["bridgeClient.ts<br/>90 typed methods over one EngineMethod union"]
+    RS["commands.rs<br/>engine_call + 4 native dialogs/log commands"]
     SC["sidecar.rs<br/>JSON lines over stdio, per-method timeouts (default 30 s)"]
     UI --> TS --> RS --> SC
   end
@@ -50,8 +50,9 @@ flowchart LR
 ```
 
 **How a request travels.** A component calls `bridge.someMethod()` in
-`src/lib/api/bridgeClient.ts`; that invokes one `#[tauri::command]` in
-`src-tauri/src/commands.rs`; the command hands the dotted method name and params to
+`src/lib/api/bridgeClient.ts`; that invokes the one generic `engine_call` command in
+`src-tauri/src/commands.rs` with the dotted method name (typed as the `EngineMethod`
+union) and a params object; the command hands both to
 `sidecar.rs`, which writes one JSON line to the sidecar's stdin and correlates the reply by
 `id`; `bridge_service.py`'s `handle_request` matches the name against the `Methods` class
 and calls one `BridgeEngine` method. The dispatcher is single-threaded, so a slow handler
@@ -59,14 +60,16 @@ delays every other request behind it (`build_project_report`'s docstring records
 case). Long-running work therefore goes through a background job runner and the UI polls
 its status.
 
-**Cost of the shape.** Every RPC is defined four times: engine constant + handler +
-dispatcher branch, a Rust command, a TS client method, and TS types (`finding.ts` 884 LOC,
-`passageSemanticV1.ts`). Adding a method means four edits and a Rust rebuild. The
-2026-09-16 audit found 50 of 140 wired methods with no UI caller, 13 engine methods with
+**Cost of the shape.** An RPC is defined in two places: an engine constant + handler +
+dispatcher branch, and a TS client method (plus its TS types in `finding.ts` and friends).
+Adding a method is an engine handler, one member of the `EngineMethod` union and one
+`bridge.*` wrapper; no Rust changes and no Rust rebuild, because `commands.rs` holds one
+generic `engine_call` and four native commands (#115). Before that, the 2026-09-16 audit
+found every method defined four times, 50 of 140 with no UI caller, 13 engine methods with
 no Rust command, and a 1491-line Rust mirror of the passage-semantic types referenced only
-by `mod`; #102, #103 and #105 removed them, leaving 90 Rust commands and 90 client methods
-(the engine keeps the Stage 4 to 8 handlers as the test harness for those stages). See
-`SIMPLIFICATION_AUDIT_2026-09.md`.
+by `mod`; #102, #103 and #105 removed the dead half first, so the union was built from the
+live 86 methods. The engine keeps the Stage 4 to 8 handlers as the test harness for those
+stages. See `SIMPLIFICATION_AUDIT_2026-09.md`.
 
 **Per-method timeouts** live in `sidecar.rs` (`request_timeout_seconds`): 30 s default;
 `project.import` 300; `project.open`, `project.inspectImport`, `project.list`, `report.get`,

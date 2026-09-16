@@ -263,8 +263,9 @@ table, and any UI, remain ss7's.
   project B clobbers project A".
 - `greek_room_engine/transport/http_transport.py` (today a 35-line stub typed against
   `GreekRoomEngine`) becomes a real transport for `BridgeEngine.handle_request` with the
-  same envelope. The snake_case Tauri command → dotted method mapping moves out of
-  `commands.rs` into a shared table so the web transport can reuse it.
+  same envelope. The client already names engine methods by their dotted string
+  (`EngineMethod` in `bridgeClient.ts`, #115), so a web transport reuses that surface
+  and replaces only `call()`'s `invoke("engine_call", …)`.
 - `bridge-engine --serve --data-dir <hub>`: FastAPI + uvicorn behind the optional
   `[server]` extra, excluded from the PyInstaller spec. Threaded request handling here
   only; the stdio loop stays single-threaded (#12 owns the job coordinator).

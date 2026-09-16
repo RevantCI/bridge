@@ -8692,3 +8692,56 @@ table saying why, an assertion in
 Step two (return project info after `TranslationCoreProject` loads and build
 `PassageSemanticRuntime` on a worker) changes what the UI sees during open and is
 not a no-impact change; it stays open on #112.
+
+## 2026-09-16 — #115: one generic `engine_call` command replaces 86 Rust forwarders
+
+Audit §5.2, done after #103 so the mapping was built from the live surface. Every
+`#[tauri::command]` that forwarded to the engine did exactly one thing:
+`sidecar.send_request("<method>", json!({...}))`. `commands.rs` now holds one
+`engine_call(method: String, params: Option<Value>)` that forwards both verbatim,
+plus the four commands that are not engine calls (`engine_log_recent`,
+`pick_project_folder`, `pick_import_file`, `pick_save_path`). 1,381 lines → 84;
+`main.rs` registers five handlers. The per-method timeout table in `sidecar.rs`
+keys on the method string and is untouched. `capabilities/default.json` is
+untouched: it permits the sidecar, not commands.
+
+On the client, `bridgeClient.ts` gained an `EngineMethod` union of the 86 live
+method strings, and `call<T>(method: EngineMethod, params?)` invokes
+`engine_call` and unwraps the envelope as before. Every `bridge.*` wrapper kept
+its signature; each now names the engine method instead of a snake_case command.
+Adding a protocol method is now an engine handler, one union member and one
+wrapper, with no Rust change and no Rust rebuild, which is the cost profile the
+cross-verse alignment slices (#116–#119) need.
+
+### What the re-verification settled
+
+- **Defaults.** About 30 forwarders filled optionals before sending (`jobId`
+  → `""`, `force` → `false`, `limit` → `50`, `order` → `"CANONICAL"`, `mode` →
+  `"gap_fill"`, `metadata` → `{}` …). Every one of those engine dispatcher
+  branches already reads the key with the same default (`p.get(k, default)` or
+  `p.get(k) or default`), and JSON serialization drops `undefined` values, so the
+  wrappers pass their existing argument objects straight through. Checked branch
+  by branch, not assumed.
+- **`settings.set`** was the one reshaped call: Rust took `params: Value` and the
+  client wrapped it as `{ params }`. The engine spreads the object
+  (`set_settings(**p)`), so the wrapper now passes it directly.
+- **`runVerseChecks`** used a raw `invoke` (it reads `findings` off the envelope,
+  not `result`) and now goes through `engine_call` the same way. That call was
+  invisible to #103's survey regex, so #121's "`verse_run_checks` has no TS
+  caller" is wrong and is corrected on the issue.
+- **A regression guard** for the new seam: `src/lib/api/__tests__/bridgeClient.test.ts`
+  mocks `@tauri-apps/api/core` and asserts the command name, method string and
+  params for a plain call, the `settings.set` pass-through, the `ping` no-param
+  case, the `findings` envelope path and the error unwrap.
+
+**Not verified in the installed app.** `cargo check`/`test` prove the Rust side
+compiles and registers; the Vitest guard proves what the client sends; the engine
+side is unchanged. The missing piece is one real run: open a project, run checks,
+save a setting. #115 stays open for that, and the first cross-verse slice will
+exercise it anyway.
+
+### Gates
+
+`cargo check` clean; `cargo test` **9 passed**. `npm run check` 0 errors /
+0 warnings; `npm run test` 27 files, **374 passed** (7 new); `npm run build`
+clean. No engine change.
