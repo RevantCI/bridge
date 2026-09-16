@@ -272,8 +272,8 @@ jobs:
         # Confirmed the hard way: run 34587550433 cleared the externalBin check with
         # the stubs below and then failed on `resource path `resources` doesn't exist`.
         #
-        # The binary stubs are never executed -- the unit tests in sidecar.rs and
-        # passage_semantic_wire.rs are pure logic and never spawn the engine. The
+        # The binary stubs are never executed -- the unit tests in sidecar.rs are
+        # pure logic and never spawn the engine. The
         # resources copy mirrors build-sidecars.ps1 exactly (engine/resources ->
         # src-tauri/resources) rather than faking a directory, so the build script
         # sees what it sees in a real build.

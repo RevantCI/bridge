@@ -94,9 +94,9 @@ the USFM checker script. Verify the frozen pair directly (not just source)
 with `python scripts/smoke_sidecars.py engine/dist/bridge-engine.exe`.
 
 `src-tauri/` has both: `cargo check`/`cargo build` for compile success, and a
-handful of real `#[test]` unit tests (`passage_semantic_wire::tests`,
-`sidecar::tests` — 10 as of 2026-09-07) run with `cargo test`. Run both, not
-just the compile check.
+handful of real `#[test]` unit tests (`sidecar::tests` — 9 as of 2026-09-16;
+`passage_semantic_wire.rs` and its tests were removed in #103) run with
+`cargo test`. Run both, not just the compile check.
 
 ## Architecture
 

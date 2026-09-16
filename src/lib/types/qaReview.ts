@@ -205,22 +205,6 @@ export interface DecideFindingResult {
   history: ReviewRecord[];
 }
 
-export interface DecideLocationResult {
-  location: Record<string, unknown>;
-  history: ReviewRecord[];
-}
-
-export interface DecideMeaningResult {
-  meaning: Record<string, unknown>;
-  history: ReviewRecord[];
-}
-
-export interface EntityHistory {
-  entityType: string;
-  entityId: string;
-  records: ReviewRecord[];
-}
-
 /**
  * Visual tone for a review status pill. Each tone pairs with a glyph and its
  * own text in ReviewStatusBadge, so status never depends on colour alone.

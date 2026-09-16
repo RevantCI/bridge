@@ -206,71 +206,6 @@ export interface PassageSemanticRecoveryStatus {
   schemaVersion: number;
 }
 
-export interface PassageSemanticRuntimeStatus {
-  state: PassageSemanticRuntimeState;
-  available: boolean;
-  readOnly: boolean;
-  databaseSchemaVersion?: number;
-  databasePath?: string;
-  projectId?: string;
-  book?: string;
-  replayedInvalidations?: number;
-  recovery?: PassageSemanticRecoveryStatus;
-  error?: string;
-}
-
-export interface PassageSemanticProjectMetadata {
-  projectId: string;
-  identityFingerprint: string;
-  book: string;
-  targetLanguageId: string;
-  resourceId: string;
-  pathHistory: string[];
-  createdAt: string;
-  updatedAt: string;
-  lifecycleStatus: LifecycleStatus;
-  revision: number;
-  sourceLock: {
-    projectId: string;
-    book: string;
-    resourceId: string;
-    resourceVersion: string;
-    resourceHash: string;
-    lifecycleStatus: LifecycleStatus;
-    revision: number;
-    updatedAt: string;
-  } | null;
-}
-
-export interface CurrentPassageSnapshot extends PassageRecord {
-  referenceMappings: PassageReferenceMapping[];
-  targetTokenInstanceIds: string[];
-  structureStatus: "CURRENT" | "STRUCTURE_TEXT_MISMATCH";
-  structureDiagnostics: Array<{
-    code: "STRUCTURE_TEXT_MISMATCH";
-    reference?: string;
-    detail: string;
-  }>;
-  tokenizerProfile: "bridge-unicode-word-v1" | "tc-whitespace-v1";
-}
-
-export interface PassageSemanticStaleSummary {
-  counts: {
-    passages: number;
-    tokens: number;
-    semanticUnits: number;
-    semanticRelationships: number;
-    coverageAccounts: number;
-    qaFindings: number;
-    lexicalSolutions: number;
-    correctionProposals: number;
-    evidence: number;
-    exportability: number;
-  };
-  pendingInvalidations: number;
-  quarantined: number;
-}
-
 export interface PassageSemanticMigrationRun {
   id: string;
   sourcePath: string;
@@ -280,11 +215,6 @@ export interface PassageSemanticMigrationRun {
   startedAt: string;
   completedAt: string;
   report: Record<string, unknown>;
-}
-
-export interface PassageSemanticMigrationReport {
-  runs: PassageSemanticMigrationRun[];
-  quarantineByReason: Record<string, number>;
 }
 
 export interface EvidenceRecord {
@@ -510,35 +440,6 @@ export interface SourceInventoryDiagnostics {
   reviewOnlyUnits: number;
   resourceEnrichedUnits: number;
   resourceConflicts: number;
-}
-
-export interface SourceSemanticInventory {
-  id: string;
-  book: string;
-  rangeKey: string;
-  canonicalReferences: string[];
-  fingerprint: string;
-  sourceSemanticFingerprint: string;
-  sourceResource: {
-    languageId: "hbo" | "el-x-koine";
-    resourceId: "uhb" | "ugnt";
-    version: string;
-    owner: string;
-    commit: string;
-    release: string;
-    license: "CC BY-SA 4.0";
-    provenanceSha256: string;
-    licenseSha256: string;
-  };
-  inventoryEngineVersion: string;
-  sourceTokenizationVersion: string;
-  policyBinding: PolicyBinding;
-  tokens: SourceInventoryToken[];
-  units: SemanticUnit[];
-  coverageAccounts: SourceInventoryCoverageAccount[];
-  evidence: EvidenceRecord[];
-  diagnostics: SourceInventoryDiagnostics;
-  cacheStatus: "MISS" | "HIT";
 }
 
 export type CapabilityAvailability = "AVAILABLE" | "UNAVAILABLE" | "FALLBACK" | "STRUCTURAL_FALLBACK";
@@ -807,27 +708,6 @@ export interface MeaningAnalysisDiagnostics {
   averageComponentCount: number;
   deterministicContradictionCount: number;
   analyzerLimitedAssessments: number;
-}
-
-export interface MeaningAnalysisRun {
-  id: string;
-  book: string;
-  rangeKey: string;
-  fingerprint: string;
-  locationRunId: string;
-  locationRunFingerprint: string;
-  sourceInventoryFingerprint: string;
-  targetInventoryFingerprint: string;
-  meaningEngineVersion: string;
-  comparisonNormalizationVersion: string;
-  meaningPolicyVersion: string;
-  modelVersion: string;
-  calibrationVersion: string;
-  runStatus: MeaningRunStatus;
-  assessments: MeaningAssessment[];
-  diagnostics: MeaningAnalysisDiagnostics;
-  elapsedSeconds: number;
-  cacheStatus: "MISS" | "HIT";
 }
 
 /** Convert canonical code-point offsets to the UTF-16 offsets used by DOM APIs. */

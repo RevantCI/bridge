@@ -145,14 +145,6 @@ export interface CollectionReportBookSummary {
   publicationGate: PublicationGate;
 }
 
-export interface CollectionReport {
-  bookCount: number;
-  verseCoverage: { counts: Record<CoverageState, number>; totalVerses: number; checkedPercent: number };
-  qaSeverityCounts: Record<string, number>;
-  publicationGate: PublicationGate;
-  books: CollectionReportBookSummary[];
-}
-
 export interface TokenRef {
   word: string;
   occurrence: number;

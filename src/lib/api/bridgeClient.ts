@@ -1,17 +1,35 @@
 import type {
-  AIReviewChapterResponse, AIReviewJobSnapshot, AlignmentAiProposal, AlignmentAiProposeResponse, AlignmentContext,
-  AlignmentStatusResponse, BookProgressEntry, CheckJobSnapshot, DesktopConnectorState, ImportMetadata, ImportPreview,
-  CheckSelectionMutation, CheckSelectionValidation, CheckTargetSelection, LexiconEntryResponse, NativeCheckListResponse,
-  NativeCheckTool, NavigationSyncState, ProjectInfo, RegisteredProject, VerseAlignment, VerseData, QaFinding, SettingsData,
-  IssueResolutionHandoffResult, IssueResolutionListResponse, IssueResolutionRecord,
-  ProjectReport, CollectionReport,
+  AIReviewChapterResponse,
+  AIReviewJobSnapshot,
+  AlignmentAiProposal,
+  AlignmentAiProposeResponse,
+  AlignmentContext,
+  AlignmentStatusResponse,
+  BookProgressEntry,
+  CheckJobSnapshot,
+  DesktopConnectorState,
+  ImportMetadata,
+  ImportPreview,
+  CheckSelectionMutation,
+  CheckSelectionValidation,
+  CheckTargetSelection,
+  LexiconEntryResponse,
+  NativeCheckListResponse,
+  NativeCheckTool,
+  NavigationSyncState,
+  ProjectInfo,
+  RegisteredProject,
+  VerseAlignment,
+  VerseData,
+  QaFinding,
+  SettingsData,
+  IssueResolutionHandoffResult,
+  IssueResolutionListResponse,
+  IssueResolutionRecord,
+  ProjectReport,
 } from "../types/finding";
 import type {
   DecideFindingResult,
-  DecideLocationResult,
-  DecideMeaningResult,
-  EntityHistory,
-  MeaningStatus,
   QaFindingDetail,
   ReviewEntityType,
   ReviewQueueFilters,
@@ -20,27 +38,8 @@ import type {
   ReviewerDecision,
 } from "../types/qaReview";
 import type {
-  CurrentPassageSnapshot,
-  PassageSemanticMigrationReport,
-  PassageSemanticProjectMetadata,
-  PassageSemanticRuntimeStatus,
-  PassageSemanticStaleSummary,
-  SemanticUnit,
-  SourceInventoryCoverageAccount,
-  SourceInventoryDiagnostics,
-  SourceSemanticInventory,
-  TargetInventoryDiagnostics,
-  TargetLanguageCapabilities,
-  TargetSearchSpan,
   TargetSemanticInventory,
-  SemanticLocationCandidate,
-  SemanticLocationDiagnostics,
-  SemanticLocationRelationship,
   SemanticLocationRun,
-  MeaningAnalysisRun,
-  MeaningAssessment,
-  MeaningComponentAssessment,
-  MeaningAnalysisDiagnostics,
 } from "../types/passageSemanticV1";
 import type {
   AnalysisJobSnapshot,
@@ -62,14 +61,17 @@ import type {
   ReportExportResult,
   ReportGetResponse,
   ReportJobSnapshot,
-  ReportRow,
   TriageJobSnapshot,
   TriageOverrideResponse,
   TriageResultsResponse,
   TriageRunResponse,
 } from "../types/report";
-import type { TriageOverrideVerdict } from "../types/finding";
-import type { ExportRow } from "../utils/reportStats";
+import type {
+  TriageOverrideVerdict,
+} from "../types/finding";
+import type {
+  ExportRow,
+} from "../utils/reportStats";
 
 /**
  * Thin wrapper around Tauri's invoke() calling the real commands defined
@@ -204,16 +206,8 @@ export const bridge = {
     return call("project_delete", { projectId });
   },
 
-  scanProject(): Promise<{ chapters: string[]; checkTypes: Record<string, number>; indexTools: Record<string, number> }> {
-    return call("project_scan");
-  },
-
   projectReport(): Promise<ProjectReport> {
     return call("project_report");
-  },
-
-  projectCollectionReport(): Promise<CollectionReport> {
-    return call("project_collection_report");
   },
 
   // --- Whole-collection QA report (engine/tc_ai_bridge/qa_report.py) -------
@@ -266,10 +260,6 @@ export const bridge = {
   /** An empty verdict clears the override and returns the finding to the model. */
   triageOverride(book: string, hash: string, verdict: TriageOverrideVerdict | ""): Promise<TriageOverrideResponse> {
     return call("triage_override", { book, hash, verdict });
-  },
-
-  triageClear(book = ""): Promise<{ cleared: string[] }> {
-    return call("triage_clear", { book });
   },
 
   triageResults(book = ""): Promise<TriageResultsResponse> {
@@ -427,24 +417,10 @@ export const bridge = {
     return call("alignment_unalign", { chapter, verse, bottomIds, expectedOriginal });
   },
 
-  saveAlignment(
-    chapter: string, verse: string, alignment: VerseAlignment, expectedOriginal: VerseAlignment,
-  ): Promise<AlignmentContext> {
-    return call("alignment_save", { chapter, verse, alignment, expectedOriginal });
-  },
-
-  completeAlignment(chapter: string, verse: string): Promise<AlignmentContext> {
-    return call("alignment_complete", { chapter, verse });
-  },
-
   undoAlignment(
     chapter: string, verse: string, expectedOriginal: VerseAlignment,
   ): Promise<AlignmentContext> {
     return call("alignment_undo", { chapter, verse, expectedOriginal });
-  },
-
-  alignmentBackups(chapter: string, verse: string): Promise<{ history: AlignmentContext["history"] }> {
-    return call("alignment_backups", { chapter, verse });
   },
 
   restoreAlignment(
@@ -487,164 +463,16 @@ export const bridge = {
     return call("ai_review_list_chapter", { chapter });
   },
 
-  passageSemanticStatus(): Promise<PassageSemanticRuntimeStatus> {
-    return call("passage_semantic_status");
-  },
-
-  passageSemanticProjectMetadata(): Promise<PassageSemanticProjectMetadata> {
-    return call("passage_semantic_project_metadata");
-  },
-
-  passageSemanticCurrentPassage(
-    chapter: string, verse: string, endChapter?: string, endVerse?: string,
-  ): Promise<CurrentPassageSnapshot> {
-    return call("passage_semantic_current_passage", {
-      chapter, verse, endChapter, endVerse,
-    });
-  },
-
-  passageSemanticStaleSummary(): Promise<PassageSemanticStaleSummary> {
-    return call("passage_semantic_stale_summary");
-  },
-
-  passageSemanticMigrationReport(): Promise<PassageSemanticMigrationReport> {
-    return call("passage_semantic_migration_report");
-  },
-
-  passageSemanticRebuildPassage(
-    chapter: string,
-    verse: string,
-    options: {
-      endChapter?: string;
-      endVerse?: string;
-      tokenizerProfile?: "bridge-unicode-word-v1" | "tc-whitespace-v1";
-    } = {},
-  ): Promise<CurrentPassageSnapshot> {
-    return call("passage_semantic_rebuild_passage", {
-      chapter, verse, ...options,
-    });
-  },
-
-  sourceSemanticBuildRange(
-    chapter: string, verse: string, endChapter?: string, endVerse?: string,
-  ): Promise<SourceSemanticInventory> {
-    return call("source_semantic_build_range", { chapter, verse, endChapter, endVerse });
-  },
-
-  sourceSemanticGetRange(inventoryId: string): Promise<SourceSemanticInventory> {
-    return call("source_semantic_get_range", { inventoryId });
-  },
-
-  sourceSemanticGetUnit(unitId: string): Promise<SemanticUnit> {
-    return call("source_semantic_get_unit", { unitId });
-  },
-
-  sourceSemanticGetCoverageAccounts(inventoryId: string): Promise<SourceInventoryCoverageAccount[]> {
-    return call("source_semantic_get_coverage_accounts", { inventoryId });
-  },
-
-  sourceSemanticGetDiagnostics(inventoryId: string): Promise<SourceInventoryDiagnostics> {
-    return call("source_semantic_get_diagnostics", { inventoryId });
-  },
-
-  targetSemanticBuildRange(
-    chapter: string, verse: string, endChapter?: string, endVerse?: string,
-  ): Promise<TargetSemanticInventory> {
-    return call("target_semantic_build_range", { chapter, verse, endChapter, endVerse });
-  },
-
   targetSemanticGetRange(inventoryId: string): Promise<TargetSemanticInventory> {
     return call("target_semantic_get_range", { inventoryId });
-  },
-
-  targetSemanticGetUnit(unitId: string): Promise<SemanticUnit> {
-    return call("target_semantic_get_unit", { unitId });
-  },
-
-  targetSemanticGetDiagnostics(inventoryId: string): Promise<TargetInventoryDiagnostics> {
-    return call("target_semantic_get_diagnostics", { inventoryId });
-  },
-
-  targetSemanticGetSearchSpans(inventoryId: string): Promise<TargetSearchSpan[]> {
-    return call("target_semantic_get_search_spans", { inventoryId });
-  },
-
-  targetSemanticGetCapabilities(inventoryId?: string): Promise<TargetLanguageCapabilities> {
-    return call("target_semantic_get_capabilities", { inventoryId });
-  },
-
-  semanticLocationRunRange(
-    chapter: string, verse: string, endChapter?: string, endVerse?: string,
-    maxCandidateEvaluations?: number,
-  ): Promise<SemanticLocationRun> {
-    return call("semantic_location_run_range", {
-      chapter, verse, endChapter, endVerse, maxCandidateEvaluations,
-    });
-  },
-
-  semanticLocationStatus(runId: string): Promise<Pick<SemanticLocationRun, "id" | "runStatus" | "diagnostics" | "cacheStatus">> {
-    return call("semantic_location_status", { runId });
   },
 
   semanticLocationGetRange(runId: string): Promise<SemanticLocationRun> {
     return call("semantic_location_get_range", { runId });
   },
 
-  semanticLocationGetRelationship(relationshipId: string): Promise<SemanticLocationRelationship> {
-    return call("semantic_location_get_relationship", { relationshipId });
-  },
-
-  semanticLocationGetCandidates(runId: string, sourceOwnerUnitId?: string): Promise<SemanticLocationCandidate[]> {
-    return call("semantic_location_get_candidates", { runId, sourceOwnerUnitId });
-  },
-
-  semanticLocationGetDiagnostics(runId: string): Promise<SemanticLocationDiagnostics> {
-    return call("semantic_location_get_diagnostics", { runId });
-  },
-
-  meaningAnalysisRunRange(
-    chapter: string, verse: string, endChapter?: string, endVerse?: string,
-    locationRunId?: string,
-  ): Promise<MeaningAnalysisRun> {
-    return call("meaning_analysis_run_range", {
-      chapter, verse, endChapter, endVerse, locationRunId,
-    });
-  },
-
-  meaningAnalysisStatus(runId: string): Promise<Pick<MeaningAnalysisRun, "id" | "runStatus" | "diagnostics" | "cacheStatus">> {
-    return call("meaning_analysis_status", { runId });
-  },
-
-  meaningAnalysisGetRange(runId: string): Promise<MeaningAnalysisRun> {
-    return call("meaning_analysis_get_range", { runId });
-  },
-
-  meaningAnalysisGetAssessment(assessmentId: string): Promise<MeaningAssessment> {
-    return call("meaning_analysis_get_assessment", { assessmentId });
-  },
-
-  meaningAnalysisGetComponents(assessmentId: string): Promise<MeaningComponentAssessment[]> {
-    return call("meaning_analysis_get_components", { assessmentId });
-  },
-
-  meaningAnalysisGetDiagnostics(runId: string): Promise<MeaningAnalysisDiagnostics> {
-    return call("meaning_analysis_get_diagnostics", { runId });
-  },
-
   paratextGetState(): Promise<DesktopConnectorState> {
     return call("paratext_get_state");
-  },
-
-  paratextSetReference(reference: string, originId?: string): Promise<Record<string, unknown>> {
-    return call("paratext_set_reference", { reference, originId });
-  },
-
-  logosGetState(): Promise<DesktopConnectorState> {
-    return call("logos_get_state");
-  },
-
-  logosSetReference(reference: string, originId?: string): Promise<DesktopConnectorState> {
-    return call("logos_set_reference", { reference, originId });
   },
 
   navigationStatus(context?: string): Promise<NavigationSyncState> {
@@ -686,37 +514,6 @@ export const bridge = {
   },
 
   // --- Stage 8 QA audit (analysis; read-only) -------------------------------
-
-  qaAuditRunRange(
-    chapter: string, verse: string, endChapter?: string, endVerse?: string,
-    meaningRunId?: string,
-  ): Promise<Record<string, unknown>> {
-    return call("qa_audit_run_range", { chapter, verse, endChapter, endVerse, meaningRunId });
-  },
-
-  qaAuditStatus(runId: string): Promise<Record<string, unknown>> {
-    return call("qa_audit_status", { runId });
-  },
-
-  qaAuditGetRange(runId: string): Promise<Record<string, unknown>> {
-    return call("qa_audit_get_range", { runId });
-  },
-
-  qaAuditGetSourceCoverage(runId: string): Promise<Array<Record<string, unknown>>> {
-    return call("qa_audit_get_source_coverage", { runId });
-  },
-
-  qaAuditGetTargetSupport(runId: string): Promise<Array<Record<string, unknown>>> {
-    return call("qa_audit_get_target_support", { runId });
-  },
-
-  qaAuditGetFinding(findingId: string): Promise<Record<string, unknown>> {
-    return call("qa_audit_get_finding", { findingId });
-  },
-
-  qaAuditGetDiagnostics(runId: string): Promise<Record<string, unknown>> {
-    return call("qa_audit_get_diagnostics", { runId });
-  },
 
   // --- Stage 9A human review (decisions only; never edits Scripture) --------
 
@@ -887,43 +684,6 @@ export const bridge = {
     return call("correction_acknowledge_corrected", options);
   },
 
-  /**
-   * Approve or reject a Stage 6B location. This is a mapping verdict, not a
-   * translation verdict: rejecting says Bridge looked in the wrong place, and
-   * leaves the QA disposition untouched.
-   */
-  semanticReviewDecideLocation(
-    relationshipId: string,
-    decision: "APPROVE" | "REJECT",
-    expectedEntityRevision: number,
-    options: { note?: string; selectedCandidateId?: string } = {},
-  ): Promise<DecideLocationResult> {
-    return call("semantic_review_decide_location", {
-      relationshipId,
-      decision,
-      expectedEntityRevision,
-      note: options.note,
-      selectedCandidateId: options.selectedCandidateId,
-    });
-  },
-
-  semanticReviewDecideMeaning(
-    assessmentId: string,
-    meaningStatus: MeaningStatus,
-    expectedEntityRevision: number,
-    note?: string,
-  ): Promise<DecideMeaningResult> {
-    return call("semantic_review_decide_meaning", {
-      assessmentId, meaningStatus, expectedEntityRevision, note,
-    });
-  },
-
-  reviewHistoryGetEntityHistory(
-    entityType: ReviewEntityType, entityId: string,
-  ): Promise<EntityHistory> {
-    return call("review_history_get_entity_history", { entityType, entityId });
-  },
-
   // Stage 9A.4 orchestrates the frozen Stage 5--8 engines. Starting a job is
   // explicit; project open only reports persisted state and never starts one.
   analysisJobStart(
@@ -939,10 +699,6 @@ export const bridge = {
 
   analysisJobCancel(jobId: string): Promise<AnalysisJobSnapshot> {
     return call("analysis_job_cancel", { jobId });
-  },
-
-  analysisJobGetRecent(limit = 20): Promise<AnalysisJobSnapshot[]> {
-    return call("analysis_job_get_recent", { limit });
   },
 
   analysisJobGetScopeStatus(requestedScope: AnalysisScope): Promise<AnalysisScopeStatus> {

@@ -8482,3 +8482,64 @@ client method, and the `ai-explain-no-key` block in `scripts/smoke_sidecars.py`.
 - Shell: `cargo check` clean (5m52s, cold target). `cargo test` ran once for the
   batch of Rust-touching issues (#105, #103, #106); its result is under the #103
   entry below.
+
+## 2026-09-16 — #103: the Rust and TypeScript layers of 47 UI-dead methods, and `passage_semantic_wire.rs`
+
+Group A of the simplification audit (A3). A survey of `bridgeClient.ts` against
+every `.ts`/`.svelte` under `src/` (excluding the client itself and tests) found
+53 of 137 client methods with no caller. 47 of them are the ones the issue names
+and went here: `scanProject`, `projectCollectionReport`, `triageClear`,
+`saveAlignment`, `completeAlignment`, `alignmentBackups`, the six
+`passageSemantic*`, five `sourceSemantic*`, five `targetSemantic*`, five
+`semanticLocation*`, six `meaningAnalysis*` and seven `qaAudit*` direct-access
+methods, `semanticReviewDecideLocation/Meaning`, `reviewHistoryGetEntityHistory`,
+`analysisJobGetRecent`, `paratextSetReference`, `logosGetState/SetReference`.
+Each lost its client method, its `#[tauri::command]` and its `main.rs`
+registration. `commands.rs` goes from 137 commands to 90 (669 lines), the client
+from 137 methods to 90. `semanticLocationGetRange` and `targetSemanticGetRange`
+stay: `PassageAlignmentMode.svelte` calls both. Every engine handler stays.
+
+`src-tauri/src/passage_semantic_wire.rs` (1,491 lines) is gone with its `mod`
+line. It was referenced by nothing but `main.rs` and its own three tests. The
+JSON schema it mirrored (`schemas/bridge-passage-semantic-v1.schema.json`) stays:
+`passage_semantic_models.py`, two engine test files and `passageSemanticV1.ts`
+reference it. Its test fixture `schemas/fixtures/unicode-spans-v1.json` stays too,
+read by `test_passage_semantic_foundation.py`.
+
+### What else the re-verification turned up
+
+- **Six more dead client methods the issue did not name**: `chapterVerses`,
+  `getVerse`, `alignmentStatus`, `correctionGetProposal`, and the two
+  AI-alignment ones (`aiProposeAlignment`, `aiApplyAlignmentProposal`, which are
+  #109's). The Rust command `verse_run_checks` has no TS caller either (the UI
+  runs checks through `checks.start`). Left in place; the first four and the Rust
+  command are filed as one Idea issue.
+- **Types.** Pruning the client's type imports and then surveying every
+  `export` under `src/lib/types/` for references outside its own file found 27
+  unused declarations. Eleven were orphaned by this change and went:
+  `CollectionReport` (`finding.ts`); `PassageSemanticRuntimeStatus`,
+  `PassageSemanticProjectMetadata`, `CurrentPassageSnapshot`,
+  `PassageSemanticStaleSummary`, `PassageSemanticMigrationReport`,
+  `SourceSemanticInventory`, `MeaningAnalysisRun` (`passageSemanticV1.ts`);
+  `DecideLocationResult`, `DecideMeaningResult`, `EntityHistory` (`qaReview.ts`).
+  The other sixteen were already unused at HEAD (the same survey run against
+  `git archive HEAD`), so they are in the Idea issue, not deleted here.
+  `ReportRow` was imported by the client and mentioned only in a comment; the
+  import went.
+- **`sidecar.rs`.** The `logos.getState | logos.setReference => 20` timeout entry
+  went: no Rust command sends those strings any more (the engine keeps the
+  handlers; Logos is reached through `navigation.*`). One assertion in
+  `triage_polling_stays_interactive…` checked the default timeout for
+  `triage.clear`, which Rust no longer sends; that line went, the test stays.
+- **Docs.** `CLAUDE.md`'s `cargo test` note now says `sidecar::tests`, 9 tests;
+  `ARCHITECTURE.md`'s "cost of the shape" paragraph records the post-#102/#103/#105
+  counts; QA matrix A04 records 9 tests and why. `ci.yml`'s stub comment no longer
+  names the wire file.
+
+### Gates (run once for the #105, #103, #106 batch, after all three were applied)
+
+- `cargo check` clean (warm, 6s; no dead-code warnings). `cargo test` **9 passed**,
+  0 failed.
+- `npm run check` 0 errors / 0 warnings; `npm run test` 26 files, **367 passed**;
+  `npm run build` clean.
+- No engine change in #103 or #106; the engine suite ran for #105 (above).

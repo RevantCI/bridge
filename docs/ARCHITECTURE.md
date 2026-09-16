@@ -61,10 +61,11 @@ its status.
 
 **Cost of the shape.** Every RPC is defined four times: engine constant + handler +
 dispatcher branch, a Rust command, a TS client method, and TS types (`finding.ts` 884 LOC,
-`passageSemanticV1.ts` 860 LOC). Adding a method means four edits and a Rust rebuild. As of
-2026-09-16, 50 of the 140 wired methods have no UI caller, 13 more engine methods have no
-Rust command at all, and `src-tauri/src/passage_semantic_wire.rs` (1491 LOC of typed
-mirrors) is referenced only by `mod` in `main.rs` and its own tests. See
+`passageSemanticV1.ts`). Adding a method means four edits and a Rust rebuild. The
+2026-09-16 audit found 50 of 140 wired methods with no UI caller, 13 engine methods with
+no Rust command, and a 1491-line Rust mirror of the passage-semantic types referenced only
+by `mod`; #102, #103 and #105 removed them, leaving 90 Rust commands and 90 client methods
+(the engine keeps the Stage 4 to 8 handlers as the test harness for those stages). See
 `SIMPLIFICATION_AUDIT_2026-09.md`.
 
 **Per-method timeouts** live in `sidecar.rs` (`request_timeout_seconds`): 30 s default;

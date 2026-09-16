@@ -134,8 +134,6 @@ fn request_timeout_seconds(method: &str) -> u64 {
         "alignment.aiPropose" | "correction.createProposal" | "correction.regenerateProposal" => {
             260
         }
-        // Logos starts a persistent -STA PowerShell helper on first use.
-        "logos.getState" | "logos.setReference" => 20,
         // A whole-Bible report payload (tens of thousands of rows) takes a
         // while to serialize and ship over stdio; the export writes it
         // back out. report.status/report.cancel stay interactive.
@@ -528,7 +526,6 @@ mod tests {
         assert_eq!(request_timeout_seconds("triage.status"), 30);
         assert_eq!(request_timeout_seconds("triage.cancel"), 30);
         assert_eq!(request_timeout_seconds("triage.override"), 30);
-        assert_eq!(request_timeout_seconds("triage.clear"), 30);
         assert_eq!(request_timeout_seconds("triage.results"), 180);
     }
 
