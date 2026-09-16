@@ -200,7 +200,7 @@ running, and cancel-wait every 400 ms.
 | Stage 9B correction | `correction_eligibility.py` 570, `correction_wording.py` 694, `correction_application.py` 306, `correction_application_recovery.py` 232, `correction_affected_analysis.py` 269, `correction_verification.py` 1036 |
 | Stage 3 semantic mapping (removal decided) | `semantic_mapping.py` 867, `semantic_mapping_bridge.py` 319, `semantic_mapping_service.py`, `semantic_review_policy.py` 164 (the validation queue on top of it was removed in #100, the corpus-discovery generator in #101) |
 | AI (optional, online) | `ai_client.py` 911, `triage.py` 620, `triage_prompts.py` 220 |
-| Connectors | `paratext_connector.py`, `paratext_notes.py` 420, `paratext_api.py`, `logos_connector.py` 281, `navigation.py` 446 |
+| Connectors | `paratext_connector.py`, `paratext_notes.py` 420, `logos_connector.py` 281, `navigation.py` 446 |
 | Storage and durability | `workbench_repository.py` 1162, `workspace_repository.py` 489, `transaction_journal.py` 177 |
 | Reporting | `qa_report.py` 828, `reporting.py` 203, `analytics.py`, `metrics.py` |
 | Versification | `versification.py` 333 (imports the vendored Greek Room library directly) |

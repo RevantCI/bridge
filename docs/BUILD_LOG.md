@@ -8586,3 +8586,37 @@ lines leave the `docs/` reading path; nothing is deleted.
 2m45s. The failure was not this change's: `test_correction_stage9b3a.py` read
 the Rust wire file #103 deleted (see the #103 follow-up entry below). Every
 Python file whose comments were re-pointed here imported and ran.
+
+## 2026-09-16 — #104: five engine modules with no importer
+
+Group A of the simplification audit (A4). A precise import grep over `engine/`
+and `scripts/` (excluding `tests/` and `vendor/`) found no importer for
+`semantic_location_benchmark.py` (205 lines), `qa_benchmark.py` (157),
+`paratext_api.py` (117), `text_graphemes.py` (81) or `identity.py` (51). Only the
+first had a test (`tests/semantic/test_semantic_location_benchmark.py`, 85 lines,
+3 tests); the other four had none. All six files are deleted; `ARCHITECTURE.md`'s
+connector row no longer lists `paratext_api.py`.
+
+Two checks the issue asked for: `issueResolution.queueParatext/retryParatext`
+never reached `paratext_api.py` (`paratext_notes.py` and `paratext_connector.py`
+import nothing from it; the Paratext handoff goes through the companion plugin,
+not the registry HTTPS client). `text_graphemes.py` was Tk caret-safety code from
+the legacy Tkinter tool, with no Tk left to protect.
+
+**The benchmarks were deleted, not moved.** The issue offered "move the two
+benchmarks under `scripts/` if anyone still runs them". Nothing runs them: neither
+module has an entry point, no script or CI step calls them, and `HANDOFF.md` §"At
+the end of Stage 9A" records that every Stage 6B/7/8 benchmark is
+`MACHINE_PROPOSED` only, never human-reviewed. The evaluators are one `git show`
+away (`279b6e6:engine/tc_ai_bridge/semantic_location_benchmark.py`) if a runner
+is ever built. What they read stays: `engine/resources/semantic_location/benchmark-v1.json`
+and `engine/resources/qa_audit/{omission,addition}-benchmark-v1.json` (15 KB
+together) are still bundled and are now read by nothing. `meaning_benchmark.py`
+and its test are the same shape but were not named by the issue and stay.
+
+### Gates
+
+Run once for #107 and #104 together: `pytest -n auto -m "not slow"` from
+`engine/`, **1008 passed, 1 failed** (2m45s); the failure was #103's, see the
+next entry. 1013 before, minus the three benchmark tests removed here, minus
+the one failing test, plus none added.
