@@ -455,8 +455,10 @@ def test_alignment_precedents_for_range_skips_a_verse_bridge_reference(
 # hits by the fixed engine -- correction_verification.py's fingerprint()
 # docstring states the same rule for Stage 6B changes generally.
 
-def test_alignment_evidence_version_is_v2() -> None:
-    assert word_alignment_evidence.ALIGNMENT_EVIDENCE_VERSION == "tc-word-alignment-v2"
+def test_alignment_evidence_version_is_v3() -> None:
+    # v3 (#119): cross-verse links join the evidence; a v2-fingerprinted run
+    # never saw them and must not be served as a cache hit.
+    assert word_alignment_evidence.ALIGNMENT_EVIDENCE_VERSION == "tc-word-alignment-v3"
 
 
 def test_alignment_evidence_version_is_in_policy_versions_output(tmp_path: Path) -> None:
@@ -464,7 +466,134 @@ def test_alignment_evidence_version_is_in_policy_versions_output(tmp_path: Path)
 
     runtime = _runtime_with_completed_alignment(tmp_path)
     versions = AnalysisJobManager.policy_versions(runtime)
-    assert versions["alignmentEvidenceVersion"] == "tc-word-alignment-v2"
+    assert versions["alignmentEvidenceVersion"] == "tc-word-alignment-v3"
+
+
+# --- #119: Bridge-private cross-verse links as location evidence -------------
+
+PHP_1_4_EN = "always"
+
+
+def _runtime_with_cross_verse_link(tmp_path: Path) -> PassageSemanticRuntime:
+    """PHP 1:3 "God" and 1:4 "always", no tC alignment at all, and one
+    Bridge cross-verse link: 1:4's δεήσει is (for the test's purposes)
+    realized by 1:3's "God". Single-word verses for the same reason
+    PHP_1_3_EN is one word."""
+    root = tmp_path / "php-en-xv"
+    (root / "php").mkdir(parents=True)
+    alignment_dir = root / ".apps" / "translationCore" / "alignmentData" / "php"
+    alignment_dir.mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps({
+        "project": {"id": "php", "name": "Philippians"},
+        "target_language": {"id": "en"}, "resource": {"id": "test"}, "tc_version": "8",
+    }), encoding="utf-8")
+    (root / "php" / "1.json").write_text(
+        json.dumps({"3": PHP_1_3_EN, "4": PHP_1_4_EN}, ensure_ascii=False), encoding="utf-8",
+    )
+    (alignment_dir / "1.json").write_text(json.dumps({
+        "3": {"alignments": [], "wordBank": [{"word": "God", "occurrence": 1, "occurrences": 1}]},
+        "4": {"alignments": [], "wordBank": [{"word": "always", "occurrence": 1, "occurrences": 1}]},
+    }), encoding="utf-8")
+    (root / "php.usfm").write_text("\\id PHP\n\\c 1\n\\p\n\\v 3 OLD\n\\v 4 OLD\n", encoding="utf-8")
+    project = TranslationCoreProject(root)
+    project.cross_verse_links.link(
+        "1", "4", TokenRef("δεήσει", 1, 1, strong="G11620", lemma="δέησις", morph="Gr,N,,,,,DFS,"),
+        "1", "3", TokenRef("God", 1, 1),
+    )
+    return PassageSemanticRuntime(project, f"cross-verse-evidence-{tmp_path.name}")
+
+
+def _expected_pair(runtime: PassageSemanticRuntime) -> tuple[str, str]:
+    source = runtime.source_semantic.build_range("1", "3", "1", "4")
+    target = runtime.target_semantic.build_range("1", "3", "1", "4")
+    source_token_id = next(
+        unit for unit in source["units"]
+        if unit.get("semanticFeatures", {}).get("lemma") == "δέησις"
+    )["tokenInstanceIds"][0]
+    target_token_id = next(token for token in target["tokens"] if token["rawForm"] == "God")["id"]
+    return source_token_id, target_token_id
+
+
+def test_cross_verse_link_projects_as_a_precedent_across_verses(tmp_path: Path) -> None:
+    runtime = _runtime_with_cross_verse_link(tmp_path)
+    source_token_id, target_token_id = _expected_pair(runtime)
+    precedents = alignment_precedents_for_range(runtime, "1", "3", "1", "4")
+    # No completed tC alignment exists, so the link is the only evidence.
+    assert precedents == [{
+        "sourceTokenInstanceIds": [source_token_id],
+        "targetTokenInstanceIds": [target_token_id],
+    }]
+    # A range touching only one end of the link still resolves the pair; whether
+    # it can score is then up to the search spans of that range.
+    assert alignment_precedents_for_range(runtime, "1", "3") == precedents
+
+
+def test_an_invalid_cross_verse_link_contributes_nothing(tmp_path: Path) -> None:
+    runtime = _runtime_with_cross_verse_link(tmp_path)
+    invalidated = runtime.project.cross_verse_links.invalidate_missing_targets("1", "3", {"God␟1␟1"})
+    assert len(invalidated) == 1 and invalidated[0]["state"] == "invalid"
+    assert alignment_precedents_for_range(runtime, "1", "3", "1", "4") == []
+
+
+def test_cross_verse_link_lifts_the_source_from_not_located_to_a_credible_cross_verse_candidate(
+    tmp_path: Path,
+) -> None:
+    """The #54 cross-verse half. Without the link, Stage 6B has nothing for
+    δεήσει (1:4) and reports NOT_LOCATED (top candidate 0.16). With the link,
+    at the existing 0.65 WORD_ALIGNMENT weight and no embedding provider, every
+    top candidate contains 1:3's "God" and clears `located_minimum`.
+
+    Measured, not assumed: on this two-word range the outcome is AMBIGUOUS,
+    not LOCATED, because the split pseudo-span pairing "God" with its
+    source-verse neighbour "always" also contains the linked token, also
+    earns the WORD_ALIGNMENT component, and wins STRUCTURAL_PROXIMITY for
+    touching the source verse -- 0.81 against 0.77 for "God" alone, inside
+    the 0.07 ambiguity margin. That tie is candidate generation's, not this
+    evidence's (filed as #123); no weight or threshold is tuned here. When
+    the top candidate does win outright the relationship carries CROSS_VERSE,
+    which this test asserts conditionally so a later fix to #123 tightens it
+    rather than breaking it."""
+    from tc_ai_bridge.semantic_location import LocationSearchPolicy, SemanticLocationEngine
+
+    runtime = _runtime_with_cross_verse_link(tmp_path)
+    source_token_id, target_token_id = _expected_pair(runtime)
+
+    def relationship_for(location: dict) -> dict:
+        source_units = {
+            unit["id"]: unit for unit in runtime.source_semantic.build_range("1", "3", "1", "4")["units"]
+        }
+        return next(
+            item for item in location["relationships"]
+            if source_units[item["sourceSemanticUnitIds"][0]].get("semanticFeatures", {}).get("lemma")
+            == "δέησις"
+        )
+
+    with_link = SemanticLocationEngine(runtime).run_range("1", "3", "1", "4")
+    relationship = relationship_for(with_link)
+    assert relationship["locationOutcome"] in {"LOCATED", "AMBIGUOUS"}
+    top_ids = [relationship["selectedCandidateId"], *relationship["alternativeCandidateIds"]]
+    top = sorted(
+        (c for c in with_link["candidates"] if c["id"] in top_ids),
+        key=lambda c: -c["rawScore"],
+    )[:2]
+    assert top and all(target_token_id in c["targetTokenInstanceIds"] for c in top)
+    assert all(
+        any(k["kind"] == "WORD_ALIGNMENT" and k["rawScore"] > 0 for k in c["evidenceComponents"])
+        for c in top
+    )
+    assert top[0]["rawScore"] >= LocationSearchPolicy().located_minimum
+    if relationship["locationOutcome"] == "LOCATED":
+        assert "CROSS_VERSE" in relationship["properties"]
+        assert target_token_id in relationship["targetTokenInstanceIds"]
+
+    # The counterfactual: remove the link, stale the run, and the same source
+    # unit is NOT_LOCATED again -- the link is the only thing that located it.
+    link_id = runtime.project.cross_verse_links.active_links()[0]["id"]
+    runtime.project.cross_verse_links.unlink(link_id)
+    runtime.synchronize_alignment_state()
+    without_link = SemanticLocationEngine(runtime).run_range("1", "3", "1", "4")
+    assert without_link["fingerprint"] != with_link["fingerprint"]
+    assert relationship_for(without_link)["locationOutcome"] == "NOT_LOCATED"
 
 
 def test_alignment_evidence_version_is_a_real_input_to_the_verifier_fingerprint(
@@ -506,5 +635,5 @@ def test_alignment_evidence_version_is_a_real_input_to_the_verifier_fingerprint(
             "qaPolicy": QA_POLICY_VERSION,
         })
 
-    assert real_fingerprint == _fingerprint_with("tc-word-alignment-v2")
-    assert real_fingerprint != _fingerprint_with("tc-word-alignment-v1")
+    assert real_fingerprint == _fingerprint_with("tc-word-alignment-v3")
+    assert real_fingerprint != _fingerprint_with("tc-word-alignment-v2")

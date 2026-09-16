@@ -1714,6 +1714,11 @@ class BridgeEngine:
 
     def _cross_verse_result(self, link: dict[str, Any]) -> dict[str, Any]:
         source, target = link["source"], link["target"]
+        # #119: a link is alignment state Stage 6B reads as evidence, so the
+        # same digest-keyed staling that follows a tC alignment save follows
+        # a link change -- in this session, not only after a reopen.
+        if self.passage_semantic_runtime is not None:
+            self.passage_semantic_runtime.synchronize_alignment_state()
         return {
             "link": link,
             "source": self._alignment_context(source["chapter"], source["verse"]),

@@ -499,6 +499,13 @@ def alignment_state_digest(project: Any) -> str:
     for path in sorted(tools_dir.glob("*/*/*.json")):
         digest_builder.update(str(path.relative_to(tools_dir)).encode("utf-8"))
         digest_builder.update(path.read_bytes())
+    # #119: the Bridge-private cross-verse links are alignment state too. A
+    # link change must move this digest for exactly the reason a completion
+    # marker does: it changes what Stage 6B's WORD_ALIGNMENT evidence finds.
+    cross_verse = getattr(project, "cross_verse_links", None)
+    if cross_verse is not None:
+        digest_builder.update("␟crossVerse␟".encode("utf-8"))
+        digest_builder.update(cross_verse.digest().encode("utf-8"))
     return digest_builder.hexdigest()
 
 

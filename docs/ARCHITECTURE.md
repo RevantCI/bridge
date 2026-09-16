@@ -156,6 +156,13 @@ flowchart LR
   end
 ```
 
+Stage 6B also reads human alignment as evidence (`word_alignment_evidence.py`): completed
+same-verse translationCore alignment groups (V11-000a) and, since #119, Bridge's own
+cross-verse links from `bridge-workbench.sqlite3`, both projected into the same precedent
+shape and scored as one `WORD_ALIGNMENT` component at the `HUMAN_PRECEDENT` weight. A change
+to either stales downstream Stage 6B/7/8 records through the book-level `WORD_ALIGNMENT`
+dependency anchor, because both are folded into `alignment_state_digest`.
+
 Two review vocabularies coexist on purpose because they sit on two data sources. The
 ReviewPanel writes engine `FindingStatus` values against Greek Room findings; the QA mode of
 Alignment Review writes Stage 9A dispositions against `qa_findings` in the semantic DB.

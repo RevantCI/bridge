@@ -16,11 +16,18 @@ identity unambiguously drops that one alignment group from the evidence
 than being guessed at -- a wrong group would confidently mislocate a
 finding, which is worse than the gap this closes.
 
-Scope: same-verse source->target links only. A tC alignment group stored
-under a verse-bridge key ("3-4") is out of scope for this pass -- deciding
-which individual verse each of its tokens belongs to is itself an
-unresolved-or-guess problem, so those verses simply contribute no alignment
-evidence rather than being split heuristically.
+Scope: same-verse tC groups, plus (#119) Bridge's own cross-verse links from
+`cross_verse_links.py` -- the human record that a source token of one verse
+is realized in another verse's target text, which translationCore alignment
+cannot hold. Both are projected into the same precedent shape, so a
+cross-verse link scores at the same 0.65 WORD_ALIGNMENT weight and the
+resulting relationship acquires CROSS_VERSE in `semantic_location.py` on its
+own; no weight or threshold changes. A tC alignment group stored under a
+verse-bridge key ("3-4") is still out of scope -- deciding which individual
+verse each of its tokens belongs to is itself an unresolved-or-guess
+problem, so those verses simply contribute no alignment evidence rather
+than being split heuristically -- and so is a link whose end sits on a
+bridged verse.
 """
 from __future__ import annotations
 
@@ -40,7 +47,9 @@ from .source_semantic_inventory import source_token_identity
 # evidence-dropped runs as cache hits -- same rule
 # correction_verification.py's fingerprint() docstring states for Stage 6B
 # changes generally.
-ALIGNMENT_EVIDENCE_VERSION = "tc-word-alignment-v2"
+# v3 (#119): cross-verse links join the evidence. A run fingerprinted under
+# v2 never saw them, so it must not be served as a cache hit once they exist.
+ALIGNMENT_EVIDENCE_VERSION = "tc-word-alignment-v3"
 
 # Same "verse bridge" recognition rule as
 # original_language_resources.source_tokens_for_verse (e.g. "2-3").
@@ -281,4 +290,94 @@ def alignment_precedents_for_range(
             precedents.append({
                 "sourceTokenInstanceIds": source_ids, "targetTokenInstanceIds": target_ids,
             })
+    precedents.extend(_cross_verse_precedents(runtime, resource, passage["targetTextByDisplayedReference"]))
+    return precedents
+
+
+def _cross_verse_precedents(
+    runtime: Any, resource: OriginalLanguageResource, passage_texts: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Active Bridge cross-verse links touching the range, as precedents (#119).
+
+    A link counts when either of its verses is in the range: the source verse
+    supplies the pack identity of its token and the target verse supplies the
+    revision-bound target token id, each resolved exactly the way the
+    same-verse path resolves them (exact NFC word plus occurrence, no
+    guessing). A target verse outside the range is looked up through the same
+    passage rebuild the range itself went through, so its text revision is the
+    one Stage 6A would use. Whether the resolved pair can actually score is
+    then Stage 6B's business: if the target verse is not in this range's
+    search spans the precedent simply matches no candidate. Invalid links,
+    links on bridged verses, and any verse-scoped read problem contribute
+    nothing rather than raising -- optional evidence, like the rest.
+    """
+    from .passage_semantic_runtime import DEFAULT_TOKENIZER
+
+    project = runtime.project
+    book = runtime.book
+    try:
+        links = project.cross_verse_links.active_links()
+    except Exception:
+        return []
+    if not links:
+        return []
+    in_range: dict[tuple[str, str], str] = {}
+    for reference in passage_texts:
+        parsed = _reference_chapter_verse(reference)
+        if parsed is not None:
+            in_range[parsed] = reference
+    verse_cache: dict[tuple[str, str], tuple[str, str, str] | None] = {}
+
+    def verse_context(chapter: str, verse: str) -> tuple[str, str, str] | None:
+        key = (chapter, verse)
+        if key in verse_cache:
+            return verse_cache[key]
+        result: tuple[str, str, str] | None = None
+        try:
+            if key in in_range:
+                reference = in_range[key]
+                text = passage_texts[reference]
+            else:
+                single = runtime.rebuild_current_passage(chapter, verse)
+                items = list(single["targetTextByDisplayedReference"].items())
+                if len(items) == 1:
+                    reference, text = items[0]
+                else:
+                    reference, text = "", ""
+            if reference:
+                row = runtime.repository.current_target_revision(runtime.project_id, book, reference)
+                if row is not None:
+                    result = (reference, text, row["textRevision"])
+        except Exception:
+            result = None
+        verse_cache[key] = result
+        return result
+
+    precedents: list[dict[str, Any]] = []
+    for link in links:
+        source = link.get("source") or {}
+        target = link.get("target") or {}
+        s_key = (str(source.get("chapter") or ""), str(source.get("verse") or ""))
+        t_key = (str(target.get("chapter") or ""), str(target.get("verse") or ""))
+        if s_key not in in_range and t_key not in in_range:
+            continue
+        if _VERSE_BRIDGE.fullmatch(s_key[1]) or _VERSE_BRIDGE.fullmatch(t_key[1]):
+            continue
+        source_id = resolve_source_token_id(resource, book, s_key[0], s_key[1], TokenRef.from_dict(source))
+        if source_id is None:
+            continue
+        context = verse_context(*t_key)
+        if context is None:
+            continue
+        reference, text, text_revision = context
+        target_id = resolve_target_token_id(
+            project_id=runtime.project_id, book=book, displayed_reference=reference,
+            text_revision=text_revision, current_text=text, profile=DEFAULT_TOKENIZER,
+            ref=TokenRef.from_dict(target),
+        )
+        if target_id is None:
+            continue
+        precedents.append({
+            "sourceTokenInstanceIds": [source_id], "targetTokenInstanceIds": [target_id],
+        })
     return precedents

@@ -297,3 +297,40 @@ def test_completing_an_alignment_through_the_rpc_refreshes_the_memo_so_a_fresh_r
 
     assert _run_status(reopened.repository, published["id"]) == "ACTIVE"
     assert reopened.synchronize_alignment_state() == {"changed": False, "staled": 0}
+
+
+def test_a_cross_verse_link_change_stales_a_cached_location_run(tmp_path: Path) -> None:
+    """#119: a Bridge cross-verse link is alignment state Stage 6B reads, so
+    adding one moves `alignment_state_digest`, `synchronize_alignment_state`
+    stales the cached run, and the next run recomputes under a new fingerprint
+    -- exactly what a completion marker already does."""
+    from tc_ai_bridge.models import TokenRef
+
+    runtime = _runtime(tmp_path)
+    (runtime.project.path / "php" / "1.json").write_text(
+        json.dumps({"3": "God", "4": "always"}, ensure_ascii=False), encoding="utf-8",
+    )
+    runtime.project.alignment_dir.joinpath("1.json").write_text(json.dumps({
+        "3": {"alignments": [], "wordBank": [{"word": "God", "occurrence": 1, "occurrences": 1}]},
+        "4": {"alignments": [], "wordBank": [{"word": "always", "occurrence": 1, "occurrences": 1}]},
+    }), encoding="utf-8")
+    engine = SemanticLocationEngine(runtime)
+    first = engine.run_range("1", "3", "1", "4")
+    assert first["cacheStatus"] == "MISS"
+    assert engine.run_range("1", "3", "1", "4")["cacheStatus"] == "HIT"
+
+    runtime.project.cross_verse_links.link(
+        "1", "4", TokenRef("δεήσει", 1, 1, strong="G11620", lemma="δέησις", morph="Gr,N,,,,,DFS,"),
+        "1", "3", TokenRef("God", 1, 1),
+    )
+    sync = runtime.synchronize_alignment_state()
+    assert sync["staled"] >= 1
+    assert _run_status(runtime.repository, first["id"]) == "STALE"
+
+    second = engine.run_range("1", "3", "1", "4")
+    assert second["cacheStatus"] == "MISS"
+    assert second["fingerprint"] != first["fingerprint"]
+    # And unlinking moves it again.
+    link_id = runtime.project.cross_verse_links.active_links()[0]["id"]
+    runtime.project.cross_verse_links.unlink(link_id)
+    assert runtime.synchronize_alignment_state()["staled"] >= 1

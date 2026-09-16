@@ -9046,3 +9046,74 @@ first chapter's verses. No golden or threshold change; Semantic/Passage tabs unt
 across `crossVerseSuggest`, `VerseListMultiSelect`, `QaFindingDetailCrossVerse` and two
 new `CrossVerseAlignmentModal` cases); `npm run build` clean. No engine or Rust change,
 so pytest and `cargo` were not run.
+
+## 2026-09-16 — #119: cross-verse alignment, slice 4 — Stage 6B reads human cross-verse links as location evidence
+
+The cross-verse half of #54. V11-000a taught Stage 6B to read completed same-verse tC
+alignment as `WORD_ALIGNMENT` evidence and left the cross-verse half on #54 because tC
+alignment cannot express it. Since #117 a human record of "this source token of verse A
+is realized in verse B" exists for the first time, in `alignment_cross_verse_links`; this
+slice makes Stage 6B read it. Engine only, no schema change (the links stay in the
+workbench DB), no weight or threshold change.
+
+### What was built
+
+- **`word_alignment_evidence.py`**: `alignment_precedents_for_range` now also returns one
+  precedent per *active* cross-verse link touching the range (`_cross_verse_precedents`).
+  The source end resolves onto the pinned UHB/UGNT pack identity exactly as the same-verse
+  path does (`resolve_source_token_id`: exact NFC word + occurrence, Strong's/lemma/morph
+  as tie-breakers, no guessing); the target end resolves onto the current revision of its
+  *own* verse through `resolve_target_token_id`, using the range's passage text when the
+  verse is in range and a single-verse `rebuild_current_passage` when it is not, so the
+  text revision is the one Stage 6A uses. Output shape unchanged, so `_score_candidate`
+  scores it at the existing 0.65 and a located relationship acquires `CROSS_VERSE` on its
+  own (source and target canonical verses differ). Invalid links, links on bridged verses
+  and any verse-scoped read problem contribute nothing rather than raising.
+  `ALIGNMENT_EVIDENCE_VERSION` → `tc-word-alignment-v3`, so a run fingerprinted before
+  links existed is never served as a cache hit.
+- **Staleness.** `CrossVerseLinkStore.digest()` (every link row: id, state, revision,
+  updated_at) is folded into `alignment_state_digest`, which is both Stage 6B's run
+  fingerprint input (`alignment_evidence_digest`) and the key `synchronize_alignment_state`
+  memoises its staling on. So a link, unlink or invalidation stales downstream Stage 6B/7/8
+  records through the existing book-level `WORD_ALIGNMENT` anchor, in the same session:
+  `alignment.crossVerse.link` / `.unlink` now call `synchronize_alignment_state()` before
+  returning, and a text edit that invalidates a link already went through the post-commit
+  call in `apply_scripture_edit`. No new anchor type, no new dependency table.
+- `CrossVerseLinkStore.active_links()` for the projection.
+
+### What the measurement said (recorded, not tuned)
+
+On the test fixture (PHP 1:3 "God", 1:4 "always", one link δεήσει@1:4 → God@1:3, no
+embedding provider): without the link the δεήσει unit is **NOT_LOCATED** (top candidate
+0.16); with it, every top candidate contains the linked token and carries the
+`WORD_ALIGNMENT` component, the best at **0.81**, well over `located_minimum` 0.36. The
+outcome is **AMBIGUOUS**, not LOCATED: the split pseudo-span pairing "God" with its
+source-verse neighbour "always" also contains the linked token, also earns the component,
+and wins `STRUCTURAL_PROXIMITY` for touching the source verse — 0.81 against 0.77 for
+"God" alone, inside the 0.07 ambiguity margin. That is candidate generation's tie, not
+this evidence's, and resolving it means touching Stage 6B scoring, which is a stop-and-ask;
+filed as **#123** and left alone. The test asserts the measured delta (NOT_LOCATED →
+credible, linked-token candidates on top, `CROSS_VERSE` when LOCATED) so a later fix to
+#123 tightens it rather than breaking it.
+
+### The golden did not move
+
+`tests/semantic/test_semantic_location_stage6b.py::test_irvtam_php_passage_reordering_is_discovered_without_engine_book_rules`
+passed by name (4.2 s) and `git status` on `engine/tests/fixtures/` is clean: the golden's
+fixture project has no completed alignment and no cross-verse links, so the new component
+contributes exactly zero there. Not re-baselined.
+
+### Deliberately not done
+
+No weight, threshold or search-policy change (#123 records the one place that would
+help). No new dependency anchor. No semantic-DB schema change. No UI change. The archived
+HANDOFF.md still says the cross-verse half is blocked on the embedding-provider direction;
+that document is an archive and is left as written — this entry and #54's closing comment
+are the correction.
+
+### Gates
+
+Engine: `tests/semantic/test_word_alignment_evidence.py` + `test_word_alignment_invalidation.py`
+**36 passed** (53 s; 4 new); the Stage 6B golden test by name **1 passed**;
+`pytest -n auto -m "not slow"` **1030 passed** in 2 m 37 s. No frontend or Rust change, so
+`npm` and `cargo` were not run.

@@ -100,6 +100,38 @@ class CrossVerseLinkStore:
                     found[str(payload["id"])] = payload
         return sorted(found.values(), key=lambda item: (str(item.get("createdAt", "")), str(item["id"])))
 
+    def active_links(self) -> list[dict[str, Any]]:
+        """Every active link of this book, oldest first (#119: Stage 6B evidence)."""
+        identity = self._identity
+        payloads = self.project.workbench.payloads(
+            TABLE, project_id=identity.project_id, book_id=self.project.book_id,
+            equals={"state": STATE_ACTIVE},
+        )
+        return sorted(
+            (p for p in payloads if isinstance(p, dict) and p.get("id")),
+            key=lambda item: (str(item.get("createdAt", "")), str(item["id"])),
+        )
+
+    def digest(self) -> str:
+        """Content digest over every link row of this book, active or invalid.
+
+        Folded into `alignment_state_digest` (#119) so that Stage 6B's run
+        fingerprint and `synchronize_alignment_state`'s staling memo both move
+        when a link is added, removed or invalidated -- the same rule that
+        makes a completion-marker change stale a cached location run.
+        """
+        import hashlib
+        identity = self._identity
+        rows = self.project.workbench.rows(
+            TABLE, project_id=identity.project_id, book_id=self.project.book_id, order_by="id",
+        )
+        builder = hashlib.sha256()
+        for row in rows:
+            builder.update(
+                f"{row['id']}␟{row.get('state')}␟{row.get('revision')}␟{row.get('updated_at')}".encode("utf-8")
+            )
+        return builder.hexdigest()
+
     def get(self, link_id: str) -> dict[str, Any] | None:
         row = self.project.workbench.get(TABLE, link_id)
         if row is None:
