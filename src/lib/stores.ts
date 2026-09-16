@@ -82,7 +82,6 @@ export const checkingProgress = writable<CheckingProgress>({
 
 export const settingsOpen = writable(false);
 export const exportOpen = writable(false);
-export const showSource = writable(false);
 export const diagnosticsOpen = writable(false);
 
 const disconnectedNavigationTarget = {

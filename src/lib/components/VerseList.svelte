@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, currentChapter, showSource, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress } from "../stores";
+  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress } from "../stores";
   import { buildSegments } from "../utils/highlight";
   import { parseVerseNotes, withNoteMarkers, type ParsedVerse, type VerseNote, type VerseNoteKind } from "../utils/usfmNotes";
   import VerseNotesPopup from "./VerseNotesPopup.svelte";
@@ -377,7 +377,7 @@
   }
 </script>
 
-<div class="editor-scroll" class:show-source={$showSource} bind:this={scrollContainer}>
+<div class="editor-scroll" bind:this={scrollContainer}>
   <div class="chapter-label">Chapter {$currentChapter}</div>
 
   {#each $verseNums as v}

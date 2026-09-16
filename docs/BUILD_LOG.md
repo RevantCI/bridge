@@ -8543,3 +8543,13 @@ read by `test_passage_semantic_foundation.py`.
 - `npm run check` 0 errors / 0 warnings; `npm run test` 26 files, **367 passed**;
   `npm run build` clean.
 - No engine change in #103 or #106; the engine suite ran for #105 (above).
+
+## 2026-09-16 — #106: the dead `showSource` store
+
+Group A of the simplification audit (A7). `showSource` in `stores.ts` was a
+`writable(false)` nothing ever set; `VerseList.svelte` imported it and toggled
+`class:show-source` on it, and no stylesheet defined `.show-source`. Both went.
+#100 had already removed the `"validation"` screen literal and the
+`SemanticMappingValidation` gating the issue also listed. If #67 (show the
+original-language text in the editor) wants a source toggle, it adds one that is
+wired. Gates: the batch run recorded under #103.
