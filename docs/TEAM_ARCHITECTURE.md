@@ -182,7 +182,8 @@ survives too and now lives in `workbench_repository.py`.
   resolutions, alignment history, progress, check-finding snapshots, check cache, triage,
   paratext sync state, the audit tail in `apply_scripture_edit`, the backups index.
   `MetricsStore`, `TeamWorkflow`, `SemanticMappingStore` and
-  `semantic_validation_service` take a `store` argument.
+  `semantic_validation_service` take a `store` argument (the last was removed
+  in #100; its `semantic_validation_runs` table stays in the v1 block, unused).
 - `bridge_service.py` changes only to construct the workspace repository, pass identity
   in, and read `project_progress_cache` for the multi-book dashboard.
 

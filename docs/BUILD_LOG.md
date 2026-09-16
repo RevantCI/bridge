@@ -8242,3 +8242,100 @@ than keep two architecture docs.
 **Not done here, on purpose.** No issues filed (the draft bodies are in the audit
 doc for the maintainer to file), no code or resource deleted, no golden touched,
 no test run (nothing they gate changed).
+
+## 2026-09-16 — #100: the semantic validation queue is removed; the Stage 3 engine stays
+
+The dashboard's **Validate semantic mappings** button (shown as **Enable
+semantic validation** outside Advanced mode) opened the Stage 3 IRVTam
+validation queue: 40 machine-proposed cross-verse mappings in Luke and
+Philippians that a human confirmed, corrected or rejected. That review finished
+on 2026-08-31 (38 / 1 / 1, 95% agreement — the table is in
+`DEVELOPER_GUIDE.md`'s Beta 15 snapshot). The maintainer asked for the feature
+to go; #100 is the plan and this is the record of what actually happened.
+
+### What was removed
+
+Two commits, frontend first so no caller outlived the method it called.
+
+Frontend and shell: `SemanticMappingValidation.svelte` (389 lines, no other
+importer); the `.validation-entry` block, its CSS and the `advancedMode` /
+`onOpenSemanticValidation` / `onRequestAdvancedMode` props on
+`ProjectDashboard.svelte`; in `App.svelte` the `showingSemanticValidation`
+state (nine sites), `VALIDATION_BOOK_IDS`, `openSemanticValidation()`,
+`switchValidationBook()`, the `$:` guard that bounced the screen when Advanced
+mode was switched off, the `"validation"` member of the `screen` union and its
+render branch, and the `validation:` field of the external-navigation snapshot;
+`listSemanticValidationCandidates` / `decideSemanticValidationCandidate` in
+`bridgeClient.ts`; five `SemanticValidation*` types in `finding.ts`; the two
+`semantic_validation_*` Tauri commands and their `main.rs` registrations.
+`allowManualOverride` lost its import in `App.svelte` (nothing else there read
+it) but the store and the Settings toggle stay — `TranslationHelpsReview.svelte`
+still uses them.
+
+Engine and build: `semantic_validation_service.py`; its import, the two
+`Methods` constants, the two `BridgeEngine` methods and the two dispatcher
+branches in `bridge_service.py`; `tests/semantic/test_semantic_validation.py`
+and its `stage3db` entry in `tests/conftest.py`; the block in
+`build-sidecars.ps1` that copied the manifest into Tauri resources (and its
+hard `throw` when the file was missing); `scripts/generate_irvtam_mapping_candidates.py`.
+
+### What deliberately stayed, and why
+
+- **The Stage 3 mapping engine** — `semantic_mapping.py`,
+  `semantic_mapping_bridge.py`, `semantic_mapping_service.py`,
+  `semantic_review_policy.py`, `semantic_alignment_guard.py`,
+  `semantic_corpus_discovery.py`, the `semantic_mappings` table and the
+  Stage 3 DB download in `ci.yml` / `release.yml`. `ai_client.py` builds its
+  review pack from `prepare_semantic_mappings_for_review` and runs
+  `apply_semantic_review_policy_all` over the results, and
+  `TranslationHelpsReview.svelte` renders `semantic_mapping` on AI check
+  reviews. Removing that is a separate decision (the 2026-09-16 architecture
+  rewrite records it as "removal decided"); it was not made here.
+- **`semantic_validation_error`** in `bridge_service.py`'s dispatcher. Despite
+  the name it maps Stage 9A's `FoundationValidationError`, and
+  `test_qa_review_service_stage9a.py` asserts it. Left exactly as it was.
+- **`'semanticValidation'` in `_PRE_CUTOVER_STORE_DIRS`.** It identifies a
+  project written by a pre-cutover build; that stays true after removal, and
+  dropping it would reintroduce the silent-empty open the cutover was built to
+  refuse.
+- **The `semantic_validation_runs` table and its `MUTABLE_TABLES` entry.** The
+  table is in the workbench v1 block, and the ladder is never edited; a `DROP`
+  would be a v3 migration for an empty table. If a v3 happens for another
+  reason, the drop can ride along.
+- **`docs/validation/irvtam-semantic-mapping-candidates.json`**, now with a
+  README that says what it was and that nothing reads it.
+
+### The audit files are gone
+
+The plan's step 0 was to copy the two per-project audit files
+(`semanticValidation/irvtam-v0.1.json` under `tam_irv_luk` and `tam_irv_php`)
+into `docs/validation/` before the reader code went. They do not exist: the
+Tamil IRV projects were re-imported after the #76 cutover, and a search of the
+whole machine — `%USERPROFILE%`, `C:\code`, every `bridge-workbench.sqlite3`
+(all eight hold zero `semantic_validation_runs` and zero `semantic_mappings`
+rows) — found only a pytest temp fixture. The Beta 15 table in
+`DEVELOPER_GUIDE.md` is the surviving record, and both that section and
+`docs/validation/README.md` now say so. QA matrix rows M29–M35 are `RETIRED`.
+
+### Gates
+
+Run in a fresh worktree (`.claude/worktrees/`), which is worth knowing about
+because two things a fresh checkout lacks showed up as failures first:
+
+- Frontend: `npm run check` 0 errors / 0 warnings; `npm run test` 26 files,
+  **367 passed**; `npm run build` clean.
+- Shell: `cargo check` clean (cold target, 4m58s); `cargo test` **12 passed**.
+- Engine: `pytest -n auto -m "not slow"` **1009 passed, 13 failed** on the first
+  run. Twelve were `test_semantic_mapping_stage3.py` raising
+  `SemanticMappingError: Semantic source database…` — the 125 MB Stage 3 DB is
+  git-ignored and a worktree does not have it (exactly the failure `ci.yml`'s
+  comment describes). With the file copied in: **21 passed**. The thirteenth
+  was `test_logos_get_state_spawns_the_real_helper…` under xdist while the
+  other session's `cargo tauri dev` was running; alone it **passed**.
+  `test_qa_review_service_stage9a.py::test_invalid_review_input_is_a_validation_error_not_a_crash`
+  (the `semantic_validation_error` assertion) **passed**; the workbench
+  repository and sync tests **passed**.
+- Not run: `build-sidecars.ps1` and `smoke_sidecars.py`. The script change is a
+  pure deletion of a copy step, and a full PyInstaller build would have
+  contended with the release build running in the other session. The next
+  release build exercises it.

@@ -56,7 +56,6 @@ _FILE_MARKERS = {
     "test_versification_concurrency.py": ("subprocess", "slow"),
     "test_semantic_mapping_stage3.py": ("stage3db",),
     "test_semantic_corpus_discovery.py": ("stage3db",),
-    "test_semantic_validation.py": ("stage3db",),
     "test_correction_acceptance_queue_visibility.py": ("external",),
     "test_correction_acceptance_scripts.py": ("external",),
     "test_correction_case_c_production.py": ("external",),

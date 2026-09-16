@@ -139,6 +139,16 @@ CROSS_VERSE_REORDERED · meaning preserved
 
 This is a representative corpus case, not a Tamil rule.
 
+The validation queue that recorded those decisions — the dashboard's
+**Validate semantic mappings** button, `SemanticMappingValidation.svelte`,
+`semanticValidation.list/decide` and `semantic_validation_service.py` — was
+removed on 2026-09-16 (#100) once the review was complete. The per-project
+audit files it wrote no longer exist on any machine (the Tamil IRV projects were
+re-imported after the #76 cutover), so this summary and the Beta 15 table below
+are the surviving record of the review. The Stage 3 mapping engine underneath
+(`semantic_mapping*.py`, `semantic_review_policy.py`) was kept: the AI review
+pack in `ai_client.py` still uses it.
+
 #### Passage-semantic Stages 1–9
 
 - **Stages 1, 2, and 2.1:** repository analysis, codebase-specific technical
@@ -255,29 +265,21 @@ The two non-confirmed records require careful interpretation:
   prompt, relationship, or confidence adjustment. Obtain or derive explicit
   linguistic evidence before changing production policy.
 
-The per-project source audits remain local companion data, not repository
-fixtures:
+The per-project source audits were local companion data at
 
 ```text
 %LOCALAPPDATA%\Bridge\data\projects\tam_irv_luk\.apps\translationCoreAI\semanticValidation\irvtam-v0.1.json
 %LOCALAPPDATA%\Bridge\data\projects\tam_irv_php\.apps\translationCoreAI\semanticValidation\irvtam-v0.1.json
 ```
 
-Next implementation steps, in order:
-
-1. Export a sanitized, deterministic human-validation fixture keyed by
-   candidate ID, proposal manifest hash/fingerprint, expected decision, and
-   accepted/corrected mapping. Do not check in machine-specific paths or depend
-   on the mutable local audit files in tests.
-2. Add regressions for all 40 decisions, the PHP 1:3 → 1:6 sentinel, the
-   corrected multi-span contract, the rejected fellowship proposal, audit
-   persistence, and byte-identical USFM/native-selection preservation.
-3. Calibrate by confidence band and relationship. Do not lower global
-   safeguards or introduce Tamil-specific logic from one rejection. Any
-   classifier change must have a stated linguistic cause and its own fixture.
-4. Complete the remaining manual `Needs discussion` path. No `unsure` event is
-   present in the current audits, so QA item M32 is still partial even though
-   every proposal has a terminal confirm/correct/reject decision.
+and **no longer exist**: those projects were re-imported after the #76 cutover,
+and a 2026-09-16 search of the machine (every `bridge-workbench.sqlite3`
+included) found no copy. The "next implementation steps" this snapshot used to
+list — export a sanitized fixture of the 40 decisions, add per-decision
+regressions, calibrate by confidence band, exercise the `Needs discussion`
+path — were therefore never done and are now moot: the validation queue itself
+was removed in #100. The table above and the two non-confirmed records described
+here are the surviving record.
 5. Run the focused semantic suites, complete Python suite, Svelte check,
    production frontend build, UI-state tests, Rust tests, frozen-sidecar smoke,
    and NSIS packaging. Then perform installed Beta 15 upgrade/persistence,
@@ -305,9 +307,9 @@ reading a doc's description — including this repo's own docs.
   performs explicit one-shot Paratext issue handoffs; the live Paratext path is
   verified, while Logos remains unverified against a running installation.
 - A dedicated UI panel for alignment corpus statistics (protocol-only today).
-- A second-language semantic-mapping corpus validation. The first IRVTam set is
-  now fully reviewed, but its sanitized regression fixture and Beta 15 release
-  gates described above are still pending.
+- A second-language semantic-mapping corpus validation. The first IRVTam set
+  was fully reviewed and its validation queue then removed (#100); a second
+  corpus would need a new review surface, not a revival of that one.
 - Manual alignment does not invent source tokens — it requires original-
   language tokens already present from import.
 
