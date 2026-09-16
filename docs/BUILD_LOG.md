@@ -8081,3 +8081,78 @@ Engine suite serially, the configuration CI runs: **1245 passed, 0 failed**
 (11m01s), with the perf tweak in the tree. Frontend and `src-tauri/` untouched (the one protocol change is
 an additive `progressCache` field on `project.open`), so those gates were not
 run.
+
+## 2026-09-16 — a 66-book import "timed out" after finishing: the alignment scan's 20,612 commits
+
+First import after the 0.10.0 data reset: hin-irv, 66 books, and the UI
+reported `sidecar request 'project.import' timed out`. On disk the import was
+complete: all 66 folders written 11:45:08–11:45:13 (Genesis normalized, 65 lazy
+stubs), all 66 rows in `workspace.sqlite3` by 11:45:14.85, Genesis opened at
+11:45:15. Then nothing observable until the Genesis semantic DB stopped being
+written at 11:51:09, six minutes later. Rust gave up at the 300 s import
+timeout in between; the engine's reply landed on nobody.
+
+### Root cause
+
+`PassageSemanticRuntime.__init__` ends with `synchronize_alignment_state()`, a
+content-addressed compatibility scan of `.apps/translationCore/alignmentData/`.
+A raw import writes every unaligned source word as its own group with
+`bottomWords: []`, and the scan quarantines each of those as
+`LEGACY_EMPTY_BOTTOM_WORDS_AMBIGUOUS`. Genesis has 20,612 source words, so
+20,612 quarantine records — and `quarantine_migration_record` opened a
+connection and committed per record, with `PRAGMA synchronous = FULL`, so one
+fsync each. The scan's own `migration_runs` row says it: started
+06:15:58.42Z, completed 06:21:09.10Z, `groupsScanned: 20612, quarantined: 20612`.
+~66 records/s on this laptop's SSD with the app running.
+
+Not a regression: the writer is from Stage 3 (`ccab58a`), the scan from Stage 4
+(`78fdf4b`), the stub shape from the import feature. It surfaces now because a
+whole-Bible import opens Genesis first, and Genesis is one of the largest
+books. **`project.open` has only the 30 s default**, so before this fix every
+first open of a book over ~2,000 source words — most of the Bible — would have
+timed out the same way, then succeeded on a retry once the memoized scan had
+finished in the background.
+
+### Fix
+
+`FoundationRepository.quarantine_migration_records_bulk(records)`: one
+`BEGIN IMMEDIATE`, one `executemany`, one commit, one timestamp for the batch
+(the babdee1 convention). `quarantine_migration_record` is now a one-element
+call to it. The scan collects into a list and writes once before its
+`save_migration_run`. Crash-safety is unchanged: both are still plain
+content-addressed idempotency checks, and a crash between the batch and the run
+row just redoes the scan.
+
+Measured in a scratch repository, Genesis-sized batch of 20,612 records: **0.25 s**
+bulk. 200 per-record commits took 1.49 s (7.5 ms each → ~2.6 min extrapolated;
+the live run was slower at 5m11s, presumably antivirus and the app's own I/O).
+
+### Trace lines for the unexplained 43 s
+
+Between the registry touch (11:45:15) and the scan starting (11:45:58) something
+took 43 s that nothing recorded. Rather than guess, `open_project` and
+`import_project` now emit one `[trace]` line each to stderr with per-phase
+wall-clock seconds (`materialize_lazy`, `original_language`, `load_project`,
+`register`, `tc_recovery`, `progress_cache`, `semantic_runtime[…]`,
+`project_info`; the runtime's own constructor phases nested). sidecar.rs relays
+stderr into the diagnostics panel and `engine-events.log` under the app log
+directory — as level `warn`, because the relay only distinguishes tracebacks;
+a Rust-side `[trace]` → `info` mapping is a one-line follow-up that needs a
+`cargo test`, which a running `bridge-engine.exe` blocks (gotcha 13).
+
+### Open question for the maintainer, not decided here
+
+An empty target side is the shape the raw importer itself writes today for
+every unaligned word. Quarantining it as "legacy ambiguous" is arguably wrong
+in principle, not just slow — 20,612 quarantine rows per large book, one per
+word, of a kind nothing reads. Whether the scan should skip the raw-import stub
+shape entirely is a design change to the scan and was left alone.
+
+### Gates
+
+`tests/service tests/persistence tests/semantic tests/correction tests/review
+tests/alignment`, `-m "not slow"`, `-n auto`: **766 passed**. Two new tests:
+the batch writer opens one connection for 500 records and none for an empty
+batch; the scan hands the repository exactly one batch and never the
+per-record method, and a second open of the same folder writes nothing.
+Frontend and `src-tauri/` untouched.

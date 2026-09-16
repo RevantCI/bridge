@@ -16,6 +16,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import time
 import unicodedata
 from typing import Any, Iterable
 import uuid
@@ -559,14 +560,31 @@ class PassageSemanticRuntime:
         self.project_id = project_id
         self.book = str(project.book_id).upper()
         self.path = project.companion_dir() / "passageSemantic" / "bridge-semantic.sqlite3"
+        # Wall-clock seconds per constructor phase, in order, for the
+        # `[trace] project.open` line bridge_service writes to stderr. Opening
+        # a freshly imported book has taken minutes with nothing to say where.
+        self.init_timings: list[tuple[str, float]] = []
+        last = time.perf_counter()
+
+        def mark(phase: str) -> None:
+            nonlocal last
+            now = time.perf_counter()
+            self.init_timings.append((phase, now - last))
+            last = now
+
         self.repository = FoundationRepository(self.path)
+        mark("repository")
         self.last_error = ""
         self.replayed_invalidations = 0
         self._versification_schema = ""
         self._bind_project()
+        mark("bind")
         self.replayed_invalidations = self.replay_pending_invalidations()
+        mark("replay_invalidations")
         self.synchronize_current_text()
+        mark("current_text")
         self._synchronize_source_lock()
+        mark("source_lock")
         self.source_semantic = SourceSemanticInventory(self)
         self.target_semantic = TargetSemanticInventory(self)
         self.semantic_location = SemanticLocationEngine(self)
@@ -576,7 +594,9 @@ class PassageSemanticRuntime:
         self.correction_eligibility = CorrectionEligibilityService(self)
         self.correction_wording = CorrectionWordingService(self)
         self.correction_application_recovery = CorrectionApplicationRecoveryCoordinator(self)
+        mark("engines")
         self.application_recovery = self.correction_application_recovery.reconcile_incomplete()
+        mark("reconcile_applications")
         # `_migrate_legacy_companions()` used to run here. It imported
         # `semanticMappings/` and `semanticValidation/` companion files as
         # AI_RATIONALE evidence, and #76 moved both stores into the workbench
@@ -586,6 +606,10 @@ class PassageSemanticRuntime:
         # removed it. What remains is the alignment scan, which is a real
         # content-addressed compatibility check and always was.
         self.synchronize_alignment_state()
+        mark("alignment_scan")
+
+    def init_timing_summary(self) -> str:
+        return " ".join(f"{phase}={seconds:.2f}s" for phase, seconds in self.init_timings)
 
     def _identity_fingerprint(self) -> str:
         manifest = self.project.manifest
@@ -1024,11 +1048,24 @@ class PassageSemanticRuntime:
             "legacyEmptyBottomWords": 0, "duplicateMembership": 0,
             "malformedTokenIdentity": 0, "mutated": False,
         }
+        # Collected and written in one transaction below. A raw import writes
+        # every unaligned source word as its own empty group, so this scan
+        # quarantines one record per word of the book -- 20,612 for Genesis --
+        # and one commit (one fsync) per record took 5m11s, past the import
+        # timeout. See quarantine_migration_records_bulk.
+        pending: list[dict[str, Any]] = []
+
+        def quarantine(*, source_kind: str, source_identity: str, reason_code: str, payload: dict[str, Any]) -> None:
+            pending.append({
+                "sourceKind": source_kind, "sourceIdentity": source_identity,
+                "reasonCode": reason_code, "payload": payload,
+            })
+
         for path in paths:
             try:
                 chapter = json.loads(path.read_text(encoding="utf-8-sig"))
             except Exception as exc:
-                self.repository.quarantine_migration_record(
+                quarantine(
                     source_kind="translationCore.alignmentData", source_identity=str(path),
                     reason_code="MALFORMED_LEGACY_ALIGNMENT_FILE",
                     payload={"originalText": path.read_text(encoding="utf-8-sig", errors="replace"), "error": str(exc)},
@@ -1048,7 +1085,7 @@ class PassageSemanticRuntime:
                     if bottom == []:
                         report["legacyEmptyBottomWords"] += 1
                         report["quarantined"] += 1
-                        self.repository.quarantine_migration_record(
+                        quarantine(
                             source_kind="translationCore.alignmentData",
                             source_identity=f"{path}#{verse}/alignment/{group_index}",
                             reason_code="LEGACY_EMPTY_BOTTOM_WORDS_AMBIGUOUS",
@@ -1061,7 +1098,7 @@ class PassageSemanticRuntime:
                         if not isinstance(tokens, list):
                             report["malformedTokenIdentity"] += 1
                             report["quarantined"] += 1
-                            self.repository.quarantine_migration_record(
+                            quarantine(
                                 source_kind="translationCore.alignmentData",
                                 source_identity=f"{path}#{verse}/alignment/{group_index}/{side}",
                                 reason_code="MALFORMED_LEGACY_TOKEN_IDENTITY",
@@ -1073,7 +1110,7 @@ class PassageSemanticRuntime:
                             if signature is None:
                                 report["malformedTokenIdentity"] += 1
                                 report["quarantined"] += 1
-                                self.repository.quarantine_migration_record(
+                                quarantine(
                                     source_kind="translationCore.alignmentData",
                                     source_identity=f"{path}#{verse}/alignment/{group_index}/{side}",
                                     reason_code="MALFORMED_LEGACY_TOKEN_IDENTITY",
@@ -1086,7 +1123,7 @@ class PassageSemanticRuntime:
                         continue
                     report["duplicateMembership"] += 1
                     report["quarantined"] += 1
-                    self.repository.quarantine_migration_record(
+                    quarantine(
                         source_kind="translationCore.alignmentData",
                         source_identity=f"{path}#{verse}/{signature}",
                         reason_code="DUPLICATE_ACTIVE_TOKEN_MEMBERSHIP",
@@ -1095,6 +1132,7 @@ class PassageSemanticRuntime:
                             "originalVerseRecord": verse_data,
                         },
                     )
+        self.repository.quarantine_migration_records_bulk(pending)
         self.repository.save_migration_run(
             run_id=str(uuid.uuid4()), project_id=self.project_id,
             source_path=source_path, source_hash=digest,

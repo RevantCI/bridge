@@ -437,6 +437,46 @@ def test_native_alignment_ambiguities_are_quarantined_without_rewrite(
     assert path.read_bytes() == original
 
 
+def test_alignment_compatibility_scan_quarantines_in_one_batch(
+    tmp_path: Path, stage4_project: Path, monkeypatch,
+) -> None:
+    """A raw import writes every unaligned source word as its own empty group,
+    so the scan quarantines one record per word of the book. Written one
+    commit at a time that took 5m11s for Genesis (20,612 words) and timed out
+    project.import; the scan must hand the repository one batch."""
+    path = stage4_project / ".apps" / "translationCore" / "alignmentData" / "rut" / "1.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["1"]["alignments"] = [
+        {"topWords": [{"word": f"w{i}", "occurrence": 1, "occurrences": 1}], "bottomWords": []}
+        for i in range(120)
+    ]
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    from tc_ai_bridge.passage_semantic_repository import FoundationRepository
+
+    batches: list[int] = []
+    real_bulk = FoundationRepository.quarantine_migration_records_bulk
+
+    def recording_bulk(self, records):
+        batches.append(len(records))
+        return real_bulk(self, records)
+
+    monkeypatch.setattr(FoundationRepository, "quarantine_migration_records_bulk", recording_bulk)
+    monkeypatch.setattr(
+        FoundationRepository, "quarantine_migration_record",
+        lambda self, **kwargs: pytest.fail("scan must not quarantine one record at a time"),
+    )
+    engine = _engine(tmp_path)
+    _call(engine, "project.open", {"path": str(stage4_project)})
+    report = engine.passage_semantic_runtime.migration_report()
+    assert report["quarantineByReason"]["LEGACY_EMPTY_BOTTOM_WORDS_AMBIGUOUS"] == 120
+    assert batches == [120]
+    assert report["runs"][-1]["report"]["quarantined"] == 120
+    # Memoized against the alignment folder's content digest: a second open
+    # does not scan again, so it writes nothing.
+    _call(engine, "project.open", {"path": str(stage4_project)})
+    assert batches == [120]
+
+
 @pytest.mark.parametrize(("book", "chapter", "verse", "mapped", "kind"), [
     ("RUT", "1", "1", {"mapping": "same", "orgRef": "RUT 1:1"}, "SAME"),
     ("RUT", "1", "1", {"mapping": "mapped", "orgRef": "RUT 1:2"}, "MAPPED"),

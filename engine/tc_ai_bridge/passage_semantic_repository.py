@@ -4549,15 +4549,40 @@ class FoundationRepository:
         self, *, source_kind: str, source_identity: str, reason_code: str,
         payload: dict[str, Any],
     ) -> str:
-        quarantine_id = str(uuid.uuid4())
+        return self.quarantine_migration_records_bulk([{
+            "sourceKind": source_kind, "sourceIdentity": source_identity,
+            "reasonCode": reason_code, "payload": payload,
+        }])[0]
+
+    def quarantine_migration_records_bulk(self, records: list[dict[str, Any]]) -> list[str]:
+        """Quarantine many records in one transaction; returns their ids in order.
+
+        Each record is ``{sourceKind, sourceIdentity, reasonCode, payload}``.
+        One commit for the whole batch, and one timestamp: with
+        ``synchronous = FULL`` every commit is an fsync, and the alignment
+        compatibility scan (``synchronize_alignment_state``) quarantines one
+        record per unaligned source word -- a raw import writes every word
+        as its own empty group, and Genesis has 20,612 of them. Committed one
+        at a time that measured 5m11s on a laptop SSD and blew the 300s
+        ``project.import`` timeout; a first ``project.open`` has only 30s.
+        """
+        now = self._now()
+        ids: list[str] = []
+        rows: list[tuple[str, str, str, str, str, str]] = []
+        for record in records:
+            quarantine_id = str(uuid.uuid4())
+            ids.append(quarantine_id)
+            rows.append((
+                quarantine_id, str(record["sourceKind"]), str(record["sourceIdentity"]),
+                str(record["reasonCode"]), json.dumps(record["payload"], ensure_ascii=False), now,
+            ))
+        if not rows:
+            return ids
         with self._connect() as conn:
-            conn.execute(
-                "INSERT INTO migration_quarantine VALUES(?,?,?,?,?,?)",
-                (quarantine_id, source_kind, source_identity, reason_code,
-                 json.dumps(payload, ensure_ascii=False), self._now()),
-            )
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany("INSERT INTO migration_quarantine VALUES(?,?,?,?,?,?)", rows)
             conn.commit()
-        return quarantine_id
+        return ids
 
     def migration_quarantine_records(self) -> list[dict[str, Any]]:
         with self._connect() as conn:

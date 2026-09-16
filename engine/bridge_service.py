@@ -21,7 +21,9 @@ import json
 import os
 import re
 import shutil
+import sys
 import threading
+import time
 from collections import Counter
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -152,6 +154,35 @@ _SEVERITY_MAP = {
     "editorial": Severity.LOW,
     "info": Severity.INFO,
 }
+
+
+def _trace(message: str) -> None:
+    """One diagnostic line on stderr.
+
+    stdout is the JSON-lines protocol and must stay clean; stderr is relayed by
+    the Rust shell (sidecar.rs) into the diagnostics panel and
+    ``engine-events.log`` under the app log directory, which is where a
+    tester looking for "why did that open take a minute" can find it.
+    """
+    print(f"[trace] {message}", file=sys.stderr, flush=True)
+
+
+class _PhaseTimer:
+    """Wall-clock seconds per named phase of one request, for `_trace` lines."""
+
+    def __init__(self) -> None:
+        self._start = time.perf_counter()
+        self._last = self._start
+        self.phases: list[tuple[str, float]] = []
+
+    def mark(self, phase: str) -> None:
+        now = time.perf_counter()
+        self.phases.append((phase, now - self._last))
+        self._last = now
+
+    def summary(self) -> str:
+        total = time.perf_counter() - self._start
+        return f"total={total:.2f}s " + " ".join(f"{p}={s:.2f}s" for p, s in self.phases)
 
 
 def _stable_finding_id(*, chapter: str, verse: str, engine: str,
@@ -567,9 +598,13 @@ class BridgeEngine:
         self._names_errors_by_book.clear()
         self._consistency_findings_by_book.clear()
         self._corpus_stats_by_book.clear()
+        timer = _PhaseTimer()
         materialize_lazy_project(path)
+        timer.mark("materialize_lazy")
         ensure_bridge_original_language(path)
+        timer.mark("original_language")
         candidate = TranslationCoreProject(path, workspace=self.workspace)
+        timer.mark("load_project")
         if project_id:
             existing = self.project_registry.get(project_id)
             if existing:
@@ -592,6 +627,7 @@ class BridgeEngine:
             registered = self.project_registry.register(path, touch=True, project_id=project_id)
         except ProjectIdentityError as exc:
             raise ProjectError(str(exc)) from exc
+        timer.mark("register")
         self.project = candidate
         self.passage_semantic_runtime = None
         self._correction_application_service = None
@@ -601,6 +637,7 @@ class BridgeEngine:
         # the semantic runtime could fingerprint a partially written chapter
         # that the translationCore journal then rolls back.
         tc_recovery = candidate.recover_incomplete_transactions()
+        timer.mark("tc_recovery")
         recovery_failed = any(
             str(item.get("status") or "") == "recovery_required"
             for item in tc_recovery
@@ -614,6 +651,7 @@ class BridgeEngine:
             progress_cache = {"state": candidate.sync_progress_cache()}
         except Exception as exc:
             progress_cache = {"state": "error", "error": str(exc)}
+        timer.mark("progress_cache")
         if recovery_failed:
             self._passage_semantic_status = {
                 "available": False, "readOnly": True,
@@ -633,6 +671,8 @@ class BridgeEngine:
                 "passageSemantic": dict(self._passage_semantic_status),
                 "progressCache": progress_cache,
             })
+            timer.mark("project_info")
+            _trace(f"project.open {candidate.book_id} RECOVERY_REQUIRED {timer.summary()}")
             return info
         self._passage_semantic_status = {
             "available": False, "readOnly": True, "state": "UNAVAILABLE",
@@ -661,6 +701,7 @@ class BridgeEngine:
                 "available": False, "readOnly": True,
                 "state": "RECOVERY_REQUIRED", "error": str(exc),
             }
+        timer.mark("semantic_runtime")
         info = self._project_info()
         siblings = collection_projects(path)
         if siblings:
@@ -672,6 +713,12 @@ class BridgeEngine:
             "passageSemantic": dict(self._passage_semantic_status),
             "progressCache": progress_cache,
         })
+        timer.mark("project_info")
+        runtime_phases = (
+            f" semantic_runtime[{self.passage_semantic_runtime.init_timing_summary()}]"
+            if self.passage_semantic_runtime is not None else ""
+        )
+        _trace(f"project.open {candidate.book_id} {timer.summary()}{runtime_phases}")
         return info
 
     def list_projects(self) -> dict[str, Any]:
@@ -818,8 +865,11 @@ class BridgeEngine:
         if not self._import_lock.acquire(blocking=False):
             raise ProjectError("Another project import is already running.")
         try:
+            timer = _PhaseTimer()
             preview = inspect_import(path)
+            timer.mark("inspect")
             duplicate = self.project_registry.classify(preview, metadata)
+            timer.mark("classify")
             if duplicate["classification"] == "exactDuplicate" and not allow_duplicate:
                 raise ProjectError(
                     "This source has already been imported. Open the existing project, "
@@ -827,6 +877,7 @@ class BridgeEngine:
                 )
             root = Path(destination_root).resolve() if destination_root else self.project_root
             result = import_source(path, root, metadata)
+            timer.mark("import_source")
             # A folder that is being (re)populated is a new project even at an
             # old path; whatever the cache said about that path is void.
             self.workspace.forget_progress_cache([
@@ -845,10 +896,13 @@ class BridgeEngine:
                     "projectId": registered["projectId"],
                     "collectionId": registered.get("collectionId", ""),
                 })
+            timer.mark("register")
 
             info = self.open_project(result["primaryProjectPath"])
+            timer.mark("open_primary")
             info["import"] = result
             info["importedProjects"] = result["projects"]
+            _trace(f"project.import {len(result['projects'])} book(s) {timer.summary()}")
             return info
         finally:
             self._import_lock.release()

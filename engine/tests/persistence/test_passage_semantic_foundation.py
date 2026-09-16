@@ -651,3 +651,35 @@ def test_ambiguous_legacy_alignment_can_be_quarantined_without_mutation(tmp_path
         "sourceIdentity": "PHP 1:3/group-1", "reasonCode": "LEGACY_EMPTY_BOTTOM_WORDS_AMBIGUOUS",
         "payload": original, "createdAt": records[0]["createdAt"],
     }]
+
+
+def test_bulk_quarantine_writes_every_record_in_one_connection(tmp_path: Path, monkeypatch) -> None:
+    """One commit per record is what made a 20,612-word book take five minutes
+    to open; the batch writer must not scale connections with record count."""
+    repo = FoundationRepository(tmp_path / "semantic.sqlite3")
+    connects = 0
+    real_connect = FoundationRepository._connect
+
+    def counting_connect(self):
+        nonlocal connects
+        connects += 1
+        return real_connect(self)
+
+    monkeypatch.setattr(FoundationRepository, "_connect", counting_connect)
+    records = [{
+        "sourceKind": "translationCore.alignmentData", "sourceIdentity": f"GEN 1:1/group-{i}",
+        "reasonCode": "LEGACY_EMPTY_BOTTOM_WORDS_AMBIGUOUS",
+        "payload": {"originalRecord": {"topWords": [{"word": f"w{i}"}], "bottomWords": []}},
+    } for i in range(500)]
+    ids = repo.quarantine_migration_records_bulk(records)
+    assert connects == 1
+    assert len(ids) == 500 and len(set(ids)) == 500
+    stored = {row["id"]: row for row in repo.migration_quarantine_records()}
+    assert set(stored) == set(ids)
+    for quarantine_id, record in zip(ids, records):
+        assert stored[quarantine_id]["sourceIdentity"] == record["sourceIdentity"]
+        assert stored[quarantine_id]["payload"] == record["payload"]
+    assert len({row["createdAt"] for row in stored.values()}) == 1  # one timestamp per batch
+    before = connects
+    assert repo.quarantine_migration_records_bulk([]) == []
+    assert connects == before  # an empty batch never opens the database
