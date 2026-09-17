@@ -89,6 +89,7 @@ from tc_ai_bridge.workspace_repository import WorkspaceRepository, project_path_
 from tc_ai_bridge.resource_materializer import materialize_book_checks
 from tc_ai_bridge.usfm import whitespace_tokens
 from tc_ai_bridge import versification as versification_tool
+from tc_ai_bridge import alignment_gaps
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
 from tc_ai_bridge.reporting import ReportService
 from tc_ai_bridge.qa_report import (
@@ -322,6 +323,7 @@ class Methods:
 
     ALIGNMENT_GET = "alignment.get"
     ALIGNMENT_GET_RANGE = "alignment.getRange"
+    ALIGNMENT_GAP_SCAN = "alignment.gapScan"
     ALIGNMENT_CROSS_VERSE_LINK = "alignment.crossVerse.link"
     ALIGNMENT_CROSS_VERSE_UNLINK = "alignment.crossVerse.unlink"
     ALIGNMENT_STATUS = "alignment.status"
@@ -1548,37 +1550,11 @@ class BridgeEngine:
             if token_id not in seen_bottom_ids:
                 bottom_tokens.append({"id": token_id, **token.to_dict(bottom=True)})
 
-        groups = []
-        for index, group in enumerate(alignment.alignments):
-            groups.append({
-                "id": f"G{index + 1:03d}",
-                "topIds": [
-                    inventory.top_sig_to_id[token.signature]
-                    for token in group.top_words
-                    if token.signature in inventory.top_sig_to_id
-                ],
-                "bottomIds": [
-                    inventory.bottom_sig_to_id[token.signature]
-                    for token in group.bottom_words
-                    if token.signature in inventory.bottom_sig_to_id
-                ],
-            })
-        # Per-verse gap counts, computed from the groups above. A source token
-        # counts as matched only when some group holds it *and* that group has
-        # at least one target word; a target token counts as matched when any
-        # group holds it (wordBank tokens are in the inventory but no group).
-        matched_top_ids: set[str] = set()
-        matched_bottom_ids: set[str] = set()
-        for group_view in groups:
-            if group_view["bottomIds"]:
-                matched_top_ids.update(group_view["topIds"])
-            matched_bottom_ids.update(group_view["bottomIds"])
-        gaps = {
-            "sourceUnmatched": sum(1 for token_id in inventory.top_ids if token_id not in matched_top_ids),
-            "targetUnmatched": sum(
-                1 for token_id in inventory.bottom_ids if token_id not in matched_bottom_ids
-            ),
-        }
+        groups = alignment_gaps.group_views(alignment, inventory)
+        # The gap sets are computed once, below, after the cross-verse links are
+        # known -- #137. A link-blind pair used to be built here as well and
+        # then overwritten a few lines down by the link-aware one, so it was
+        # dead work on every alignment.get and every verse of every getRange.
         source_direction = "rtl" if any(
             token.strong.upper().startswith("H") or token.morph.startswith("He,")
             for token in alignment.all_top()
@@ -1601,16 +1577,10 @@ class BridgeEngine:
         # is what lets the editors drop the "not fully aligned" flag while
         # `status` / `completionState` keep telling the tC truth.
         cross = self._cross_verse_annotations(str(chapter), str(verse), inventory)
-        matched_top = {tid for g in groups if g["bottomIds"] for tid in g["topIds"]}
-        grouped_bottom = {bid for g in groups for bid in g["bottomIds"]}
-        remaining_sources = [
-            tid for tid in inventory.top_ids
-            if tid not in matched_top and tid not in cross["realizedIds"]
-        ]
-        remaining_targets = [
-            bid for bid in inventory.bottom_ids
-            if bid not in grouped_bottom and bid not in cross["accountedIds"]
-        ]
+        remaining_sources, remaining_targets = alignment_gaps.gap_ids(
+            inventory, groups,
+            realized_ids=cross["realizedIds"], accounted_ids=cross["accountedIds"],
+        )
         gaps = {"sourceUnmatched": len(remaining_sources), "targetUnmatched": len(remaining_targets)}
         fully_accounted = (
             not remaining_sources and not remaining_targets
@@ -1676,6 +1646,97 @@ class BridgeEngine:
             self._alignment_context(chapter, verse, chapter_counts=counts) for verse in ordered
         ]
         return {"chapter": chapter, "verses": contexts, "chapterStatus": counts}
+
+    def gap_scan(self, chapter: str) -> dict[str, Any]:
+        """alignment.gapScan: every verse of one chapter with its alignment gaps
+        *named*, not merely counted (#137).
+
+        Deliberately not `[self._alignment_context(c, v) for v in verses]`:
+        `load_alignment_chapter` re-reads and re-parses the whole chapter JSON on
+        every call and caches nothing, so that shape costs one full chapter parse
+        per verse, plus each verse's history, chapter-status and target-text
+        reads -- none of which a gap needs. This reads the chapter once and the
+        link table once.
+
+        Verse strings stay opaque throughout (bridges "3-4", segments "3a" --
+        CLAUDE.md gotcha 12). A verse whose alignment entry is missing or
+        unparseable contributes an entry with `readable: false` rather than
+        failing the scan: a chapter-wide view that dies on one bad verse is
+        useless exactly when it is most needed.
+        """
+        self._require_project()
+        chapter = str(chapter)
+        if chapter not in self.project.chapters():
+            raise ProjectError(f"Chapter {chapter} does not exist in this project.")
+        chapter_data = self.project.load_alignment_chapter(chapter)
+
+        # One read of the link table for the whole chapter. `links_for_verse`
+        # would be two queries per verse; only *active* links close a gap.
+        realized_by_verse: dict[tuple[str, str], list[str]] = {}
+        accounted_by_verse: dict[tuple[str, str], list[str]] = {}
+        try:
+            active_links = self.project.cross_verse_links.active_links()
+        except Exception:
+            active_links = []
+        for link in active_links:
+            source, target = link.get("source") or {}, link.get("target") or {}
+            realized_by_verse.setdefault(
+                (str(source.get("chapter") or ""), str(source.get("verse") or "")), [],
+            ).append(str(source.get("signature") or ""))
+            accounted_by_verse.setdefault(
+                (str(target.get("chapter") or ""), str(target.get("verse") or "")), [],
+            ).append(str(target.get("signature") or ""))
+
+        verses: list[dict[str, Any]] = []
+        total_source = total_target = verses_with_gaps = 0
+        for verse in self.project.verses(chapter):
+            raw = chapter_data.get(verse)
+            try:
+                if raw is None:
+                    raise ProjectError(f"No alignment data for {chapter}:{verse}")
+                alignment = VerseAlignment.from_dict(raw)
+                inventory = make_inventory(alignment)
+            except Exception:
+                verses.append({
+                    "chapter": chapter, "verse": verse, "readable": False,
+                    "sourceGaps": [], "targetGaps": [],
+                    "gaps": {"sourceUnmatched": 0, "targetUnmatched": 0},
+                })
+                continue
+            # Signatures are what the link store persists; resolve them to this
+            # load's positional ids here, the same way _cross_verse_annotations
+            # does per verse.
+            realized = [
+                token_id for signature in realized_by_verse.get((chapter, verse), ())
+                if (token_id := inventory.top_sig_to_id.get(signature))
+            ]
+            accounted = [
+                token_id for signature in accounted_by_verse.get((chapter, verse), ())
+                if (token_id := inventory.bottom_sig_to_id.get(signature))
+            ]
+            source_ids, target_ids = alignment_gaps.gap_ids(
+                inventory, alignment_gaps.group_views(alignment, inventory),
+                realized_ids=realized, accounted_ids=accounted,
+            )
+            total_source += len(source_ids)
+            total_target += len(target_ids)
+            if source_ids or target_ids:
+                verses_with_gaps += 1
+            verses.append({
+                "chapter": chapter, "verse": verse, "readable": True,
+                "sourceGaps": alignment_gaps.describe_tokens(inventory, source_ids, bottom=False),
+                "targetGaps": alignment_gaps.describe_tokens(inventory, target_ids, bottom=True),
+                "gaps": {"sourceUnmatched": len(source_ids), "targetUnmatched": len(target_ids)},
+                "crossVerseRealized": len(realized), "crossVerseAccounted": len(accounted),
+                "sourceAvailable": bool(inventory.top_ids),
+            })
+        return {
+            "chapter": chapter, "verses": verses,
+            "totals": {
+                "sourceUnmatched": total_source, "targetUnmatched": total_target,
+                "versesWithGaps": verses_with_gaps, "verses": len(verses),
+            },
+        }
 
     def _cross_verse_annotations(self, chapter: str, verse: str, inventory) -> dict[str, Any]:
         """Links touching one verse, with this verse's positional ids resolved
@@ -3903,6 +3964,8 @@ class BridgeEngine:
                 return EngineResponse.ok(
                     request.id, result=self.get_alignment_range(p["chapter"], p.get("verses", [])),
                 )
+            if m == Methods.ALIGNMENT_GAP_SCAN:
+                return EngineResponse.ok(request.id, result=self.gap_scan(p["chapter"]))
             if m == Methods.ALIGNMENT_CROSS_VERSE_LINK:
                 return EngineResponse.ok(request.id, result=self.link_cross_verse(
                     p.get("source"), p.get("target"),
