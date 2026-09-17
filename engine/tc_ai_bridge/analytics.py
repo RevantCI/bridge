@@ -155,7 +155,16 @@ def exception_first_queue(project) -> list[dict[str,Any]]:
             invalid,helps_findings=_translation_helps_findings(project,str(ch),str(vs),checks)
             discussion=sum(1 for d in project.decisions_for_verse(ch,vs) if d.get('decision')=='needs_discussion')
             review=project.load_review_state(ch,vs) or {}; final_state=str(review.get('status',''))
-            if critical or high or cache in ('stale','missing') or invalid or wa=='invalid' or discussion or final_state.startswith('stale') or local_findings:
+            # `missing` is deliberately NOT an exception (#144). It means only
+            # that no AI review has been saved for this verse, and AI review is
+            # optional and human-invoked -- never on the path a translator hits
+            # during normal work. Counting it admitted every verse of any book
+            # nobody had run AI review over: the real Hindi IRV Exodus import
+            # put all 1213 of its verses in this queue, so "verses needing
+            # attention" was the whole book in verse order. `stale` still
+            # counts, because that means a review existed and the text moved
+            # underneath it, which is a real thing to look at.
+            if critical or high or cache=='stale' or invalid or wa=='invalid' or discussion or final_state.startswith('stale') or local_findings:
                 summary=str(saved.get('summary','')) or '; '.join(
                     str(f.get('explanation','')) for f in local_findings[:3] if f.get('explanation')
                 )

@@ -111,6 +111,35 @@ describe("ProjectDashboard", () => {
     expect(screen.queryByRole("button", { name: /finding/ })).not.toBeInTheDocument();
   });
 
+  describe("the exception queue is pageable, not a dead count (#144)", () => {
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => row({ chapter: "1", verse: String(i + 1), high: 1 }));
+
+    it("caps the first page and says how much is hidden", () => {
+      mount(many(60));
+      expect(screen.getByText("showing 25 of 60")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Show 25 more" })).toBeInTheDocument();
+    });
+
+    it("reveals the next page on click, and the last page asks for only what is left", async () => {
+      mount(many(60));
+
+      await fireEvent.click(screen.getByRole("button", { name: "Show 25 more" }));
+      expect(screen.getByText("showing 50 of 60")).toBeInTheDocument();
+
+      // 10 left, not another 25 — the label must not promise rows that do not exist.
+      await fireEvent.click(screen.getByRole("button", { name: "Show 10 more" }));
+      expect(screen.queryByText(/showing \d+ of 60/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Show \d+ more/ })).not.toBeInTheDocument();
+    });
+
+    it("offers no control when everything already fits", () => {
+      mount(many(25));
+      expect(screen.queryByRole("button", { name: /Show \d+ more/ })).not.toBeInTheDocument();
+      expect(screen.queryByText(/showing/)).not.toBeInTheDocument();
+    });
+  });
+
   describe("the report is asked for, not built on open", () => {
     function mountWithoutReport(props: Record<string, unknown> = {}) {
       const onLoadReport = vi.fn();

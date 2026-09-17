@@ -47,6 +47,22 @@
     PASS: "pass", ISSUE: "issue", REVIEW_REQUIRED: "review", NOT_CHECKED: "not-checked",
   };
 
+  // The queue was capped at 25 with a dead "+ N more" paragraph under it (#144):
+  // it named the hidden rows and gave no way to reach any of them.
+  const EXCEPTION_PAGE = 25;
+  let shownExceptions = EXCEPTION_PAGE;
+
+  function showMoreExceptions(): void {
+    shownExceptions += EXCEPTION_PAGE;
+  }
+
+  // A new report is a new list, so the page position must not carry over from
+  // the last one -- otherwise rebuilding it for another book keeps showing
+  // however many rows were expanded before. Reading `report` is what makes
+  // this re-run; `shownExceptions` is only written, so paging does not reset
+  // itself.
+  $: if (report) shownExceptions = EXCEPTION_PAGE;
+
   let expandedRows = new Set<string>();
 
   function toggleExpanded(key: string): void {
@@ -198,7 +214,7 @@
 
           {#if report.exceptionQueue.length > 0}
             <div class="exceptions" aria-label="Verses needing attention">
-              {#each report.exceptionQueue.slice(0, 25) as row (row.chapter + ':' + row.verse)}
+              {#each report.exceptionQueue.slice(0, shownExceptions) as row (row.chapter + ':' + row.verse)}
                 {@const key = row.chapter + ":" + row.verse}
                 {@const helps = row.helpsFindings ?? []}
                 {@const tnCount = helps.filter((f) => f.tool === "translationNotes").length}
@@ -247,8 +263,13 @@
                   {/if}
                 </div>
               {/each}
-              {#if report.exceptionQueue.length > 25}
-                <p class="more">+ {report.exceptionQueue.length - 25} more</p>
+              {#if report.exceptionQueue.length > shownExceptions}
+                <div class="more">
+                  <button type="button" class="report-cta" on:click={showMoreExceptions}>
+                    Show {Math.min(EXCEPTION_PAGE, report.exceptionQueue.length - shownExceptions)} more
+                  </button>
+                  <span>showing {shownExceptions} of {report.exceptionQueue.length}</span>
+                </div>
               {/if}
             </div>
           {:else}
@@ -296,7 +317,8 @@
   .error-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--surface-2); color: var(--danger); border-radius: 8px; padding: 14px; font-size: var(--fs-xs); }
   .report-area { box-sizing: border-box; padding: 20px 32px; max-width: 820px; }
   .empty.hint { background: none; padding: 6px 14px 12px; color: var(--text-3); }
-  .report-cta { font: inherit; margin-left: 14px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 7px; padding: 7px 12px; cursor: pointer; }
+  .report-cta { font: inherit; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 7px; padding: 7px 12px; cursor: pointer; }
+  .report-area > .report-cta { margin-left: 14px; }
   .report-cta:hover { border-color: var(--accent); color: var(--accent); }
   .gate { border-radius: 8px; padding: 10px 14px; font-size: var(--fs-xs); font-weight: 600; background: var(--danger-bg); color: var(--danger); margin-bottom: 12px; }
   .gate.ready { background: var(--pass-bg); color: var(--pass); }
@@ -345,7 +367,7 @@
   .local-finding-row.source-tn { border-left-color: var(--tn); }
   .local-finding-row.source-tw { border-left-color: var(--tw); }
   .local-explain { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .more { color: var(--text-2); font-size: var(--fs-2xs); margin: 8px 2px 0; }
+  .more { color: var(--text-2); font-size: var(--fs-2xs); margin: 8px 2px 0; display: flex; align-items: center; gap: 10px; }
   .books { border: 1px solid var(--border); border-radius: 10px; }
   .book-tools { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 9px; margin-bottom: 10px; }
   .book-tools label { color: var(--text-2); font-size: var(--fs-2xs); font-weight: 700; white-space: nowrap; }

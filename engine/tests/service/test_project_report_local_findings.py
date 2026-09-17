@@ -220,3 +220,47 @@ def test_project_report_reports_no_helps_findings_when_everything_is_selected(fi
     if row is not None:
         assert row["helpsFindings"] == []
         assert row["invalidChecks"] == 0
+
+
+def test_a_verse_with_no_ai_review_and_nothing_wrong_is_not_an_exception(fixture_project):
+    """#144: `ai_review_cache_status` returns 'missing' whenever no AI review has
+    been saved, and AI review is optional and human-invoked -- so counting
+    'missing' as an exception put *every* verse of any book nobody had run it
+    over into the queue. The real Hindi IRV Exodus import had all 1213 of its
+    verses in a panel titled "verses needing attention", truncated at 25 with a
+    dead "+ 1188 more" under it.
+
+    This fixture verse has no findings, no decisions, valid alignment and no AI
+    review, so there is nothing to attend to and the queue must be empty.
+    """
+    root, _ = fixture_project
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(root)})
+
+    result = call(engine, "project.report")
+
+    assert result["success"] is True
+    assert engine.project.ai_review_cache_status("1", "1") == "missing"
+    assert result["result"]["exceptionQueue"] == []
+
+
+def test_a_stale_ai_review_is_still_an_exception(fixture_project):
+    """The other half of #144: only 'missing' was dropped. 'stale' means a review
+    existed and the text moved underneath it, which is a real thing to look at.
+    """
+    root, _ = fixture_project
+    engine = BridgeEngine()
+    call(engine, "project.open", {"path": str(root)})
+    # record_ai_review_result computes inputFingerprint, then spreads the payload
+    # over it -- so this saves a review whose fingerprint cannot match the text.
+    engine.project.record_ai_review_result("1", "1", {
+        "summary": "checked earlier", "batchState": "complete",
+        "inputFingerprint": "stale-on-purpose", "qaIssues": [], "checkReviews": [],
+    })
+
+    result = call(engine, "project.report")
+
+    assert result["success"] is True
+    assert engine.project.ai_review_cache_status("1", "1") == "stale"
+    queue = result["result"]["exceptionQueue"]
+    assert [(r["chapter"], r["verse"], r["cache"]) for r in queue] == [("1", "1", "stale")]
