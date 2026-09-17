@@ -9219,3 +9219,91 @@ changed — the four Python edits are comments and one docstring.
 every Markdown file outside the code directories found no broken relative link
 except the pre-existing screenshot placeholders in `USER_MANUAL.md`. No frontend
 or Rust change.
+
+---
+
+## 2026-09-17 — Automating cross-verse alignment (#136–#140)
+
+Follows #116–#119, which built the cross-verse page and the link store by hand.
+The question asked here was whether Bridge could *find* the gaps itself and
+suggest where a paraphrased source word was actually realized.
+
+### What was already there, verified by reading the code
+
+- **Gap detection**, in `_alignment_context`, but only as counts: the identities
+  were thrown away and recomputed client-side in `alignmentGroups.ts`.
+- **A cross-verse search engine**, Stage 6B, which marks a relationship
+  `CROSS_VERSE`.
+- **A translation memory**, `alignment_statistics.build_corpus_stats` — UAlign-style
+  co-occurrence, translation probability, PMI and an SED phonetic boost over the
+  project's own completed alignments. Already cached per book on the service.
+
+### The finding that shaped the design
+
+**Stage 6B cannot find a cross-verse realization unaided in the shipped app.**
+Its weights are SEMANTIC_SIMILARITY 0.42 + LEXICAL 0.38 + CONCEPT 0.15 +
+MORPHOLOGY 0.12 + STRUCTURAL_PROXIMITY 0.05 + EXACT_SPAN 0.01, against
+`LocationSearchPolicy.located_minimum` 0.36. `SemanticEmbeddingProvider.available`
+is `False` in the shipped app, so the first is always 0; `_lexical_score` between
+an NFC Greek/Hebrew string and a target-language one is 0 for any real
+translation pair. The remaining components sum to at most 0.33. The two that can
+carry a relationship over the line, HUMAN_PRECEDENT and WORD_ALIGNMENT, are both
+0.65 and both mean "a human already said so" (#119) — which a token that is still
+a gap does not have.
+
+So an automation built on Stage 6B would have found nothing new while looking
+authoritative. The corpus table was used instead, and `cross_verse_proposals.py`'s
+docstring records this reasoning so it is not "fixed" later by wiring Stage 6B in.
+
+### Dead code found while doing #137
+
+`_alignment_context` computed the gap sets twice. `bridge_service.py:1570-1580`
+built `matched_top_ids` / `matched_bottom_ids` and a `gaps` from them; none of the
+three was read again, because #117 had added a link-aware recomputation ~25 lines
+below under different names and reassigned `gaps` over the top. Only statement
+ordering decided which definition shipped. Removed as part of consolidating both
+into `alignment_gaps.py`; recorded on #137 rather than fixed silently.
+
+### Design calls worth keeping
+
+- **`strong_key` folds UGNT's trailing variant digit** ("G23160" == "G2316") using
+  the H/G prefix instead of plumbing a `language_id` through, and only on a
+  5-digit number — classic Greek numbering stops at four, so truncating a 4-digit
+  number would silently produce a different lemma. Found by writing the test, not
+  by reading.
+- **The ambiguity margin excludes PROXIMITY.** The first version separated two
+  otherwise-identical candidates purely on which verse sat nearer and called the
+  winner PROPOSED. Distance orders the list; it never settles it.
+- **Suggestions are loaded on an explicit click.** Measured: ~1.9 s for the first
+  call in a process (Uroman/SED one-time table load) plus the completed-verse
+  scan; ~14 ms for 200 candidate pairs in steady state. The naive reading of a
+  single timing is entirely the load. A romanization memo was written, measured
+  to make no difference, and reverted rather than kept as unearned complexity in
+  shared code.
+- **Nothing auto-applies.** Accept is an ordinary `alignment.crossVerse.link`;
+  `alignment_reliability.AUTO_LINK_THRESHOLD` is the pattern deliberately not
+  revived.
+
+### Not done
+
+#140 (persisted dismissals, workbench schema v4) is filed and not built — it is
+the only part needing a schema bump, and it carries an open question about
+whether a dismissal is per-actor or per-project on a team project. Dismiss is
+session-local until then. Neither the layout change nor the suggestions strip has
+been seen in the real desktop app; jsdom does not lay out or paint.
+
+### Gates
+
+Frontend: `npm run check` 0 errors/0 warnings, `npm run test` 426 passed (20 in
+`CrossVerseAlignmentModal.test.ts`), `npm run build` clean.
+
+Engine: full `pytest -n auto`, **1272 passed, 1 failed** — and the failure is
+`tests/connectors/test_desktop_connectors.py::test_logos_get_state_spawns_the_real_helper_and_returns_environment_safe_result`,
+which passes on its own and passes with `-n auto` over `tests/connectors` alone.
+It spawns a real helper process, so it flakes under the load of a full 20-worker
+run; nothing in this work touches the Logos connector. Worth remembering that
+`pyproject.toml`'s `-n auto` is a local convenience and CI runs serial for
+exactly this class of reason.
+
+No Rust change — since #115 a new RPC is an engine handler, an `EngineMethod`
+member and a `bridge.*` wrapper.

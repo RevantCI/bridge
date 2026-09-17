@@ -69,6 +69,8 @@ realized in another verse's target text is therefore recorded outside
 
 ```text
 alignment.getRange(chapter, verses[])    one context per verse, plus per-verse gap counts
+alignment.gapScan(chapter)               every verse's gaps NAMED, chapter-wide (#137)
+alignment.crossVerse.propose(chapter, verses[])   ranked candidates, read-only (#139)
 alignment.crossVerse.link                {source: {chapter, verse, topId}, target: {chapter, verse, bottomId}}
 alignment.crossVerse.unlink              {linkId}
 ```
@@ -96,6 +98,49 @@ alignment.crossVerse.unlink              {linkId}
 - Stage 6B reads active links as `WORD_ALIGNMENT` location evidence at the same
   weight as completed same-verse alignment, and a link change stales the
   downstream Stage 6B/7/8 records (#119).
+
+## Finding the gaps, and suggesting what fills them (#137–#139)
+
+A **gap** is a source token with no target word in its own verse, or a target
+word with no source token — always **net of active cross-verse links**, so a
+linked word is no longer a gap. `alignment_gaps.py` is the single definition of
+that; `_alignment_context` and `alignment.gapScan` both call it, so a count and a
+named list cannot disagree. `alignment.gapScan` covers a whole chapter and reads
+the chapter JSON and the link table once each, rather than looping
+`_alignment_context` (which re-parses the whole chapter per verse).
+
+`cross_verse_proposals.py` then ranks, for each unmatched source token, the
+unaccounted target words of the *other* verses in range. Two things about it are
+easy to get wrong later:
+
+- **It does not consult Stage 6B, on purpose.** Stage 6B marks a relationship
+  `CROSS_VERSE`, but in the shipped app it cannot find one unaided:
+  `SemanticEmbeddingProvider.available` is `False`, so SEMANTIC_SIMILARITY (0.42)
+  is always 0, and `_lexical_score` between an original-language string and a
+  target-language one is 0 as well — the remaining components sum to at most 0.33
+  against a `located_minimum` of 0.36. The components that *can* carry a
+  relationship over it, HUMAN_PRECEDENT and WORD_ALIGNMENT, both mean "a human
+  already said so", and a token that is still a gap has no such judgement. Wiring
+  Stage 6B in would look like evidence and be tautology. If the embedding provider
+  ever ships, that is the moment to revisit.
+- **The evidence is the project's own completed alignments**, through
+  `alignment_statistics.CorpusStatsTable` — translation probability, PMI and the
+  Smart-Edit-Distance phonetic boost — plus a Strong's-keyed index beside the
+  surface one, because every inflected form of a source word is otherwise its own
+  sparse key. This is the only offline signal that is genuinely bilingual. Its
+  honest limit is that the table is built from **completed** verses only, so a
+  book with none teaches it nothing and the result says so rather than returning
+  an empty list.
+
+Every weight and cut-off is an uncalibrated placeholder
+(`PROPOSAL_CALIBRATION_VERSION`), with raw and weighted scores kept apart per
+component. The ambiguity margin is measured on the score **excluding** proximity:
+verse distance orders the candidates but never settles them, and two source
+tokens whose best candidate is the same target word are both reported contested.
+
+**Nothing here writes.** Accepting a suggestion is an ordinary
+`alignment.crossVerse.link` call made by the reviewer, so there is no second
+writer and no confidence at which a link appears on its own.
 
 ## Aligned USFM
 

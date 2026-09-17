@@ -214,7 +214,8 @@
       } else if (item.kind === "PHONETIC") {
         parts.push("the two words sound alike when romanized");
       } else if (item.kind === "PROXIMITY") {
-        parts.push("a neighbouring verse");
+        // rawScore is 1/distance, so only 1 means the verse next door.
+        parts.push(item.rawScore === 1 ? "the verse next door" : "a nearby verse");
       }
     }
     return parts.join(" · ");
