@@ -15,6 +15,7 @@
   } from "../stores";
   import type {
     AlignmentContext, AlignmentCounts, AlignmentToken, CrossVerseLink, CrossVerseLinkResult,
+    CrossVerseProposal,
   } from "../types/finding";
   import { createPointerDrag } from "../alignmentDrag";
   import {
@@ -56,6 +57,16 @@
   let meaningByToken: Record<string, string> = {};
   const meaningCache = new Map<string, string>();
   let loadSequence = 0;
+  /** Cross-verse suggestions (#139), loaded only on an explicit click. */
+  let proposals: CrossVerseProposal[] = [];
+  let proposalsBusy = false;
+  let proposalError = "";
+  let proposalsUnavailable = "";
+  let suggestionsShown = false;
+  let dismissed = new Set<string>();
+  /** The selection the current proposals were computed for, so a widened range
+   *  is reported as stale rather than silently showing yesterday's answer. */
+  let proposalsFor: string[] = [];
 
   $: span = spanOf($verseNums, selection);
   $: spanVerses = span ? rangeBetween($verseNums, span[0], span[1]) : [];
@@ -68,6 +79,8 @@
     { sourceUnmatched: 0, targetUnmatched: 0 },
   );
   $: visibleVerses = gapFilterVerse ? ordered.filter((v) => v === gapFilterVerse) : ordered;
+  $: visibleProposals = proposals.filter((p) => !dismissed.has(proposalKey(p)));
+  $: proposalsStale = suggestionsShown && proposalsFor.join("␟") !== selection.join("␟");
 
   // The page is chapter-scoped: navigating to another chapter underneath it
   // would leave the range pointing at verses of the old one.
@@ -134,6 +147,73 @@
     } finally {
       if (sequence === loadSequence) loading = false;
     }
+  }
+
+  /** Suggestions are loaded on an explicit click, never with the range (#139).
+   *  The first call in a session pays the one-time Uroman/Smart-Edit-Distance
+   *  table load (~2 s) plus a scan of every completed verse in the collection;
+   *  paying that silently on every range change would make the picker feel
+   *  broken. Steady state afterwards is milliseconds. */
+  async function loadProposals() {
+    if (proposalsBusy) return;
+    proposalsBusy = true;
+    proposalError = "";
+    try {
+      const wanted = [...selection];
+      const result = await bridge.crossVersePropose(chapter, wanted);
+      proposals = result.proposals;
+      proposalsFor = wanted;
+      proposalsUnavailable = result.unavailable?.message ?? "";
+      suggestionsShown = true;
+    } catch (value) {
+      proposalError = value instanceof Error ? value.message : String(value);
+    } finally {
+      proposalsBusy = false;
+    }
+  }
+
+  function proposalKey(proposal: CrossVerseProposal): string {
+    const { source, target } = proposal;
+    return `${source.verse}|${source.topId}|${target.verse}|${target.bottomId}`;
+  }
+
+  function dismissProposal(proposal: CrossVerseProposal) {
+    // Session-local only in this slice; persisting it is #140, which needs a
+    // workbench schema bump.
+    dismissed = new Set([...dismissed, proposalKey(proposal)]);
+  }
+
+  /** Accepting is an ordinary cross-verse link with the ids the proposal
+   *  carries -- there is no separate apply path, and nothing was written
+   *  until this click. */
+  async function acceptProposal(proposal: CrossVerseProposal) {
+    const { source, target } = proposal;
+    dismissProposal(proposal);
+    await mutateCross(
+      () => bridge.crossVerseLink(
+        { chapter, verse: source.verse, topId: source.topId },
+        { chapter, verse: target.verse, bottomId: target.bottomId },
+      ),
+      `Linked ${source.word} (${chapter}:${source.verse}) to ${target.word} (${chapter}:${target.verse}).`,
+    );
+    if (!error) await loadProposals();
+  }
+
+  function evidenceSummary(proposal: CrossVerseProposal): string {
+    const parts: string[] = [];
+    for (const item of proposal.evidence) {
+      if (item.rawScore <= 0) continue;
+      if (item.kind === "STRONGS_PRECEDENT" && item.jointCount) {
+        parts.push(`this lemma rendered "${proposal.target.word}" ${item.jointCount}× in completed verses`);
+      } else if (item.kind === "SURFACE_PRECEDENT" && item.jointCount) {
+        parts.push(`this exact form paired ${item.jointCount}×`);
+      } else if (item.kind === "PHONETIC") {
+        parts.push("the two words sound alike when romanized");
+      } else if (item.kind === "PROXIMITY") {
+        parts.push("a neighbouring verse");
+      }
+    }
+    return parts.join(" · ");
   }
 
   async function loadMeanings(tokens: AlignmentToken[]) {
@@ -430,6 +510,68 @@
           <button type="button" class="link" on:click={resetToDefaultRange} disabled={busy}>Back to {verse} ±1</button>
         </div>
       {/if}
+      <section class="suggest" aria-label="Cross-verse suggestions">
+        <div class="suggest-head">
+          <button type="button" on:click={loadProposals} disabled={proposalsBusy || busy || loading}>
+            {#if proposalsBusy}<span class="spin" />{/if}
+            {suggestionsShown ? "Suggest again" : "Suggest links"}
+          </button>
+          <small>
+            learned from this project's own completed alignments · nothing is linked until you accept
+          </small>
+          {#if suggestionsShown && !proposalsBusy}
+            <span class="suggest-count">
+              {visibleProposals.length} suggestion{visibleProposals.length === 1 ? "" : "s"}
+            </span>
+          {/if}
+        </div>
+        {#if proposalError}<div class="error">{proposalError}</div>{/if}
+        {#if proposalsStale}
+          <p class="empty">The range changed since these were worked out — suggest again.</p>
+        {/if}
+        {#if proposalsUnavailable}
+          <p class="empty">{proposalsUnavailable}</p>
+        {:else if suggestionsShown && !proposalsBusy && visibleProposals.length === 0}
+          <p class="empty">No cross-verse realization found for the gaps in this range.</p>
+        {/if}
+        {#if visibleProposals.length > 0}
+          <ul class="proposals">
+            {#each visibleProposals as proposal (proposalKey(proposal))}
+              <li class="proposal" class:ambiguous={proposal.status === "AMBIGUOUS"}>
+                <div class="proposal-claim">
+                  <span class="word source-word">{proposal.source.word}</span>
+                  <small>{chapter}:{proposal.source.verse}</small>
+                  <span aria-hidden="true">→</span>
+                  <span class="word">{proposal.target.word}</span>
+                  <small>{chapter}:{proposal.target.verse}</small>
+                  {#if proposal.status === "AMBIGUOUS"}
+                    <span class="status partial" title={proposal.contested
+                      ? "Another source word's best candidate is this same target word."
+                      : "Another candidate scores as well on the evidence; verse distance alone does not settle it."}
+                    >ambiguous</span>
+                  {/if}
+                </div>
+                <div class="proposal-why">{evidenceSummary(proposal)}</div>
+                <div class="proposal-actions">
+                  {#if proposal.status === "PROPOSED"}
+                    <button type="button" on:click={() => acceptProposal(proposal)} disabled={busy || proposalsBusy}>
+                      Accept
+                    </button>
+                  {:else}
+                    <button type="button" on:click={() => (gapFilterVerse = proposal.source.verse)} disabled={busy}>
+                      Show the gap
+                    </button>
+                  {/if}
+                  <button type="button" class="link" on:click={() => dismissProposal(proposal)} disabled={busy}>
+                    Dismiss
+                  </button>
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </section>
+
       {#if notice}<div class="notice">{notice}</div>{/if}
       {#if error}<div class="error">{error}</div>{/if}
       {#if loading}<div class="reloading"><span class="spin" /> Updating range…</div>{/if}
@@ -638,6 +780,24 @@
   .notice { background: #EAF7EF; color: var(--success); }
   .suggestion { border-radius: 9px; padding: 8px 12px; margin-bottom: 8px; font-size: var(--fs-sm); background: var(--accent-bg); color: var(--accent); flex-shrink: 0; display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
   .error { background: #FFF0F0; color: var(--danger); }
+
+  /* Cross-verse suggestions (#139). Deliberately above the columns and
+     collapsed to a single button until asked: a proposal is a claim about the
+     text, and it should not appear as if the page had already decided. */
+  .suggest { flex-shrink: 0; margin-bottom: 8px; }
+  .suggest-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-3); }
+  .suggest-head .spin { margin-right: 4px; }
+  .suggest-count { color: var(--accent); font-weight: 700; }
+  .proposals { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 6px; }
+  .proposal { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 9px; padding: 6px 10px; background: var(--surface-2); }
+  .proposal.ambiguous { border-left-color: var(--warning); }
+  .proposal-claim { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+  .proposal-claim .word { font-family: var(--font-target); font-size: var(--fs-sm); font-weight: 700; }
+  .proposal-claim .source-word { font-family: var(--font-greek); }
+  .proposal-claim small { color: var(--text-3); font-size: var(--fs-2xs); }
+  .proposal-why { color: var(--text-2); font-size: var(--fs-2xs); margin: 3px 0 5px; line-height: 1.4; }
+  .proposal-actions { display: flex; gap: 8px; align-items: center; }
+  .proposal-actions button { padding: 3px 9px; font-size: var(--fs-xs); }
 
   /* Two vertically scrolling columns: the range view never scrolls sideways (#72). */
   .columns { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; flex: 1; min-height: 0; }

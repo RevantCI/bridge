@@ -7,6 +7,7 @@ import type {
   AlignmentRange,
   AlignmentStatusResponse,
   CrossVerseLinkResult,
+  CrossVerseProposalResult,
   BookProgressEntry,
   CheckJobSnapshot,
   DesktopConnectorState,
@@ -170,7 +171,9 @@ export type EngineMethod =
   | "alignment.aiApplyProposal"
   | "alignment.aiPropose"
   | "alignment.crossVerse.link"
+  | "alignment.crossVerse.propose"
   | "alignment.crossVerse.unlink"
+  | "alignment.gapScan"
   | "alignment.get"
   | "alignment.getRange"
   | "alignment.realign"
@@ -505,6 +508,12 @@ export const bridge = {
    *  `verses` are the opaque strings from verseNums, in the order wanted back. */
   getAlignmentRange(chapter: string, verses: string[]): Promise<AlignmentRange> {
     return call("alignment.getRange", { chapter, verses });
+  },
+
+  /** Where each unmatched source token in the range was probably realized
+   *  (#138/#139). Read-only: accepting one is a separate crossVerseLink call. */
+  crossVersePropose(chapter: string, verses: string[]): Promise<CrossVerseProposalResult> {
+    return call("alignment.crossVerse.propose", { chapter, verses });
   },
 
   /** Bridge-private cross-verse link (#117): nothing in alignmentData changes.

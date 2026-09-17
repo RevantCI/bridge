@@ -91,6 +91,7 @@ from tc_ai_bridge.usfm import whitespace_tokens
 from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_gaps
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
+from tc_ai_bridge import cross_verse_proposals
 from tc_ai_bridge.reporting import ReportService
 from tc_ai_bridge.qa_report import (
     aggregate_qa_report,
@@ -324,6 +325,7 @@ class Methods:
     ALIGNMENT_GET = "alignment.get"
     ALIGNMENT_GET_RANGE = "alignment.getRange"
     ALIGNMENT_GAP_SCAN = "alignment.gapScan"
+    ALIGNMENT_CROSS_VERSE_PROPOSE = "alignment.crossVerse.propose"
     ALIGNMENT_CROSS_VERSE_LINK = "alignment.crossVerse.link"
     ALIGNMENT_CROSS_VERSE_UNLINK = "alignment.crossVerse.unlink"
     ALIGNMENT_STATUS = "alignment.status"
@@ -1738,6 +1740,54 @@ class BridgeEngine:
             },
         }
 
+    def _corpus_stats(
+        self, project: Optional[TranslationCoreProject] = None,
+    ) -> corpus_stats_tool.CorpusStatsTable:
+        """The book's corpus statistics, built once and cached until an
+        alignment mutation invalidates it (see `_corpus_stats_by_book`)."""
+        project = project or self.project
+        book_key = str(project.path)
+        table = self._corpus_stats_by_book.get(book_key)
+        if table is None:
+            table = corpus_stats_tool.build_corpus_stats(project)
+            self._corpus_stats_by_book[book_key] = table
+        return table
+
+    def propose_cross_verse(self, chapter: str, verses: list[str]) -> dict[str, Any]:
+        """alignment.crossVerse.propose: for each unmatched source token in the
+        range, where it was probably realized in another verse (#138/#139).
+
+        Read-only. Accepting a proposal is a separate, human-initiated
+        `alignment.crossVerse.link` call -- nothing here writes, and there is no
+        confidence at which a link is created automatically.
+        """
+        self._require_project()
+        chapter = str(chapter)
+        if not isinstance(verses, list) or not verses:
+            raise ProjectError(
+                "alignment.crossVerse.propose requires a non-empty list of verses."
+            )
+        scan = self.gap_scan(chapter)
+        by_verse = {entry["verse"]: entry for entry in scan["verses"]}
+        wanted: list[str] = []
+        for raw in verses:
+            verse = str(raw)
+            if verse not in by_verse:
+                raise ProjectError(f"Verse {chapter}:{verse} does not exist in this project.")
+            if verse not in wanted:
+                wanted.append(verse)
+        # An unreadable verse contributes no gaps rather than failing the call,
+        # the same way it does in the scan itself.
+        gaps = {
+            verse: by_verse[verse] for verse in wanted if by_verse[verse].get("readable")
+        }
+        result = cross_verse_proposals.propose(
+            gaps, self._corpus_stats(),
+            chapter=chapter, verse_order=self.project.verses(chapter),
+        )
+        result["verses"] = wanted
+        return result
+
     def _cross_verse_annotations(self, chapter: str, verse: str, inventory) -> dict[str, Any]:
         """Links touching one verse, with this verse's positional ids resolved
         from the stored signatures (ids are never persisted, #117)."""
@@ -3122,10 +3172,7 @@ class BridgeEngine:
         if cached is not None:
             return cached
 
-        table = self._corpus_stats_by_book.get(book_key)
-        if table is None:
-            table = corpus_stats_tool.build_corpus_stats(project)
-            self._corpus_stats_by_book[book_key] = table
+        table = self._corpus_stats(project)
 
         renderings: dict[str, Counter] = {}
         for (source_word, target_word), count in table.pair_counts.items():
@@ -3966,6 +4013,10 @@ class BridgeEngine:
                 )
             if m == Methods.ALIGNMENT_GAP_SCAN:
                 return EngineResponse.ok(request.id, result=self.gap_scan(p["chapter"]))
+            if m == Methods.ALIGNMENT_CROSS_VERSE_PROPOSE:
+                return EngineResponse.ok(request.id, result=self.propose_cross_verse(
+                    p["chapter"], p.get("verses", []),
+                ))
             if m == Methods.ALIGNMENT_CROSS_VERSE_LINK:
                 return EngineResponse.ok(request.id, result=self.link_cross_verse(
                     p.get("source"), p.get("target"),

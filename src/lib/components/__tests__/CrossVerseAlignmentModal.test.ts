@@ -11,7 +11,7 @@ import type {
 
 const {
   getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry, crossVerseLink, crossVerseUnlink,
-  analysisJobGetScopeStatus, semanticLocationGetRange, targetSemanticGetRange,
+  analysisJobGetScopeStatus, semanticLocationGetRange, targetSemanticGetRange, crossVersePropose,
 } = vi.hoisted(() => ({
   getAlignmentRange: vi.fn(),
   realignWords: vi.fn(),
@@ -23,12 +23,13 @@ const {
   analysisJobGetScopeStatus: vi.fn(),
   semanticLocationGetRange: vi.fn(),
   targetSemanticGetRange: vi.fn(),
+  crossVersePropose: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
   bridge: {
     getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry, crossVerseLink, crossVerseUnlink,
-    analysisJobGetScopeStatus, semanticLocationGetRange, targetSemanticGetRange,
+    analysisJobGetScopeStatus, semanticLocationGetRange, targetSemanticGetRange, crossVersePropose,
   },
 }));
 
@@ -128,7 +129,30 @@ beforeEach(() => {
   runVerseChecks.mockResolvedValue([{ id: "f1" }]);
   // No completed analysis by default: the suggestion path stays quiet.
   analysisJobGetScopeStatus.mockResolvedValue({ state: "NOT_ANALYZED", latestJob: null });
+  crossVersePropose.mockResolvedValue({
+    chapter: "1", verses: ["1", "2", "3-4"], proposals: [], calibrationVersion: "cross-verse-uncalibrated-v1",
+  });
 });
+
+/** A proposal shaped as `alignment.crossVerse.propose` returns it (#139). */
+function proposal(overrides: Record<string, unknown> = {}) {
+  return {
+    status: "PROPOSED", confidence: 0.65, margin: 0.55, contested: false,
+    source: {
+      chapter: "1", verse: "3-4", topId: "H001", word: "φῶς",
+      signature: "φῶς␟1␟1", strong: "G54570", lemma: "φῶς",
+    },
+    target: { chapter: "1", verse: "2", bottomId: "T002", word: "was", signature: "was␟1␟1" },
+    evidence: [
+      { kind: "STRONGS_PRECEDENT", rawScore: 1, weight: 0.55, weightedScore: 0.55, jointCount: 7, sourceCount: 7 },
+      { kind: "SURFACE_PRECEDENT", rawScore: 0, weight: 0.45, weightedScore: 0, jointCount: 0, sourceCount: 0 },
+      { kind: "PHONETIC", rawScore: 0, weight: 0.25, weightedScore: 0 },
+      { kind: "PROXIMITY", rawScore: 1, weight: 0.1, weightedScore: 0.1 },
+    ],
+    alternatives: [],
+    ...overrides,
+  };
+}
 
 async function renderPage(verse = "2", initialVerses: string[] = []) {
   const onClose = vi.fn();
@@ -307,5 +331,115 @@ describe("CrossVerseAlignmentModal", () => {
     const { onClose } = await renderPage("2");
     currentChapter.set("2");
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  describe("cross-verse suggestions (#139)", () => {
+    async function suggest() {
+      await fireEvent.click(screen.getByRole("button", { name: /Suggest links/ }));
+      await waitFor(() => expect(crossVersePropose).toHaveBeenCalled());
+    }
+
+    it("asks for nothing until the reviewer asks: a proposal is a claim, not a default", async () => {
+      await renderPage("2");
+      expect(crossVersePropose).not.toHaveBeenCalled();
+      await suggest();
+      expect(crossVersePropose).toHaveBeenCalledWith("1", ["1", "2", "3-4"]);
+    });
+
+    it("shows the claim and why it was made", async () => {
+      crossVersePropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"], proposals: [proposal()],
+        calibrationVersion: "cross-verse-uncalibrated-v1",
+      });
+      await renderPage("2");
+      await suggest();
+
+      const strip = screen.getByLabelText("Cross-verse suggestions");
+      expect(within(strip).getByText("φῶς")).toBeInTheDocument();
+      expect(within(strip).getByText("was")).toBeInTheDocument();
+      expect(within(strip).getByText(/rendered "was" 7× in completed verses/)).toBeInTheDocument();
+      expect(within(strip).getByText("1 suggestion")).toBeInTheDocument();
+    });
+
+    it("accepting is an ordinary cross-verse link, and nothing was written before it", async () => {
+      crossVersePropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"], proposals: [proposal()],
+        calibrationVersion: "cross-verse-uncalibrated-v1",
+      });
+      crossVerseLink.mockResolvedValue(linked());
+      await renderPage("2");
+      await suggest();
+      expect(crossVerseLink).not.toHaveBeenCalled();
+
+      await fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+
+      await waitFor(() => expect(crossVerseLink).toHaveBeenCalledWith(
+        { chapter: "1", verse: "3-4", topId: "H001" },
+        { chapter: "1", verse: "2", bottomId: "T002" },
+      ));
+      await waitFor(() => expect(runVerseChecks).toHaveBeenCalledWith("1", "3-4", ["alignment", "greekroom"]));
+    });
+
+    it("an ambiguous proposal cannot be accepted in one click; it points at the gap instead", async () => {
+      crossVersePropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"],
+        proposals: [proposal({ status: "AMBIGUOUS", contested: true, margin: 0 })],
+        calibrationVersion: "cross-verse-uncalibrated-v1",
+      });
+      await renderPage("2");
+      await suggest();
+
+      const strip = screen.getByLabelText("Cross-verse suggestions");
+      expect(within(strip).queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+      expect(within(strip).getByText("ambiguous")).toBeInTheDocument();
+      await fireEvent.click(within(strip).getByRole("button", { name: "Show the gap" }));
+      expect(crossVerseLink).not.toHaveBeenCalled();
+    });
+
+    it("dismissing removes it without writing anything", async () => {
+      crossVersePropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"], proposals: [proposal()],
+        calibrationVersion: "cross-verse-uncalibrated-v1",
+      });
+      await renderPage("2");
+      await suggest();
+
+      await fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+      const strip = screen.getByLabelText("Cross-verse suggestions");
+      expect(within(strip).getByText("0 suggestions")).toBeInTheDocument();
+      expect(crossVerseLink).not.toHaveBeenCalled();
+    });
+
+    it("says why there is nothing to suggest rather than showing an empty list", async () => {
+      crossVersePropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"], proposals: [],
+        calibrationVersion: "cross-verse-uncalibrated-v1",
+        unavailable: {
+          reason: "no-completed-alignments",
+          message: "Cross-verse suggestions are learned from this project's own completed alignments…",
+        },
+      });
+      await renderPage("2");
+      await suggest();
+
+      expect(screen.getByText(/learned from this project's own completed alignments…/)).toBeInTheDocument();
+    });
+
+    it("reports suggestions as stale when the range moves under them", async () => {
+      crossVersePropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"], proposals: [proposal()],
+        calibrationVersion: "cross-verse-uncalibrated-v1",
+      });
+      await renderPage("2");
+      await suggest();
+      expect(screen.queryByText(/range changed/i)).not.toBeInTheDocument();
+
+      // Widen the range to verse 5 through the "To" picker.
+      await fireEvent.change(screen.getByLabelText("To"), { target: { value: "5" } });
+      await waitFor(() => expect(getAlignmentRange).toHaveBeenLastCalledWith("1", ["1", "2", "3-4", "5"]));
+
+      expect(await screen.findByText(/The range changed since these were worked out/)).toBeInTheDocument();
+    });
   });
 });

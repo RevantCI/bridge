@@ -251,6 +251,48 @@ export interface CrossVerseLinkResult {
   target: AlignmentContext;
 }
 
+/** One scored component behind a cross-verse proposal (#138). `rawScore` and
+ *  `weightedScore` are kept apart because every weight is an uncalibrated
+ *  placeholder -- see cross_verse_proposals.py's docstring. */
+export interface CrossVerseProposalEvidence {
+  kind: "STRONGS_PRECEDENT" | "SURFACE_PRECEDENT" | "PHONETIC" | "PROXIMITY";
+  rawScore: number;
+  weight: number;
+  weightedScore: number;
+  /** Corpus components only: how often this pairing was seen. */
+  jointCount?: number;
+  sourceCount?: number;
+  strongKey?: string;
+  sedCost?: number;
+}
+
+export interface CrossVerseProposal {
+  /** PROPOSED is one-click acceptable; AMBIGUOUS points at the verse instead. */
+  status: "PROPOSED" | "AMBIGUOUS";
+  confidence: number;
+  /** Lead over the runner-up on substantive evidence, excluding proximity. */
+  margin: number;
+  /** Another source token's best candidate is this same target word. */
+  contested: boolean;
+  source: {
+    chapter: string; verse: string; topId: string;
+    word: string; signature: string; strong: string; lemma: string;
+  };
+  target: { chapter: string; verse: string; bottomId: string; word: string; signature: string };
+  evidence: CrossVerseProposalEvidence[];
+  alternatives: Omit<CrossVerseProposal, "status" | "margin" | "contested" | "alternatives">[];
+}
+
+export interface CrossVerseProposalResult {
+  chapter: string;
+  verses: string[];
+  proposals: CrossVerseProposal[];
+  calibrationVersion: string;
+  corpus?: { versesScanned: number; booksScanned: string[]; totalPairs: number };
+  /** Set instead of proposals when the project has nothing to learn from. */
+  unavailable?: { reason: string; message: string };
+}
+
 export interface AlignmentContext {
   chapter: string;
   verse: string;
