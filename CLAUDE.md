@@ -477,13 +477,16 @@ references, session-by-session narrative). Read it when the guide's summary
 isn't enough, and **keep appending to it** as work progresses — it's the
 record `DEVELOPER_GUIDE.md` gets distilled from, not a doc to let go stale.
 
-`docs/ARCHITECTURE.md` is the current-state map (rewritten 2026-09-16 against
-the code: process boundary, the three databases, pipelines, UI surfaces,
-subsystems). `docs/SIMPLIFICATION_AUDIT_2026-09.md` records what is slowing the
-codebase down and what is slated for removal. `docs/ALIGNMENT.md` and `docs/IMPORTS.md` document the
-manual-alignment and import subsystems respectively. `docs/QA_TEST_MATRIX.md`
-is the release gate — a feature isn't release-ready because its unit tests
-pass; check the matrix's source/frozen/desktop rows.
+`docs/ARCHITECTURE.md` is the current-state map (process boundary, why the stack
+is what it is, the three databases, vendored and bundled data, pipelines, UI
+surfaces, subsystems) — and its **§9 is the repository's one doc map**: every
+other doc is listed there with what it covers, so go there rather than guessing
+from filenames. `docs/INVARIANTS.md` holds the rules the pipeline may not break,
+still numbered as they were in the old handoff because engine code cites them by
+number (§20 token identity, §21 the Unicode span contract, §39 the hard
+constraints). `docs/QA_TEST_MATRIX.md` is the release gate — a feature isn't
+release-ready because its unit tests pass; check the matrix's source/frozen/desktop
+rows.
 
 `docs/TEAM_ARCHITECTURE.md` (2026-09-11) is the design record for the direction
 behind issues #44–#47: a second per-project `bridge-workbench.sqlite3` for the

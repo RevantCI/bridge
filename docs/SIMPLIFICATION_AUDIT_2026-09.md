@@ -137,7 +137,7 @@ Not filed: B5 (keep), B7 (held behind the cross-verse alignment page, #116 to #1
 3. #102 (A2) and #105 (A5).
 4. #103 (A3, including `passage_semantic_wire.rs`).
 5. #107 (A8, docs archive) and #106 (A7).
-6. B6 (navigation poll, not yet filed).
+6. B6 (navigation poll) — filed as #110 and shipped in `50c7620`.
 7. #94.
 8. §4.1 lazy runtime, after reading the traces.
 9. #82.

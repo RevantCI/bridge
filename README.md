@@ -13,7 +13,7 @@ desktop app (Tauri + Svelte), while keeping the same QA engines
 ([Greek Room](https://github.com/BibleNLP/greek-room)) and translation
 business logic underneath.
 
-**Status:** `v0.9.6` — the full import → check → review → align →
+**Status:** `v0.11.0` — the full import → check → review → align →
 export loop works end to end. See [Current status](#current-status) below.
 
 ## Who this is for
@@ -25,65 +25,26 @@ export loop works end to end. See [Current status](#current-status) below.
 - **Developers and QA** setting up or extending Bridge → read
   **[Developer Setup](docs/DEVELOPER_SETUP.md)** to get a working dev
   environment and build the desktop app.
-- **Developers** who want the technical background — architecture decisions,
-  the phase roadmap and what's actually shipped, dependencies, and vendored/
-  bundled data → read the **[Developer Guide](docs/DEVELOPER_GUIDE.md)**.
+- **Developers** who want the technical background → start with
+  **[Architecture](docs/ARCHITECTURE.md)** (current state: process boundary, why
+  the stack is what it is, the three databases, pipelines — and §9, the map of
+  every other doc), then the **[Developer Guide](docs/DEVELOPER_GUIDE.md)** for
+  the phase roadmap and what actually shipped.
 
-## Quick start (developers)
+## Running it
 
-```powershell
-# 1. Python engine
-cd engine
-py -3.12 -m venv .venv
-.venv\Scripts\python.exe -m pip install -c constraints-py312-windows.txt -e ".[dev,wildebeest]"
-.venv\Scripts\python.exe -m pytest tests/ greek_room_engine/tests/ -v   # expect 261 passed
-
-# 2. Full desktop app (needs Rust + MSVC build tools, see Developer Setup)
-cd ..
-npm install
-npm run test:dev-start
-npm run test:ui-state
-.\scripts\build-sidecars.ps1
-npm run tauri dev
-```
-
-## Run locally on Windows
-
-If this checkout has already been set up, open PowerShell in the repository
-root and run:
+Everything about getting a dev environment working — prerequisites, the Python
+engine, the frontend, the full desktop app, building the installer, and the
+Windows problems worth knowing about — is in
+**[docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md)**. In an already-set-up
+checkout:
 
 ```powershell
 npm run tauri dev
 ```
 
-Tauri first builds the frontend and serves it from a local Vite preview,
-compiles the Rust development shell when needed, launches the bundled Python
-sidecars, and opens the Bridge desktop window. This deterministic preview path
-avoids a Windows WebView/Vite on-demand Svelte compiler runaway that otherwise
-produces a white window. Keep the terminal open while using Bridge; press
-`Ctrl+C` in that terminal to stop the development app.
-
-For a new checkout, complete the **Quick start** above first. Re-run
-`.\scripts\build-sidecars.ps1` whenever Python engine code or bundled engine
-resources change. Frontend-only Svelte/CSS changes do not require rebuilding
-the sidecars, but they do require restarting `npm run tauri dev` so the local
-frontend bundle is rebuilt.
-
-If local startup fails, verify these files exist before retrying:
-
-```text
-engine/.venv/Scripts/python.exe
-src-tauri/binaries/bridge-engine-x86_64-pc-windows-msvc.exe
-src-tauri/binaries/bridge-usfm-checker-x86_64-pc-windows-msvc.exe
-```
-
-If the Tauri window opens blank, stop the development process and run
-`npm run test:dev-start`. This smoke test performs the same production-style
-frontend compile used by the local desktop launcher, starts an isolated preview
-server, and verifies that both the index and application bundle are available.
-
-Full prerequisites, platform notes, and troubleshooting:
-**[docs/DEVELOPER_SETUP.md](docs/DEVELOPER_SETUP.md)**.
+Re-run `.\scripts\build-sidecars.ps1` whenever Python engine code or bundled
+engine resources change.
 
 ## Repo layout
 
@@ -93,56 +54,34 @@ src/              Svelte frontend
 src-tauri/        Rust shell (spawns + talks to the sidecar)
 paratext_plugin/  Companion Paratext plugin (C#)
 scripts/          Build and resource-vendoring scripts
-docs/             User manual, developer setup, architecture, roadmap, import/alignment design, QA matrix
+docs/             Architecture (and the doc map, §9), user manual, setup, roadmap,
+                  invariants, import/alignment design, QA matrix, release notes
 ```
 
 ## Current status
 
-The import → check → review → manual-align → export loop is implemented and
-verified against real translationCore projects. Beta 11 installed acceptance
-confirmed upgrade/project preservation, reference-scoped AI review state,
-persisted tN/tW results, protected human/imported selections, stale-review
-reruns, chapter/book processing, alignment, and export. A small amount of
-Translation Helps navigation jitter remains as non-blocking UX follow-up work.
+The import → check → review → align → export loop is implemented and verified
+against real translationCore projects. Since 0.10.0 every Bridge-private record
+(human decisions, check results, progress, alignment history) lives in a
+per-project SQLite database rather than JSON files, with an app-level database
+for the project registry; 0.11.0 added the **Cross-verse alignment** page, where
+a source word can be recorded as realized in a neighbouring verse without
+faking a translationCore alignment, and taught the semantic pipeline to read
+those records as evidence.
 
-Beta 14 carries the completed Milestone 3B.4 workflow, fixes contradictory
-AI proposals that cited exact target words while returning **Nothing to
-Select**. Reviewers can turn a tN/tW finding into a
-persisted issue-resolution record, attach exact target text, correction,
-evidence and a reviewer note, and hand it off to a confirmed Paratext project.
-The crash-safe, idempotent queue preserves queued and sent state across
-restarts. Editing a resolved verse starts an automatic grounded recheck;
-Advanced mode keeps uncertain results for a human decision and records the
-result in an append-only lifecycle audit.
+Where to look next:
 
-Beta 14 also adds language-aware semantic passage mapping. Source and target
-verse numbers are treated as reference anchors rather than mandatory semantic
-boundaries, so a meaning moved or split across nearby target verses is surfaced
-as a passage mapping instead of a false omission or Nothing-to-Select decision.
-Search begins with the current USFM structural passage/sentence/paragraph and
-expands through adjacent structural windows only within explicit latency/cost
-budgets. Exhaustion becomes **Needs extended passage review**, never an
-automatic missing/omission conclusion. Bridge preserves imported verse markers
-and target word order; cross-verse relationships live only in companion data.
-
-The current Beta 15 work adds an Advanced-mode human-validation queue for the
-40 generated IRVTam Luke/Philippians mapping candidates. Reviewers can filter,
-confirm, reject, defer, or correct exact multi-span mappings; every decision is
-append-only, reviewer-attributed, restart-safe companion data. A live
-calibration summary separates human agreement, corrections, and rejections by
-confidence and relationship so thresholds can be adjusted from evidence after
-the initial 15–20 reviews. No validation action changes Scripture or native
-translationCore selections.
-See:
-
-- [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) for what's usable today, in
-  plain language.
-- [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md) for the phase-by-phase
+- [`docs/RELEASE_0.11.0.md`](docs/RELEASE_0.11.0.md) and its siblings —
+  what changed in each version, including the one-way database migration.
+- [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) — what's usable today, in plain
+  language (written against 0.9.6; see the note at its top).
+- [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md) — the phase-by-phase
   roadmap and exactly what's done vs. deliberately deferred.
-- [`docs/QA_TEST_MATRIX.md`](docs/QA_TEST_MATRIX.md) for the release gate.
+- [`docs/QA_TEST_MATRIX.md`](docs/QA_TEST_MATRIX.md) — the release gate.
 
 ## License
 
 See [`LICENSE`](LICENSE) (GPL-3.0). Bundled Scripture/translation-helps data
 and vendored third-party code carry their own licenses — see
-[`docs/DEVELOPER_GUIDE.md#bundled-data--vendored-packages`](docs/DEVELOPER_GUIDE.md#bundled-data--vendored-packages).
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §3.1 and each
+`engine/vendor/*/NOTICE.md`.

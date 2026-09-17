@@ -3,7 +3,14 @@
 For translators and checkers using Bridge day to day. If you're setting up
 or building the app, see [`DEVELOPER_SETUP.md`](DEVELOPER_SETUP.md) instead.
 
-*Written from the app's current state (`v0.9.6`, 2026-09-10).*
+> **This manual is written against `v0.9.6` (2026-09-10) and has not been
+> rewritten since.** The app is at 0.11.0. Two shipped things are missing
+> below: the workbench database cutover (0.10.0 — Bridge-private records moved
+> from JSON files into a per-project SQLite database, which is invisible in use
+> but means a project opened by 0.11.0 cannot be opened by 0.10.x), and the
+> Cross-verse alignment page (0.11.0 — summarized in §6.5). Everything else
+> still matches. The release notes in `RELEASE_*.md` cover what changed per
+> version.
 
 > **Screenshots:** not included yet — see [Adding screenshots](#adding-screenshots)
 > at the bottom for exactly which screen/file to capture and where to drop
@@ -287,6 +294,30 @@ Open the alignment editor for a verse to:
 - **Undo** just this verse, or restore an earlier version from its history.
 - If you've configured an AI provider, request an **AI alignment
   proposal** as a starting point — you still have to review and accept it.
+
+**Cross-verse alignment (added in 0.11.0).** Sometimes a word in the original
+is translated in the *next* verse, not this one. Aligning one verse at a time
+cannot show that: it looks like an omission here and an addition there. Open
+**Cross-verse alignment** from the editor toolbar, or from the link inside
+Align Words, to see several verses of the chapter at once — source words down
+the left, each verse's unaligned words down the right, and a strip along the
+top counting the gaps per verse.
+
+- Pick the range with the from/to selectors, the per-verse chips, or by
+  Ctrl-clicking and Shift-clicking verses in the verse list first. It opens on
+  the selected verse and its neighbours by default.
+- Dragging a word onto a source word **of the same verse** aligns it exactly as
+  Align Words does.
+- Dragging a word onto a source word **of another verse** records a *cross-verse
+  link*: the source word shows "realized in v.N", the word stays in its own
+  verse's word bank marked "↔ v.N", and the × on either removes the link.
+- A verse whose only remaining gaps are linked stops being flagged as not fully
+  aligned and says how many words are linked across verses. It is still not
+  "complete" for translationCore — aligned USFM cannot express a cross-verse
+  link, so completion stays with translationCore and nothing is written into
+  its alignment data.
+- Editing a verse so a linked word disappears marks that link invalid, with the
+  reason, rather than deleting it.
 
 ### 6.6 Translation helps review
 

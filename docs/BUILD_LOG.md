@@ -9117,3 +9117,105 @@ Engine: `tests/semantic/test_word_alignment_evidence.py` + `test_word_alignment_
 **36 passed** (53 s; 4 new); the Stage 6B golden test by name **1 passed**;
 `pytest -n auto -m "not slow"` **1030 passed** in 2 m 37 s. No frontend or Rust change, so
 `npm` and `cargo` were not run.
+
+## 2026-09-17 — docs consolidation: one doc map, one invariants file, `HANDOFF.md` deleted
+
+A board-and-docs audit (issues #124 to #135 filed from it separately) found 33
+Markdown files outside the code directories, three of them narrating the same
+architecture, four different doc maps that disagreed with each other, and two
+files still describing the app at v0.9.6. This entry is the consolidation the
+maintainer approved from that audit.
+
+### What moved, verbatim
+
+- **`DEVELOPER_GUIDE.md` §1 "Tech stack and why"** → `ARCHITECTURE.md` §2.1. The
+  stack table, the accepted Rust trade-off and the "never integrated directly"
+  note are the *why* behind the process boundary §2 already draws; they now sit
+  together. The section's "core architectural principle" paragraph was dropped
+  as a duplicate of `ARCHITECTURE.md` §1.
+- **`DEVELOPER_GUIDE.md` §1's Unicode semantic-comparison invariant** →
+  `INVARIANTS.md` §21a, beside the span contract it is the comparison half of.
+- **`DEVELOPER_GUIDE.md` §4 "Vendored packages & bundled data"** →
+  `ARCHITECTURE.md` §3.1 (it is storage, and the numbers were current), except
+  its **"tN/tW are not fabricated"** boundary → `IMPORTS.md`, where the tN/tW
+  materialization it governs is described.
+- **`DEVELOPER_GUIDE.md` L217-317, the dated Beta 15 handoff** →
+  `docs/archive/BETA15_HANDOFF_2026-08-31.md`.
+- **`docs/plans/FONT_SUPPORT_PLAN.md`** → `docs/archive/` (self-declared
+  implemented 2026-09-08; `docs/plans/` is now empty and gone).
+
+### One doc map
+
+`ARCHITECTURE.md` §9 is now the repository's only doc map, extended to name
+`DEVELOPER_SETUP.md`, `DECISIONS.md`, `INVARIANTS.md`,
+`passage-aware-semantic-alignment.md` (previously reachable only from the
+archived handoff), the release notes and the archive. The three lists that
+disagreed with it — `DEVELOPER_GUIDE.md` §7, `TEAM_ARCHITECTURE.md` §12 and
+CLAUDE.md's "Working in this repo" — now point at it in one line each.
+
+### `HANDOFF.md` is gone; `INVARIANTS.md` replaces the part that mattered
+
+`docs/archive/HANDOFF.md` was 4,139 lines in 44 numbered sections. Its status
+records (§35 to §37.14, §43, §44.x) duplicated `BUILD_LOG.md` — its own archive
+banner said so — and its transfer instructions (§40, §41, the "where to pick up"
+block) describe handing the project to a second developer, which no longer
+applies. Six sections were project knowledge with no other home and are now
+`docs/INVARIANTS.md`, **lifted verbatim with their original numbers kept**
+because engine code cites them by number:
+
+| Section | What it fixes |
+|---|---|
+| §20 | Stable token identity |
+| §21 + §21a | The Unicode span contract and the comparison invariant |
+| §31 | Embeddings are retrieval evidence, never truth |
+| §36 | The end-of-Stage-9A limitations list, under a note saying it is a dated snapshot and naming its two now-false bullets |
+| §39 | The hard non-negotiable constraints |
+| §44.8 | The continuity rules |
+
+The four live citations in code (`correction_verification.py`,
+`test_correction_stage9b4.py`, `cross_verse_links.py`,
+`workbench_repository.py`) now say `INVARIANTS.md §39` instead of
+`HANDOFF.md §39`. The 17 mentions inside `BUILD_LOG.md` are historical log text
+and are left exactly as written.
+
+### Stale text corrected, not rewritten
+
+- `README.md`: status `v0.9.6` → `v0.11.0`; the "Current status" narrative,
+  which still described Beta 11/14/15 and the 40-candidate validation queue that
+  #100 removed, replaced by two paragraphs naming the 0.10.0 database cutover
+  and the 0.11.0 cross-verse page, with pointers to the release notes. The
+  duplicated developer quick-start and run-locally sections became a pointer to
+  `DEVELOPER_SETUP.md`, which already covers both. The licence pointer follows
+  the vendoring tables to `ARCHITECTURE.md` §3.1.
+- `DEVELOPER_GUIDE.md`: "BUILD_LOG is ~1850 lines" (it is 9,100+) dropped;
+  "Schema is **v14**" in the roadmap table now points at `ARCHITECTURE.md` §3
+  rather than restating a number that is v16. The two other v14 mentions are
+  inside a block explicitly labelled as a 2026-09-11 baseline snapshot and are
+  left as the record they are, with a dated note added above them.
+- `ALIGNMENT.md`: the "Bridge v0.9.6 provides" version line dropped; a new
+  section documents the Bridge-private cross-verse link store (#117) and the
+  Stage 6B evidence (#119), which the doc had no mention of.
+- `USER_MANUAL.md`: a banner at the top saying it is written against 0.9.6 and
+  naming the two shipped things it does not cover, plus a short Cross-verse
+  alignment subsection in §6.5. A real rewrite is still owed.
+- `QA_TEST_MATRIX.md`: the "Python: 319 tests" line in Automated evidence
+  contradicted row A01's current count; it now says the suite is at 1,030 and
+  keeps the original list as what that 319-test suite covered.
+- `SIMPLIFICATION_AUDIT_2026-09.md`: the sequencing list still said B6 was "not
+  yet filed"; it is #110 and shipped in `50c7620`.
+
+### Not done
+
+`BUILD_LOG.md`'s own internal duplication (the undated "current release state"
+and "phase roadmap status" sections inside an otherwise chronological log) was
+left alone: it is an append-only record and editing its middle is worse than the
+duplication. The user manual rewrite is still outstanding. No code behaviour
+changed — the four Python edits are comments and one docstring.
+
+### Gates
+
+`tests/correction/test_correction_stage9b4.py` + `tests/alignment/test_alignment_cross_verse.py`
+**72 passed** (2 m 3 s) — the two files whose comments changed. A link check over
+every Markdown file outside the code directories found no broken relative link
+except the pre-existing screenshot placeholders in `USER_MANUAL.md`. No frontend
+or Rust change.

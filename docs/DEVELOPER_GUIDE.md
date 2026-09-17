@@ -3,55 +3,11 @@
 The "why" and "where things stand" companion to
 [`DEVELOPER_SETUP.md`](DEVELOPER_SETUP.md) (the "how to get it running"
 doc). This is a curated summary for personal/team reference — the full
-detail always lives in [`ARCHITECTURE.md`](ARCHITECTURE.md) (design
-rationale) and [`BUILD_LOG.md`](BUILD_LOG.md) (session-by-
-session build log, currently ~1850 lines). Read those two when you need the
-full story on something; use this doc to find out *whether* you need to.
-
----
-
-## 1. Tech stack and why
-
-| Layer | Choice | Why |
-|---|---|---|
-| Desktop shell | **Tauri v2** (Rust) | Native OS webview instead of bundling Chromium → smaller binary, faster cold start, lower idle memory. Matters for an all-day tool on modest field hardware. Rejected **Electron** for this reason. |
-| Frontend | **Svelte 4 + TypeScript + Tailwind** | A real web-app UI (colored status badges, inline findings, tabbed panels) that a native widget toolkit fights rather than enables. Also gives a direct path to a future web deployment. Rejected **Python + Tkinter** (the original app's stack) for this reason. |
-| Business logic | **Python 3.12/3.13 sidecar** (`bridge-engine`, PyInstaller-bundled) | Reuses the 29 (now 30) existing, proven `tc_ai_bridge` modules from the legacy app rather than rewriting them. |
-| Sidecar transport | **JSON-lines over stdin/stdout** | Transport-agnostic protocol defined once in `engine/greek_room_engine/protocol.py`. Desktop uses stdio (`stdio_transport.py` / `src-tauri/src/sidecar.rs`); a future web deployment reuses the same `GreekRoomEngine.handle_request()` behind an HTTP wrapper — no protocol or UI rewrite needed. |
-
-**Trade-off accepted:** Rust has a learning curve for a team with none; in
-practice, day-to-day work stays in the Python engine and Svelte frontend —
-the Rust shell is intentionally thin (spawn sidecar, route JSON, expose a
-few Tauri commands).
-
-**Core architectural principle:** Greek Room says what's *objectively
-suspicious*, AI says what it *might mean*, and the human says what the
-translation should be. Bridge never silently rewrites Scripture or alignment
-groups. Basic-mode AI may record only policy-approved, high-confidence tN/tW
-review selections grounded in bundled evidence; Advanced mode keeps them as
-editable proposals, and every stored selection records its provenance. Full detail:
-[`ARCHITECTURE.md`](ARCHITECTURE.md).
-
-**Unicode semantic-comparison invariant (V1.1):** authoritative Scripture is
-never normalized or rewritten for comparison. Stage 7 derives transient NFC,
-Unicode-case-folded comparison keys by walking extended grapheme clusters and
-preserving Letter, Number, and Mark material. Canonically equivalent NFC/NFD
-spellings therefore compare consistently, while compatibility distinctions are
-not erased. Punctuation and symbols remain comparison boundaries. Internal
-ZWJ/ZWNJ/WORD JOINER controls are retained in orthographic runs; standalone
-directional controls do not become semantic tokens. The one explicit exception
-is Stage 7's controlled Biblical-Hebrew category matching, which can derive an
-unpointed consonantal key without changing UHB token identity or stored text.
-
-Grapheme safety is not universal lexical segmentation. The generic comparison
-tokenizer intentionally does not claim dictionary-quality boundaries for
-Thai, Khmer, Lao, Myanmar, or other no-space writing systems. Persistent spans
-remain exact half-open Unicode code-point offsets over raw text, and normalized
-comparison keys must never be used to apply a correction.
-
-**Never integrated directly:** Greek Room's `ephesus/` web API (Docker,
-database, its own web UI) — Bridge only uses the underlying check modules,
-not the reference web app around them.
+detail always lives in [`ARCHITECTURE.md`](ARCHITECTURE.md) (current-state
+architecture and the repository's doc map, §9) and
+[`BUILD_LOG.md`](BUILD_LOG.md) (session-by-session build log). Read those two
+when you need the full story on something; use this doc to find out *whether*
+you need to.
 
 ---
 
@@ -74,7 +30,7 @@ reasons — this table is the fast way to see both.
 | *(Stage 3 follow-up)* | — | Language-independent semantic passage mapping and a 40-case IRVTam discovery queue are built. All 40 Luke/Philippians proposals were human-reviewed and verified after restart: 38 confirmed, one corrected, and one rejected (95% combined proposal agreement). This became the validation evidence base for the later passage-semantic stages; the Beta 15 instructions below are retained as a historical checkpoint, not the current resume boundary. |
 | *(Passage-semantic Stages 4-8)* | Source/target semantic inventories, passage-aware location, meaning preservation, bidirectional QA | ✅ Done (2026-09-01 / 2026-09-02). Deterministic throughout — none of these stages uses a language model. Note the numbering collision: these are semantic **Stages**, a different axis from the Greek Room **Phases** above. Production caveat: `SemanticEmbeddingProvider.available` is `False` in the shipped app, so location runs there use lexical/structural evidence only; `scripts/seed_review_fixture.py` seeds a project with a fixture provider for exercising the review UI. |
 | *(Stage 9A)* | Human QA review, evidence inspection, disposition workflow | ✅ Done, including Stage 9A.4 orchestration (2026-09-03). A 2026-09-04 follow-up kept a running analysis job visible while the reviewer navigates (it was previously dropped), and fixed the Logos VBScript shim going silent on any COM error, and bounded the Bridge navigation publish retry. Alignment Review is a top-level Word/Semantic/Passage/QA surface; `qaReview.*`, `semanticReview.*` and `reviewHistory.*` record decisions with optimistic concurrency. **Run analysis** now executes Stages 5–8 as a persisted background job for passage/chapter/book/range and refreshes the queue. Findings are classified only — no correction generation or application, which remains Stage 9B. Normal runtime visibly reports limited retrieval until a production multilingual embedding provider is configured. |
-| *(Stage 9B)* | Correction wording, review, explicit apply, affected re-analysis, semantic verification | ✅ Done through **9B.4**. 9B.0 schema/eligibility, 9B.1 wording generation, 9B.2 review UI, 9B.3a persistence/recovery, 9B.3b the first authorized Scripture write behind explicit human confirmation, 9B.3c affected re-analysis, and 9B.4 positive semantic verification plus explicit `CORRECTED` acknowledgement are present. Schema is **v14**. Stage 8 target-hash and resource-conflict blockers, Case C source-inventory consistency, and terminal verification refresh were repaired before release v0.9.6. A correction is never verified merely because a finding disappeared: current Stage 6B/7/8 evidence must positively satisfy the original obligation, and `PASSED` alone never sets `CORRECTED`. |
+| *(Stage 9B)* | Correction wording, review, explicit apply, affected re-analysis, semantic verification | ✅ Done through **9B.4**. 9B.0 schema/eligibility, 9B.1 wording generation, 9B.2 review UI, 9B.3a persistence/recovery, 9B.3b the first authorized Scripture write behind explicit human confirmation, 9B.3c affected re-analysis, and 9B.4 positive semantic verification plus explicit `CORRECTED` acknowledgement are present. For the current schema versions of the three databases see `ARCHITECTURE.md` §3. Stage 8 target-hash and resource-conflict blockers, Case C source-inventory consistency, and terminal verification refresh were repaired before release v0.9.6. A correction is never verified merely because a finding disappeared: current Stage 6B/7/8 evidence must positively satisfy the original obligation, and `PASSED` alone never sets `CORRECTED`. |
 | *(Project QA report)* | — | ✅ Done (2026-09-04). **Generate report** on the project screen builds a whole-collection QA report in a background sidecar job (`report.generate/status/get/cancel/export`, `tc_ai_bridge/qa_report.py`, `report_jobs.py`): every book's Greek Room / tN / tW / alignment / AI-review progress, and every issue as a filterable row (category, book, chapter, verse, issue, AI proposal, fixed by human/machine, pass/fail) with charts and CSV / TSV / print-to-PDF export. Needed one piece of new persistence: a succeeded check job now snapshots its findings per chapter (the rollup only ever kept ids) — originally `.apps/translationCoreAI/checkFindings/<book>/<chapter>.json`, a `check_findings` row in `bridge-workbench.sqlite3` since #77. Installed-app acceptance still NOT RUN. |
 | *(AI triage)* | — | ✅ Done (2026-09-07). Optional, **online-only** false-positive scoring layered on that report — see §5. Backend, protocol and report-screen UI; live model behaviour and installed-app acceptance NOT RUN. |
 
@@ -181,6 +137,11 @@ pack in `ai_client.py` still uses it.
 
 #### Stabilization and releases
 
+*The release list and the baseline block below are a snapshot taken on
+2026-09-11, kept as a record. Releases since then (0.10.0 to 0.11.0) are in
+`BUILD_LOG.md` and the `RELEASE_*.md` notes; current schema versions are in
+`ARCHITECTURE.md` §3.*
+
 - **v0.9.4:** Stage 9B.4 acceptance boundary and correction verification.
 - **v0.9.5:** canonical acceptance-fixture repair.
 - **v0.9.6:** Case C source-inventory consistency and terminal verification
@@ -214,107 +175,6 @@ obtain an explicit V1.2 boundary. Do not begin export/Scripture Burrito,
 cross-verse visualization, new providers, or new semantic dimensions merely
 because the numbered phases and stages are complete.
 
-### Historical Beta 15 developer handoff — 2026-08-31
-
-> This subsection is retained as an audit snapshot. Its “next” instructions
-> describe the repository on 2026-08-31 and are superseded by §2.1 and the
-> latest sections of `BUILD_LOG.md` (`HANDOFF.md` is archived, #107).
-
-Start from `main` at `933d48c` (`feat(dashboard): split project dashboard into
-book list and report panels`) or a later descendant. The working tree was clean
-before this handoff update. The bundled proposal artifact remains
-[`validation/irvtam-semantic-mapping-candidates.json`](validation/irvtam-semantic-mapping-candidates.json):
-40 `MACHINE_PROPOSED` rows generated with `gpt-5.6`. Do not rewrite that file
-as though the model originally produced human-confirmed data.
-
-Manual installed-app validation is complete for every bundled candidate:
-
-| Book | Reviewed | Confirmed | Corrected | Rejected | Displayed agreement |
-|---|---:|---:|---:|---:|---:|
-| Luke | 28/28 | 27 | 1 | 0 | 96% |
-| Philippians | 12/12 | 11 | 0 | 1 | 92% |
-| **Combined** | **40/40** | **38** | **1** | **1** | **95%** |
-
-Bridge was restarted after review. Both book-specific decision sets and their
-calibration totals persisted. The reviewed set covers `SAME_VERSE`,
-`CROSS_VERSE`, `CROSS_VERSE_REORDERED`, `SPLIT_ACROSS_VERSES`,
-`MERGED_ACROSS_VERSES`, `REORDERED_WITHIN_VERSE`, `CLAUSE_MOVED`,
-`SENTENCE_REORDERED`, `PRONOMINALIZED`, `GRAMMATICALLY_ENCODED`, `IMPLICIT`,
-and `PARAPHRASED`. The known regression is explicitly human-confirmed:
-
-```text
-PHP 1:3  τῷ Θεῷ μου
-PHP 1:6  என் தேவனை
-CROSS_VERSE_REORDERED · PRESERVED · proposed confidence 0.99
-candidate a9d12c8a97e405ae0709
-```
-
-The two non-confirmed records require careful interpretation:
-
-- `dababa8fb3c5280df4c0` (LUK 3:34, `translate-names`) was saved as
-  `HUMAN_CORRECTED`. Its saved mapping has the two exact spans in LUK 3:33 and
-  3:34, `CROSS_VERSE + SPLIT_ACROSS_VERSES + PARAPHRASED`, `PRESERVED`, and
-  confidence `0.99`. That payload currently matches the machine proposal in
-  all material mapping fields. Treat it as proof of the correction workflow,
-  not as evidence that a relationship or threshold is wrong.
-- `a55017aa58d2d1fcb657` (PHP 1:5, translationWord `fellowship`) was rejected.
-  The rejected proposal mapped `τῇ κοινωνίᾳ` to
-  `நீங்கள் எங்களோடு ஊழியத்தில் ஐக்கியப்பட்டிருப்பதால்` in PHP 1:3 at
-  confidence `0.97`. The audit contains no reviewer note, so it establishes a
-  negative regression fixture but does **not** by itself justify a particular
-  prompt, relationship, or confidence adjustment. Obtain or derive explicit
-  linguistic evidence before changing production policy.
-
-The per-project source audits were local companion data at
-
-```text
-%LOCALAPPDATA%\Bridge\data\projects\tam_irv_luk\.apps\translationCoreAI\semanticValidation\irvtam-v0.1.json
-%LOCALAPPDATA%\Bridge\data\projects\tam_irv_php\.apps\translationCoreAI\semanticValidation\irvtam-v0.1.json
-```
-
-and **no longer exist**: those projects were re-imported after the #76 cutover,
-and a 2026-09-16 search of the machine (every `bridge-workbench.sqlite3`
-included) found no copy. The "next implementation steps" this snapshot used to
-list — export a sanitized fixture of the 40 decisions, add per-decision
-regressions, calibrate by confidence band, exercise the `Needs discussion`
-path — were therefore never done and are now moot: the validation queue itself
-was removed in #100. The table above and the two non-confirmed records described
-here are the surviving record.
-5. Run the focused semantic suites, complete Python suite, Svelte check,
-   production frontend build, UI-state tests, Rust tests, frozen-sidecar smoke,
-   and NSIS packaging. Then perform installed Beta 15 upgrade/persistence,
-   validation, USFM-preservation, alignment, export, and Paratext acceptance.
-
-Do not mark Beta 15 complete merely from the 40/40 review count. The checked-in
-fixture, evidence-supported calibration decision, automated gates, exact
-artifact provenance, and installed acceptance are still release requirements.
-
-**Lesson worth keeping in mind for future phases:** every external
-integration attempted so far (Wildebeest, USFM checker, versification,
-Uroman) turned out to have a real, non-obvious problem that only surfaced by
-actually running the code — wrong PyPI package name, a Python 3.13
-compatibility break, an unpublished dependency, a Windows-only `strftime`
-crash, a version-skew bug between upstream's GitHub and PyPI releases, a
-class-level-state crash on a second call, a silently different data license
-hiding inside an otherwise-permissive vendor tree. Verify by running, not by
-reading a doc's description — including this repo's own docs.
-
-**Deliberately not yet done** (scope decisions, not bugs):
-
-- Live original-language resource downloads (current baseline is a pinned,
-  bundled snapshot — see §4).
-- Automatic continuous Paratext or Logos synchronization. Bridge currently
-  performs explicit one-shot Paratext issue handoffs; the live Paratext path is
-  verified, while Logos remains unverified against a running installation.
-- A dedicated UI panel for alignment corpus statistics (protocol-only today).
-- A second-language semantic-mapping corpus validation. The first IRVTam set
-  was fully reviewed and its validation queue then removed (#100); a second
-  corpus would need a new review surface, not a revival of that one.
-- Manual alignment does not invent source tokens — it requires original-
-  language tokens already present from import.
-
----
-
 ## 3. Dependencies
 
 ### Python (`engine/pyproject.toml`)
@@ -338,60 +198,6 @@ reading a doc's description — including this repo's own docs.
 | `usfm-js` | USFM parsing/serialization on the frontend. |
 | `word-aligner` | Alignment-related utility (translationCore ecosystem package). |
 | `vite`, `typescript` | Build tooling. |
-
----
-
-## 4. Vendored packages & bundled data
-
-### Vendored source (not available as installable packages)
-
-All three live under `engine/vendor/`, sourced from
-[`BibleNLP/greek-room`](https://github.com/BibleNLP/greek-room), pinned
-commit `18ddcf0e6c03fa2774b73b21186115d712e4cba9` (USFM checker and
-versification; SED vendored separately, no PyPI package exists under any
-name for it either):
-
-| Vendored dir | Source path in upstream repo | Why vendored, not `pip install` |
-|---|---|---|
-| `engine/vendor/greekroom-usfm/` | `greekroom/greekroom/usfm/` | Not published on PyPI at all — only `owl` and `gr_utilities` are part of the `greekroom` package; `usfm` exists only in the source tree. Monolithic CLI script — invoked via subprocess/temp-dir, not a direct Python import (path-sensitive internal import: `from ualign_utilities import ...`). |
-| `engine/vendor/greekroom-versification/` | `greekroom/greekroom/versification/` | Same repo/commit as USFM. Unlike the USFM checker, this one **is** a genuine importable library, so it's wired in as a direct import. Its `data/standard_mappings/*.json` files carry **CC BY-SA 4.0**, a different license than the BSD-3-Clause code around them — real distinction to track, not a rubber-stamp of the USFM checker's licensing precedent. |
-| `engine/vendor/greekroom-smart-edit-distance/` | `smart_edit_distance/` | Not published on PyPI under any name (checked `smart-edit-distance` and `smart_edit_distance`, neither exists), and not part of the `greekroom` PyPI package either. |
-
-Each vendored directory has its own `NOTICE.md` with full provenance
-(source URL, path, pinned commit, fetch date) — check those before updating
-or re-vendoring anything.
-
-### Bundled offline data (`engine/resources/`)
-
-Bridge ships original-language source text and English translation-helps
-data so a raw Scripture import produces real, working checks and alignment
-targets **without any network access** — the whole premise is field teams
-with unreliable connectivity.
-
-| Path | Contents | Size | Source |
-|---|---|---|---|
-| `engine/resources/hbo/bibles/uhb/` | Hebrew OT tokens | ~3.9 MB | unfoldingWord UHB v3.0.0, checksum-verified, exact pinned commit |
-| `engine/resources/el-x-koine/bibles/ugnt/` | Greek NT tokens | ~1.5 MB | unfoldingWord UGNT v0.34, checksum-verified, exact pinned commit |
-| `engine/resources/en/translationHelps/` | translationNotes, translationWords, translationWordsLinks, translationAcademy | ~42 MB | Pinned English unfoldingWord snapshot (raw Door43 TSV for tN), matching real translationCore's own practice of shipping English checking helps in its installer |
-
-All 66 books / 31,103 verses / 443,131 canonical tokens are covered.
-Existing aligned USFM or native translationCore projects are **never**
-overwritten by this baseline — it only fills empty source arrays and stops
-outright on a resource-version mismatch for legacy raw-import recovery. Full
-generation process and licensing (CC BY-SA 4.0, with attribution) is
-documented alongside the resources and reproducible via
-`npm run vendor:original-language`
-(`scripts/vendor-original-language-resources.mjs`).
-
-### Critical design boundary: tN/tW are not fabricated
-
-Raw USFM contains Scripture, not translationNotes or translationWords
-checks. translationCore imports Scripture first and materializes tool
-indexes from installed, versioned checking resources afterward — Bridge
-follows the same boundary. A raw import records
-`requires-resource-index` until the first background-check preflight for
-that book actually materializes real entries from the bundled data above;
-Bridge never generates fake/empty check entries to fill the gap.
 
 ---
 
@@ -545,13 +351,4 @@ Three rules a new contributor will otherwise get wrong:
 
 ## 7. Where the deeper docs live
 
-| Doc | Covers |
-|---|---|
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Current-state architecture (2026-09-16): process boundary and RPC path, the three databases, QA pipelines, UI surface map, engine subsystems, `QaFinding` model. |
-| [`SIMPLIFICATION_AUDIT_2026-09.md`](SIMPLIFICATION_AUDIT_2026-09.md) | What is slowing development and runtime, ranked removal candidates with blast radius, and the decisions taken on them. |
-| [`BUILD_LOG.md`](BUILD_LOG.md) | Session-by-session build log — the ground truth for anything this guide summarizes. Also the current gotcha list and known-gaps list, verified as of each update. |
-| [`IMPORTS.md`](IMPORTS.md) | Import pipeline design: supported inputs, normalized project schema, duplicate-safety logic, provenance. |
-| [`ALIGNMENT.md`](ALIGNMENT.md) | Manual word-alignment protocol, persistence, completion states. |
-| [`QA_TEST_MATRIX.md`](QA_TEST_MATRIX.md) | Release gate — what's tested, how, and current pass/fail status per release candidate. |
-| [`TEAM_ARCHITECTURE.md`](TEAM_ARCHITECTURE.md) | Direction for #44–#47: per-project workbench SQLite, app-level workspace SQLite, user + device identity, optional sync hub, hub-served dashboard. §3–§4 (the two databases, #75–#77) describe what the code does as of 2026-09-15; §5–§8 are still design. |
-| [`DECISIONS.md`](DECISIONS.md) | Five-line log of architectural and product decisions, newest first, with what each rules out. |
+One doc map for the repository, in [`ARCHITECTURE.md`](ARCHITECTURE.md) §9.

@@ -1,6 +1,6 @@
 # Bridge — Indic & Source-Script Font Support
 
-**Repository path:** `docs/plans/FONT_SUPPORT_PLAN.md`
+**Repository path:** `docs/archive/FONT_SUPPORT_PLAN.md` (moved from `docs/plans/` on 2026-09-17)
 **Status:** Implemented 2026-09-08. This document is kept as the design
 rationale; where it and the shipped code disagree, the code is right and
 `docs/BUILD_LOG.md` ("Indic and source-script font support") records why —

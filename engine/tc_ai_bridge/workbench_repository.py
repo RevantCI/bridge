@@ -451,7 +451,7 @@ END;
 
 # v3 (#117, cross-verse alignment): Bridge-private cross-verse links.
 # translationCore alignment groups are verse-local, and Bridge never fakes a
-# cross-verse link inside them (semantic_alignment_guard.py, HANDOFF ss39), so
+# cross-verse link inside them (semantic_alignment_guard.py, INVARIANTS ss39), so
 # a reviewer's judgement that a source token of one verse is realized in
 # another verse's target text has nowhere to live in `alignmentData/`. It
 # lives here. A link is keyed by tC token signatures

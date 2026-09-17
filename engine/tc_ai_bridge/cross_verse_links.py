@@ -3,7 +3,7 @@
 translationCore alignment groups are verse-local: each verse's groups may only
 contain that verse's own target tokens, and ``_validate_alignment_identity``
 rejects anything else on every save. Bridge never fakes a cross-verse link
-inside them (``semantic_alignment_guard.py``, HANDOFF ss39). When a reviewer
+inside them (``semantic_alignment_guard.py``, INVARIANTS ss39). When a reviewer
 sees that a source token of verse 3 is realized in verse 6's target text, that
 judgement is recorded *here* -- table ``alignment_cross_verse_links`` in
 ``bridge-workbench.sqlite3`` -- and nowhere in ``alignmentData/``. The tC group

@@ -346,6 +346,7 @@ events. `sync_conflicts` as a table, and any UI, remain ss7's.
 ## 12. Docs to keep in step
 
 `CLAUDE.md` (on-disk shape gains the workbench DB; "schema changes are migrations" covers
-two ladders; the single-user premise becomes "optional team"), `docs/DECISIONS.md`,
+three ladders; the single-user premise becomes "optional team"), `docs/DECISIONS.md`,
 `docs/ARCHITECTURE.md`, `docs/BUILD_LOG.md` — each updated with the
-commit that changes the behaviour it describes, not afterwards.
+commit that changes the behaviour it describes, not afterwards. The repository's doc map
+is `ARCHITECTURE.md` §9.

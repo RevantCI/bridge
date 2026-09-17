@@ -780,7 +780,7 @@ def test_one_to_null_possibly_missing_abstains_instead_of_failing(tmp_path: Path
 
     Stage 8 left coverage unresolved, so there is no positive current evidence
     either way. Calling this FAILED would assert an absence Stage 8 declined to
-    conclude -- the auto-promotion docs/archive/HANDOFF.md section 39 forbids.
+    conclude -- the auto-promotion docs/INVARIANTS.md section 39 forbids.
     """
     runtime, application, service, _job = _verified(
         tmp_path, source_text="τῷ θεῷ μου", target_text="",

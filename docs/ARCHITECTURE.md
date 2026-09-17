@@ -77,6 +77,26 @@ stages. See `SIMPLIFICATION_AUDIT_2026-09.md`.
 model calls 260 to 300. `project.open` joined the 180 class in #112 (step one); step two,
 building `PassageSemanticRuntime` lazily, is still open.
 
+### 2.1 Why these choices
+
+*Moved verbatim from `DEVELOPER_GUIDE.md` section 1, 2026-09-17.*
+
+| Layer | Choice | Why |
+|---|---|---|
+| Desktop shell | **Tauri v2** (Rust) | Native OS webview instead of bundling Chromium → smaller binary, faster cold start, lower idle memory. Matters for an all-day tool on modest field hardware. Rejected **Electron** for this reason. |
+| Frontend | **Svelte 4 + TypeScript + Tailwind** | A real web-app UI (colored status badges, inline findings, tabbed panels) that a native widget toolkit fights rather than enables. Also gives a direct path to a future web deployment. Rejected **Python + Tkinter** (the original app's stack) for this reason. |
+| Business logic | **Python 3.12/3.13 sidecar** (`bridge-engine`, PyInstaller-bundled) | Reuses the 29 (now 30) existing, proven `tc_ai_bridge` modules from the legacy app rather than rewriting them. |
+| Sidecar transport | **JSON-lines over stdin/stdout** | Transport-agnostic protocol defined once in `engine/greek_room_engine/protocol.py`. Desktop uses stdio (`stdio_transport.py` / `src-tauri/src/sidecar.rs`); a future web deployment reuses the same `GreekRoomEngine.handle_request()` behind an HTTP wrapper — no protocol or UI rewrite needed. |
+
+**Trade-off accepted:** Rust has a learning curve for a team with none; in
+practice, day-to-day work stays in the Python engine and Svelte frontend —
+the Rust shell is intentionally thin (spawn sidecar, route JSON, expose a
+few Tauri commands).
+
+**Never integrated directly:** Greek Room's `ephesus/` web API (Docker,
+database, its own web UI) — Bridge only uses the underlying check modules,
+not the reference web app around them.
+
 ## 3. Storage
 
 ```mermaid
@@ -126,6 +146,51 @@ the correction services. After #99 (2026-09-16) a first open of Genesis from sou
 about 1 s and a lazy sibling's first open about 4 s; before it, per-verse fsyncs made the
 same step take minutes. Any runtime failure degrades the open to `RECOVERY_REQUIRED` rather
 than failing it.
+
+### 3.1 Vendored source and bundled data
+
+*Moved verbatim from `DEVELOPER_GUIDE.md` section 4, 2026-09-17. Each vendored
+directory's own `NOTICE.md` remains the authority on provenance and licence.*
+
+### Vendored source (not available as installable packages)
+
+All three live under `engine/vendor/`, sourced from
+[`BibleNLP/greek-room`](https://github.com/BibleNLP/greek-room), pinned
+commit `18ddcf0e6c03fa2774b73b21186115d712e4cba9` (USFM checker and
+versification; SED vendored separately, no PyPI package exists under any
+name for it either):
+
+| Vendored dir | Source path in upstream repo | Why vendored, not `pip install` |
+|---|---|---|
+| `engine/vendor/greekroom-usfm/` | `greekroom/greekroom/usfm/` | Not published on PyPI at all — only `owl` and `gr_utilities` are part of the `greekroom` package; `usfm` exists only in the source tree. Monolithic CLI script — invoked via subprocess/temp-dir, not a direct Python import (path-sensitive internal import: `from ualign_utilities import ...`). |
+| `engine/vendor/greekroom-versification/` | `greekroom/greekroom/versification/` | Same repo/commit as USFM. Unlike the USFM checker, this one **is** a genuine importable library, so it's wired in as a direct import. Its `data/standard_mappings/*.json` files carry **CC BY-SA 4.0**, a different license than the BSD-3-Clause code around them — real distinction to track, not a rubber-stamp of the USFM checker's licensing precedent. |
+| `engine/vendor/greekroom-smart-edit-distance/` | `smart_edit_distance/` | Not published on PyPI under any name (checked `smart-edit-distance` and `smart_edit_distance`, neither exists), and not part of the `greekroom` PyPI package either. |
+
+Each vendored directory has its own `NOTICE.md` with full provenance
+(source URL, path, pinned commit, fetch date) — check those before updating
+or re-vendoring anything.
+
+### Bundled offline data (`engine/resources/`)
+
+Bridge ships original-language source text and English translation-helps
+data so a raw Scripture import produces real, working checks and alignment
+targets **without any network access** — the whole premise is field teams
+with unreliable connectivity.
+
+| Path | Contents | Size | Source |
+|---|---|---|---|
+| `engine/resources/hbo/bibles/uhb/` | Hebrew OT tokens | ~3.9 MB | unfoldingWord UHB v3.0.0, checksum-verified, exact pinned commit |
+| `engine/resources/el-x-koine/bibles/ugnt/` | Greek NT tokens | ~1.5 MB | unfoldingWord UGNT v0.34, checksum-verified, exact pinned commit |
+| `engine/resources/en/translationHelps/` | translationNotes, translationWords, translationWordsLinks, translationAcademy | ~42 MB | Pinned English unfoldingWord snapshot (raw Door43 TSV for tN), matching real translationCore's own practice of shipping English checking helps in its installer |
+
+All 66 books / 31,103 verses / 443,131 canonical tokens are covered.
+Existing aligned USFM or native translationCore projects are **never**
+overwritten by this baseline — it only fills empty source arrays and stops
+outright on a resource-version mismatch for legacy raw-import recovery. Full
+generation process and licensing (CC BY-SA 4.0, with attribution) is
+documented alongside the resources and reproducible via
+`npm run vendor:original-language`
+(`scripts/vendor-original-language-resources.mjs`).
 
 ## 4. QA pipelines and AI overlays
 
@@ -240,7 +305,22 @@ survive re-running checks.
 
 ## 9. Where the direction is recorded
 
-`DEVELOPER_GUIDE.md` (roadmap, what is actually done), `BUILD_LOG.md` (the session record),
-`DECISIONS.md` (dated decisions), `TEAM_ARCHITECTURE.md` (#44 to #47 direction; its §3 and §4
-describe what the code does, §5 to §8 are still design), `SIMPLIFICATION_AUDIT_2026-09.md`
-(what is slowing the codebase and what to remove).
+This is the repository's one doc map; `CLAUDE.md`, `DEVELOPER_GUIDE.md` and
+`TEAM_ARCHITECTURE.md` point here rather than keeping their own lists.
+
+| Doc | Covers |
+|---|---|
+| `DEVELOPER_GUIDE.md` | Roadmap: what was planned per phase and what actually shipped, plus dependencies, AI triage and the finding context menu. |
+| `DEVELOPER_SETUP.md` | How to get engine, frontend and desktop app running on Windows, and how to build the installer. |
+| `BUILD_LOG.md` | The session record: the investigation behind every decision and gotcha, appended as work lands. |
+| `DECISIONS.md` | Five lines per decision, newest first, with what each one rules out. |
+| `INVARIANTS.md` | The rules the pipeline may not break: token identity (§20), the Unicode span contract (§21) and comparison invariant (§21a), embeddings policy (§31), the hard constraints (§39) and continuity rules (§44.8). Cited by section number from engine code. |
+| `passage-aware-semantic-alignment.md` | The requirements spec those invariants come from: passage awareness, the semantic/lexical split, coverage accounting, meaning states. |
+| `IMPORTS.md` | Import pipeline: supported inputs, normalized project schema, duplicate safety, provenance, and the tN/tW materialization boundary. |
+| `ALIGNMENT.md` | Manual word alignment and the Bridge-private cross-verse link store: protocol, persistence, completion states. |
+| `TEAM_ARCHITECTURE.md` | Direction for #44 to #47. Its §3 and §4 describe shipped code; §5 to §8 are still design. |
+| `QA_TEST_MATRIX.md` | The release gate: what is tested, how, and the current pass state per row. |
+| `SIMPLIFICATION_AUDIT_2026-09.md` | What is slowing the codebase down, ranked, with the decisions taken. Point-in-time (2026-09-16). |
+| `USER_MANUAL.md` | What the app does, screen by screen, for translators and checkers. |
+| `RELEASE_*.md` | Release notes, one per version. |
+| `archive/` | Point-in-time records kept for citation: acceptance runs, review prompts, spikes, the Beta 15 handoff, the font-support plan. |

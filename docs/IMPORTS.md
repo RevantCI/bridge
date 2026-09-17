@@ -174,3 +174,14 @@ Relevant upstream implementation:
 - [Manifest generation](https://github.com/unfoldingWord/translationCore/blob/develop/src/js/helpers/manifestHelpers.js)
 - [Project structure validation](https://github.com/unfoldingWord/translationCore/blob/develop/src/js/helpers/ProjectValidation/ProjectStructureValidationHelpers.js)
 
+## Critical design boundary: tN/tW are not fabricated
+
+*Moved verbatim from `DEVELOPER_GUIDE.md` section 4, 2026-09-17.*
+
+Raw USFM contains Scripture, not translationNotes or translationWords
+checks. translationCore imports Scripture first and materializes tool
+indexes from installed, versioned checking resources afterward — Bridge
+follows the same boundary. A raw import records
+`requires-resource-index` until the first background-check preflight for
+that book actually materializes real entries from the bundled data above;
+Bridge never generates fake/empty check entries to fill the gap.

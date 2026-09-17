@@ -193,7 +193,10 @@ Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
 ## Automated evidence
 
-- Python: 319 tests, including Stage 3 language-aware semantic passage mapping and all alignment cardinalities, conflicts/history/restart/rollback,
+- Python: the suite has grown to 1,030 tests as of 0.11.0 (row A01 carries the current
+  count and date; the list below is what the 319-test suite covered when this section was
+  written and is kept because it names the kinds of evidence, not the total) — Stage 3
+  language-aware semantic passage mapping and all alignment cardinalities, conflicts/history/restart/rollback,
   RTL metadata, nested aligned-USFM round trips, versification detection/org-normalization/
   back-versification against the real vendored schema data (including merge/split edge cases),
   a concurrency regression guard for a real GIL-contention slowdown, a whole-book
