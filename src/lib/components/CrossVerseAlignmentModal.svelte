@@ -446,6 +446,7 @@
                   {#if !context.sourceAvailable}<span class="warn">no original-language source</span>{/if}
                   {#if context.issues.length}<span class="warn" title={context.issues.join("\n")}>⚠ {context.issues.length} issue{context.issues.length === 1 ? "" : "s"}</span>{/if}
                 </div>
+                <div class="rows">
                 {#each sourceRows(context) as src (src.id)}
                   {@const columnKey = joinVerseId(v, src.id)}
                   <div class="row">
@@ -513,6 +514,7 @@
                 {:else}
                   <p class="empty">{gapFilterVerse ? "Every source word has a counterpart." : "No source tokens in this verse."}</p>
                 {/each}
+                </div>
               </div>
             {/each}
           </div>
@@ -648,11 +650,27 @@
   .verse-head { display: flex; align-items: center; gap: 8px; padding: 6px 0; position: sticky; top: 0; background: var(--surface); z-index: 1; font-size: var(--fs-xs); }
   .vnum { font-weight: 800; color: var(--text); }
   .warn { color: var(--warning); }
-  .row { display: grid; grid-template-columns: minmax(150px, 2fr) minmax(0, 3fr); gap: 8px; align-items: stretch; padding: 3px 0; }
+  /* #136: the source cells flow left-to-right and wrap, so one verse occupies
+     several short rows instead of one tall column -- on a small window that is
+     the difference between one verse on screen and four. auto-fill, not
+     auto-fit: with auto-fit a verse holding a single source word stretches that
+     one cell across the whole column, which looks like a layout bug; auto-fill
+     keeps the empty tracks and the cell its normal width. Still no sideways
+     scroll (#72) -- wrapping is what replaces it, and min(230px, 100%) rather
+     than a bare 230px because below that width a bare minimum would size the
+     track wider than the column and `.scroll`'s overflow-x would clip it. */
+  .rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: 2px 12px; align-items: start; }
+  .rows .empty { grid-column: 1 / -1; }
+  .row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; align-items: stretch; padding: 3px 0; min-width: 0; }
   .token { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-width: 62px; }
-  .token small { font-size: var(--fs-3xs); color: var(--text-3); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* max-width: 100% (was a fixed 160px): inside a flowed cell (#136) the lemma
+     must ellipsize within its own track, or a long one widens the source column
+     and squeezes the drop cell next to it. */
+  .token small { font-size: var(--fs-3xs); color: var(--text-3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .occ { margin-left: 3px; font-size: 0.8em; font-weight: 400; color: var(--text-3); }
-  .token.source { width: 100%; background: #F6F1FF; cursor: pointer; align-items: flex-start; font-family: var(--font-greek); }
+  /* min-width: 0 overrides `.token`'s 62px so the source cell can shrink inside
+     a flowed track (#136) and ellipsize, instead of overflowing it. */
+  .token.source { width: 100%; min-width: 0; background: #F6F1FF; cursor: pointer; align-items: flex-start; font-family: var(--font-greek); }
   .token.source.hebrew { font-family: var(--font-hebrew); align-items: flex-end; }
   .token.source .word { font-size: var(--fs-lg); }
   .drop-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 38px; padding: 4px 6px; border-radius: 8px; border: 1px dashed var(--border); }
