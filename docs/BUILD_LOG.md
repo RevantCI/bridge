@@ -9385,3 +9385,42 @@ Engine untouched, so no pytest run; no Rust change.
 jsdom does not lay out or paint, so the two-line clamp, the narrower 150px
 cross-verse track and the stacked rows have been verified as structure only. The
 visual check at 1366x768 is still owed.
+
+### Amended same day: renderings, not definitions (#145)
+
+The maintainer looked at the result and asked for the other field: `usage`
+under the word, `meaning` in the tooltip. That is the better call and the
+reason is worth keeping — under a source word a reviewer wants to know what
+the word *gets translated as*, not what it is *defined as*. G2632 reads
+"condemn, damn" instead of "to judge against".
+
+`shortUsage` does for the rendering list what `shortGloss` does for the
+definition, but the shape is different enough to need its own function: `usage`
+is a comma-separated list, so it is truncated by dropping whole renderings at
+the 42-character budget rather than by cutting a sentence.
+
+**The KJV marker is spelled two ways in the bundled data.** Found by checking
+real entries rather than one: H430 writes `× exceeding`, G2316 writes an ASCII
+`X exceeding`. Only stripping `×` would have left the commonest source token in
+the New Testament labelled "X exceeding, God, god". Both are stripped, and only
+where the concordance puts one — alone at the head of a rendering — so a real
+word beginning with X survives. The parenthetical infixes (`chief(-est)`,
+`first(-fruits, part, time)`, `(feast of) charity(-ably)`) are removed before
+the comma split, because the ones holding an infix list contain commas of their
+own.
+
+Two fallbacks, in order, when an entry has no `usage`: a Hebrew proclitic's
+`HEBREW_PREFIX_LABELS` text passes through whole — its parenthetical
+("Preposition (in/on/with)") is the part that carries the sense, and
+`shortGloss` would strip it as a hedge — and otherwise `shortGloss(meaning)`,
+which is what the label showed before this amendment.
+
+One consequence to be aware of rather than fix: `usage` is ordered
+alphabetically by the KJV concordance, not by frequency, so H430 labels as
+"angels, exceeding, God, great, judges" and G2316 as "exceeding, God, god".
+The most common rendering is not necessarily first. That is the resource's own
+ordering; reordering it would be Bridge inventing a claim the lexicon does not
+make.
+
+Gates after the amendment: `npm run check` 0/0, `npm run test` **453 passed**
+(34 files), `npm run build` clean. Still not seen in the real desktop app.

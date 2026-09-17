@@ -125,7 +125,10 @@ beforeEach(() => {
   seed();
   getAlignmentRange.mockImplementation(async (_chapter: string, verses: string[]) =>
     rangeFor(verses, { "1": V1, "2": V2, "3-4": V34, "5": V5 }));
-  getLexiconEntry.mockResolvedValue({ languageId: "el-x-koine", segments: [{ meaning: "God", lemma: "θεός" }] });
+  getLexiconEntry.mockResolvedValue({
+    languageId: "el-x-koine",
+    segments: [{ meaning: "a deity, especially the supreme Divinity", lemma: "θεός", usage: "God, god" }],
+  });
   runVerseChecks.mockResolvedValue([{ id: "f1" }]);
   // No completed analysis by default: the suggestion path stays quiet.
   analysisJobGetScopeStatus.mockResolvedValue({ state: "NOT_ANALYZED", latestJob: null });
@@ -183,15 +186,16 @@ describe("CrossVerseAlignmentModal", () => {
     expect(screen.getByRole("heading", { name: /verses 1–3-4/ })).toBeInTheDocument();
   });
 
-  it("labels a source word with its meaning, not its lemma, and keeps the lemma on hover", async () => {
+  it("labels a source word with its renderings, not its lemma, and keeps lemma and definition on hover", async () => {
     const { container } = await renderPage("2");
     const source = [...container.querySelectorAll<HTMLElement>("button.token.source")]
       .find((element) => element.textContent?.includes("λόγος"))!;
     // The lemma is another Greek string, so it is no longer the visible label.
-    await waitFor(() => expect(within(source).getByText("God")).toBeInTheDocument());
+    await waitFor(() => expect(within(source).getByText("God, god")).toBeInTheDocument());
     expect(within(source).queryByText("λόγος·lemma")).not.toBeInTheDocument();
-    expect(source.getAttribute("title")).toContain("λόγος·lemma");
-    expect(source.getAttribute("title")).toContain("God");
+    const title = source.getAttribute("title") ?? "";
+    expect(title).toContain("λόγος·lemma");
+    expect(title).toContain("a deity, especially the supreme Divinity");
   });
 
   it("a same-verse drop realigns through alignment.realign, resending the column's existing words, then reruns local checks", async () => {

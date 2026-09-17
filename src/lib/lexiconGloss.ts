@@ -5,9 +5,10 @@
  * Both modals used to print the token's `lemma` under the source word. A lemma
  * is another Greek or Hebrew string, so for a reviewer who does not read either
  * script it carried no information at all -- the label was decoration. What is
- * actually useful there is the English gloss, with the lemma demoted to the
- * hover title where a reader who *does* want it can still find it alongside
- * Strong's number and the morphology.
+ * actually useful there is what the word gets *translated* as: the lexicon's
+ * `usage` list. The `meaning` (a full dictionary definition) and the lemma both
+ * move to the hover title, where a reader who wants them can still find them
+ * alongside Strong's number and the morphology.
  *
  * Both modals resolve the same lexicon entries, keyed on the same
  * `strong|morph` pair, so the cache and the two label builders live here rather
@@ -16,11 +17,56 @@
 import { bridge } from "./api/bridgeClient";
 import type { LexiconSegment, TokenRef } from "./types/finding";
 
-/** How much of a Strong's definition fits under a word before it reads as a paragraph. */
+/** How much text fits under a word before the label reads as a paragraph. */
 const SHORT_GLOSS_LIMIT = 42;
 
 /**
+ * Compress a Strong's `usage` list into the renderings that fit under a word.
+ *
+ * `usage` is the list of words the KJV actually rendered this lexeme with --
+ * "condemn, damn" for G2632 -- which is what a reviewer wants under a source
+ * word: not what the word is defined as, but what it gets translated as. It
+ * carries two print conventions from the KJV concordance that have to go first:
+ * a marker on a rendering with no direct counterpart in the original, and
+ * parenthetical infixes folding several renderings into one entry
+ * ("chief(-est)", "first(-fruits, part, time)", "(feast of) charity(-ably)").
+ * The parentheses are stripped before the split, because the ones holding an
+ * infix list contain commas of their own.
+ *
+ * The marker is written **both** ways in the bundled data -- `×` (U+00D7) in
+ * H430, an ASCII `X` in G2316 -- so both are stripped, but only where the
+ * concordance puts one: alone at the head of a rendering, never inside a word.
+ */
+export function shortUsage(usage: string | null | undefined): string {
+  const text = String(usage ?? "").replace(/\([^()]*\)/g, " ");
+  const renderings = text
+    .split(",")
+    .map((part) => part
+      .replace(/\s+/g, " ")
+      .replace(/^[\s.;:-]+/, "")
+      .replace(/^[X×](\s+|$)/, "")
+      .replace(/^[\s.;:-]+/, "")
+      .replace(/[\s.;:-]+$/, ""))
+    .filter(Boolean);
+  if (!renderings.length) return "";
+  const kept: string[] = [];
+  let length = 0;
+  for (const rendering of renderings) {
+    const next = kept.length ? length + 2 + rendering.length : rendering.length;
+    // Always keep the first, however long: an empty label is worse than a wide one.
+    if (kept.length && next > SHORT_GLOSS_LIMIT) break;
+    kept.push(rendering);
+    length = next;
+  }
+  const joined = kept.join(", ");
+  return joined.length > SHORT_GLOSS_LIMIT ? `${joined.slice(0, SHORT_GLOSS_LIMIT).replace(/\s+$/, "")}…` : joined;
+}
+
+/**
  * Compress one Strong's definition into something that fits under a word.
+ *
+ * The fallback for an entry with no `usage` list, and what the label used
+ * before the switch to renderings.
  *
  * The bundled Open Scriptures entries are full dictionary definitions, not
  * glosses -- G746 is "(properly abstract) a commencement, or (concretely) chief
@@ -73,11 +119,25 @@ interface ResolvedEntry {
 
 const EMPTY: ResolvedEntry = { short: "", detail: "" };
 
+/**
+ * A Hebrew proclitic has no Strong's entry of its own: the engine leaves
+ * `lemma` and `usage` null and puts one of `HEBREW_PREFIX_LABELS` in `meaning`.
+ * Those are already short, and the part that carries the sense is the
+ * parenthetical -- "Preposition (in/on/with)" -- which `shortGloss` would strip
+ * as a hedge, so they pass through whole.
+ */
+function prefixLabel(segment: LexiconSegment): string {
+  if (segment.lemma || segment.usage) return "";
+  return (segment.meaning ?? "").replace(/\s+/g, " ").trim();
+}
+
 function resolve(segments: readonly LexiconSegment[]): ResolvedEntry {
   const shorts: string[] = [];
   const details: string[] = [];
   for (const segment of segments) {
-    const gloss = shortGloss(segment.meaning);
+    // Renderings first, definition only as a fallback: what the word gets
+    // translated as is more use under a source word than what it is defined as.
+    const gloss = shortUsage(segment.usage) || prefixLabel(segment) || shortGloss(segment.meaning);
     if (gloss) shorts.push(gloss);
     const full = (segment.meaning ?? "").replace(/\s+/g, " ").trim();
     const lemma = (segment.lemma ?? "").trim();
