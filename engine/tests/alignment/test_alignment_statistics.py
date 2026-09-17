@@ -91,6 +91,48 @@ def test_build_corpus_stats_only_counts_completed_verses(fixture_project):
     assert table.target_counts["தேவன்"] == 1
 
 
+def test_the_scan_populates_the_strongs_index_beside_the_surface_one(fixture_project):
+    """#138's parallel index is built by the same scan, not a second pass."""
+    project = TranslationCoreProject(fixture_project)
+    table = corpus_stats.build_corpus_stats(project, include_collection=False)
+    # "H430" is what the fixture writes; the key folds padding and homonym
+    # letters, so "H0430" and "H430a" would land here too.
+    assert table.strong_pair_counts[("H430", "தேவன்")] == 1
+    assert table.strong_counts["H430"] == 1
+    assert table.strong_pair_stats("H0430", "தேவன்").joint_count == 1
+    assert table.strong_pair_stats("H430a", "தேவன்").joint_count == 1
+
+
+def test_an_inflected_source_form_reaches_its_rendering_through_strongs():
+    """The reason the index exists: the surface pair misses, the Strong's pair
+    does not."""
+    table = corpus_stats.CorpusStatsTable()
+    table.strong_pair_counts[("G2316", "கடவுள்")] = 8
+    table.strong_counts["G2316"] = 8
+    table.target_counts["கடவுள்"] = 8
+    table.total_pairs = 8
+
+    assert table.pair_stats("θεοῦ", "கடவுள்", with_sed_boost=False).joint_count == 0
+    assert table.strong_pair_stats("G23160", "கடவுள்").translation_probability == 1.0
+
+
+def test_strong_key_rejects_what_is_not_a_strongs_number():
+    assert corpus_stats.strong_key("") == ""
+    assert corpus_stats.strong_key("X430") == ""
+    assert corpus_stats.strong_key("H") == ""
+    assert corpus_stats.strong_key("Hxyz") == ""
+    # H and G are kept apart, so an OT and an NT book in one collection cannot
+    # collide on the same number.
+    assert corpus_stats.strong_key("H430") != corpus_stats.strong_key("G430")
+    # UGNT's trailing variant digit is folded, but only on a 5-digit number:
+    # a classic 4-digit Greek number must not be truncated into another lemma.
+    assert corpus_stats.strong_key("G23160") == corpus_stats.strong_key("G2316")
+    assert corpus_stats.strong_key("G2316") == "G2316"
+    assert corpus_stats.strong_key("G0040") == "G40"
+    # Hebrew numbers are never shortened this way.
+    assert corpus_stats.strong_key("H12345") == "H12345"
+
+
 def test_pair_stats_probability_and_pmi_match_hand_computed_values():
     table = corpus_stats.CorpusStatsTable()
     # 3 instances of source "A": twice paired with target "x", once with "y".

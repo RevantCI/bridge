@@ -216,17 +216,61 @@ class CorpusPairStats:
         return out
 
 
+def strong_key(strong: str) -> str:
+    """A Strong's key that is self-consistent *within one project's own data*.
+
+    Deliberately NOT `lexicon_resources.normalize_strong`: that maps onto the
+    classic Strong's dictionary key and needs a `language_id` to know whether to
+    strip UGNT's extra trailing variant digit — a language this table neither
+    has nor needs. Here both sides of every comparison come from the same
+    project's own alignmentData and the same pinned UHB/UGNT packs, so all that
+    is required is that the same lemma always produces the same key.
+
+    Leading zeros and OSHB's trailing homonym letter are still folded ("H0430"
+    and "H430" are one lemma; "H1254a" and "H1254" are one lemma), because a
+    collection can span packs. The H/G prefix is kept, so an OT and an NT book
+    in one collection cannot collide (#138).
+
+    UGNT's extra trailing "variant" digit is folded too ("G23160" and "G2316"
+    are one lemma). `normalize_strong` needs a `language_id` to know whether to
+    strip it; here the "G" prefix already says the number is Greek, so no
+    language has to be plumbed through. It is stripped only from a 5-digit
+    number, because classic Strong's Greek numbering stops at four digits --
+    so a number already in the classic form is left alone rather than
+    truncated into a different lemma.
+    """
+    text = str(strong or "").strip().upper()
+    if len(text) < 2 or text[0] not in ("H", "G"):
+        return ""
+    digits = text[1:].rstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    if not digits.isdigit():
+        return ""
+    if text[0] == "G" and len(digits.lstrip("0") or "0") == 5:
+        digits = (digits.lstrip("0") or "0")[:-1]
+    return f"{text[0]}{digits.lstrip('0') or '0'}"
+
+
 @dataclass
 class CorpusStatsTable:
     """Aggregate bilingual co-occurrence statistics over every COMPLETED
     verse scanned. Source/target "word" identity is the exact surface
     token string (same identity tC itself uses for occurrence tracking) —
-    not lemma-normalized, since target tokens generally have no lemma."""
+    not lemma-normalized, since target tokens generally have no lemma.
+
+    #138 adds a second, parallel index keyed by Strong's number rather than
+    surface form. The surface index is sparse for an inflected source language —
+    every case and number of a Greek noun is its own key, so a rendering seen
+    forty times can still read as forty singletons — while the Strong's index
+    pools them. Both are kept: the surface pair is the more specific evidence
+    when it exists, and the Strong's pair is what survives inflection.
+    """
     source_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     target_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     pair_counts: dict[tuple[str, str], int] = field(default_factory=lambda: defaultdict(int))
     source_fertility: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
     target_fertility: dict[str, Counter] = field(default_factory=lambda: defaultdict(Counter))
+    strong_counts: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    strong_pair_counts: dict[tuple[str, str], int] = field(default_factory=lambda: defaultdict(int))
     total_pairs: int = 0
     verses_scanned: int = 0
     books_scanned: list[str] = field(default_factory=list)
@@ -251,6 +295,26 @@ class CorpusStatsTable:
             joint_count=joint, source_count=s_count, target_count=t_count,
             translation_probability=probability, pmi=pmi_score,
             sed_cost=sed_cost, sed_boosted_probability=sed_probability,
+        )
+
+    def strong_pair_stats(self, strong: str, target_word: str) -> CorpusPairStats:
+        """The same statistics over the Strong's index rather than the surface
+        one (#138), so an inflected source form still finds its rendering.
+
+        No SED boost: phonetic similarity is a property of two *surface* strings
+        (a transliterated name against its original), and a Strong's number is
+        not a string anyone romanizes. `pair_stats` remains the place that
+        signal comes from.
+        """
+        key = strong_key(strong)
+        joint = self.strong_pair_counts.get((key, target_word), 0) if key else 0
+        s_count = self.strong_counts.get(key, 0) if key else 0
+        t_count = self.target_counts.get(target_word, 0)
+        return CorpusPairStats(
+            source_word=key, target_word=target_word,
+            joint_count=joint, source_count=s_count, target_count=t_count,
+            translation_probability=(joint / t_count) if t_count else 0.0,
+            pmi=_pmi(s_count, t_count, joint, self.total_pairs),
         )
 
 
@@ -363,10 +427,19 @@ def _accumulate_verse(alignment: VerseAlignment, table: CorpusStatsTable) -> Non
         for token in tops:
             table.source_fertility[token.word][len(bottoms)] += 1
             table.source_counts[token.word] += 1
+            # #138: the parallel Strong's index. A token with no Strong's value
+            # (rare, but real in hand-edited alignmentData) simply contributes
+            # to the surface index only.
+            key = strong_key(token.strong)
+            if key:
+                table.strong_counts[key] += 1
         for token in bottoms:
             table.target_fertility[token.word][len(tops)] += 1
             table.target_counts[token.word] += 1
         for top in tops:
+            top_key = strong_key(top.strong)
             for bottom in bottoms:
                 table.pair_counts[(top.word, bottom.word)] += 1
                 table.total_pairs += 1
+                if top_key:
+                    table.strong_pair_counts[(top_key, bottom.word)] += 1
