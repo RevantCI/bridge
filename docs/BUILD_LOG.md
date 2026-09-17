@@ -9297,13 +9297,17 @@ been seen in the real desktop app; jsdom does not lay out or paint.
 Frontend: `npm run check` 0 errors/0 warnings, `npm run test` 426 passed (20 in
 `CrossVerseAlignmentModal.test.ts`), `npm run build` clean.
 
-Engine: full `pytest -n auto`, **1272 passed, 1 failed** — and the failure is
-`tests/connectors/test_desktop_connectors.py::test_logos_get_state_spawns_the_real_helper_and_returns_environment_safe_result`,
-which passes on its own and passes with `-n auto` over `tests/connectors` alone.
-It spawns a real helper process, so it flakes under the load of a full 20-worker
-run; nothing in this work touches the Logos connector. Worth remembering that
-`pyproject.toml`'s `-n auto` is a local convenience and CI runs serial for
-exactly this class of reason.
+Engine: full `pytest -n auto` — **1273 passed** (7 m 55 s).
+
+The first run of it came back 1272 passed / 1 failed, on
+`tests/connectors/test_desktop_connectors.py::test_logos_get_state_spawns_the_real_helper_and_returns_environment_safe_result`.
+That test passes on its own, passes with `-n auto` over `tests/connectors`
+alone, and passed on the clean re-run above; it spawns a real helper process, so
+it flakes under the load of a full 20-worker run, and nothing in this work
+touches the Logos connector. Recorded rather than dropped, because it is the
+second time this class of test has flaked only in parallel — `pyproject.toml`'s
+`-n auto` is a local convenience and `ci.yml` runs serial for exactly this
+reason.
 
 No Rust change — since #115 a new RPC is an engine handler, an `EngineMethod`
 member and a `bridge.*` wrapper.
