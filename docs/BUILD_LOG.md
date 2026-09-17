@@ -9311,3 +9311,77 @@ reason.
 
 No Rust change — since #115 a new RPC is an engine handler, an `EngineMethod`
 member and a `bridge.*` wrapper.
+
+## 2026-09-17 — The source-word label is a meaning, not a lemma (#145)
+
+Both alignment surfaces printed the token's `lemma` under the Greek or Hebrew
+word. The maintainer, reviewing alignments: *"I can't read Greek or Hebrew so
+it's not meaningful for me."* That is the whole finding — a lemma is one more
+string in a script the reviewer may not read, so the label was decoration
+occupying the one place where what the word *means* could go.
+
+### The bundled lexicon holds definitions, not glosses
+
+Checked against the real data rather than assumed. `lexicon_entry_for_strong`
+returns Open Scriptures entries whose `meaning` is a full dictionary definition:
+
+| Strong's | `meaning` |
+|---|---|
+| G746 | `(properly abstract) a commencement, or (concretely) chief (in various applications of order, time, place, or rank)` |
+| G2632 | `to judge against, i.e. sentence` |
+| G26 | `love, i.e. affection or benevolence; specially (plural) a love-feast` |
+| H430 | `gods in the ordinary sense; but specifically used (in the plural thus, especially with the article) of the supreme God; …` |
+
+Dropped verbatim into a 150px cell that is worse than the lemma was. But the
+sense a reader needs is reliably at the *front*, ahead of the first `i.e.`, the
+first `;`, and outside the parenthetical hedges — which is what `shortGloss`
+keeps (42 characters, broken on a comma rather than mid-word). The unabridged
+text stays in the hover title and in the lexicon popup, both unchanged in
+substance. `usage` was considered for the short label and rejected: it is the
+KJV rendering list and carries its own artifacts (`angels, × exceeding, God
+(gods) (-dess, -ly), …`).
+
+A Hebrew proclitic is its own morpheme segment — `b:H7225` decodes to a
+preposition plus a lexeme — so the *word's* gloss joins the segments in order
+("Preposition (in/on/with) + the first, in place, time, order or rank"), not the
+lexeme's gloss alone. When the lexicon resolves nothing the label falls back to
+the lemma, which is exactly what it used to show; an unresolved Strong's number
+must not leave the cell blank.
+
+### Two copies of the same lookup, now one
+
+`AlignmentModal` and `CrossVerseAlignmentModal` each had their own
+`loadMeanings`/`sourceTitle` pair resolving the same entries keyed on the same
+`strong|morph`. Both moved into `src/lib/lexiconGloss.ts` (`SourceGlossCache`).
+The shared version also claims a key before awaiting, so the cross-verse modal —
+which reloads on every range change — no longer fires the same lookup twice when
+two range changes overlap.
+
+The new CSS has one non-obvious job: the gloss sits inside a container that sets
+the Greek/Hebrew face and, for an OT book, `dir=rtl`. Both were right for a
+lemma and wrong for an English definition, so `.gloss` re-declares
+`font-family: var(--font-ui)` and `direction: ltr`, and clamps to two lines so a
+definition cannot stretch an interlinear row taller than the words in it.
+
+### Cross-verse rows stack
+
+Asked for in the same breath, and the reason is space: the source word now sits
+*above* its drop cell rather than beside it, the way the single-verse
+interlinear already did. A stacked cell needs roughly half the width, so the
+`auto-fill` track from #136 drops from 230px to 150px and the same column holds
+two cells where it held one.
+
+### Gates
+
+Frontend: `npm run check` 0 errors/0 warnings, `npm run test` **446 passed**
+(34 files; 11 new — 10 in `lexiconGloss.test.ts`, one in
+`CrossVerseAlignmentModal.test.ts` asserting the cell shows the gloss and the
+title still carries the lemma), `npm run build` clean.
+
+Engine untouched, so no pytest run; no Rust change.
+
+### Not seen in the real app
+
+jsdom does not lay out or paint, so the two-line clamp, the narrower 150px
+cross-verse track and the stacked rows have been verified as structure only. The
+visual check at 1366x768 is still owed.
