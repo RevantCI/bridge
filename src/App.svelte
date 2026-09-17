@@ -345,8 +345,15 @@
   async function handleOpened() {
     opened = true;
     showingDashboard = true;
+    report = null;
+    reportError = "";
     void loadDashboard();
-    void loadReport();
+    // The QA report is deliberately NOT built here. Measured on Genesis of a
+    // real Hindi IRV import: build_book_report() takes ~130 s (project_scan
+    // 78 s + exception_first_queue 44 s), and the sidecar's stdio loop is
+    // single-threaded, so every other request queues behind it -- the 30 s
+    // client timeout fired and the whole app was unresponsive until Python
+    // finished. It is requested explicitly from the dashboard instead.
   }
 
   async function loadDashboard(): Promise<void> {
@@ -378,7 +385,8 @@
     showingReport = false;
     showingDashboard = true;
     void loadDashboard();
-    void loadReport();
+    // Same reasoning as handleOpened: whichever book is open, the report is
+    // minutes of synchronous work that blocks the sidecar, so it is a button.
   }
 
   // -- whole-collection QA report ---------------------------------------
@@ -990,6 +998,8 @@
       {report}
       reportLoading={reportLoading}
       reportError={reportError}
+      openBookName={$project?.bookName || $project?.bookId?.toUpperCase() || ""}
+      onLoadReport={loadReport}
       onNavigateToFinding={navigateToFinding}
     />
   {:else if screen === "report"}

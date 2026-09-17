@@ -11,12 +11,17 @@
   export let onRetry: () => void;
 
   // Project-level QA report for whichever book is currently open — see
-  // BridgeEngine.build_project_report(). null while loading/unavailable
-  // (e.g. no book open yet), in which case the report section just
-  // doesn't render rather than showing an empty shell.
+  // BridgeEngine.build_project_report(). It is NOT built when the project
+  // opens: measured at ~130 s on Genesis of a real Bible, during which the
+  // single-threaded sidecar answers nothing else, so it used to blow the
+  // 30 s client timeout and freeze the app. null now means "not asked for
+  // yet", and the panel prompts for a book instead of showing an empty shell.
   export let report: ProjectReport | null = null;
   export let reportLoading = false;
   export let reportError = "";
+  /** The open book, for the wording of the explicit "build it" action. */
+  export let openBookName = "";
+  export let onLoadReport: () => void = () => {};
   export let onNavigateToFinding: (chapter: string, verse: string) => void = () => {};
 
   let bookSearch = "";
@@ -150,9 +155,18 @@
 
     <main class="right-panel">
       {#if reportLoading}
-        <div class="report-area"><p class="empty">Loading report…</p></div>
+        <div class="report-area">
+          <p class="empty">Building the QA report…</p>
+          <p class="empty hint">
+            It reads every verse of the open book, so on a full-length book this takes
+            a couple of minutes, and the rest of the app waits for it.
+          </p>
+        </div>
       {:else if reportError}
-        <div class="report-area"><p class="empty">Could not load report: {reportError}</p></div>
+        <div class="report-area">
+          <p class="empty">Could not load report: {reportError}</p>
+          <button type="button" class="report-cta" on:click={onLoadReport}>Try again</button>
+        </div>
       {:else if report}
         <div class="report-area" aria-label="Current book QA report">
           <div class="gate" class:ready={report.publicationGate.readyForHumanPublicationSignoff}>
@@ -242,7 +256,18 @@
           {/if}
         </div>
       {:else}
-        <div class="report-area"><p class="empty">Open a book on the left to see its QA report here.</p></div>
+        <div class="report-area">
+          <p class="empty">Select a book on the left to check it for errors.</p>
+          <p class="empty hint">
+            The QA report reads every verse of the open book and takes a couple of minutes
+            on a full-length one, so it is no longer built automatically when a project opens.
+          </p>
+          {#if openBookName}
+            <button type="button" class="report-cta" on:click={onLoadReport}>
+              Build the QA report for {openBookName}
+            </button>
+          {/if}
+        </div>
       {/if}
     </main>
   </div>
@@ -270,6 +295,9 @@
   .empty { background: var(--surface-2); color: var(--text-2); border-radius: 8px; padding: 14px; font-size: var(--fs-xs); margin: 0; }
   .error-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--surface-2); color: var(--danger); border-radius: 8px; padding: 14px; font-size: var(--fs-xs); }
   .report-area { box-sizing: border-box; padding: 20px 32px; max-width: 820px; }
+  .empty.hint { background: none; padding: 6px 14px 12px; color: var(--text-3); }
+  .report-cta { font: inherit; margin-left: 14px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 7px; padding: 7px 12px; cursor: pointer; }
+  .report-cta:hover { border-color: var(--accent); color: var(--accent); }
   .gate { border-radius: 8px; padding: 10px 14px; font-size: var(--fs-xs); font-weight: 600; background: var(--danger-bg); color: var(--danger); margin-bottom: 12px; }
   .gate.ready { background: var(--pass-bg); color: var(--pass); }
   .coverage-bar { display: flex; width: 100%; height: 10px; border-radius: 5px; overflow: hidden; background: var(--surface-2); }

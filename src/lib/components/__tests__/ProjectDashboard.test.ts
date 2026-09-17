@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/svelte";
 
 import ProjectDashboard from "../ProjectDashboard.svelte";
@@ -109,5 +109,59 @@ describe("ProjectDashboard", () => {
   it("offers no expander when a row has nothing to detail", () => {
     mount([row({ high: 1 })]);
     expect(screen.queryByRole("button", { name: /finding/ })).not.toBeInTheDocument();
+  });
+
+  describe("the report is asked for, not built on open", () => {
+    function mountWithoutReport(props: Record<string, unknown> = {}) {
+      const onLoadReport = vi.fn();
+      const utils = render(ProjectDashboard, {
+        props: {
+          projectName: "Hindi IRV", books, loading: false, error: "",
+          onSelectBook: () => {}, onPreviewBook: () => {}, onRetry: () => {},
+          report: null, reportLoading: false, reportError: "",
+          openBookName: "Genesis", onLoadReport,
+          ...props,
+        },
+      });
+      return { ...utils, onLoadReport };
+    }
+
+    it("prompts for a book instead of building a report nobody asked for", () => {
+      mountWithoutReport();
+      expect(screen.getByText("Select a book on the left to check it for errors.")).toBeInTheDocument();
+      expect(screen.getByText(/takes a couple of minutes/)).toBeInTheDocument();
+    });
+
+    it("builds the report only on an explicit click", async () => {
+      const { onLoadReport } = mountWithoutReport();
+      expect(onLoadReport).not.toHaveBeenCalled();
+
+      await fireEvent.click(screen.getByRole("button", { name: /Build the QA report for Genesis/ }));
+
+      expect(onLoadReport).toHaveBeenCalledTimes(1);
+    });
+
+    it("offers no build action when no book is open", () => {
+      mountWithoutReport({ openBookName: "" });
+      expect(screen.queryByRole("button", { name: /Build the QA report/ })).not.toBeInTheDocument();
+      expect(screen.getByText("Select a book on the left to check it for errors.")).toBeInTheDocument();
+    });
+
+    it("says the wait is expected while it builds", () => {
+      mountWithoutReport({ reportLoading: true });
+      expect(screen.getByText("Building the QA report…")).toBeInTheDocument();
+      expect(screen.getByText(/the rest of the app waits for it/)).toBeInTheDocument();
+    });
+
+    it("lets a failed report be retried rather than stranding the panel", async () => {
+      const { onLoadReport } = mountWithoutReport({
+        reportError: "sidecar request 'project.report' timed out",
+      });
+      expect(screen.getByText(/timed out/)).toBeInTheDocument();
+
+      await fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+      expect(onLoadReport).toHaveBeenCalledTimes(1);
+    });
   });
 });

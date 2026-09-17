@@ -149,6 +149,16 @@ fn request_timeout_seconds(method: &str) -> u64 {
         // while to serialize and ship over stdio; the export writes it
         // back out. report.status/report.cancel stay interactive.
         "report.get" | "report.export" => 180,
+        // The book QA report. Measured on Genesis of a real Hindi IRV import
+        // (50 chapters, 1533 verses): build_book_report() takes ~113 s, almost
+        // all of it project_scan and exception_first_queue doing per-verse
+        // workbench reads on a fresh connection each time (#143, and #113
+        // underneath it). At the default 30 s the request always failed on a
+        // full-length book while the single-threaded sidecar stayed blocked
+        // until Python finished anyway -- so the timeout bought nothing and
+        // cost a misleading error. It is no longer issued on project open;
+        // the dashboard asks for it explicitly and warns about the wait.
+        "project.report" => 180,
         // A whole-Bible triage map is one record per finding across every
         // book; the same serialize-and-ship cost as report.get, so the same
         // class. triage.run only starts a background job and returns a
@@ -528,6 +538,9 @@ mod tests {
         assert_eq!(request_timeout_seconds("report.cancel"), 30);
         assert_eq!(request_timeout_seconds("report.get"), 180);
         assert_eq!(request_timeout_seconds("report.export"), 180);
+        // The book QA report measured ~113 s on a real full-length book, so the
+        // default 30 s could only ever fail there (#143).
+        assert_eq!(request_timeout_seconds("project.report"), 180);
     }
 
     #[test]

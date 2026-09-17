@@ -538,11 +538,21 @@ class TranslationCoreProject:
             'pendingTransactions': len(self.pending_transactions()),
         }
         for ch in self.chapters():
+            # One parse of this chapter's alignment file for the whole verse
+            # loop (#143). `load_verse_alignment` is `load_alignment_chapter`
+            # plus a dict lookup and caches nothing, so calling it per verse
+            # re-parsed the same file once per verse -- 1533 parses for Genesis
+            # instead of 50, and 78 of project.report's 130 seconds. Every key
+            # of this dict is exactly what `verses()` returns (it sorts these
+            # same keys), so the lookup below cannot miss.
+            chapter_alignments = self.load_alignment_chapter(ch)
             for vs in self.verses(ch):
                 if str(vs) == 'front':
                     continue
                 result['verses'] += 1
-                alignment_state = self._alignment_work_state(self.load_verse_alignment(ch, vs))
+                alignment_state = self._alignment_work_state(
+                    VerseAlignment.from_dict(chapter_alignments[str(vs)])
+                )
                 result['alignment'][alignment_state] += 1
                 for entry in self.checks_for_verse(ch, vs):
                     tool = str(entry.get('contextId', {}).get('tool') or '')
