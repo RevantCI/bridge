@@ -188,7 +188,6 @@
    *  until this click. */
   async function acceptProposal(proposal: CrossVerseProposal) {
     const { source, target } = proposal;
-    dismissProposal(proposal);
     await mutateCross(
       () => bridge.crossVerseLink(
         { chapter, verse: source.verse, topId: source.topId },
@@ -196,7 +195,12 @@
       ),
       `Linked ${source.word} (${chapter}:${source.verse}) to ${target.word} (${chapter}:${target.verse}).`,
     );
-    if (!error) await loadProposals();
+    // Only after the link actually succeeded: a refused link (the word was
+    // aligned underneath us, the text changed) must leave the suggestion on
+    // screen with the error, not silently swallow it.
+    if (error) return;
+    dismissProposal(proposal);
+    await loadProposals();
   }
 
   function evidenceSummary(proposal: CrossVerseProposal): string {

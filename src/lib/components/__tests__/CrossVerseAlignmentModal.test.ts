@@ -396,6 +396,22 @@ describe("CrossVerseAlignmentModal", () => {
       expect(crossVerseLink).not.toHaveBeenCalled();
     });
 
+    it("a refused link leaves the suggestion on screen with the error", async () => {
+      crossVersePropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"], proposals: [proposal()],
+        calibrationVersion: "cross-verse-uncalibrated-v1",
+      });
+      crossVerseLink.mockRejectedValue(new Error("was is already aligned in verse 2."));
+      await renderPage("2");
+      await suggest();
+
+      await fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+
+      expect(await screen.findByText(/already aligned in verse 2/)).toBeInTheDocument();
+      const strip = screen.getByLabelText("Cross-verse suggestions");
+      expect(within(strip).getByText("1 suggestion")).toBeInTheDocument();
+    });
+
     it("dismissing removes it without writing anything", async () => {
       crossVersePropose.mockResolvedValue({
         chapter: "1", verses: ["1", "2", "3-4"], proposals: [proposal()],
