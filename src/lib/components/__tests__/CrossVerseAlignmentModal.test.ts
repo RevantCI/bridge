@@ -183,6 +183,17 @@ describe("CrossVerseAlignmentModal", () => {
     expect(screen.getByRole("heading", { name: /verses 1–3-4/ })).toBeInTheDocument();
   });
 
+  it("labels a source word with its meaning, not its lemma, and keeps the lemma on hover", async () => {
+    const { container } = await renderPage("2");
+    const source = [...container.querySelectorAll<HTMLElement>("button.token.source")]
+      .find((element) => element.textContent?.includes("λόγος"))!;
+    // The lemma is another Greek string, so it is no longer the visible label.
+    await waitFor(() => expect(within(source).getByText("God")).toBeInTheDocument());
+    expect(within(source).queryByText("λόγος·lemma")).not.toBeInTheDocument();
+    expect(source.getAttribute("title")).toContain("λόγος·lemma");
+    expect(source.getAttribute("title")).toContain("God");
+  });
+
   it("a same-verse drop realigns through alignment.realign, resending the column's existing words, then reruns local checks", async () => {
     realignWords.mockResolvedValue({ ...V2, status: "complete", gaps: { sourceUnmatched: 0, targetUnmatched: 0 } });
     await renderPage("2");

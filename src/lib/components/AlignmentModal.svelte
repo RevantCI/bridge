@@ -11,6 +11,7 @@
   import {
     alignedTargetsFor, bottomIdsAfterDrop, groupForTarget, occurrenceLabel as occurrence, unaccountedTargets,
   } from "../alignmentGroups";
+  import { SourceGlossCache } from "../lexiconGloss";
   import LexiconPopup from "./LexiconPopup.svelte";
 
   export let chapter: string;
@@ -45,9 +46,14 @@
 
   $: ghostLabel = $dragState.tokenId ? (context?.bottomTokens.find((t) => t.id === $dragState.tokenId)?.word ?? "") : "";
 
-  // Resolved lexicon gloss per source token id, for the hover tooltip (item b).
-  // Fetched once on load — source tokens don't change across alignment edits.
-  let meaningByToken: Record<string, string> = {};
+  // Resolved lexicon glosses for the source tokens: the English sense goes
+  // under the word and the lemma moves into the tooltip, because a lemma is
+  // one more Greek/Hebrew string and tells a non-reader of those scripts
+  // nothing. Fetched once on load — source tokens don't change across
+  // alignment edits. `glossVersion` is what makes the labels re-render when
+  // the lookups land.
+  const glosses = new SourceGlossCache();
+  let glossVersion = 0;
 
   onMount(load);
 
@@ -59,7 +65,7 @@
     try {
       context = await bridge.getAlignment(chapter, verse);
       restoreId = context.history[0]?.id ?? "";
-      void loadMeanings(context.topTokens);
+      void glosses.load(context.topTokens).then(() => (glossVersion = glosses.version));
     } catch (value) {
       error = value instanceof Error ? value.message : String(value);
     } finally {
@@ -67,29 +73,14 @@
     }
   }
 
-  async function loadMeanings(tokens: AlignmentToken[]) {
-    const cache = new Map<string, string>();
-    await Promise.all(
-      tokens
-        .filter((t) => t.strong || t.morph)
-        .map(async (t) => {
-          const key = `${t.strong ?? ""}|${t.morph ?? ""}`;
-          if (!cache.has(key)) {
-            try {
-              const entry = await bridge.getLexiconEntry(t.strong ?? "", t.morph ?? "");
-              cache.set(key, entry.segments.map((s) => s.meaning || s.lemma).filter(Boolean).join("; "));
-            } catch {
-              cache.set(key, "");
-            }
-          }
-          meaningByToken[t.id] = cache.get(key) ?? "";
-        }),
-    );
-    meaningByToken = { ...meaningByToken };
+  // `glossVersion` is read, not used, so Svelte re-invokes these once the
+  // lexicon lookups resolve.
+  function sourceGloss(token: AlignmentToken, _version: number): string {
+    return glosses.glossFor(token).short;
   }
 
-  function sourceTitle(token: AlignmentToken): string {
-    return meaningByToken[token.id] || [token.lemma, token.strong, token.morph].filter(Boolean).join(" · ");
+  function sourceTitle(token: AlignmentToken, _version: number): string {
+    return glosses.glossFor(token).title;
   }
 
   // #117: a word that a cross-verse link accounts for is still in the tC word
@@ -262,10 +253,10 @@
                 class="token source"
                 on:click={() => (lexiconToken = src)}
                 disabled={busy}
-                title={sourceTitle(src)}
+                title={sourceTitle(src, glossVersion)}
               >
                 <span>{src.word}{#if src.occurrences > 1}<span class="occ">{occurrence(src)}</span>{/if}</span>
-                {#if src.lemma}<small>{src.lemma}</small>{/if}
+                {#if sourceGloss(src, glossVersion)}<small class="gloss">{sourceGloss(src, glossVersion)}</small>{/if}
               </button>
               <div
                 class="target-cell"
@@ -419,6 +410,16 @@
   .panel-title small { color: var(--text-3); font-weight: 400; }
   .token { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-width: 62px; }
   .token small { font-size: var(--fs-3xs); color: var(--text-3); max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+  /* The gloss replaced the lemma here, so it must undo what the lemma needed:
+     `.interlinear` sets the Greek/Hebrew face and, for an OT book, dir=rtl --
+     both wrong for an English definition. Clamped to two lines so a long
+     definition cannot stretch the interlinear row taller than the words in it;
+     the unabridged text stays in the tooltip and the lexicon popup. */
+  .gloss {
+    font-family: var(--font-ui); direction: ltr; text-align: center;
+    white-space: normal; line-height: 1.25; max-width: 120px;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  }
   .occ { margin-left: 3px; font-size: 0.8em; font-weight: 400; color: var(--text-3); }
   .column .token.source { width: 100%; background: #F6F1FF; cursor: pointer; }
   /* On the target token itself, not on .aligned-card .word: this one rule

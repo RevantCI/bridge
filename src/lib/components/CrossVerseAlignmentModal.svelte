@@ -24,6 +24,7 @@
   } from "../alignmentGroups";
   import { defaultRange, joinVerseId, rangeBetween, spanOf, splitVerseId, toggleVerse } from "../crossVerseRange";
   import { suggestCrossVerseRange, unionInChapterOrder } from "../crossVerseSuggest";
+  import { SourceGlossCache } from "../lexiconGloss";
   import LexiconPopup from "./LexiconPopup.svelte";
 
   export let chapter: string;
@@ -54,8 +55,12 @@
   let lexiconToken: AlignmentToken | null = null;
   let lexiconDirection: "ltr" | "rtl" = "rtl";
   let pickedUpKey: string | null = null;
-  let meaningByToken: Record<string, string> = {};
-  const meaningCache = new Map<string, string>();
+  // The English sense goes under the source word and the lemma moves into the
+  // tooltip: a lemma is one more Greek/Hebrew string, and tells a reviewer who
+  // does not read those scripts nothing. Cached across range changes, since a
+  // verse that leaves and re-enters the range resolves the same entries.
+  const glosses = new SourceGlossCache();
+  let glossVersion = 0;
   let loadSequence = 0;
   /** Cross-verse suggestions (#139), loaded only on an explicit click. */
   let proposals: CrossVerseProposal[] = [];
@@ -222,28 +227,18 @@
   }
 
   async function loadMeanings(tokens: AlignmentToken[]) {
-    await Promise.all(
-      tokens
-        .filter((t) => t.strong || t.morph)
-        .map(async (t) => {
-          const key = `${t.strong ?? ""}|${t.morph ?? ""}`;
-          if (!meaningCache.has(key)) {
-            try {
-              const entry = await bridge.getLexiconEntry(t.strong ?? "", t.morph ?? "");
-              meaningCache.set(key, entry.segments.map((s) => s.meaning || s.lemma).filter(Boolean).join("; "));
-            } catch {
-              meaningCache.set(key, "");
-            }
-          }
-          meaningByToken[key] = meaningCache.get(key) ?? "";
-        }),
-    );
-    meaningByToken = { ...meaningByToken };
+    await glosses.load(tokens);
+    glossVersion = glosses.version;
   }
 
-  function sourceTitle(token: AlignmentToken): string {
-    const key = `${token.strong ?? ""}|${token.morph ?? ""}`;
-    return meaningByToken[key] || [token.lemma, token.strong, token.morph].filter(Boolean).join(" · ");
+  // `glossVersion` is read, not used, so Svelte re-invokes these once the
+  // lexicon lookups resolve.
+  function sourceGloss(token: AlignmentToken, _version: number): string {
+    return glosses.glossFor(token).short;
+  }
+
+  function sourceTitle(token: AlignmentToken, _version: number): string {
+    return glosses.glossFor(token).title;
   }
 
   // ---- range picker -------------------------------------------------------
@@ -604,10 +599,10 @@
                       class:hebrew={context.sourceDirection === "rtl"}
                       on:click={() => openLexicon(src, context.sourceDirection)}
                       disabled={busy}
-                      title={sourceTitle(src)}
+                      title={sourceTitle(src, glossVersion)}
                     >
                       <span class="word">{src.word}{#if src.occurrences > 1}<span class="occ">{occurrence(src)}</span>{/if}</span>
-                      {#if src.lemma}<small>{src.lemma}</small>{/if}
+                      {#if sourceGloss(src, glossVersion)}<small class="gloss">{sourceGloss(src, glossVersion)}</small>{/if}
                     </button>
                     <div
                       class="drop-cell"
@@ -821,17 +816,32 @@
      auto-fit: with auto-fit a verse holding a single source word stretches that
      one cell across the whole column, which looks like a layout bug; auto-fill
      keeps the empty tracks and the cell its normal width. Still no sideways
-     scroll (#72) -- wrapping is what replaces it, and min(230px, 100%) rather
-     than a bare 230px because below that width a bare minimum would size the
+     scroll (#72) -- wrapping is what replaces it, and min(150px, 100%) rather
+     than a bare 150px because below that width a bare minimum would size the
      track wider than the column and `.scroll`'s overflow-x would clip it. */
-  .rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: 2px 12px; align-items: start; }
+  .rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr)); gap: 4px 10px; align-items: start; }
   .rows .empty { grid-column: 1 / -1; }
-  .row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; align-items: stretch; padding: 3px 0; min-width: 0; }
+  /* Source word above its drop cell rather than beside it, matching the
+     single-verse interlinear. A stacked cell needs roughly half the width of a
+     side-by-side one, so the auto-fill track above drops from 230px to 150px
+     and the same column now holds two cells where it held one -- which is the
+     whole point: more of the range on screen at once. */
+  .row { display: flex; flex-direction: column; gap: 3px; padding: 3px 0; min-width: 0; }
   .token { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-width: 62px; }
-  /* max-width: 100% (was a fixed 160px): inside a flowed cell (#136) the lemma
+  /* max-width: 100% (was a fixed 160px): inside a flowed cell (#136) the label
      must ellipsize within its own track, or a long one widens the source column
-     and squeezes the drop cell next to it. */
+     and squeezes the drop cell below it. */
   .token small { font-size: var(--fs-3xs); color: var(--text-3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The gloss replaced the lemma here, so it must undo what the lemma needed:
+     `.token.source` carries the Greek/Hebrew face and, for an OT book, dir=rtl
+     -- both wrong for an English definition. Two lines rather than one
+     ellipsized one, because at 150px a single line of definition is mostly the
+     ellipsis; the unabridged text stays in the tooltip and the lexicon popup. */
+  .gloss {
+    font-family: var(--font-ui); direction: ltr; text-align: left;
+    white-space: normal; line-height: 1.25;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  }
   .occ { margin-left: 3px; font-size: 0.8em; font-weight: 400; color: var(--text-3); }
   /* min-width: 0 overrides `.token`'s 62px so the source cell can shrink inside
      a flowed track (#136) and ellipsize, instead of overflowing it. */
