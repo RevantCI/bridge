@@ -2,9 +2,10 @@
   import { onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
   import {
-    alignmentStatusByVerse, checkStatusByVerse, currentChapter, findingsByVerse,
+    alignmentStatusByVerse, checkStatusByVerse, findingsByVerse, project,
     verseKey,
   } from "../stores";
+  import { bookDisplayName } from "../utils/reportStats";
   import type { AlignmentContext, AlignmentToken } from "../types/finding";
   import { createPointerDrag } from "../alignmentDrag";
   import { openCrossVerse } from "../alignmentUi";
@@ -87,9 +88,55 @@
   // bank (translationCore alignment is verse-local) but is no longer a gap.
   $: unalignedCount = context ? unaccountedTargets(context).length : 0;
   $: accountedIds = new Set(context?.crossVerseAccountedIds ?? []);
-  $: accountedNote = context && context.crossVerseAccounted + context.crossVerseRealized > 0
-    ? `${context.crossVerseAccounted + context.crossVerseRealized} word${context.crossVerseAccounted + context.crossVerseRealized === 1 ? "" : "s"} linked across verses (Bridge-private; completion stays with translationCore).`
+  $: linkedCount = context ? context.crossVerseAccounted + context.crossVerseRealized : 0;
+  $: accountedNote = linkedCount > 0
+    ? `${linkedCount} word${linkedCount === 1 ? "" : "s"} linked across verses (Bridge-private; completion stays with translationCore).`
     : "";
+
+  // #148: the book is not in the modal's props, but it is in the project store
+  // and both call sites are inside the open book. `bookName` can be a vernacular
+  // header name (import reads USFM \h/\toc2) and falls back to the raw book id
+  // when the tC manifest has no project.name -- so the code only joins the name
+  // when it adds something, or the title reads "gen (GEN)".
+  $: bookLabel = $project ? bookDisplayName($project) : "";
+  $: bookCode = $project ? $project.bookId.toUpperCase() : "";
+  $: reference = bookLabel && bookLabel.toLowerCase() !== bookCode.toLowerCase()
+    ? `${bookLabel} (${bookCode}) ${chapter}:${verse}`
+    : `${bookCode ? `${bookCode} ` : ""}${chapter}:${verse}`;
+
+  // #148: the four counts are a partition of the chapter's verses -- one
+  // increment per verse in `alignment_status` (bridge_service.py) -- so their
+  // total is the chapter's verse count, and saying so is what makes the row
+  // readable. "Chapter:" alone read as a count of chapters.
+  $: chapterVerseTotal = context
+    ? context.chapterStatus.complete + context.chapterStatus.partial
+      + context.chapterStatus.untouched + context.chapterStatus.invalid
+    : 0;
+
+  // #148: the structural issues live behind a red button in the status row
+  // rather than an always-open block. Hover reveals, click pins.
+  let issuesPinned = false;
+  let issuesHovered = false;
+  $: issuesOpen = issuesPinned || issuesHovered;
+  let issuesWrap: HTMLElement | null = null;
+
+  // Same capture-phase outside-pointerdown close as FindingContextMenu.
+  onMount(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!issuesPinned) return;
+      if (issuesWrap && event.target instanceof Node && issuesWrap.contains(event.target)) return;
+      issuesPinned = false;
+    };
+    window.addEventListener("pointerdown", onPointerDown, true);
+    return () => window.removeEventListener("pointerdown", onPointerDown, true);
+  });
+
+  function onEscape() {
+    if (busy || lexiconToken) return;
+    // A pinned popover swallows the first Escape; a second one closes the modal.
+    if (issuesPinned) { issuesPinned = false; return; }
+    onClose();
+  }
 
   async function refreshChecks(updated: AlignmentContext, message: string) {
     context = updated;
@@ -187,14 +234,14 @@
   }
 </script>
 
-<svelte:window on:keydown={(event) => event.key === "Escape" && !busy && !lexiconToken && onClose()} />
+<svelte:window on:keydown={(event) => event.key === "Escape" && onEscape()} />
 
 <div class="overlay" role="presentation">
-  <section class="modal" role="dialog" aria-modal="true" aria-label={`Word alignment ${chapter}:${verse}`}>
+  <section class="modal" role="dialog" aria-modal="true" aria-label={`Word alignment ${reference}`}>
     <header>
       <div>
         <div class="eyebrow">WORD ALIGNMENT</div>
-        <h2>{chapter}:{verse} — align source and target words</h2>
+        <h2>{reference} — align source and target words</h2>
         <button
           type="button"
           class="cross-verse-link"
@@ -211,11 +258,37 @@
     {:else if context}
       <div class="summary">
         <span class="status {context.status}">Verse: {context.status}</span>
-        <span>Chapter:</span>
-        <span>{context.chapterStatus.complete} complete</span>
-        <span>{context.chapterStatus.partial} partial</span>
-        <span>{context.chapterStatus.untouched} untouched</span>
-        {#if context.chapterStatus.invalid}<span class="danger">{context.chapterStatus.invalid} invalid</span>{/if}
+        <span class="tally">
+          Chapter {chapter} — {chapterVerseTotal} verse{chapterVerseTotal === 1 ? "" : "s"}:
+          <span title="Every target word is placed, and no source word is left without one.">{context.chapterStatus.complete} complete</span> ·
+          <span title="Some target words are placed, but the word bank is not empty or a source word has none.">{context.chapterStatus.partial} partial</span> ·
+          <span title="No target word has been placed in this verse yet.">{context.chapterStatus.untouched} untouched</span>
+          {#if context.chapterStatus.invalid}· <span class="danger" title="Marked invalid in translationCore.">{context.chapterStatus.invalid} invalid</span>{/if}
+        </span>
+        {#if context.issues.length > 0}
+          <span
+            class="issues-wrap"
+            bind:this={issuesWrap}
+            role="presentation"
+            on:mouseenter={() => (issuesHovered = true)}
+            on:mouseleave={() => (issuesHovered = false)}
+            on:focusin={() => (issuesHovered = true)}
+            on:focusout={() => (issuesHovered = false)}
+          >
+            <button
+              type="button"
+              class="issues-button"
+              aria-expanded={issuesOpen}
+              aria-controls="alignment-issues"
+              on:click={() => (issuesPinned = !issuesPinned)}
+            >⚠ {context.issues.length} issue{context.issues.length === 1 ? "" : "s"}</button>
+            {#if issuesOpen}
+              <div class="issues-panel" id="alignment-issues" role="status">
+                {#each context.issues as issue}<div>⚠ {issue}</div>{/each}
+              </div>
+            {/if}
+          </span>
+        {/if}
       </div>
 
       {#if !context.sourceAvailable}
@@ -223,30 +296,22 @@
           <strong>Original-language source unavailable</strong>
           <span>{context.sourceMessage}</span>
         </div>
-      {:else if unalignedCount > 0}
-        <div class="alignment-flag">
-          ⚑ Not fully aligned — {unalignedCount} target word{unalignedCount === 1 ? "" : "s"} still
-          {unalignedCount === 1 ? "needs" : "need"} a source word. Drag or click a word bank item below, then a
-          column, to align it.
-          {#if accountedNote}<span class="accounted-note">{accountedNote}</span>{/if}
-        </div>
-      {:else if context.fullyAccounted}
-        <div class="accounted-flag">↔ {accountedNote}</div>
       {:else if context.status === "invalid"}
-        <div class="alignment-flag">⚑ Alignment has structural issues — see below.</div>
-      {/if}
-
-      {#if context.issues.length > 0}
-        <div class="issues">
-          {#each context.issues as issue}<div>⚠ {issue}</div>{/each}
-        </div>
+        <!-- #149: this is the translationCore invalid marker, which is not the
+             structural-issues list -- the old wording claimed it was. -->
+        <div class="alignment-flag">⚑ Marked invalid in translationCore.</div>
       {/if}
 
       {#if notice}<div class="notice">✓ {notice}</div>{/if}
       {#if error}<div class="error">{error}</div>{/if}
 
       <div class="workspace">
-        <div class="interlinear" dir={context.sourceDirection}>
+        <section class="source-bank">
+          <div class="panel-title">
+            <span>Source words</span>
+            <small>Click a word for its lexicon entry — its target words sit in the column beneath it</small>
+          </div>
+          <div class="interlinear" dir={context.sourceDirection}>
           {#each context.topTokens as src (src.id)}
             <div class="column">
               <button
@@ -289,11 +354,20 @@
           {:else}
             <p class="empty">No source tokens are present in this verse.</p>
           {/each}
-        </div>
+          </div>
+        </section>
 
         <section class="word-bank">
           <div class="panel-title">
-            <span>Target words</span>
+            <span class="panel-label">
+              Target words
+              {#if unalignedCount > 0}
+                <span class="chip remaining">{unalignedCount} remaining</span>
+              {/if}
+              {#if linkedCount > 0}
+                <span class="chip linked" title={accountedNote}>↔ {linkedCount} linked across verses</span>
+              {/if}
+            </span>
             <small>In verse order — drag an unaligned (blue) word into a column above, or click it then click a column</small>
           </div>
           <div
@@ -382,14 +456,27 @@
   .status.complete, .completed { color: var(--success); background: #EAF7EF; }
   .status.partial { color: var(--warning); background: var(--warning-bg); }
   .status.invalid, .danger { color: var(--danger); }
-  .source-warning, .issues, .notice, .error, .alignment-flag { border-radius: 9px; padding: 10px 12px; margin-bottom: 12px; font-size: var(--fs-sm); line-height: 1.45; }
+  .tally span { border-bottom: 1px dotted var(--border-strong); cursor: help; }
+  .tally span.danger { border-bottom-color: currentColor; }
+  /* #148: the structural issues sit behind this button instead of an open block
+     above the columns. Anchored, not a centred overlay like LexiconPopup -- it
+     belongs to the row it came from. It opens downward near the top of a modal
+     that scrolls, so it stays inside and needs no portal. */
+  .issues-wrap { position: relative; margin-left: auto; }
+  .issues-button { border: 0; background: none; padding: 3px 6px; font-size: var(--fs-xs); font-weight: 700; color: var(--danger); border-radius: 7px; }
+  .issues-button:hover:not(:disabled), .issues-button[aria-expanded="true"] { background: var(--danger-bg); border-color: transparent; }
+  .issues-panel {
+    position: absolute; top: calc(100% + 4px); right: 0; z-index: 20; width: max(260px, 26vw);
+    background: #FFF5F5; color: var(--danger); border: 1px solid var(--danger); border-radius: 9px;
+    padding: 10px 12px; font-size: var(--fs-sm); line-height: 1.45; text-align: left;
+    box-shadow: 0 10px 28px rgba(0,0,0,.16);
+  }
+  .issues-panel div + div { margin-top: 6px; }
+  .source-warning, .notice, .error, .alignment-flag { border-radius: 9px; padding: 10px 12px; margin-bottom: 12px; font-size: var(--fs-sm); line-height: 1.45; }
   .source-warning { display: flex; flex-direction: column; gap: 3px; background: var(--warning-bg); color: var(--warning); }
   .alignment-flag { background: var(--warning-bg); color: var(--warning); font-weight: 600; }
-  .accounted-note { display: block; margin-top: 4px; font-weight: 400; color: var(--text-2); }
-  .accounted-flag { border-radius: 9px; padding: 10px 12px; margin-bottom: 12px; font-size: var(--fs-sm); background: var(--accent-bg); color: var(--accent); font-weight: 600; }
   .already-aligned.accounted { border-style: dashed; border-color: var(--accent); flex-direction: row; gap: 5px; }
   .already-aligned.accounted small { color: var(--accent); font-weight: 700; }
-  .issues { background: #FFF5F5; color: var(--danger); }
   .notice { background: #EAF7EF; color: var(--success); }
   .error { background: #FFF0F0; color: var(--danger); }
   .workspace { display: flex; flex-direction: column; gap: 14px; }
@@ -424,8 +511,14 @@
   }
   .target-cell.drop-hover { background: var(--accent-bg); outline: 2px dashed var(--accent); }
   .target-cell .placeholder { color: var(--text-3); font-size: var(--fs-xl); line-height: 1; padding-bottom: 6px; }
-  .panel-title { display: flex; justify-content: space-between; gap: 10px; font-size: var(--fs-sm); font-weight: 700; margin-bottom: 10px; }
+  .panel-title { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; font-size: var(--fs-sm); font-weight: 700; margin-bottom: 10px; }
   .panel-title small { color: var(--text-3); font-weight: 400; }
+  .panel-label { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  /* #148: the counts the "Not fully aligned" banner used to spell out across two
+     full-width lines, as chips beside the heading they are about. */
+  .chip { border-radius: 999px; padding: 2px 9px; font-size: var(--fs-2xs); font-weight: 700; }
+  .chip.remaining { color: var(--warning); background: var(--warning-bg); }
+  .chip.linked { color: var(--accent); background: var(--accent-bg); cursor: help; }
   .token { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-width: 62px; }
   .token small { font-size: var(--fs-3xs); color: var(--text-3); max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
   /* The gloss replaced the lemma here, so it must undo what the lemma needed:
@@ -463,7 +556,10 @@
     color: var(--text-2); font-size: var(--fs-md); cursor: pointer; flex-shrink: 0;
   }
   .unalign-x:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
-  .word-bank { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  .word-bank, .source-bank { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+  /* The interlinear carries its own border today; inside the titled section it
+     would be a second box around the same thing. */
+  .source-bank .interlinear { border: 0; border-radius: 0; padding: 0; }
   .bank-tokens { display: flex; flex-wrap: wrap; gap: 7px; min-height: 46px; align-content: flex-start; border-radius: 8px; padding: 4px; }
   .bank-tokens.drop-hover { background: var(--accent-bg); outline: 2px dashed var(--accent); }
   .drag-ghost {

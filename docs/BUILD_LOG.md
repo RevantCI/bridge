@@ -9554,3 +9554,111 @@ range, deliberately, until the verdict quality above is known. Dismissals are
 still session-local (#140). Not seen in the real desktop app — jsdom does not lay
 out or paint, so the AI button, the "both agree" / "AI only" badges and the
 auto-link notice are verified as structure only.
+
+---
+
+## 2026-09-18 — Align Words popup: the wrap (#72), and what its chapter tally was actually counting (#148, #149)
+
+Two rounds of maintainer feedback on the single-verse Align Words popup
+(`AlignmentModal.svelte`), from screenshots of Genesis 1:1. Frontend only, one
+component; no engine, no RPC, no schema.
+
+### #72 — the interlinear wraps instead of scrolling sideways
+
+`#72` was open since 2026-09-11 and deliberately parked: deleting `overflow-x`
+alone clips a long verse rather than removing the need to scroll, so the issue
+asked for a replacement *layout* first, and the maintainer's own comment said to
+decide once the cross-verse page (#116) had been used in anger. It has been, and
+the answer is the same shape as `dd078d7` (#136) applied to the other surface.
+
+`.interlinear` is now `flex-wrap: wrap` with `overflow-x: hidden`, capped at
+`48vh` with its own `overflow-y: auto`. CSS only — no markup, no JS.
+
+- **flex-wrap, not the cross-verse `auto-fill` grid.** That page's unit is a
+  side-by-side source+cell *pair*, which needs a consistent track width; here the
+  unit is a self-sizing stacked column, so natural widths pack a line tighter and
+  no token rule (`min-width: 62px`, the lemma's `max-width`) has to be relaxed.
+- **`flex-shrink: 0` stays.** Wrapping is what absorbs the overflow now; columns
+  still must not be squeezed. The new test asserts this, because "make it fit" by
+  shrinking is the obvious wrong fix.
+- **The height cap is about dragging, not tidiness.** The pointer drag has no
+  auto-scroll, so a column that cannot be on screen at the same time as the word
+  bank is unreachable by drag. Capping the block keeps the bank and the
+  Undo/Restore footer in place while the columns scroll.
+- **No JS changed because none needed to.** `alignmentDrag.ts` resolves its drop
+  target per pointer-move via `elementFromPoint` → `closest('[data-drop-column]')`,
+  so it is geometry- and order-independent, and nothing in the component measures
+  widths, calls `scrollIntoView`, or walks columns by arrow key.
+- The original concern that wrapping "breaks the straight-line source→target
+  visual link" does not hold: each source word still sits directly above its own
+  target chips. Only the single continuous reading line breaks, into several,
+  which is how a printed interlinear reads anyway.
+
+### #148 — what "Chapter: 0 complete 3 partial 28 untouched" was counting
+
+The question that started the second half was literally "what is it tallying?".
+Traced rather than guessed: `alignment_status` (`bridge_service.py:1465-1480`)
+loops `self.project.verses(chapter)`, skips `front`, and buckets **each verse**
+through `_alignment_verse_status` (`:1457-1463`). The four numbers are therefore a
+partition of the chapter's verse count — 0 + 3 + 28 = 31 = Genesis 1's 31 verses.
+Per `_alignment_work_state` (`tc_project.py:480-491`): `untouched` = no target
+word placed in any group; `partial` = some placed but the word bank is non-empty
+or a source group has none; `complete` = every target word placed and no empty
+source group; `invalid` = the tC `tools/wordAlignment/invalid/` marker.
+
+Worth keeping straight: **`complete` here is "fully aligned", not the
+translationCore "completed" marker** — that is the separate `completionState`
+field (`bridge_service.py:1602`), which is why a verse can be `complete` in this
+tally and still not be human-completed. The numbers were never wrong; the label
+"Chapter:" was, because it reads as a count of chapters. It now says
+`Chapter 1 — 31 verses: 0 complete · 3 partial · 28 untouched`, each word carrying
+a tooltip with the definition above.
+
+The rest of #148 is chrome the same screenshot was carrying:
+
+- The full-width "⚑ Not fully aligned — 2 target words still need a source word.
+  Drag or click a word bank item below…" banner became a `2 remaining` chip beside
+  the **Target words** heading. Nothing was lost: its instruction is already the
+  word bank's own hint one line below it.
+- Its second line became a second chip, `↔ 2 linked across verses`, with the full
+  Bridge-private sentence as the tooltip.
+- The always-open structural-issues block moved behind a red `⚠ n issues` button
+  at the end of the status row — hover reveals, click pins, Escape unpins before
+  it closes the modal. Anchored `position: absolute`, not a centred overlay like
+  `LexiconPopup`: it belongs to the row it came from. The outside-`pointerdown`
+  close is the capture-phase one `FindingContextMenu` already uses.
+- The title now reads `Genesis (GEN) 1:1`. `bookName`/`bookId` were already on the
+  `project` store, so no new RPC — but `bookName` can be a *vernacular* header
+  name (import reads USFM `\h`/`\toc2`) and falls back to the raw book id when the
+  tC manifest has no `project.name`, so the code is only joined when it adds
+  something. Otherwise the title would read "gen (GEN)".
+- The source columns got a `Source words` heading, which the target side always had.
+
+### #149 — filed, not fixed
+
+While tracing the above: the flag "⚑ Alignment has structural issues — see
+below." fired on `status === "invalid"`, which comes **solely** from the tC
+`invalid/` marker file and has nothing to do with `context.issues`. A verse can be
+tC-invalid with an empty issues list, or carry several issues while reporting
+`partial`. Only the one string this change made stale was fixed (it now reads
+"⚑ Marked invalid in translationCore."); the real question — what, if anything,
+should surface when a verse has issues but no marker, and whether the engine's
+duplicate-granularity issue reporting should be collapsed — is #149.
+
+### Gates
+
+Frontend: `npm run check` 0 errors/0 warnings, `npm run test`, `npm run build`.
+New `AlignmentModal.test.ts` — the component had none, because `AlignmentReview`
+mocks it out for reaching Tauri and the stores; `CrossVerseAlignmentModal.test.ts`
+shows the `vi.hoisted` + `vi.mock("../../api/bridgeClient")` pattern that makes it
+renderable.
+
+Engine untouched, so pytest was not run and this records that rather than
+implying it passed. No Rust change.
+
+### Not done
+
+Neither change has been seen in the real desktop app. jsdom does not lay out or
+paint, so the wrap in particular needs a visual check at 1366x768 — including
+that `dir="rtl"` fills each line right-to-left with lines stacking downward, and
+that a drop onto a column on the second line works.
