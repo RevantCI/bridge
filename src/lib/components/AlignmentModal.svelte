@@ -393,13 +393,31 @@
   .notice { background: #EAF7EF; color: var(--success); }
   .error { background: #FFF0F0; color: var(--danger); }
   .workspace { display: flex; flex-direction: column; gap: 14px; }
-  .interlinear { display: flex; gap: 10px; overflow-x: auto; padding: 12px 6px; border: 1px solid var(--border); border-radius: 10px; min-height: 128px; }
+  /* #72: the columns flow left-to-right and wrap, the way a printed interlinear
+     reads, instead of sitting on one line behind a horizontal scrollbar. Each
+     source word still sits directly above its own target chips -- only the
+     single continuous reading line is broken, into several. flex-wrap rather
+     than the cross-verse page's auto-fill grid (#136): the unit there is a
+     side-by-side source+cell pair needing a consistent track, here it is a
+     self-sizing stacked column, so natural widths pack a line tighter.
+     `flex-shrink: 0` stays on .column -- wrapping is what absorbs the overflow
+     now, columns still must not be squeezed. The max-height caps a long verse
+     so the word bank and the footer controls stay on screen: the pointer drag
+     has no auto-scroll, so a column you cannot see at the same time as the bank
+     is unreachable by drag. */
+  .interlinear {
+    display: flex; flex-wrap: wrap; align-content: flex-start; gap: 16px 10px;
+    overflow-x: hidden; overflow-y: auto; max-height: 48vh;
+    padding: 12px 6px; border: 1px solid var(--border); border-radius: 10px; min-height: 128px;
+  }
   /* The source column is Hebrew for an OT book and Greek for an NT one, so
      the face keys off the `dir` the markup already sets from
      context.sourceDirection rather than being hardcoded to either. */
   .interlinear[dir="rtl"] { font-family: var(--font-hebrew); }
   .interlinear[dir="ltr"] { font-family: var(--font-greek); }
-  .column { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 76px; flex-shrink: 0; }
+  /* max-width so a column can never be wider than the box and be silently
+     clipped by the overflow-x above on a narrow window. */
+  .column { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 76px; max-width: 100%; flex-shrink: 0; }
   .target-cell {
     display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; box-sizing: border-box;
     min-height: 36px; justify-content: flex-end; padding: 4px; border-radius: 8px;
