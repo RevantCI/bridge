@@ -12,7 +12,10 @@ import type {
 const {
   getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry, crossVerseLink, crossVerseUnlink,
   analysisJobGetScopeStatus, semanticLocationGetRange, targetSemanticGetRange, crossVersePropose,
+  crossVerseAiPropose, getSettings,
 } = vi.hoisted(() => ({
+  crossVerseAiPropose: vi.fn(),
+  getSettings: vi.fn(),
   getAlignmentRange: vi.fn(),
   realignWords: vi.fn(),
   unalignWords: vi.fn(),
@@ -30,6 +33,7 @@ vi.mock("../../api/bridgeClient", () => ({
   bridge: {
     getAlignmentRange, realignWords, unalignWords, runVerseChecks, getLexiconEntry, crossVerseLink, crossVerseUnlink,
     analysisJobGetScopeStatus, semanticLocationGetRange, targetSemanticGetRange, crossVersePropose,
+    crossVerseAiPropose, getSettings,
   },
 }));
 
@@ -134,6 +138,13 @@ beforeEach(() => {
   analysisJobGetScopeStatus.mockResolvedValue({ state: "NOT_ANALYZED", latestJob: null });
   crossVersePropose.mockResolvedValue({
     chapter: "1", verses: ["1", "2", "3-4"], proposals: [], calibrationVersion: "cross-verse-uncalibrated-v1",
+  });
+  // An API key is configured by default so the AI button renders; the
+  // no-key case is its own test.
+  getSettings.mockResolvedValue({ hasApiKey: true });
+  crossVerseAiPropose.mockResolvedValue({
+    chapter: "1", verses: ["1", "2", "3-4"], proposals: [], corpusProposals: [],
+    calibrationVersion: "cross-verse-ai-uncalibrated-v1", modelConsulted: true,
   });
 });
 
@@ -471,6 +482,131 @@ describe("CrossVerseAlignmentModal", () => {
       await waitFor(() => expect(getAlignmentRange).toHaveBeenLastCalledWith("1", ["1", "2", "3-4", "5"]));
 
       expect(await screen.findByText(/The range changed since these were worked out/)).toBeInTheDocument();
+    });
+  });
+
+  describe("AI cross-verse suggestions (#146)", () => {
+    /** A proposal as `alignment.crossVerse.aiPropose` returns it. */
+    function aiProposal(overrides: Record<string, unknown> = {}) {
+      return {
+        ...proposal(),
+        confidence: 0.88,
+        agreesWithCorpus: true,
+        autoLinkable: true,
+        evidence: [
+          { kind: "MODEL_PICK", rawScore: 0.88, weight: 1, weightedScore: 0.88, modelConfidence: 88, reason: "v.2 renders it \"was\"" },
+          { kind: "STRONGS_PRECEDENT", rawScore: 1, weight: 0.55, weightedScore: 0.55, jointCount: 7, sourceCount: 7 },
+        ],
+        ...overrides,
+      };
+    }
+
+    async function clickAi() {
+      await fireEvent.click(await screen.findByRole("button", { name: /Suggest with AI/ }));
+    }
+
+    it("sends nothing to a provider until the reviewer asks, exactly like the offline pass", async () => {
+      await renderPage("2");
+      // A billed request must never fire because a page opened or a range moved.
+      expect(crossVerseAiPropose).not.toHaveBeenCalled();
+      await clickAi();
+      await waitFor(() => expect(crossVerseAiPropose).toHaveBeenCalledWith("1", ["1", "2", "3-4"]));
+    });
+
+    it("links a pair the AI and the corpus both chose, and records that the AI did it", async () => {
+      crossVerseAiPropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"], proposals: [aiProposal()], corpusProposals: [],
+        calibrationVersion: "cross-verse-ai-uncalibrated-v1", modelConsulted: true,
+      });
+      crossVerseLink.mockResolvedValue(linked());
+      await renderPage("2");
+      await clickAi();
+
+      await waitFor(() => expect(crossVerseLink).toHaveBeenCalledTimes(1));
+      expect(crossVerseLink).toHaveBeenCalledWith(
+        { chapter: "1", verse: "3-4", topId: "H001" },
+        { chapter: "1", verse: "2", bottomId: "T002" },
+        "ai-auto",
+      );
+      expect(await screen.findByText(/Linked 1 pair/)).toBeInTheDocument();
+    });
+
+    it("never links a proposal the corpus does not corroborate, however sure the AI is", async () => {
+      crossVerseAiPropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"],
+        proposals: [aiProposal({ confidence: 0.99, agreesWithCorpus: false, autoLinkable: false, status: "AMBIGUOUS" })],
+        corpusProposals: [], calibrationVersion: "cross-verse-ai-uncalibrated-v1", modelConsulted: true,
+      });
+      await renderPage("2");
+      await clickAi();
+
+      await waitFor(() => expect(screen.getByText("AI only")).toBeInTheDocument());
+      expect(crossVerseLink).not.toHaveBeenCalled();
+    });
+
+    it("shows the AI's own reason, so a reviewer who reads no Greek can check it", async () => {
+      crossVerseAiPropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"],
+        proposals: [aiProposal({ autoLinkable: false, agreesWithCorpus: false })],
+        corpusProposals: [], calibrationVersion: "cross-verse-ai-uncalibrated-v1", modelConsulted: true,
+      });
+      await renderPage("2");
+      await clickAi();
+
+      expect(await screen.findByText(/the AI says: v\.2 renders it "was"/)).toBeInTheDocument();
+    });
+
+    it("keeps the corpus suggestions when the model returned none", async () => {
+      crossVerseAiPropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"], proposals: [], corpusProposals: [proposal()],
+        calibrationVersion: "cross-verse-ai-uncalibrated-v1", modelConsulted: true,
+      });
+      await renderPage("2");
+      await clickAi();
+
+      // Otherwise asking the AI would be strictly worse than not asking.
+      expect(await screen.findByText(/1 suggestion/)).toBeInTheDocument();
+      expect(crossVerseLink).not.toHaveBeenCalled();
+    });
+
+    it("stops at the first refused link rather than half-applying the batch", async () => {
+      crossVerseAiPropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"],
+        proposals: [
+          aiProposal(),
+          aiProposal({ source: { chapter: "1", verse: "3-4", topId: "H002", word: "x", signature: "x", strong: "", lemma: "" } }),
+        ],
+        corpusProposals: [], calibrationVersion: "cross-verse-ai-uncalibrated-v1", modelConsulted: true,
+      });
+      crossVerseLink.mockRejectedValue(new Error("was is already aligned within 1:2."));
+      await renderPage("2");
+      await clickAi();
+
+      await waitFor(() => expect(screen.getByText(/already aligned within 1:2/)).toBeInTheDocument());
+      expect(crossVerseLink).toHaveBeenCalledTimes(1);
+    });
+
+    it("offers no AI button at all when no API key is configured", async () => {
+      getSettings.mockResolvedValue({ hasApiKey: false });
+      await renderPage("2");
+
+      await waitFor(() => expect(screen.getByText(/add an API key in Settings/)).toBeInTheDocument());
+      expect(screen.queryByRole("button", { name: /Suggest with AI/ })).not.toBeInTheDocument();
+      // The offline pass is unaffected: it needs no key and stays the default.
+      expect(screen.getByRole("button", { name: /Suggest links/ })).toBeInTheDocument();
+    });
+
+    it("reports an unavailable provider instead of failing the page", async () => {
+      crossVerseAiPropose.mockResolvedValue({
+        chapter: "1", verses: ["1", "2", "3-4"], proposals: [],
+        calibrationVersion: "cross-verse-ai-uncalibrated-v1",
+        unavailable: { reason: "no-api-key", message: "No OpenAI-compatible API key is configured." },
+      });
+      await renderPage("2");
+      await clickAi();
+
+      expect(await screen.findByText(/No OpenAI-compatible API key is configured/)).toBeInTheDocument();
+      expect(crossVerseLink).not.toHaveBeenCalled();
     });
   });
 });

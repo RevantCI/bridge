@@ -255,7 +255,7 @@ export interface CrossVerseLinkResult {
  *  `weightedScore` are kept apart because every weight is an uncalibrated
  *  placeholder -- see cross_verse_proposals.py's docstring. */
 export interface CrossVerseProposalEvidence {
-  kind: "STRONGS_PRECEDENT" | "SURFACE_PRECEDENT" | "PHONETIC" | "PROXIMITY";
+  kind: "STRONGS_PRECEDENT" | "SURFACE_PRECEDENT" | "PHONETIC" | "PROXIMITY" | "MODEL_PICK";
   rawScore: number;
   weight: number;
   weightedScore: number;
@@ -264,6 +264,11 @@ export interface CrossVerseProposalEvidence {
   sourceCount?: number;
   strongKey?: string;
   sedCost?: number;
+  /** MODEL_PICK only (#146): the model's own 0-100 number, and its one-line
+   *  reason. Recorded as evidence about the model, not as a calibrated score --
+   *  it is deliberately not what gates an automatic link. */
+  modelConfidence?: number;
+  reason?: string;
 }
 
 export interface CrossVerseProposal {
@@ -274,6 +279,11 @@ export interface CrossVerseProposal {
   margin: number;
   /** Another source token's best candidate is this same target word. */
   contested: boolean;
+  /** #146, AI proposals only: the corpus scorer's top candidate is this same
+   *  pair. `autoLinkable` is that agreement AND not contested -- the only thing
+   *  that may be linked without a per-link click. */
+  agreesWithCorpus?: boolean;
+  autoLinkable?: boolean;
   source: {
     chapter: string; verse: string; topId: string;
     word: string; signature: string; strong: string; lemma: string;
@@ -291,6 +301,18 @@ export interface CrossVerseProposalResult {
   corpus?: { versesScanned: number; booksScanned: string[]; totalPairs: number };
   /** Set instead of proposals when the project has nothing to learn from. */
   unavailable?: { reason: string; message: string };
+}
+
+/** `alignment.crossVerse.aiPropose` (#146). Same proposal shape, plus what the
+ *  corpus pass found on its own, so a model that returns nothing still leaves
+ *  the statistical suggestions on screen. */
+export interface CrossVerseAiProposalResult extends CrossVerseProposalResult {
+  /** False when the gaps gave nothing worth a billed request. */
+  modelConsulted?: boolean;
+  /** The menu hit its cap; some gaps were not offered to the model. */
+  truncated?: boolean;
+  corpusProposals?: CrossVerseProposal[];
+  corpusUnavailable?: { reason: string; message: string };
 }
 
 export interface AlignmentContext {

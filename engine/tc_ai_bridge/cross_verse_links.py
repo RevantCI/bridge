@@ -148,11 +148,20 @@ class CrossVerseLinkStore:
         self,
         source_chapter: str | int, source_verse: str | int, source_token: TokenRef,
         target_chapter: str | int, target_verse: str | int, target_token: TokenRef,
+        *, origin: str = "",
     ) -> dict[str, Any]:
         """Record that ``source_token`` (of verse A) is realized by ``target_token`` (of verse B).
 
         Re-linking an ``invalid`` pair reactivates it; re-linking an ``active``
         pair is refused, so a double drop cannot write two events.
+
+        ``origin`` records what produced the link -- ``"ai-auto"`` for one an
+        agreed model proposal applied without a per-link click (#146). It rides
+        on the ``change_log`` event only, never on the row: the *fact* recorded
+        is identical however it was reached, and a row column would be a schema
+        bump for something only the audit trail needs. The event is append-only
+        and can never be edited, which is exactly the property "who decided
+        this?" wants.
         """
         source = _end(source_chapter, source_verse, source_token, source=True)
         target = _end(target_chapter, target_verse, target_token, source=False)
@@ -178,7 +187,10 @@ class CrossVerseLinkStore:
             "actorId": self._identity.actor_id,
         }
         self._write_row(payload)
-        self._event(row_id, "crossVerseLink", payload)
+        self._event(
+            row_id, "crossVerseLink",
+            {**payload, "origin": origin} if origin else payload,
+        )
         self._history(source["chapter"], source["verse"], "crossVerseLink", payload)
         return payload
 

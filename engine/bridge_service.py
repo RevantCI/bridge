@@ -87,11 +87,11 @@ from tc_ai_bridge.models import QAIssue, TokenRef, VerseAlignment
 from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.workspace_repository import WorkspaceRepository, project_path_key
 from tc_ai_bridge.resource_materializer import materialize_book_checks
-from tc_ai_bridge.usfm import whitespace_tokens
+from tc_ai_bridge.usfm import strip_usfm, whitespace_tokens
 from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_gaps
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
-from tc_ai_bridge import cross_verse_proposals
+from tc_ai_bridge import cross_verse_proposals, cross_verse_ai_proposals
 from tc_ai_bridge.reporting import ReportService
 from tc_ai_bridge.qa_report import (
     aggregate_qa_report,
@@ -326,6 +326,7 @@ class Methods:
     ALIGNMENT_GET_RANGE = "alignment.getRange"
     ALIGNMENT_GAP_SCAN = "alignment.gapScan"
     ALIGNMENT_CROSS_VERSE_PROPOSE = "alignment.crossVerse.propose"
+    ALIGNMENT_CROSS_VERSE_AI_PROPOSE = "alignment.crossVerse.aiPropose"
     ALIGNMENT_CROSS_VERSE_LINK = "alignment.crossVerse.link"
     ALIGNMENT_CROSS_VERSE_UNLINK = "alignment.crossVerse.unlink"
     ALIGNMENT_STATUS = "alignment.status"
@@ -1788,6 +1789,132 @@ class BridgeEngine:
         result["verses"] = wanted
         return result
 
+    def _cross_verse_gloss_table(self, gaps_by_verse: dict[str, Any]) -> dict[str, str]:
+        """One short English gloss per distinct Strong's number in the source gaps.
+
+        A model asked to judge whether a Tamil word realizes `θεοῦ` does far better
+        told that it means "God"; the reviewer reading the reason back needs the
+        same. Keyed on Strong's and resolved once per number, because a range
+        routinely repeats one.
+        """
+        glosses: dict[str, str] = {}
+        for entry in gaps_by_verse.values():
+            for token in entry.get("sourceGaps", ()):
+                strong = str(token.get("strong") or "")
+                if not strong or strong in glosses:
+                    continue
+                try:
+                    glosses[strong] = self._gloss_for_strong(strong, str(token.get("morph") or ""))
+                except Exception:
+                    # A missing gloss weakens the prompt; it must never fail the
+                    # request. The lexicon is a bundled convenience, not a source
+                    # of truth about the alignment.
+                    glosses[strong] = ""
+        return glosses
+
+    def _gloss_for_strong(self, strong: str, morph: str) -> str:
+        """A short English gloss for one (possibly compound) Strong's value.
+
+        Language normally comes from the morph code, but a token can reach here
+        without one -- older alignment data, and any producer that writes `strong`
+        without `x-morph`. The H/G prefix still says which lexicon to read, so
+        fall back to it rather than silently returning nothing: a prompt that
+        says `θεοῦ` and a prompt that says `θεοῦ (God)` are not the same prompt.
+        """
+        language_id, _ = decode_morph(morph)
+        parts = [part for part in strong.split(":") if part]
+        glosses: list[str] = []
+        for part in parts:
+            language = language_id or ("hbo" if part[:1].upper() == "H" else "el-x-koine")
+            entry = lexicon_entry_for_strong(part, language)
+            if not entry:
+                prefix = HEBREW_PREFIX_LABELS.get(part) if language == "hbo" else None
+                if prefix:
+                    glosses.append(prefix)
+                continue
+            # `usage` (what the KJV rendered it as) over `meaning` (the dictionary
+            # definition), for the same reason the alignment labels prefer it
+            # (#145): a translator wants the renderings, not the definition.
+            text = str(entry.get("usage") or entry.get("meaning") or "").strip()
+            if text:
+                glosses.append(text)
+        return "; ".join(glosses)[:160]
+
+    def ai_propose_cross_verse(self, chapter: str, verses: list[str]) -> dict[str, Any]:
+        """alignment.crossVerse.aiPropose: the same question as
+        `alignment.crossVerse.propose`, asked of a model as well (#146).
+
+        Read-only, exactly like its offline sibling: this returns proposals and
+        writes nothing. A link is still written only by
+        `alignment.crossVerse.link`, whether the reviewer clicked Accept or the
+        caller is applying a proposal this marked `autoLinkable`.
+
+        `autoLinkable` is set only where the model's pick and the offline
+        scorer's top candidate are the same uncontested pair, so the automatic
+        write rests on two independent methods agreeing -- never on the model's
+        own confidence, which is as uncalibrated as everything else in this
+        pipeline.
+
+        Returns a structured `unavailable` rather than raising when no API key is
+        configured, the shape `start_triage` established: an offline project is a
+        supported state, not an error the reviewer has to dismiss.
+        """
+        self._require_project()
+        chapter = str(chapter)
+        if not isinstance(verses, list) or not verses:
+            raise ProjectError("A cross-verse AI proposal needs at least one verse.")
+        try:
+            client = self._ai_client()
+        except AIError as exc:
+            return {
+                "chapter": chapter, "verses": [str(v) for v in verses], "proposals": [],
+                "calibrationVersion": cross_verse_ai_proposals.AI_PROPOSAL_CALIBRATION_VERSION,
+                "unavailable": {"reason": "no-api-key", "message": str(exc)},
+            }
+
+        # The offline pass first: it is the other half of the agreement gate, and
+        # it is also what makes a disagreement visible rather than invisible.
+        offline = self.propose_cross_verse(chapter, verses)
+        wanted = [str(verse) for verse in offline.get("verses", verses)]
+        scan = self.gap_scan(chapter)
+        gaps_by_verse = {
+            str(entry["verse"]): entry for entry in scan.get("verses", ())
+            if str(entry["verse"]) in set(wanted) and entry.get("readable")
+        }
+        verse_texts: dict[str, str] = {}
+        for verse in gaps_by_verse:
+            try:
+                verse_texts[verse] = strip_usfm(self.project.target_verse_text(chapter, verse))
+            except Exception:
+                verse_texts[verse] = ""
+
+        def call_model(instructions: str, input_text: str) -> dict[str, Any]:
+            return client.propose_cross_verse_links(
+                instructions, input_text, cross_verse_ai_proposals.LINK_SCHEMA,
+            )
+
+        result = cross_verse_ai_proposals.propose_with_model(
+            gaps_by_verse, offline, call_model,
+            chapter=chapter,
+            verse_order=[str(v) for v in self.project.verses(chapter)],
+            verse_texts=verse_texts,
+            glosses=self._cross_verse_gloss_table(gaps_by_verse),
+            error=AIError,
+        )
+        if result.get("modelConsulted"):
+            usage = getattr(client, "last_usage", None)
+            self.settings.record_ai_usage(
+                getattr(usage, "total_tokens", 0) or 0, getattr(client, "last_cost_usd", 0.0) or 0.0,
+            )
+        result["chapter"] = chapter
+        result["verses"] = wanted
+        # The offline pass's own proposals are returned alongside, so the strip can
+        # show what statistics alone found even when the model returned nothing.
+        result["corpusProposals"] = offline.get("proposals", [])
+        if offline.get("unavailable"):
+            result["corpusUnavailable"] = offline["unavailable"]
+        return result
+
     def _cross_verse_annotations(self, chapter: str, verse: str, inventory) -> dict[str, Any]:
         """Links touching one verse, with this verse's positional ids resolved
         from the stored signatures (ids are never persisted, #117)."""
@@ -1836,7 +1963,7 @@ class BridgeEngine:
             "target": self._alignment_context(target["chapter"], target["verse"]),
         }
 
-    def link_cross_verse(self, source: Any, target: Any) -> dict[str, Any]:
+    def link_cross_verse(self, source: Any, target: Any, origin: str = "") -> dict[str, Any]:
         """Record that a source token of one verse is realized by a target word
         of another verse (#117). Refused when either token is already aligned
         within its own verse, when both ends are the same verse (that is what
@@ -1876,6 +2003,7 @@ class BridgeEngine:
             )
         link = self.project.cross_verse_links.link(
             s_chapter, s_verse, s_token, t_chapter, t_verse, t_token,
+            origin=str(origin or ""),
         )
         return self._cross_verse_result(link)
 
@@ -4017,9 +4145,13 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.propose_cross_verse(
                     p["chapter"], p.get("verses", []),
                 ))
+            if m == Methods.ALIGNMENT_CROSS_VERSE_AI_PROPOSE:
+                return EngineResponse.ok(request.id, result=self.ai_propose_cross_verse(
+                    p["chapter"], p.get("verses", []),
+                ))
             if m == Methods.ALIGNMENT_CROSS_VERSE_LINK:
                 return EngineResponse.ok(request.id, result=self.link_cross_verse(
-                    p.get("source"), p.get("target"),
+                    p.get("source"), p.get("target"), p.get("origin", ""),
                 ))
             if m == Methods.ALIGNMENT_CROSS_VERSE_UNLINK:
                 return EngineResponse.ok(request.id, result=self.unlink_cross_verse(

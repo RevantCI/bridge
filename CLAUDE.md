@@ -126,6 +126,16 @@ Greek Room says "this is objectively suspicious," AI (when wired up) says
 "here's what it may mean," the human decides. Nothing auto-applies to
 project files — every finding carries an explicit review `status`.
 
+The one thing that now applies without a per-item click is a **cross-verse
+link** (#146), and the boundary is worth stating precisely because it is the
+boundary: a cross-verse link is a Bridge-private workbench row, not a project
+file — `alignmentData/` is untouched, unlink is ordinary, and the write is
+journalled to the append-only `change_log` with `origin: "ai-auto"`. It happens
+only where an LLM proposal and the offline corpus scorer independently choose the
+same uncontested pair, and only on an explicit "Suggest with AI" click. Two
+methods agreeing is the gate; a confidence threshold on one number is still not,
+anywhere. Nothing about Scripture, tC alignment data or findings changed.
+
 ### Two different vendoring shapes for the same upstream repo
 
 Both the USFM structural checker (`engine/vendor/greekroom-usfm/`) and
@@ -537,7 +547,11 @@ raise it as a question in the issue rather than deciding it in a commit:
 - Anything that adds a server, an account, a login, or a network round-trip on a
   runtime path a translator hits
 - Re-baselining either golden
-- Changing the confidence thresholds or the auto-apply behaviour
+- Changing the confidence thresholds or the auto-apply behaviour. Still on this
+  list after #146: that decision was taken once, for cross-verse links only, on
+  an agreement-between-two-methods gate. Widening it — to Scripture, to tC
+  alignment data, to findings, or to any single-score threshold — is a fresh
+  question, not a precedent already set
 - A second Scripture writer, or an alternative path for applying corrections to
   the text — Stage 9B.3b's authorized write behind an explicit human confirmation
   is deliberately the only one

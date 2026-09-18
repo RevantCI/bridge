@@ -305,6 +305,22 @@ class OpenAIResponsesClient:
         """One AI-triage batch. Returns raw output text for the caller to parse."""
         return self._post_text(instructions, input_text, 'finding_triage', self.TRIAGE_SCHEMA)
 
+    def propose_cross_verse_links(
+        self, instructions: str, input_text: str, schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        """One cross-verse link proposal batch (#146).
+
+        Deliberately thin, and the prompt and schema come from the caller: the
+        domain knowledge -- which ids the model may use, why a same-verse pair is
+        meaningless, what gates an automatic link -- belongs with the proposal
+        logic in `cross_verse_ai_proposals.py`, not in the transport. Same split
+        as `triage_batch`. Structured rather than raw text because, unlike triage,
+        every field here is resolved back against a Bridge-built id table, so a
+        provider that ignores the schema should fail loudly rather than be parsed
+        defensively into a guess.
+        """
+        return self._post_structured(instructions, input_text, 'cross_verse_links', schema)
+
     def test_connection(self) -> dict[str, Any]:
         """Authenticate the API key and confirm the configured model is accessible without generating tokens."""
         url = f'{self.models_endpoint}/{urllib.parse.quote(self.model, safe="")}'

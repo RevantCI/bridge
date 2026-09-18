@@ -139,8 +139,39 @@ verse distance orders the candidates but never settles them, and two source
 tokens whose best candidate is the same target word are both reported contested.
 
 **Nothing here writes.** Accepting a suggestion is an ordinary
-`alignment.crossVerse.link` call made by the reviewer, so there is no second
-writer and no confidence at which a link appears on its own.
+`alignment.crossVerse.link` call, and that remains the only writer.
+
+### Asking a model as well (#146)
+
+`alignment.crossVerse.aiPropose` puts the same question to the configured
+OpenAI-compatible provider. It exists for the limit named above: a book with no
+completed verses teaches the corpus table nothing, and that is exactly where a
+reviewer most needs a suggestion.
+
+- **The model picks from a closed menu.** It is handed opaque `S1`/`T1` handles
+  for the gap tokens only — never Bridge's own positional ids, never the verse's
+  full inventory — plus each verse's translation and a gloss for each source
+  word. Every id in the reply is resolved back through that table and an unknown
+  one is an `AIError`, so the model cannot invent a word; it can only mis-pick
+  from a list Bridge wrote. Same discipline as `run_full_review`'s evidence ids.
+- **`autoLinkable` is agreement, not confidence.** A proposal may be linked
+  without a per-link click only where the model's pick and
+  `cross_verse_proposals`' top candidate are the same uncontested pair. The
+  model's own 0–100 number is recorded as evidence about the model and is
+  deliberately not the gate — it is as uncalibrated as everything else here. On a
+  cold-start book the corpus proposes nothing, so nothing is auto-linkable there:
+  the model adds suggestions where it has no corroboration, not writes.
+- **Still one writer, still click-only.** The proposer writes nothing; the caller
+  applies an agreed proposal through the same `alignment.crossVerse.link`, with
+  `origin: "ai-auto"` on the append-only `change_log` event so the audit trail can
+  say what chose it. No request is ever sent because a page opened or a range
+  changed.
+- **Optional.** With no API key the method returns a structured `unavailable` and
+  the offline path is untouched — the offline invariant holds.
+
+Unmeasured, and worth knowing: per #131 no Bridge AI path has ever been sent a
+real request, so prompt quality and the agreement-gate hit rate are unknown until
+a real-key run is done and recorded.
 
 ## Aligned USFM
 

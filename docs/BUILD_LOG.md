@@ -9424,3 +9424,133 @@ make.
 
 Gates after the amendment: `npm run check` 0/0, `npm run test` **453 passed**
 (34 files), `npm run build` clean. Still not seen in the real desktop app.
+
+## 2026-09-18 — Asking a model for cross-verse links, gated on agreement (#146)
+
+Cross-verse Suggest (#139) learns from this project's own completed alignments,
+so on a book nobody has finished it returns `no-completed-alignments` and helps
+least where the work is hardest. The maintainer asked for an OpenAI-backed
+proposer that could also link automatically on the click.
+
+### The decision this reverses, stated plainly
+
+#23 (extend AI auto-align) was closed 2026-09-16 and #109 — still open —
+proposes deleting the existing AI alignment path. `cross_verse_proposals.py` and
+`docs/ALIGNMENT.md` both asserted there was no cross-verse auto-apply at any
+confidence. The maintainer reversed that on 2026-09-18. All three documents were
+corrected in the same commit rather than left contradicting the code, and
+CLAUDE.md's stop-and-ask entry now says explicitly that this was decided once,
+narrowly, and is not a precedent for widening.
+
+What the reversal does **not** touch, checked rather than assumed: a cross-verse
+link is a Bridge-private workbench row. `test_alignment_cross_verse.py:87` already
+asserts `alignmentData/` is untouched, unlink is ordinary, and the write is
+journalled to an append-only `change_log`. CLAUDE.md's rule is about *project
+files*, and this is not one.
+
+### What was already there, found by reading rather than assuming
+
+Most of this feature turned out to be plumbing that already existed:
+
+- `OpenAIResponsesClient` is the only provider and *is* OpenAI-shaped —
+  Responses API, strict `json_schema`, `Bearer` auth, stdlib `urllib`, a
+  `base_url` override for Azure/Ollama/proxies, DPAPI-wrapped key with an
+  `OPENAI_API_KEY` env override. Settings already exposes provider, base URL,
+  model and key.
+- `alignment.aiPropose`/`aiApplyProposal` are a complete, tested propose→apply
+  pair for *in-verse* alignment with no UI caller at all, and `AUTO_LINK_THRESHOLD
+  = 0.72` is live on that path — `test_ai_review_auto_align.py` shows AI review
+  already auto-applies gap-fill proposals. So auto-apply was never unprecedented
+  in Bridge; the "deliberately not revived" note was about the cross-verse
+  proposer specifically. Worth knowing before quoting it as a global rule.
+- The structured-`unavailable` shape from `start_triage` is the canonical way to
+  say "no key", and is what this uses.
+
+### Three rules, and why each is load-bearing
+
+**The model picks from a closed menu.** It gets opaque `S1`/`T1` handles for the
+gap tokens only — never the positional ids, which are meaningless outside one
+load and would invite a confident reply pointing at the wrong token. Every id in
+the reply is resolved back through the handle table; an unknown one raises rather
+than being skipped, because a model returning ids Bridge never sent means the
+prompt or the provider is wrong and dropping it silently would hide that forever.
+The model cannot invent a word; the worst it can do is mis-pick from a list
+Bridge wrote. Same discipline as `run_full_review`'s evidence ids.
+
+**`autoLinkable` is agreement, never confidence.** The gate is: the model's pick
+and `cross_verse_proposals`' top candidate are the same pair, and it is
+uncontested. Two methods scoring by unrelated evidence reaching the same answer.
+Thresholding the model's self-reported number instead was considered and rejected
+— it would be a second uncalibrated number stacked on the first
+(`cross-verse-uncalibrated-v1`), against a provider that has never been measured.
+A useful consequence falls out for free: on a cold-start book the corpus proposes
+nothing, so **nothing is auto-linkable there**, which is exactly the case with no
+corroboration.
+
+**Still one writer.** The proposer writes nothing —
+`test_ai_proposing_writes_nothing` byte-compares the chapter JSON, mirroring
+#139's own guarantee. The caller applies an agreed proposal through the ordinary
+`alignment.crossVerse.link`.
+
+### Details worth recording
+
+- **Provenance needed no schema bump.** `workbench.append_event` takes an
+  arbitrary payload dict, so `origin: "ai-auto"` rides on the `change_log` event.
+  Deliberately not on the row: the *fact* recorded is identical however it was
+  reached, and the append-only event is precisely where "who decided this?"
+  belongs. Same move CLAUDE.md records for check-selection provenance.
+- **A new RPC needed a Rust change after all.** Since #115 a new method is an
+  engine handler plus a TS union member — but `request_timeout_seconds` in
+  `sidecar.rs` still keys on the method name, and the default is 30s. A provider
+  call at 30s would die mid-request. `alignment.crossVerse.aiPropose` joins the
+  260s class; its offline sibling must stay at 30s, and the two differ only by a
+  suffix, so there is a `cargo test` asserting both.
+- **A separate method, not a flag**, for that reason: one timeout key cannot
+  serve an interactive local call and a provider round trip.
+- **The gloss needed a fallback.** Language for a lexicon lookup comes from the
+  morph code, but a source token can carry `strong` with no `x-morph` — the test
+  fixture does, and so does older alignment data. `_gloss_for_strong` falls back
+  to the H/G prefix. Found by a test failing for the right reason: without it the
+  prompt says `θεοῦ` where it could say `θεοῦ (God)`.
+- **Nothing to ask about spends no request.** A range whose verses are fully
+  aligned has an empty menu; billing a round trip to be told so is waste.
+
+### Known unmeasured
+
+Per #131 / QA matrix D12, **no Bridge AI path has ever been sent a real request**.
+Every test here uses the `ai_transport` fake. The plumbing is proven; prompt
+quality, verdict spread and the agreement-gate hit rate are not, and will not be
+until a real-key run over a real book is done and recorded. The cost model says
+~2.0k input / ~600 output tokens per click, ≈ $0.028 at `gpt-5.6` — also
+unverified against a real bill.
+
+Adjacent, filed not fixed: `model_router.estimate_cost` falls back to
+`gpt-5.6-sol` (the priciest tier) for any unrecognised model, so the lifetime
+usage counter over-reports ~25× on e.g. `gpt-4o-mini`; `ModelRouter` and
+`OpenAIResponsesClient.test_connection()` are dead code.
+
+### Gates
+
+Frontend `npm run check` 0/0, `npm run test` **461 passed** (34 files; 8 new in
+`CrossVerseAlignmentModal.test.ts`), `npm run build` clean.
+Rust `cargo check` and `cargo test` — **10 passed**, including the new timeout
+assertion.
+Engine `pytest -n auto` — **1287 passed**, 12 of them new in
+`tests/alignment/test_cross_verse_ai_proposals.py`.
+
+The first engine run came back 1275 passed / 12 failed, all in
+`tests/semantic/test_semantic_mapping_stage3.py` with `Semantic source database
+...`. That is the known fresh-worktree gap, not a regression: the 119 MB Stage 3
+SQLite, the two sidecar exes and `src-tauri/resources` are git-ignored, so a new
+worktree needs them copied in before the gates mean anything. With the database
+in place the same 21 tests pass in 0.68 s. `cargo check` fails the same way and
+for the same reason (`resource path ... doesn't exist`) until the binaries and
+resources are copied — worth knowing before reading either failure as real.
+
+### Not done
+
+No real-provider run (#131 covers it). No chapter-wide job: one click is one
+range, deliberately, until the verdict quality above is known. Dismissals are
+still session-local (#140). Not seen in the real desktop app — jsdom does not lay
+out or paint, so the AI button, the "both agree" / "AI only" badges and the
+auto-link notice are verified as structure only.

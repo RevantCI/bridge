@@ -142,9 +142,15 @@ fn request_timeout_seconds(method: &str) -> u64 {
         "verse.runChecks" => 150,
         // A single call to an OpenAI-compatible endpoint: ai_client.py's own HTTP
         // timeout is 240s (with retries on transient 5xx/429).
-        "alignment.aiPropose" | "correction.createProposal" | "correction.regenerateProposal" => {
-            260
-        }
+        //
+        // alignment.crossVerse.aiPropose (#146) runs the offline gap scan and
+        // corpus pass first and then makes one such call, so it belongs to this
+        // class and not to its interactive sibling alignment.crossVerse.propose,
+        // which must keep the default 30s.
+        "alignment.aiPropose"
+        | "alignment.crossVerse.aiPropose"
+        | "correction.createProposal"
+        | "correction.regenerateProposal" => 260,
         // A whole-Bible report payload (tens of thousands of rows) takes a
         // while to serialize and ship over stdio; the export writes it
         // back out. report.status/report.cancel stay interactive.
@@ -520,6 +526,16 @@ mod tests {
         assert_eq!(request_timeout_seconds("project.open"), 180);
         assert_eq!(request_timeout_seconds("project.import"), 300);
         assert_eq!(request_timeout_seconds("ping"), 30);
+    }
+
+    #[test]
+    fn a_provider_call_gets_headroom_while_its_offline_sibling_stays_interactive() {
+        // #146: the two cross-verse proposers differ only by a suffix, and
+        // getting them the wrong way round is silent -- the AI one would die at
+        // 30s mid-request, the offline one would hang the UI for four minutes.
+        assert_eq!(request_timeout_seconds("alignment.crossVerse.aiPropose"), 260);
+        assert_eq!(request_timeout_seconds("alignment.crossVerse.propose"), 30);
+        assert_eq!(request_timeout_seconds("alignment.crossVerse.link"), 30);
     }
 
     #[test]

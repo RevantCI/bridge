@@ -7,6 +7,7 @@ import type {
   AlignmentRange,
   AlignmentStatusResponse,
   CrossVerseLinkResult,
+  CrossVerseAiProposalResult,
   CrossVerseProposalResult,
   BookProgressEntry,
   CheckJobSnapshot,
@@ -170,6 +171,7 @@ export type EngineMethod =
   | "ai.review.status"
   | "alignment.aiApplyProposal"
   | "alignment.aiPropose"
+  | "alignment.crossVerse.aiPropose"
   | "alignment.crossVerse.link"
   | "alignment.crossVerse.propose"
   | "alignment.crossVerse.unlink"
@@ -516,13 +518,23 @@ export const bridge = {
     return call("alignment.crossVerse.propose", { chapter, verses });
   },
 
+  /** The same question asked of a model as well (#146). Still read-only: a
+   *  proposal marked `autoLinkable` is applied by the caller through the same
+   *  crossVerseLink below, so there is only ever one writer. */
+  crossVerseAiPropose(chapter: string, verses: string[]): Promise<CrossVerseAiProposalResult> {
+    return call("alignment.crossVerse.aiPropose", { chapter, verses });
+  },
+
   /** Bridge-private cross-verse link (#117): nothing in alignmentData changes.
-   *  Ids are this load's positional ids; the engine stores signatures. */
+   *  Ids are this load's positional ids; the engine stores signatures.
+   *  `origin` records what produced the link on the append-only change_log
+   *  event ("ai-auto" for an agreed proposal applied without a click, #146). */
   crossVerseLink(
     source: { chapter: string; verse: string; topId: string },
     target: { chapter: string; verse: string; bottomId: string },
+    origin = "",
   ): Promise<CrossVerseLinkResult> {
-    return call("alignment.crossVerse.link", { source, target });
+    return call("alignment.crossVerse.link", { source, target, origin });
   },
 
   crossVerseUnlink(linkId: string): Promise<CrossVerseLinkResult> {

@@ -27,10 +27,22 @@ this source word as that target word", which is exactly the relation a
 paraphrase redistributes across verses.
 
 **Nothing here writes anything.** These are proposals; a link is written only
-when a human accepts one, through the existing `alignment.crossVerse.link`
-(#117). There is no auto-apply at any confidence, deliberately -- see CLAUDE.md's
-stop-and-ask list, and `alignment_reliability.AUTO_LINK_THRESHOLD`, the
-AI-auto-align pattern this does not revive.
+through `alignment.crossVerse.link` (#117), the one writer.
+
+**Nothing *this module* produces is ever applied without a click**, at any
+confidence. That is deliberate and unchanged: a single uncalibrated score
+(see below) is not a thing to write on.
+
+What did change, in #146: `cross_verse_ai_proposals.py` may mark a proposal
+`autoLinkable`, and the caller may then link it without a per-link click. It can
+only do so where the model's pick and *this* module's top candidate are the same
+uncontested pair -- two methods, scoring by unrelated evidence, reaching the same
+answer. This module is one half of that gate and is unaware of the other; it
+neither knows nor cares whether a model agreed. The maintainer took that decision
+on 2026-09-18, reversing the position recorded here and in #23; the earlier note
+that `alignment_reliability.AUTO_LINK_THRESHOLD`'s pattern would never be revived
+no longer holds, and the difference worth keeping is that the gate is agreement
+between methods rather than a threshold on one number.
 
 **The numbers below are uncalibrated.** Every weight and cut-off is a starting
 placeholder, in the same sense as `MEANING_CALIBRATION_VERSION`'s

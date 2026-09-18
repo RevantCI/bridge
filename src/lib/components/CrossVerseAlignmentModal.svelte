@@ -68,6 +68,12 @@
   let proposalError = "";
   let proposalsUnavailable = "";
   let suggestionsShown = false;
+  /** #146. `aiAvailable` is undefined until settings load, so the button reads
+   *  "checking" rather than flickering from disabled to enabled. */
+  let aiAvailable: boolean | undefined = undefined;
+  let aiUsed = false;
+  let aiTruncated = false;
+  let autoLinked = 0;
   let dismissed = new Set<string>();
   /** The selection the current proposals were computed for, so a widened range
    *  is reported as stale rather than silently showing yesterday's answer. */
@@ -106,6 +112,16 @@
 
   onMount(() => drag.attach(window));
   onMount(() => { void loadThenSuggest(); });
+  // Whether an AI proposal is even offered is a settings question, not a project
+  // one, and a failure here must leave the offline path untouched -- so it is its
+  // own mount, and a throw just means "no AI button".
+  onMount(async () => {
+    try {
+      aiAvailable = Boolean((await bridge.getSettings())?.hasApiKey);
+    } catch {
+      aiAvailable = false;
+    }
+  });
 
   /** Load the range, then widen it with the last analysis's cross-verse
    *  verses if the page was opened on the default range. The suggestion is
@@ -177,6 +193,69 @@
     }
   }
 
+  /** The same question asked of a model as well (#146), and then the agreed
+   *  proposals linked without a further click.
+   *
+   *  Three things this deliberately keeps from the offline path: it is still
+   *  click-only (a billed request must never fire because a range changed), it
+   *  still writes through the ordinary `crossVerseLink`, and a refused link
+   *  still surfaces rather than being swallowed. What it adds is that a proposal
+   *  the model and the corpus scorer *both* chose, uncontested, is applied for
+   *  you -- two independent methods agreeing, never the model's own confidence.
+   */
+  async function loadAiProposals() {
+    if (proposalsBusy) return;
+    proposalsBusy = true;
+    proposalError = "";
+    autoLinked = 0;
+    try {
+      const wanted = [...selection];
+      const result = await bridge.crossVerseAiPropose(chapter, wanted);
+      proposalsFor = wanted;
+      suggestionsShown = true;
+      aiUsed = true;
+      if (result.unavailable) {
+        proposalsUnavailable = result.unavailable.message;
+        proposals = [];
+        return;
+      }
+      // A model that returned nothing must not wipe out what statistics found.
+      const corpusOnly = (result.corpusProposals ?? []).filter(
+        (item) => !result.proposals.some(
+          (p) => p.source.verse === item.source.verse && p.source.topId === item.source.topId,
+        ),
+      );
+      proposals = [...result.proposals, ...corpusOnly];
+      proposalsUnavailable = result.proposals.length ? "" : (result.corpusUnavailable?.message ?? "");
+      aiTruncated = Boolean(result.truncated);
+
+      const gated = result.proposals.filter((item) => item.autoLinkable);
+      for (const item of gated) {
+        await mutateCross(
+          () => bridge.crossVerseLink(
+            { chapter, verse: item.source.verse, topId: item.source.topId },
+            { chapter, verse: item.target.verse, bottomId: item.target.bottomId },
+            "ai-auto",
+          ),
+          "",
+        );
+        // Stop at the first refusal rather than pressing on: the later links in
+        // the batch were computed against the state before it, and a run that
+        // half-applied while showing one error is the worst of both.
+        if (error) break;
+        autoLinked += 1;
+        dismissed = new Set([...dismissed, proposalKey(item)]);
+      }
+      if (autoLinked > 0) {
+        notice = `Linked ${autoLinked} ${autoLinked === 1 ? "pair" : "pairs"} the AI and this project's own completed alignments both chose. Undo any with ×.`;
+      }
+    } catch (value) {
+      proposalError = value instanceof Error ? value.message : String(value);
+    } finally {
+      proposalsBusy = false;
+    }
+  }
+
   function proposalKey(proposal: CrossVerseProposal): string {
     const { source, target } = proposal;
     return `${source.verse}|${source.topId}|${target.verse}|${target.bottomId}`;
@@ -221,6 +300,11 @@
       } else if (item.kind === "PROXIMITY") {
         // rawScore is 1/distance, so only 1 means the verse next door.
         parts.push(item.rawScore === 1 ? "the verse next door" : "a nearby verse");
+      } else if (item.kind === "MODEL_PICK") {
+        // The model's own sentence, verbatim. It is the only evidence line a
+        // reviewer who reads neither original language can check for themselves,
+        // so it leads -- and it is attributed, never presented as a measurement.
+        parts.unshift(item.reason ? `the AI says: ${item.reason}` : "the AI picked this pairing");
       }
     }
     return parts.join(" · ");
@@ -288,10 +372,15 @@
       const findings = await bridge.runVerseChecks(chapter, v, ["alignment", "greekroom"]);
       findingsByVerse.update((values) => ({ ...values, [key]: findings }));
       checkStatusByVerse.update((values) => ({ ...values, [key]: "succeeded" }));
-      notice = `${message} Local and Greek Room checks for ${chapter}:${v} are current.`;
+      // `message` is empty when the caller reports its own aggregate result
+      // (the AI auto-link batch, #146), so join rather than interpolate --
+      // otherwise every notice starts with a stray space.
+      notice = [message, `Local and Greek Room checks for ${chapter}:${v} are current.`]
+        .filter(Boolean).join(" ");
     } catch (value) {
       checkStatusByVerse.update((values) => ({ ...values, [key]: "failed" }));
-      error = `${message} The save succeeded, but rechecking failed: ${value instanceof Error ? value.message : String(value)}`;
+      error = [message, `The save succeeded, but rechecking failed: ${value instanceof Error ? value.message : String(value)}`]
+        .filter(Boolean).join(" ");
     }
   }
 
@@ -516,8 +605,28 @@
             {#if proposalsBusy}<span class="spin" />{/if}
             {suggestionsShown ? "Suggest again" : "Suggest links"}
           </button>
+          {#if aiAvailable !== false}
+            <button
+              type="button"
+              class="ai"
+              on:click={loadAiProposals}
+              disabled={proposalsBusy || busy || loading || aiAvailable === undefined}
+              title={aiAvailable === undefined
+                ? "Checking whether an AI provider is configured…"
+                : "Ask the configured AI provider as well, and link the pairs it and this project's own completed alignments both choose. Sends this range's unaligned words to your provider."}
+            >
+              {#if proposalsBusy && aiUsed}<span class="spin" />{/if}
+              Suggest with AI
+            </button>
+          {/if}
           <small>
-            learned from this project's own completed alignments · nothing is linked until you accept
+            {#if aiAvailable === false}
+              learned from this project's own completed alignments · nothing is linked until you accept ·
+              <span class="ai-off">add an API key in Settings to also ask an AI</span>
+            {:else}
+              learned from this project's own completed alignments · nothing is linked until you accept,
+              except pairs the AI and the corpus both choose
+            {/if}
           </small>
           {#if suggestionsShown && !proposalsBusy}
             <span class="suggest-count">
@@ -526,6 +635,12 @@
           {/if}
         </div>
         {#if proposalError}<div class="error">{proposalError}</div>{/if}
+        {#if aiTruncated}
+          <p class="empty">
+            This range had more gaps than one AI request covers, so only the first of them were
+            offered. Narrow the range to reach the rest.
+          </p>
+        {/if}
         {#if proposalsStale}
           <p class="empty">The range changed since these were worked out — suggest again.</p>
         {/if}
@@ -544,6 +659,11 @@
                   <span aria-hidden="true">→</span>
                   <span class="word">{proposal.target.word}</span>
                   <small>{chapter}:{proposal.target.verse}</small>
+                  {#if proposal.agreesWithCorpus}
+                    <span class="status agreed" title="The AI and this project's own completed alignments picked the same pair.">both agree</span>
+                  {:else if proposal.evidence.some((item) => item.kind === "MODEL_PICK")}
+                    <span class="status ai-only" title="The AI picked this; this project's completed alignments do not corroborate it. Check it before accepting.">AI only</span>
+                  {/if}
                   {#if proposal.status === "AMBIGUOUS"}
                     <span class="status partial" title={proposal.contested
                       ? "Another source word's best candidate is this same target word."
@@ -788,6 +908,13 @@
   .suggest-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-3); }
   .suggest-head .spin { margin-right: 4px; }
   .suggest-count { color: var(--accent); font-weight: 700; }
+  /* #146. The AI button sits beside the offline one rather than replacing it:
+     the corpus pass costs nothing and works with no key, so it stays the
+     default action and this is the deliberate, billed second choice. */
+  .suggest-head .ai { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .ai-off { color: var(--text-3); }
+  .status.agreed { color: var(--success); background: #EAF7EF; }
+  .status.ai-only { color: var(--accent); background: var(--accent-bg); }
   .proposals { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 6px; }
   .proposal { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 9px; padding: 6px 10px; background: var(--surface-2); }
   .proposal.ambiguous { border-left-color: var(--warning); }
