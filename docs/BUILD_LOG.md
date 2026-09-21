@@ -9662,3 +9662,32 @@ Neither change has been seen in the real desktop app. jsdom does not lay out or
 paint, so the wrap in particular needs a visual check at 1366x768 — including
 that `dir="rtl"` fills each line right-to-left with lines stacking downward, and
 that a drop onto a column on the second line works.
+
+## 2026-09-21 — full-app manual QA plan (#150) and SRS baseline (#168)
+
+The release matrix had broad manual rows but no reusable, step-by-step full-app
+execution artifact. `FULL_APP_MANUAL_QA_CHECKLIST.md` now supplies one: 241
+stable test-case IDs across preparation/smoke and 16 functional categories,
+with P0/P1/P2 priority, concrete expected outcomes, evidence/defect handling,
+and release sign-off. The matrix links to it without rewriting any historical
+PASS or NOT RUN evidence.
+
+GitHub issue #150 is the master run. Issues #151–#167 are native sub-issues for
+preparation/smoke and each functional category; every child repeats its own
+steps, category checkboxes, evidence instructions, and completion gate. The 18
+items are Todo on Project 6's `QA` board view, filtered by `manual_testing`.
+
+`SOFTWARE_REQUIREMENTS_SPECIFICATION.md` establishes an as-built 0.12.0 SRS at
+commit `c8fa74d`: 251 unique requirement IDs covering functional behavior, data,
+interfaces, quality attributes, business/safety rules, release acceptance, and
+future work kept explicitly non-normative. It uses the code-verified schema
+constants (semantic v16, workbench v3, workspace v2), not older numbers in
+narrative guidance. README and the Architecture document map now link it. Issue
+#168 tracks maintainer review/adoption and is Todo on the main project board.
+
+Documentation verification: all SRS IDs are unique, referenced local Markdown
+files exist, GitHub's master QA body matches the local checklist, all 17 native
+sub-issues and 18 QA board items were read back, and `git diff --check` is clean
+apart from Git's existing LF→CRLF notices. No engine, frontend, Rust, frozen, or
+installed-app test was run because this work changes documentation and project
+tracking only.
