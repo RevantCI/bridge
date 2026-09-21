@@ -77,6 +77,9 @@ Where to look next:
   language (written against 0.9.6; see the note at its top).
 - [`docs/DEVELOPER_GUIDE.md`](docs/DEVELOPER_GUIDE.md) — the phase-by-phase
   roadmap and exactly what's done vs. deliberately deferred.
+- [`docs/SOFTWARE_REQUIREMENTS_SPECIFICATION.md`](docs/SOFTWARE_REQUIREMENTS_SPECIFICATION.md)
+  — the current product requirements, safety rules, quality attributes, and
+  acceptance traceability.
 - [`docs/QA_TEST_MATRIX.md`](docs/QA_TEST_MATRIX.md) — the release gate.
 
 ## License

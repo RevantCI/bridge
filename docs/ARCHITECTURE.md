@@ -310,6 +310,7 @@ This is the repository's one doc map; `CLAUDE.md`, `DEVELOPER_GUIDE.md` and
 
 | Doc | Covers |
 |---|---|
+| `SOFTWARE_REQUIREMENTS_SPECIFICATION.md` | Normative current-product requirements: scope, functional behavior, data and safety rules, quality attributes, interfaces, acceptance, and traceability. |
 | `DEVELOPER_GUIDE.md` | Roadmap: what was planned per phase and what actually shipped, plus dependencies, AI triage and the finding context menu. |
 | `DEVELOPER_SETUP.md` | How to get engine, frontend and desktop app running on Windows, and how to build the installer. |
 | `BUILD_LOG.md` | The session record: the investigation behind every decision and gotcha, appended as work lands. |
