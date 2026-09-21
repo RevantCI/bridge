@@ -3,6 +3,8 @@
 This is the release gate for the current import → check → review → export
 workflow. A feature is not considered release-ready merely because its unit
 tests pass; the relevant source, frozen-sidecar, and desktop rows must pass.
+Use [`FULL_APP_MANUAL_QA_CHECKLIST.md`](FULL_APP_MANUAL_QA_CHECKLIST.md) as the
+categorized, checkbox-based procedure for a new installed-app manual run.
 
 Status values: **PASS**, **FAIL**, **BLOCKED**, or **NOT RUN**.
 
