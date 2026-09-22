@@ -10052,3 +10052,28 @@ rejected at write time).
 Desktop acceptance **not yet run** — this entry documents source-level
 verification only; the maintainer will test the actual build directly per
 `docs/QA_TEST_MATRIX.md`'s A45 row before this is called accepted.
+
+### 2026-09-22 termbase v1 installed desktop acceptance -- confirmed PASS
+
+Rebuilt sidecars at the two commits above and ran a guided installed-app
+check reusing the existing `vallinam-test` project from Part B1's
+acceptance run rather than building a new one -- this slice has no curation
+UI yet, so seeding was one `record_terminology_rule` call against the real
+project's workbench DB (concept `god`, preferred `இறைவன்`, rejected
+`கடவுள்`), then a single verse edited through Bridge's own editor (verse 9,
+previously a Part B1 non-trigger case, its job already verified) to contain
+the deprecated form.
+
+Result: `PHP 1:9` flagged as `terminology.deprecated-form`, severity `high`,
+evidence `கடவுள்`, message text matching the code's output exactly --
+`"கடவுள்" is marked deprecated for god. Preferred form: இறைவன். Prefer
+இறைவன். Verify this occurrence.` Findings count went 4 -> 5 (the four B1
+வல்லினம் findings, unaffected, plus this one) and back to 4 the moment the
+verse was corrected to `இறைவன் இருக்கிறார்.` -- confirming the finding
+clears on a genuine fix, coexists cleanly with an unrelated rule already in
+the same panel, and Scripture itself was never auto-edited (the verse text
+in the editor was exactly what was typed, nothing rewritten by the check).
+
+No code changes made during this verification -- none were needed. This
+closes A45's "desktop acceptance NOT YET RUN" note in
+`docs/QA_TEST_MATRIX.md`.
