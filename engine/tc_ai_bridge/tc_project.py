@@ -1639,21 +1639,52 @@ class TranslationCoreProject:
             book_id=self.book_id, equals=equals,
         )
 
+    _TERMINOLOGY_CATEGORIES = ('person_name', 'place_name', 'key_term', 'other')
+    _TERMINOLOGY_PROVENANCE = ('human', 'imported')
+    # 'approved' is the only status the terminology QA check ever treats as
+    # authoritative (see terminology.py's TermIndex). 'provisional'/'imported'
+    # exist so a future auto-discovery path has somewhere to land without ever
+    # being silently treated as a human decision -- frequency is evidence, not
+    # authority. This method represents explicit human/API-driven curation, so
+    # it defaults to 'approved'; nothing in this codebase yet writes anything
+    # else, and that absence is deliberate, not an oversight.
+    _TERMINOLOGY_STATUSES = ('approved', 'provisional', 'imported')
+
     def terminology_rules(self) -> list[dict[str, Any]]:
         return self._human_decision_payloads(kind='terminology')
 
-    def record_terminology_rule(self, concept_id: str, approved_renderings: list[str], allowed_alternatives: list[str] | None = None, rejected_renderings: list[str] | None = None, source_lemma: str = '', strong: str = '', note: str = '', username: str = 'AI Bridge Reviewer', scope: str = 'book') -> str:
-        concept_id=str(concept_id).strip()
-        approved=[str(x).strip() for x in approved_renderings if str(x).strip()]
-        if not concept_id: raise ProjectError('Terminology concept/key-term ID is required.')
-        if not approved: raise ProjectError('At least one approved target-language rendering is required.')
-        iso,_=self._timestamp(); safe=''.join(ch if ch.isalnum() or ch in ('-','_') else '_' for ch in concept_id)[:120]
-        data={
-            'bookId':self.book_id,'conceptId':concept_id,'sourceLemma':source_lemma,'strong':strong,
-            'approvedRenderings':approved,'allowedAlternatives':[str(x).strip() for x in (allowed_alternatives or []) if str(x).strip()],
-            'rejectedRenderings':[str(x).strip() for x in (rejected_renderings or []) if str(x).strip()],
-            'note':note,'scope':scope,'username':username,'modifiedTimestamp':iso,'status':'human_approved',
-            'app':'translationCore AI Bridge','schemaVersion':1,
+    def record_terminology_rule(
+        self, concept_id: str, approved_renderings: list[str] | None = None,
+        allowed_alternatives: list[str] | None = None, rejected_renderings: list[str] | None = None,
+        *, category: str = 'other', source_lemma: str = '', strong: str = '', note: str = '',
+        provenance: str = 'human', status: str = 'approved',
+        username: str = 'AI Bridge Reviewer', scope: str = 'book',
+    ) -> str:
+        concept_id = str(concept_id).strip()
+        if not concept_id:
+            raise ProjectError('Terminology concept/key-term ID is required.')
+        approved = [str(x).strip() for x in (approved_renderings or []) if str(x).strip()]
+        allowed = [str(x).strip() for x in (allowed_alternatives or []) if str(x).strip()]
+        rejected = [str(x).strip() for x in (rejected_renderings or []) if str(x).strip()]
+        if not (approved or allowed or rejected):
+            raise ProjectError('At least one approved, allowed, or rejected rendering is required.')
+        if category not in self._TERMINOLOGY_CATEGORIES:
+            raise ProjectError(f"Unknown terminology category: {category!r}.")
+        if provenance not in self._TERMINOLOGY_PROVENANCE:
+            raise ProjectError(f"Unknown terminology provenance: {provenance!r}.")
+        if status not in self._TERMINOLOGY_STATUSES:
+            raise ProjectError(f"Unknown terminology status: {status!r}.")
+        if scope != 'book':
+            raise ProjectError("Only book-scoped terminology is supported; whole-project scope is a separate, unbuilt design.")
+        iso, _ = self._timestamp()
+        data = {
+            'bookId': self.book_id, 'conceptId': concept_id, 'category': category,
+            'sourceLemma': source_lemma, 'strong': strong,
+            'approvedRenderings': approved, 'allowedAlternatives': allowed,
+            'rejectedRenderings': rejected,
+            'note': note, 'scope': scope, 'provenance': provenance, 'status': status,
+            'username': username, 'modifiedTimestamp': iso,
+            'app': 'translationCore AI Bridge', 'schemaVersion': 2,
         }
         # Book-scoped rather than verse-scoped: a terminology rule applies to the
         # whole book, so chapter/verse stay empty and the concept is the key.
