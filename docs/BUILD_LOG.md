@@ -9906,3 +9906,38 @@ dative -க்கு, compounds, adjectival compounds, verbal participles,
 குற்றியலுகரம், and general noun+noun joining are explicitly not covered and
 would each need their own rule and fixtures, per the maintainer's own scope
 note.
+
+### 2026-09-22 Part B1 installed desktop acceptance -- confirmed PASS
+
+Rebuilt sidecars and the dev app at `358ab9f` (clean tree at that commit) and
+ran a guided installed-app acceptance, the same discipline used for the two
+earlier scheduling fixes. Controlled test project (`vallinam-test`, book
+Philippians, one chapter, ten verses) built and imported through Bridge's
+normal Import-a-file flow rather than modifying any real translation
+project -- import always copies the source, so this carried zero risk to
+existing project data. Verses 1/3/5/7 covered all four consonant classes with
+an incorrect boundary; 2/4/6/8 were the same phrases already correctly
+linked; 9 used a non-trigger initial (வ); 10 put a comma at the boundary.
+
+Result: all four incorrect boundaries flagged as `tamil.vallinam-missing`
+with exactly the expected wording, raw-text span, verse anchor and `medium`
+severity -- message text matched the code's output character-for-character
+(e.g. `"அந்த க..." normally takes "அந்தக் க..."`). All six negative cases
+(correct forms, non-trigger initial, punctuation boundary) produced zero
+findings -- "4 review candidates" total, matching exactly the four verses
+meant to flag. Verse text unchanged in the editor, confirming no auto-edit.
+Findings survived verse navigation, Pause checks (stayed visible, state
+flipped to `paused` without blanking), Resume checks (returned directly to
+`completed`, no restart flash), and a 15+ second idle wait (stayed
+`completed`) -- exercising both earlier scheduling fixes together with B1 and
+finding no regression. One unrelated observation noted and dismissed: a
+`எந்த¹,²` superscript in the verse-7 editor view, traced to the separate
+tN/tW/Alignment check system's own "15 open findings" (a standard import-time
+artifact), not Language QA.
+
+No code changes made during this verification -- none were needed. Per the
+maintainer's sequencing: LQA-2 sandhi work pauses here. Next track is
+termbase/proper-name infrastructure (framework items 20-21/50), to be scoped
+separately once requested. If sandhi work resumes later, the next rule should
+again be narrowly bounded and validated before implementation, the same way
+B1 was.
