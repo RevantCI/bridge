@@ -1,4 +1,5 @@
 import type { AiCheckReview, QaFinding, FindingCategory, NativeCheckReview } from "../types/finding";
+import type { LanguageQaFinding } from "../types/languageQa";
 
 // Category -> CSS class matching the four-colour finding-source legend in
 // index.css (tN red, tW blue, Alignment amber, everything else = Greek Room
@@ -82,6 +83,7 @@ export function buildSegments(
   findings: QaFinding[],
   nativeChecks: NativeCheckReview[] = [],
   aiReviews: AiCheckReview[] = [],
+  languageQaFindings: LanguageQaFinding[] = [],
 ): TextSegment[] {
   const numbers = findingNumbers(findings);
   const spans: ReviewSpan[] = findings
@@ -146,6 +148,22 @@ export function buildSegments(
         }
       }
     }
+  }
+
+  // Language QA findings are offset-addressed the same way QaFinding is
+  // (start/end rather than start_offset/end_offset -- the only real
+  // difference), but they're a deliberately separate, disposable data model
+  // (see language_qa_jobs.py's own docstring) and never get cast into a fake
+  // QaFinding here, matching how nativeChecks/aiReviews above are mapped in
+  // their own native shape rather than forced into QaFinding's either.
+  // Currently only terminology.deprecated-form carries a span; other
+  // Language QA rules are shown in the panel only, same as before.
+  for (const finding of languageQaFindings) {
+    if (finding.rule !== "terminology.deprecated-form") continue;
+    spans.push({
+      start: finding.start, end: finding.end, id: finding.id,
+      className: "m-term", title: finding.message,
+    });
   }
 
   if (spans.length === 0) {

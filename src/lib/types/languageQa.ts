@@ -12,6 +12,10 @@ export interface LanguageQaFinding {
   textHash: string;
   ruleVersion: string;
   status: "review-needed";
+  /** Only present on terminology.deprecated-form findings; null when the
+   * termbase entry has no preferred rendering recorded yet. Absent (not
+   * just undefined) on every other Language QA rule. */
+  suggestedReplacement?: string | null;
 }
 
 export interface LanguageQaStatus {

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { get } from "svelte/store";
 import type { LanguageQaStatus } from "../../types/languageQa";
+import { languageQaFindingsByVerse } from "../../stores";
 
 const statusCall = vi.fn();
 const pauseCall = vi.fn();
@@ -32,9 +34,14 @@ beforeEach(() => {
 });
 
 describe("Language QA", () => {
-  it("stays collapsed automatically and requests only a compact summary", async () => {
+  it("stays collapsed automatically, but still fetches real findings for VerseList's inline decoration", async () => {
+    // Collapsed used to request limit=0 (count only) since the panel itself
+    // only ever showed the total while closed. It now requests a real page
+    // even collapsed -- VerseList's double-underline decoration needs
+    // finding data regardless of whether this panel is open -- while the
+    // panel's own UI still stays visually collapsed either way.
     render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
-    await waitFor(() => expect(statusCall).toHaveBeenCalledWith("C:/project", 0, 0));
+    await waitFor(() => expect(statusCall).toHaveBeenCalledWith("C:/project", 0, 100));
     expect(screen.queryByRole("region", { name: "Language QA results" })).toBeNull();
     expect(screen.queryByText("Check source encoding.")).toBeNull();
   });
@@ -75,6 +82,26 @@ describe("Language QA", () => {
     await waitFor(() => expect(statusCall).toHaveBeenCalled());
     await fireEvent.click(screen.getByRole("button", { name: /Language QA/ }));
     expect(screen.queryByText("Check source encoding.")).toBeNull();
+  });
+
+  it("populates languageQaFindingsByVerse with only terminology.deprecated-form entries, grouped and keyed", async () => {
+    languageQaFindingsByVerse.set({});
+    statusCall.mockResolvedValue(snapshot({
+      findings: [
+        { id: "f1", book: "php", chapter: "2", verse: "3-4", rule: "unicode.corruption",
+          severity: "high", start: 0, end: 1, originalText: "\ufffd", message: "Check source encoding.",
+          textHash: "hash", ruleVersion: "language-qa-1", status: "review-needed" },
+        { id: "f2", book: "php", chapter: "1", verse: "9", rule: "terminology.deprecated-form",
+          severity: "high", start: 0, end: 3, originalText: "bad", message: "Deprecated.",
+          textHash: "hash2", ruleVersion: "language-qa-2", status: "review-needed",
+          suggestedReplacement: "good" },
+      ],
+    }));
+    render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
+    await waitFor(() => expect(get(languageQaFindingsByVerse)["1:9"]).toBeTruthy());
+    const byVerse = get(languageQaFindingsByVerse);
+    expect(byVerse["1:9"]).toEqual([expect.objectContaining({ id: "f2", suggestedReplacement: "good" })]);
+    expect(byVerse["2:3-4"]).toBeUndefined(); // the unicode.corruption finding never enters this store
   });
 
   it("surfaces failure and leaves automatic retry scheduled", async () => {

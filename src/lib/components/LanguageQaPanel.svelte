@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
-  import type { LanguageQaStatus } from "../types/languageQa";
+  import type { LanguageQaFinding, LanguageQaStatus } from "../types/languageQa";
+  import { languageQaFindingsByVerse, verseKey } from "../stores";
 
   export let projectPath: string;
   export let onNavigate: (book: string, chapter: string, verse: string) => void;
@@ -22,6 +23,22 @@
     undetermined: "The language could not be determined. Only common checks are enabled.",
   };
 
+  // Collapsed used to fetch limit=0 (count only, no finding objects) since
+  // the panel itself only ever displayed the total. Now VerseList's inline
+  // double-underline needs real finding data regardless of whether the
+  // panel is open, so collapsed still fetches a real page -- just not the
+  // 50-per-page the panel's own Previous/Next pagination text assumes when
+  // expanded, which must stay exactly as before or that text goes wrong.
+  function updateInlineStore(next: LanguageQaStatus): void {
+    const byVerse: Record<string, LanguageQaFinding[]> = {};
+    for (const finding of next.findings) {
+      if (finding.rule !== "terminology.deprecated-form") continue;
+      const key = verseKey(finding.chapter, finding.verse);
+      (byVerse[key] ??= []).push(finding);
+    }
+    languageQaFindingsByVerse.set(byVerse);
+  }
+
   async function refresh(): Promise<void> {
     if (disposed || busy) return;
     if (timer) clearTimeout(timer);
@@ -29,7 +46,7 @@
     const path = projectPath;
     busy = true;
     try {
-      const next = await bridge.languageQaStatus(path, offset, expanded ? 50 : 0);
+      const next = await bridge.languageQaStatus(path, offset, expanded ? 50 : 100);
       if (disposed || ticket !== sequence || path !== projectPath || next.projectPath !== path) return;
       if (status && next.generation !== status.generation && offset !== 0) {
         offset = 0;
@@ -38,6 +55,7 @@
         return;
       }
       status = next;
+      updateInlineStore(next);
       error = "";
     } catch (cause) {
       if (!disposed && ticket === sequence) {

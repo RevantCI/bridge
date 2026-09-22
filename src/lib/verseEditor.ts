@@ -8,6 +8,7 @@
 import { get, writable } from "svelte/store";
 import { bridge } from "./api/bridgeClient";
 import type { QaFinding } from "./types/finding";
+import type { LanguageQaFinding } from "./types/languageQa";
 import type { CorrectionApplicationIntent } from "./types/correctionReview";
 import {
   alignmentStatusByVerse, checkStatusByVerse, checkingProgress, findingsByVerse,
@@ -200,4 +201,53 @@ export async function applySuggestedFindingFix(finding: QaFinding): Promise<Find
   return saved
     ? { ok: true, message: "Fix applied and verse re-checked." }
     : { ok: false, message: get(editError) || "The fix could not be applied." };
+}
+
+/**
+ * Termbase v2's "Use <preferred form>" action. Same splice/save/re-check
+ * path as applySuggestedFindingFix above, adapted for Language QA's own
+ * finding shape (start/end, not start_offset/end_offset -- see
+ * language_qa.py's module docstring on why the two models are kept
+ * separate). Language QA has no onSaved hook of its own (that mechanism is
+ * ReviewPanel/QaFinding-specific), so the accepted decision is recorded
+ * directly here via the same generic verse.decide endpoint every other
+ * finding type already uses -- language_qa_jobs.py's _scan() reads it back
+ * on the next pass to keep the finding from reappearing.
+ */
+export async function applyLanguageQaSuggestedFix(finding: LanguageQaFinding): Promise<FindingFixOutcome> {
+  if (!finding.suggestedReplacement) {
+    return { ok: false, message: "No suggested form is recorded for this term." };
+  }
+  const chapter = finding.chapter;
+  const verse = finding.verse;
+  const key = verseKey(chapter, verse);
+  const current = get(verseTexts)[key];
+  if (current === undefined) {
+    return { ok: false, message: "The verse text is no longer loaded." };
+  }
+  const points = Array.from(current);
+  const { start, end } = finding;
+  if (start < 0 || end < start || end > points.length) {
+    return { ok: false, message: "The suggested fix no longer matches the current verse." };
+  }
+  const original = points.slice(start, end).join("");
+  if (finding.originalText && original !== finding.originalText) {
+    return { ok: false, message: "The suggested fix is stale because the verse text changed." };
+  }
+  if (!startVerseEdit(chapter, verse)) {
+    return { ok: false, message: "Finish the current check or edit before applying this fix." };
+  }
+  editText.set(points.slice(0, start).join("") + finding.suggestedReplacement + points.slice(end).join(""));
+  const saved = await saveVerseEdit();
+  if (!saved) {
+    return { ok: false, message: get(editError) || "The fix could not be applied." };
+  }
+  try {
+    await bridge.decideVerse(chapter, verse, finding.id, "accepted");
+  } catch {
+    // The text fix already landed and the verse was re-checked -- a
+    // decision-recording failure here must not be reported as the fix
+    // itself having failed.
+  }
+  return { ok: true, message: "Fix applied and verse re-checked." };
 }

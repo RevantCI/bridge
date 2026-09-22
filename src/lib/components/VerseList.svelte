@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress } from "../stores";
+  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress, languageQaFindingsByVerse } from "../stores";
   import { rangeBetween } from "../crossVerseRange";
   import { unionInChapterOrder } from "../crossVerseSuggest";
   import { buildSegments } from "../utils/highlight";
@@ -9,8 +9,10 @@
   import FindingContextMenu from "./FindingContextMenu.svelte";
   import { decideLocalFinding } from "../findingActions";
   import type { QaFinding } from "../types/finding";
+  import type { LanguageQaFinding } from "../types/languageQa";
+  import { bridge } from "../api/bridgeClient";
   import {
-    applySuggestedFindingFix, editingChapter, editingVerse, editText, editSaving,
+    applySuggestedFindingFix, applyLanguageQaSuggestedFix, editingChapter, editingVerse, editText, editSaving,
     editError, saveVerseEdit, cancelVerseEdit, startVerseEdit, recheckingKey,
   } from "../verseEditor";
   import { openAlignment } from "../alignmentUi";
@@ -21,6 +23,11 @@
   let openNotes: { kind: VerseNoteKind; notes: VerseNote[]; reference: string } | null = null;
   let contextMenu: { finding: QaFinding; verse: string; x: number; y: number } | null = null;
   let contextBusy = false;
+  // Separate from contextMenu: Language QA findings are a different,
+  // disposable data model (see language_qa_jobs.py's own docstring), never
+  // cast into a fake QaFinding just to reuse the one menu instance above.
+  let termContextMenu: { finding: LanguageQaFinding; verse: string; x: number; y: number } | null = null;
+  let termContextBusy = false;
   // The general verse right-click menu (issue #69) -- a separate menu from
   // contextMenu above, which only ever opens on a finding span. The two
   // never open at once: a right-click on a mark stops propagation before it
@@ -63,6 +70,34 @@
       label: "Ignore",
       disabled: contextBusy,
       title: "Leave the verse as it is and move this finding to Ignored in the review panel.",
+    },
+  ] : [];
+
+  /**
+   * Termbase v2's context menu: the suggested preferred form (when the term
+   * has one recorded), plus Edit and Ignore. "Use" is omitted rather than
+   * shown disabled when suggestedReplacement is null -- a term can exist
+   * with only rejected forms recorded, per terminology.py's own contract,
+   * and there is nothing to offer applying in that case.
+   */
+  $: termContextActions = termContextMenu ? [
+    ...(termContextMenu.finding.suggestedReplacement ? [{
+      id: "use",
+      label: `Use "${termContextMenu.finding.suggestedReplacement}"`,
+      disabled: termContextBusy,
+      title: "Replace the flagged word with the preferred form, re-check the verse, and record this as accepted.",
+    }] : []),
+    {
+      id: "edit",
+      label: "Edit",
+      disabled: termContextBusy,
+      title: "Open this verse for manual editing.",
+    },
+    {
+      id: "ignore",
+      label: "Ignore",
+      disabled: termContextBusy,
+      title: "Leave the verse as it is and record this occurrence as ignored.",
     },
   ] : [];
 
@@ -164,6 +199,80 @@
     event.stopPropagation();
     onSelect(verse);
     contextMenu = { finding, verse, x: event.clientX, y: event.clientY };
+  }
+
+  function openTermFindingMenu(
+    event: MouseEvent,
+    findingIds: string[],
+    langFindings: LanguageQaFinding[],
+    verse: string,
+  ): void {
+    const finding = findingIds
+      .map((id) => langFindings.find((item) => item.id === id))
+      .find((item): item is LanguageQaFinding => Boolean(item));
+    if (!finding) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect(verse);
+    termContextMenu = { finding, verse, x: event.clientX, y: event.clientY };
+  }
+
+  /**
+   * A mark's findingIds can come from QaFinding, native/AI check reviews, or
+   * a Language QA finding (buildSegments merges all of them). Try the
+   * existing QaFinding-owning menu first, exactly as before -- this
+   * preserves every existing finding type's behaviour unchanged -- and fall
+   * back to the termbase menu only when nothing in `findings` claims this
+   * span.
+   */
+  function onMarkContextMenu(
+    event: MouseEvent,
+    findingIds: string[],
+    findings: QaFinding[],
+    langFindings: LanguageQaFinding[],
+    verse: string,
+  ): void {
+    if (findingIds.some((id) => findings.some((f) => f.id === id))) {
+      openFindingMenu(event, findingIds, findings, verse);
+    } else {
+      openTermFindingMenu(event, findingIds, langFindings, verse);
+    }
+  }
+
+  async function onTermContextAction(event: CustomEvent<{ id: string }>): Promise<void> {
+    if (!termContextMenu || termContextBusy) return;
+    const { finding, verse } = termContextMenu;
+    termContextBusy = true;
+    contextNotice = "";
+    try {
+      if (event.detail.id === "use") {
+        const result = await applyLanguageQaSuggestedFix(finding);
+        contextNotice = result.message;
+        contextNoticeError = !result.ok;
+        if (result.ok) termContextMenu = null;
+      } else if (event.detail.id === "edit") {
+        termContextMenu = null;
+        startVerseEdit($currentChapter, verse);
+      } else if (event.detail.id === "ignore") {
+        await bridge.decideVerse($currentChapter, verse, finding.id, "ignored");
+        // Optimistic removal so the underline disappears immediately; the
+        // next real scan pass independently confirms suppression
+        // server-side (language_qa_jobs.py reads the same decision back).
+        languageQaFindingsByVerse.update((map) => {
+          const key = verseKey($currentChapter, verse);
+          const remaining = (map[key] ?? []).filter((f) => f.id !== finding.id);
+          return { ...map, [key]: remaining };
+        });
+        contextNotice = "Occurrence ignored.";
+        contextNoticeError = false;
+        termContextMenu = null;
+      }
+    } catch (error) {
+      contextNotice = error instanceof Error ? error.message : String(error);
+      contextNoticeError = true;
+    } finally {
+      termContextBusy = false;
+    }
   }
 
   /**
@@ -302,6 +411,15 @@
     );
   }
 
+  /** Same reasoning as remapFindings above -- Language QA's start/end are
+   * also raw-verse code-point offsets, so they shift the same way once
+   * footnote/xref markers are lifted out of the rendered text. */
+  function remapLanguageQaFindings(findings: LanguageQaFinding[], parsed: ParsedVerse): LanguageQaFinding[] {
+    return findings.map((finding) => ({
+      ...finding, start: parsed.mapOffset(finding.start), end: parsed.mapOffset(finding.end),
+    }));
+  }
+
   let scrollContainer: HTMLDivElement;
   let lastScrolledKey = "";
 
@@ -420,7 +538,8 @@
     {@const highlightFindings = findings.filter((f) => f.status !== "ignored" && f.status !== "accepted")}
     {@const parsed = parseVerseNotes($verseTexts[key] ?? "")}
     {@const remapped = remapFindings(highlightFindings, parsed)}
-    {@const segments = buildSegments(parsed.clean, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [])}
+    {@const langFindings = remapLanguageQaFindings($languageQaFindingsByVerse[key] ?? [], parsed)}
+    {@const segments = buildSegments(parsed.clean, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [], langFindings)}
     {@const menuFindingIds = markedFindingIds(remapped, parsed.clean.length)}
     {@const activeFindingId = menuFindingIds[activeIndexFor(key, menuFindingIds.length)]}
     {@const isEditingThis = $editingChapter === $currentChapter && $editingVerse === v}
@@ -483,7 +602,7 @@
                   && piece.seg.findingIds.includes(activeFindingId)}
                 data-finding-ids={piece.seg.findingIds.join(" ")}
                 title={piece.seg.title}
-                on:contextmenu={(event) => openFindingMenu(event, piece.seg.findingIds, findings, v)}
+                on:contextmenu={(event) => onMarkContextMenu(event, piece.seg.findingIds, findings, langFindings, v)}
               >{piece.seg.text}</mark>{#if piece.seg.numbers.length}<sup class="finding-num">{piece.seg.numbers.join(",")}</sup>{/if}{:else}{piece.seg.text}{/if}
           {/each}
         </div>
@@ -543,6 +662,17 @@
     actions={verseMenuActions}
     on:action={onVerseContextAction}
     on:close={() => (verseMenu = null)}
+  />
+{/if}
+
+{#if termContextMenu}
+  <FindingContextMenu
+    x={termContextMenu.x}
+    y={termContextMenu.y}
+    findingLabel="Actions for {termContextMenu.finding.originalText}"
+    actions={termContextActions}
+    on:action={onTermContextAction}
+    on:close={() => (termContextMenu = null)}
   />
 {/if}
 

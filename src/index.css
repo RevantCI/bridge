@@ -51,6 +51,11 @@
   --tw:#0F766E; --tw-bg:#E3F2F0;
   --align:#B45309; --align-bg:#FEF3E1;
   --gr:#DC2626; --gr-bg:#FCEBEB;
+  /* Termbase-authority findings (terminology.deprecated-form) get their own
+     colour and a double underline -- distinct from the four Greek Room/tN/tW/
+     alignment sources above, since this is a different confidence class
+     entirely (a curated fact, not an engine's suspicion). */
+  --term:#7C3AED; --term-bg:#F1E9FE;
   /* Generic "this succeeded" green: passed coverage, a ready gate, the live
      check indicator, a confirmed validation. Split out of --gr, which used to
      serve both and would now paint every one of those red. Same value tN
@@ -115,6 +120,7 @@ mark.m-tn { border-color: var(--tn); }
 mark.m-tw { border-color: var(--tw); }
 mark.m-align { border-color: var(--align); }
 mark.m-gr { border-color: var(--gr); }
+mark.m-term { border-color: var(--term); border-bottom-style: double; border-bottom-width: 3px; }
 mark.m-tn.m-tw { border-bottom-color: var(--tn); box-shadow: inset 0 -1px 0 var(--tw); }
 
 /* Printing the QA report (ProjectReportScreen → Export → PDF): only the

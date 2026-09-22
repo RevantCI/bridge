@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import { buildSegments, categoryClass } from "../../utils/highlight";
 import type { AiCheckReview } from "../../types/finding";
+import type { LanguageQaFinding } from "../../types/languageQa";
+
+function termFinding(overrides: Partial<LanguageQaFinding> = {}): LanguageQaFinding {
+  return {
+    id: "t1", book: "php", chapter: "1", verse: "9", rule: "terminology.deprecated-form",
+    severity: "high", start: 6, end: 10, originalText: "beta", message: "Deprecated form.",
+    textHash: "hash", ruleVersion: "language-qa-2", status: "review-needed",
+    suggestedReplacement: "gamma", ...overrides,
+  };
+}
 
 function aiReview(overrides: Partial<AiCheckReview> = {}): AiCheckReview {
   return {
@@ -72,6 +82,16 @@ describe("verse-text underlines", () => {
       verdict: "problem", nothing_to_select: true,
       proposed_selections: [], proposed_selection_text: [],
     })]);
+    expect(marked(segments)).toEqual([]);
+  });
+
+  it("underlines a terminology.deprecated-form finding with its own class, not m-gr", () => {
+    const segments = buildSegments(TEXT, [], [], [], [termFinding()]);
+    expect(marked(segments)).toEqual([["beta", "m-term"]]);
+  });
+
+  it("does not underline any other Language QA rule -- only terminology.deprecated-form has a span today", () => {
+    const segments = buildSegments(TEXT, [], [], [], [termFinding({ rule: "tamil.wordlist-variant" })]);
     expect(marked(segments)).toEqual([]);
   });
 });

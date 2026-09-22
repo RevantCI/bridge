@@ -10077,3 +10077,87 @@ in the editor was exactly what was typed, nothing rewritten by the check).
 No code changes made during this verification -- none were needed. This
 closes A45's "desktop acceptance NOT YET RUN" note in
 `docs/QA_TEST_MATRIX.md`.
+
+### 2026-09-22 termbase v2: inline double-underline + right-click suggest/edit/ignore
+
+Backend and frontend for the UI slice the maintainer asked for next,
+explicitly scoped to `terminology.deprecated-form` only (not வல்லினம்/
+wordlist-variant) and built almost entirely out of existing machinery --
+the architecture-discovery pass before implementation found a full
+"right-click flagged span -> apply a suggested replacement -> durably
+recorded" flow already shipped for other finding types, plus a generic,
+finding-type-agnostic context menu and a generic, opaque-string-keyed
+decision store. The one real gap: nothing in Language QA's scan loop
+consulted any decision store, so recording an "ignore" would have done
+nothing -- the same finding would have reappeared on the very next pass.
+
+**Backend** (`terminology.py`, `language_qa_jobs.py`): match results now
+carry `suggestedReplacement` (the term's first `approvedRendering`, or
+`null` when only rejected forms are recorded -- never invented).
+`LanguageQaManager` gained a second loader mirroring the termbase one
+exactly, `project_qa_decisions()` (already existed, already the same
+`kind='qa'` bucket `verse.decide` writes into -- no new backend endpoint).
+Suppression is scoped narrowly: only the terminology-matching block checks
+decisions, nowhere else in `_scan()` -- not a general Language QA decision
+framework. The per-chapter cache key gained a fourth component (a hash of
+decisions, alongside the existing termbase-version hash) so a review
+decision invalidates every cached chapter's findings the same way an edited
+chapter or a changed term does, proven by a dedicated cross-chapter
+regression mirroring the termbase-version one from v1. Occurrence
+numbering for stable ids still advances even for a suppressed match, so a
+later undecided occurrence of the same word in the same verse never shifts
+onto an unstable id once an earlier one is ignored -- pinned by a dedicated
+test.
+
+**Frontend**: `buildSegments()` gained a fourth parameter
+(`languageQaFindings`), mapped into its span model the same way
+`nativeChecks`/`aiReviews` already are -- never cast into a fake `QaFinding`,
+keeping Language QA's disposable data model separate from `QaFinding`'s
+persistent one at the data layer, unified only at the render call site. New
+`.m-term` mark (double `border-bottom-style`, its own `--term` colour,
+distinct from the four existing Greek Room/tN/tW/alignment sources -- this
+is a different confidence class, a curated fact rather than an engine's
+suspicion). A new shared store, `languageQaFindingsByVerse`, is the one
+piece that didn't already exist: `LanguageQaPanel.svelte` was the only
+Language QA poller and kept its data entirely local, and -- a real gap
+found during design, not assumed -- it only ever fetched real finding
+objects when the panel was manually expanded (`limit=0` while collapsed).
+Fixed by requesting a real page (100) even collapsed, so inline decoration
+works without the reviewer ever opening the side panel; the panel's own
+50-per-page pagination text is untouched when expanded. A third
+`FindingContextMenu` instance offers `Use "<preferred>"` (omitted, not
+disabled, when there's no suggestion), `Edit`, `Ignore` -- reusing the
+existing menu component verbatim. `Use` calls a new
+`applyLanguageQaSuggestedFix()` (verseEditor.ts), the same splice/save/
+re-check sequence as the existing `applySuggestedFindingFix`, adapted for
+`start`/`end` field names, calling `bridge.decideVerse(..., "accepted")`
+directly afterward since Language QA has no `onSaved`-hook equivalent of
+its own. `Ignore` calls `bridge.decideVerse(..., "ignored")` and removes
+the finding from the store optimistically; the next real scan pass
+independently confirms the suppression server-side.
+
+**Tests**: 9 new backend (`test_terminology.py`, 26 -> 35): ignored/accepted
+decisions suppress a finding, a decision on one occurrence never suppresses
+another in the same verse, no-decisions-loader shows everything, a
+malformed decisions loader degrades gracefully (never a crash), a decision
+change invalidates an unrelated cached chapter, `suggestedReplacement`
+present/absent. Full engine suite: **1169 passed, 1 skipped** (up from
+1160, matching exactly). 7 new frontend (Vitest, 480 -> 487): the store
+populates from only `terminology.deprecated-form` entries grouped by verse
+key; `buildSegments` produces the `.m-term` mark for a terminology finding
+and nothing for any other Language QA rule; `applyLanguageQaSuggestedFix`'s
+edit/re-check/decide sequence, its staleness guard, its no-suggestion
+refusal, and that a decision-recording failure doesn't turn an already-
+successful text fix into a reported failure. One existing test updated
+(`LanguageQaPanel.test.ts`) to expect the new collapsed-state fetch
+behaviour rather than the old count-only one -- a deliberate behaviour
+change, not a regression fix. `npm run check` 0/0, `npm run build` clean
+(pre-existing large-chunk notice only).
+
+**Performance**: synthetic only, same caveat as every Language QA
+performance number so far -- 5,000 decided findings hashed 50 times (a
+generous whole-book, long-session estimate): 4.1 ms/pass, negligible
+against a full scan.
+
+Desktop acceptance not yet run -- awaiting the maintainer testing the
+actual build, same discipline as every prior slice this session.

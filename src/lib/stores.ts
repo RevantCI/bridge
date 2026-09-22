@@ -1,5 +1,6 @@
 import { writable, derived, get } from "svelte/store";
 import type { AiCheckReview, AlignmentWorkStatus, NativeCheckReview, NavigationSyncState, ProjectInfo, QaFinding } from "./types/finding";
+import type { LanguageQaFinding } from "./types/languageQa";
 import type { EngineLogEntry } from "./api/bridgeClient";
 
 export function verseKey(chapter: string, verse: string): string {
@@ -22,6 +23,12 @@ export const checkStatusByVerse = writable<Record<string, CheckStatus>>({});
 export const alignmentStatusByVerse = writable<Record<string, AlignmentWorkStatus>>({});
 export const nativeChecksByVerse = writable<Record<string, NativeCheckReview[]>>({});
 export const aiCheckReviewsByVerse = writable<Record<string, AiCheckReview[]>>({});
+// Populated by LanguageQaPanel's own poll (the only Language QA poller) —
+// disposable, recomputed on every scan pass, never the source of truth the
+// way findingsByVerse is for QaFinding. Currently only ever holds
+// terminology.deprecated-form entries; VerseList reads this for inline
+// double-underline decoration.
+export const languageQaFindingsByVerse = writable<Record<string, LanguageQaFinding[]>>({});
 export type ReviewerMode = "basic" | "advanced";
 export const reviewerMode = writable<ReviewerMode>("basic");
 
@@ -65,6 +72,7 @@ export function resetBookState(): void {
   alignmentStatusByVerse.set({});
   nativeChecksByVerse.set({});
   aiCheckReviewsByVerse.set({});
+  languageQaFindingsByVerse.set({});
   loadedChapters.set({});
   selectedVerse.set(null);
   selectedVerseSet.set([]);
