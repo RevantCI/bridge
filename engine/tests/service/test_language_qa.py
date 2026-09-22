@@ -96,7 +96,7 @@ def wait(manager, state="completed"):
     pytest.fail(f"Language QA did not reach {state}: {manager.status()}")
 
 
-def test_background_reuse_external_edits_and_no_writes(tmp_path):
+def test_background_external_edits_and_no_writes(tmp_path):
     project = project_at(tmp_path)
     manager = LanguageQaManager(debounce=0, yield_seconds=0)
     source = project.book_dir / "1.json"
@@ -107,12 +107,65 @@ def test_background_reuse_external_edits_and_no_writes(tmp_path):
     assert first["findings"][0]["verse"] == "3a"
     assert source.read_bytes() == before
     assert list(tmp_path.rglob("*")) == [project.book_dir, source]
-    manager._last_scan = 0
-    manager.status()
-    assert wait(manager)["reusedChapters"] == 1
     source.write_text('{"3a":"clean"}', encoding="utf-8")
     manager._last_scan = 0
-    assert manager.status()["findings"] == []
+    assert manager.status()["state"] == "queued"
+    assert wait(manager)["totalFindings"] == 0
+
+
+def test_completed_scan_stays_completed_when_idle_refresh_finds_no_change(tmp_path):
+    project = project_at(tmp_path)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    completed = wait(manager)
+    generation = completed["generation"]
+    manager._last_scan = 0
+    refreshed = manager.status(limit=100)
+    assert refreshed["state"] == "completed"
+    assert refreshed["generation"] == generation
+    assert manager._thread is None
+
+
+def test_idle_refresh_rechecks_an_ordinary_external_edit(tmp_path):
+    project = project_at(tmp_path, text="a  b")
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    assert wait(manager)["totalFindings"] == 1
+    path = project.book_dir / "1.json"
+    path.write_text('{"3a":"clean"}', encoding="utf-8")
+    manager._last_scan = 0
+    assert manager.status()["state"] == "queued"
+    assert wait(manager)["totalFindings"] == 0
+
+
+def test_pause_keeps_results_visible_and_resume_with_no_changes_skips_rescan(tmp_path):
+    project = project_at(tmp_path)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    completed = wait(manager)
+    manager.pause(True)
+    paused = manager.status(limit=100)
+    assert paused["state"] == "paused"
+    assert paused["findings"] == completed["findings"]
+    # A book where every chapter carries a per-verse limitation (e.g. inline
+    # USFM) never populates _scan's chapter cache, so an unconditional
+    # reschedule on resume would redo that same, unchanged pass and look
+    # like the whole book restarting from zero.
+    resumed = manager.pause(False)
+    assert resumed["state"] == "completed"  # returned synchronously: no rescan thread ran
+    assert manager.status(limit=100)["findings"] == completed["findings"]
+    assert manager._thread is None
+
+
+def test_resume_after_an_external_edit_made_while_paused_rescans(tmp_path):
+    project = project_at(tmp_path)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    wait(manager)
+    manager.pause(True)
+    (project.book_dir / "1.json").write_text('{"3a":"clean"}', encoding="utf-8")
+    resumed = manager.pause(False)
+    assert resumed["state"] == "queued"
     assert wait(manager)["totalFindings"] == 0
 
 
@@ -224,7 +277,7 @@ def test_continuous_foreground_polling_does_not_starve_worker(tmp_path):
         pytest.fail("Frequent foreground requests starved Language QA")
 
 
-def test_external_edit_with_preserved_timestamp_and_size_is_not_cached(tmp_path):
+def test_invalidated_edit_with_preserved_timestamp_and_size_is_not_cached(tmp_path):
     project = project_at(tmp_path, text="a  b")
     manager = LanguageQaManager(debounce=0, yield_seconds=0)
     manager.bind(project)
@@ -234,8 +287,7 @@ def test_external_edit_with_preserved_timestamp_and_size_is_not_cached(tmp_path)
     path.write_text(path.read_text(encoding="utf-8").replace("a  b", "a. b"), encoding="utf-8")
     os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
     assert path.stat().st_size == previous.st_size
-    manager._last_scan = 0
-    manager.status()
+    manager.invalidate("1")
     assert wait(manager)["totalFindings"] == 0
 
 

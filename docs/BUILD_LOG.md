@@ -9755,3 +9755,40 @@ ping maxima 0.831/1.321 ms; both reused three unchanged chapters after the expli
 edit. Final compressed module payload: 15,788 bytes. `git diff --check` is clean
 apart from the repository's existing LF-to-CRLF notices. The full-suite count above
 precedes the last five focused cases; all 31 focused cases passed on the final code.
+
+### 2026-09-22 desktop smoke follow-up — idle rescan loop
+
+The first real desktop check showed a completed Language QA pass returning to
+queued/running every 15 seconds. `status()` was scheduling a complete pass whenever
+the refresh interval elapsed, even when no chapter had changed. Idle refresh now
+compares a bounded `(filename, mtime, size)` chapter signature and schedules work
+only when it differs. A worker still hashes every bounded chapter it reads, so an
+explicit Bridge edit/invalidation never reuses changed content merely because an
+editor preserved metadata. Focused regressions pin both no idle restart and normal
+external-edit discovery. This follow-up came directly from installed-app evidence.
+The focused Language QA suite is now **33 passed**.
+
+### 2026-09-22 desktop smoke follow-up — pause/resume restarted the whole book
+
+Retesting the rebuilt sidecars (with the idle-rescan fix above) surfaced a second,
+related defect: the installed-app checklist item "resume continues from where
+paused" failed — resume visibly restarted the whole book (a 150-chapter Psalms-like
+project, `completed · 19/150 chapters`) instead of continuing. Root cause was the
+same class of bug as the idle-rescan one, in a different call path: `pause()` called
+the shared `_schedule()` helper unconditionally on both pause and resume, which
+always wipes `findings`/`completedChapters`/`totalChapters` back to empty/zero and
+starts a fresh pass — even when nothing on disk changed while paused. It is worse
+than a cosmetic reset for a book where most/every chapter carries a per-verse
+limitation (here, inline USFM markers in the target JSON): `_scan()` deliberately
+never caches a chapter that produced any limitation (so a later pass can retry it if
+the book-wide finding budget frees up), so an unconditional reschedule redoes the
+exact same, unchanged per-verse work for the exact same result on every resume.
+
+Fix: `pause()` now (1) keeps the last completed summary on screen while paused,
+only flipping `state` to `"paused"`, instead of blanking it, and (2) on resume,
+reuses the same bounded chapter-signature check the idle-rescan fix introduced —
+if nothing changed while paused, it restores `"completed"` directly, synchronously,
+with no worker thread and no rescan. An edit made while paused (verified with a
+direct external-file write, not just `invalidate()`) still produces a signature
+mismatch and rescans normally on resume. Two new focused regressions cover both
+paths. The focused Language QA suite is now **35 passed**.

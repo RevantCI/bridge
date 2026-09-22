@@ -38,6 +38,8 @@ class LanguageQaManager:
         self._debounce = debounce
         self._yield_seconds = yield_seconds
         self._cache: dict[str, tuple[str, str, dict[str, Any]]] = {}
+        self._source_signature: tuple[tuple[str, int, int], ...] | None = None
+        self._paused_state: str | None = None
         self._summary: dict[str, Any] = {"state": "idle", "findings": [], "limitations": []}
 
     def touch(self) -> None:
@@ -49,6 +51,8 @@ class LanguageQaManager:
         with self._lock:
             self._context = (str(project.path), project.book_id, declared, project.book_dir)
             self._cache.clear()
+            self._source_signature = None
+            self._paused_state = None
             self._paused = bool(blocked_reason)
             self._blocked_reason = blocked_reason
             self._schedule()
@@ -62,6 +66,8 @@ class LanguageQaManager:
             self._generation += 1
             self._wake.set()
             self._cache.clear()
+            self._source_signature = None
+            self._paused_state = None
             self._summary = {"state": "idle", "findings": [], "limitations": []}
 
     def invalidate(self, chapter: str) -> None:
@@ -73,7 +79,36 @@ class LanguageQaManager:
         with self._lock:
             if self._blocked_reason:
                 return self.status()
+            was_paused = self._paused
             self._paused = paused
+            if paused:
+                # Stop scheduling work but keep the last results on screen —
+                # pausing is not an invalidation, nothing found so far is wrong.
+                self._generation += 1
+                self._wake.set()
+                if not was_paused:
+                    self._paused_state = self._summary.get("state")
+                self._summary["state"] = "paused"
+                return self.status()
+            resumable = (was_paused and self._context is not None
+                        and self._paused_state == "completed")
+            context = self._context
+            generation = self._generation
+        if resumable:
+            # Nothing forced a real edit while paused. A content-limited
+            # chapter (e.g. inline USFM) never qualifies for _scan's cache,
+            # so resuming unconditionally would redo that pass for the exact
+            # same result — visible as the whole book restarting from zero.
+            signature = self._chapter_signature(context[3])
+            with self._lock:
+                if (not self._paused and context == self._context
+                        and generation == self._generation
+                        and self._summary.get("state") == "paused"
+                        and signature == self._source_signature):
+                    self._summary["state"] = "completed"
+                    self._last_scan = time.monotonic()
+                    return self.status()
+        with self._lock:
             self._schedule()
         return self.status()
 
@@ -90,10 +125,24 @@ class LanguageQaManager:
             self._thread.start()
 
     def status(self, *, offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        probe: tuple[int, tuple[str, str, str, Path]] | None = None
         with self._lock:
             if (self._context and not self._paused and self._thread is None
                     and time.monotonic() - self._last_scan >= REFRESH_SECONDS):
-                self._schedule()
+                # Reserve this refresh interval before touching the filesystem.
+                # The stdio dispatcher is serial in production, but tests and
+                # embedded clients may call status concurrently.
+                self._last_scan = time.monotonic()
+                probe = (self._generation, self._context)
+        if probe is not None:
+            generation, context = probe
+            signature = self._chapter_signature(context[3])
+            with self._lock:
+                if (generation == self._generation and context == self._context
+                        and not self._paused and self._thread is None
+                        and signature != self._source_signature):
+                    self._schedule()
+        with self._lock:
             offset = max(0, int(offset))
             limit = max(0, min(100, int(limit)))
             findings = self._summary.get("findings", [])
@@ -108,6 +157,24 @@ class LanguageQaManager:
                 "storage": "Session results; automatically regenerated on reopen.",
             })
             return copy.deepcopy(result)
+
+    @staticmethod
+    def _chapter_signature(directory: Path) -> tuple[tuple[str, int, int], ...]:
+        """Cheap change detector for idle polling; content is hashed by workers.
+
+        Normal editor saves change size or mtime. A scan triggered by Bridge's
+        edit hook or another invalidation still hashes content, so equal metadata
+        can never make changed content reusable once a scan has been requested.
+        """
+        entries: list[tuple[str, int, int]] = []
+        candidates = (p for p in directory.glob("*.json") if p.stem.isdecimal())
+        for path in itertools.islice(candidates, MAX_CHAPTERS + 1):
+            try:
+                stat = path.stat()
+                entries.append((path.name, stat.st_mtime_ns, stat.st_size))
+            except OSError:
+                entries.append((path.name, -1, -1))
+        return tuple(sorted(entries))
 
     def _cancelled(self, generation: int) -> bool:
         return generation != self._generation or self._paused or self._context is None
@@ -149,6 +216,7 @@ class LanguageQaManager:
 
     def _scan(self, generation: int, context: tuple[str, str, str, Path]) -> dict[str, Any] | None:
         _, book, declared, directory = context
+        source_signature = self._chapter_signature(directory)
         candidates = (p for p in directory.glob("*.json") if p.stem.isdecimal())
         paths = sorted(itertools.islice(candidates, MAX_CHAPTERS + 1), key=lambda p: int(p.stem))
         limitations: list[str] = []
@@ -248,7 +316,7 @@ class LanguageQaManager:
                 "limitations": limitations, "incomplete": bool(limitations or skipped),
                 "checkedVerses": checked, "skippedVerses": skipped,
                 "reusedChapters": reused, "completedChapters": completed + 1,
-                "totalChapters": len(paths)}
+                "totalChapters": len(paths), "_sourceSignature": source_signature}
 
     def _run(self) -> None:
         while True:
@@ -268,8 +336,11 @@ class LanguageQaManager:
                 if generation != self._generation:
                     continue
                 if result is not None:
+                    source_signature = result.pop("_sourceSignature", None)
                     result["elapsedSeconds"] = round(time.monotonic() - started, 3)
                     self._summary = result
+                    if source_signature is not None:
+                        self._source_signature = source_signature
                 self._last_scan = time.monotonic()
                 self._thread = None
                 return
