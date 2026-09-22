@@ -189,7 +189,7 @@ def test_wordlist_findings_tie_break_is_deterministic():
     assert lower_count < higher_count
 
 
-def project_at(root, text="தமிழ் தமிழ்  ", book="php", verses=None, terminology=None):
+def project_at(root, text="தமிழ் தமிழ்  ", book="php", verses=None, terminology=None, decisions=None):
     folder = root / book
     folder.mkdir(parents=True)
     (folder / "1.json").write_text(json.dumps(verses or {"3a": text}, ensure_ascii=False), encoding="utf-8")
@@ -197,6 +197,8 @@ def project_at(root, text="தமிழ் தமிழ்  ", book="php", verse
                                 manifest={"target_language": {"id": "tam"}})
     if terminology is not None:
         namespace.terminology_rules = terminology if callable(terminology) else (lambda: terminology)
+    if decisions is not None:
+        namespace.project_qa_decisions = decisions if callable(decisions) else (lambda: decisions)
     return namespace
 
 

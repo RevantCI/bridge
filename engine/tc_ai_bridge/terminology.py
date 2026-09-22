@@ -60,6 +60,10 @@ class TermIndex:
                 self._by_phrase[tokens] = {
                     "conceptId": concept_id, "rejectedForm": rejected,
                     "preferredRenderings": preferred, "note": note,
+                    # A term may exist with only rejected forms recorded and no
+                    # preferred one settled yet -- never invent one, None is a
+                    # real, expected value here, not an oversight.
+                    "suggestedReplacement": preferred[0] if preferred else None,
                 }
                 self.max_phrase_length = max(self.max_phrase_length, len(tokens))
 

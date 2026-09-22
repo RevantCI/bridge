@@ -39,10 +39,11 @@ class LanguageQaManager:
         self._last_scan = 0.0
         self._debounce = debounce
         self._yield_seconds = yield_seconds
-        self._cache: dict[str, tuple[str, str, str, dict[str, Any]]] = {}
+        self._cache: dict[str, tuple[str, str, str, str, dict[str, Any]]] = {}
         self._source_signature: tuple[tuple[str, int, int], ...] | None = None
         self._paused_state: str | None = None
         self._terminology_loader: Callable[[], list[dict[str, Any]]] | None = None
+        self._decisions_loader: Callable[[], list[dict[str, Any]]] | None = None
         self._summary: dict[str, Any] = {"state": "idle", "findings": [], "limitations": []}
 
     def touch(self) -> None:
@@ -57,6 +58,7 @@ class LanguageQaManager:
             self._source_signature = None
             self._paused_state = None
             self._terminology_loader = getattr(project, "terminology_rules", None)
+            self._decisions_loader = getattr(project, "project_qa_decisions", None)
             self._paused = bool(blocked_reason)
             self._blocked_reason = blocked_reason
             self._schedule()
@@ -73,6 +75,7 @@ class LanguageQaManager:
             self._source_signature = None
             self._paused_state = None
             self._terminology_loader = None
+            self._decisions_loader = None
             self._summary = {"state": "idle", "findings": [], "limitations": []}
 
     def invalidate(self, chapter: str) -> None:
@@ -250,22 +253,39 @@ class LanguageQaManager:
         detection = detect_language(sample, declared)
         with self._lock:
             terminology_loader = self._terminology_loader
+            decisions_loader = self._decisions_loader
         try:
             raw_terms = terminology_loader() if terminology_loader else []
         except Exception as exc:
             raw_terms = []
             limitations.append(f"Terminology unavailable: {exc}")
         term_index = terminology.TermIndex(raw_terms)
-        # A book-wide hash of the raw termbase, folded into the per-chapter
-        # cache key below -- a curated term changing must invalidate every
-        # cached chapter's findings the same way an edited chapter would,
-        # even though the chapter's own text is untouched.
+        try:
+            raw_decisions = decisions_loader() if decisions_loader else []
+        except Exception as exc:
+            raw_decisions = []
+            limitations.append(f"Decisions unavailable: {exc}")
+        # Only terminology.deprecated-form findings ever consult this -- see
+        # the per-verse block below. Not a general Language QA decision
+        # framework; every other rule stays exactly as disposable as before.
+        term_decisions = {
+            str(row.get("issueKey", "")): str(row.get("decision", ""))
+            for row in raw_decisions if isinstance(row, dict)
+        }
+        # A book-wide hash of the raw termbase and decisions, folded into the
+        # per-chapter cache key below -- a curated term or a review decision
+        # changing must invalidate every cached chapter's findings the same
+        # way an edited chapter would, even though the chapter's own text is
+        # untouched.
         termbase_version = hashlib.sha1(
             json.dumps(raw_terms, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
         ).hexdigest()
+        decisions_version = hashlib.sha1(
+            json.dumps(term_decisions, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
         findings: list[dict[str, Any]] = []
         checked = skipped = reused = 0
-        cache: dict[str, tuple[str, str, str, dict[str, Any]]] = {}
+        cache: dict[str, tuple[str, str, str, str, dict[str, Any]]] = {}
         book_counts: dict[str, int] = {}
         book_first_seen: dict[str, tuple[str, str, int, int, str, str]] = {}
         for completed, path in enumerate(paths):
@@ -281,8 +301,8 @@ class LanguageQaManager:
                 # Hash bounded input even when metadata is unchanged: copying or
                 # restoring a file can preserve both its length and timestamp.
                 data, signature, digest = self._read(path)
-                if cached and cached[:3] == (digest, detection["pack"], termbase_version):
-                    chapter_result = cached[3]
+                if cached and cached[:4] == (digest, detection["pack"], termbase_version, decisions_version):
+                    chapter_result = cached[4]
                     reused += 1
                 else:
                     chapter_result = {"findings": [], "limitations": [], "checked": 0, "skipped": 0,
@@ -314,11 +334,21 @@ class LanguageQaManager:
                                 for match in terminology.find_deprecated_forms(text, term_index):
                                     key = ("terminology.deprecated-form", match["matchedText"])
                                     term_occurrences[key] = term_occurrences.get(key, 0) + 1
+                                    # Always advance the counter above, even when this
+                                    # specific occurrence ends up suppressed below --
+                                    # otherwise a later, undecided occurrence of the
+                                    # same word in the same verse would shift onto a
+                                    # different, unstable id once an earlier one is
+                                    # ignored.
+                                    finding_id = stable_finding_id(
+                                        book, path.stem, verse, "terminology.deprecated-form",
+                                        match["matchedText"], term_occurrences[key])
+                                    if term_decisions.get(finding_id) in ("ignored", "accepted"):
+                                        continue
                                     preferred = ", ".join(match["preferredRenderings"]) or "no preferred form recorded yet"
                                     note = f" {match['note']}" if match["note"] else ""
                                     chapter_result["findings"].append({
-                                        "id": stable_finding_id(book, path.stem, verse, "terminology.deprecated-form",
-                                                                match["matchedText"], term_occurrences[key]),
+                                        "id": finding_id,
                                         "book": book, "chapter": path.stem, "verse": verse,
                                         "rule": "terminology.deprecated-form", "severity": "high",
                                         "start": match["start"], "end": match["end"],
@@ -328,6 +358,7 @@ class LanguageQaManager:
                                                    f'Verify this occurrence.'),
                                         "textHash": result["textHash"], "ruleVersion": RULE_VERSION,
                                         "status": "review-needed",
+                                        "suggestedReplacement": match["suggestedReplacement"],
                                     })
                         room = MAX_BOOK_FINDINGS - len(findings) - len(chapter_result["findings"])
                         chapter_result["findings"].extend(result["findings"][:max(0, room)])
@@ -352,7 +383,7 @@ class LanguageQaManager:
                 # Retry limited/omitted chapters on subsequent passes; a preceding
                 # edit may have freed the book-wide result budget in the meantime.
                 if not chapter_result["limitations"]:
-                    cache[path.stem] = (digest, detection["pack"], termbase_version, chapter_result)
+                    cache[path.stem] = (digest, detection["pack"], termbase_version, decisions_version, chapter_result)
             except (OSError, ValueError, UnicodeError) as exc:
                 limitations.append(f"Chapter {path.stem}: {exc}")
             if len(findings) >= MAX_BOOK_FINDINGS:

@@ -3,6 +3,7 @@ import unicodedata
 
 import pytest
 
+from tc_ai_bridge.language_qa import stable_finding_id
 from tc_ai_bridge.language_qa_jobs import LanguageQaManager
 from tc_ai_bridge.tc_project import ProjectError, TranslationCoreProject
 from tc_ai_bridge.terminology import MAX_PHRASE_WORDS, TermIndex, find_deprecated_forms, phrase_tokens
@@ -51,6 +52,19 @@ def test_find_deprecated_forms_flags_single_word_match():
     assert m["conceptId"] == "god"
     assert m["preferredRenderings"] == ["இறைவன்"]
     assert m["note"] == "Use இறைவன் in Psalms."
+    assert m["suggestedReplacement"] == "இறைவன்"
+
+
+def test_find_deprecated_forms_suggested_replacement_is_first_preferred_form():
+    index = TermIndex([approved_term("god", ["தேவன்"], preferred=["இறைவன்", "தெய்வம்"])])
+    assert find_deprecated_forms("தேவன்", index)[0]["suggestedReplacement"] == "இறைவன்"
+
+
+def test_find_deprecated_forms_suggested_replacement_is_none_without_a_preferred_form():
+    # A term can exist with only rejected forms recorded -- never invent a
+    # preferred one; None is the honest, expected value here.
+    index = TermIndex([approved_term("god", ["தேவன்"])])
+    assert find_deprecated_forms("தேவன்", index)[0]["suggestedReplacement"] is None
 
 
 def test_find_deprecated_forms_flags_multi_word_phrase():
@@ -289,3 +303,98 @@ def test_terminology_change_invalidates_an_unrelated_cached_chapter(tmp_path):
     findings = [f for f in after["findings"] if f["rule"] == "terminology.deprecated-form"]
     assert len(findings) == 1
     assert findings[0]["chapter"] == "1"
+
+
+# ---- decision suppression (termbase v2: Ignore/Use must actually stick) ----
+
+def test_terminology_finding_includes_a_suggested_replacement(tmp_path):
+    terms = [approved_term("god", ["கடவுள்"], preferred=["இறைவன்"])]
+    project = project_at(tmp_path, verses={"1": "கடவுள் இருக்கிறார்."}, terminology=terms)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    match = next(f for f in result["findings"] if f["rule"] == "terminology.deprecated-form")
+    assert match["suggestedReplacement"] == "இறைவன்"
+
+
+def test_terminology_ignored_decision_suppresses_the_finding(tmp_path):
+    terms = [approved_term("god", ["கடவுள்"], preferred=["இறைவன்"])]
+    finding_id = stable_finding_id("php", "1", "1", "terminology.deprecated-form", "கடவுள்", 1)
+    decisions = [{"issueKey": finding_id, "decision": "ignored"}]
+    project = project_at(tmp_path, verses={"1": "கடவுள் இருக்கிறார்."},
+                         terminology=terms, decisions=decisions)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    assert not [f for f in result["findings"] if f["rule"] == "terminology.deprecated-form"]
+
+
+def test_terminology_accepted_decision_suppresses_the_finding(tmp_path):
+    terms = [approved_term("god", ["கடவுள்"], preferred=["இறைவன்"])]
+    finding_id = stable_finding_id("php", "1", "1", "terminology.deprecated-form", "கடவுள்", 1)
+    decisions = [{"issueKey": finding_id, "decision": "accepted"}]
+    project = project_at(tmp_path, verses={"1": "கடவுள் இருக்கிறார்."},
+                         terminology=terms, decisions=decisions)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    assert not [f for f in result["findings"] if f["rule"] == "terminology.deprecated-form"]
+
+
+def test_terminology_decision_on_one_occurrence_does_not_suppress_another(tmp_path):
+    terms = [approved_term("god", ["கடவுள்"], preferred=["இறைவன்"])]
+    first_occurrence_id = stable_finding_id("php", "1", "1", "terminology.deprecated-form", "கடவுள்", 1)
+    decisions = [{"issueKey": first_occurrence_id, "decision": "ignored"}]
+    project = project_at(tmp_path, verses={"1": "கடவுள் அங்கு. பின்னர் கடவுள் மீண்டும்."},
+                         terminology=terms, decisions=decisions)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    matches = [f for f in result["findings"] if f["rule"] == "terminology.deprecated-form"]
+    assert len(matches) == 1  # only the second, undecided occurrence remains
+
+
+def test_terminology_no_decisions_loader_shows_every_finding(tmp_path):
+    terms = [approved_term("god", ["கடவுள்"], preferred=["இறைவன்"])]
+    project = project_at(tmp_path, verses={"1": "கடவுள் இருக்கிறார்."}, terminology=terms)  # no decisions=
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    assert any(f["rule"] == "terminology.deprecated-form" for f in result["findings"])
+
+
+def test_terminology_malformed_decisions_loader_degrades_gracefully(tmp_path):
+    def broken_decisions():
+        raise RuntimeError("workbench unavailable")
+    terms = [approved_term("god", ["கடவுள்"], preferred=["இறைவன்"])]
+    project = project_at(tmp_path, verses={"1": "கடவுள் இருக்கிறார்."},
+                         terminology=terms, decisions=broken_decisions)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    assert result["state"] == "completed"
+    assert any(f["rule"] == "terminology.deprecated-form" for f in result["findings"])
+    assert any("Decisions unavailable" in m for m in result["limitations"])
+
+
+def test_terminology_decision_change_invalidates_the_chapter_cache(tmp_path):
+    terms = [approved_term("god", ["கடவுள்"], preferred=["இறைவன்"])]
+    decisions: list[dict] = []
+    project = project_at(tmp_path, verses={"1": "கடவுள் இருக்கிறார்."},
+                         terminology=terms, decisions=lambda: decisions)
+    (project.book_dir / "2.json").write_text(
+        json.dumps({"1": "வேறு வரி"}, ensure_ascii=False), encoding="utf-8")
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    first = wait(manager)
+    assert any(f["rule"] == "terminology.deprecated-form" for f in first["findings"])
+    finding_id = stable_finding_id("php", "1", "1", "terminology.deprecated-form", "கடவுள்", 1)
+    decisions.append({"issueKey": finding_id, "decision": "ignored"})
+    # Force a new pass via chapter 2 only -- chapter 1's own file is untouched,
+    # so without decisions folded into the cache key it would keep serving
+    # the pre-decision finding from its content-hash cache.
+    (project.book_dir / "2.json").write_text(
+        json.dumps({"1": "புதிய வரி"}, ensure_ascii=False), encoding="utf-8")
+    manager.invalidate("2")
+    after = wait(manager)
+    assert not [f for f in after["findings"] if f["rule"] == "terminology.deprecated-form"]
