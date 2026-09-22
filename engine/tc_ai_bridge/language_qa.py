@@ -55,6 +55,17 @@ def text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
+def stable_finding_id(book: str, chapter: str, verse: str, rule: str,
+                       original: str, occurrence: int) -> str:
+    """The one id formula every Language QA finding uses -- deterministic
+    across re-scans of unchanged text. `occurrence` disambiguates repeats of
+    the same (rule, original) pair within whatever the caller's scope is
+    (one verse for scan_text's own rules; also one verse for terminology
+    matches, counted independently per verse by the caller)."""
+    identity = f"{book}:{chapter}:{verse}:{rule}:{original}:{occurrence}"
+    return hashlib.sha1(identity.encode("utf-8", errors="surrogatepass")).hexdigest()[:20]
+
+
 def detect_language(sample: str, declared: str = "") -> dict[str, Any]:
     """Script evidence is not a general language classifier. Never guess Hindi.
 
@@ -122,9 +133,8 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
             return
         original = text[start:end]
         occurrences[(rule, original)] += 1
-        identity = f"{book}:{chapter}:{verse}:{rule}:{original}:{occurrences[(rule, original)]}"
         findings.append({
-            "id": hashlib.sha1(identity.encode("utf-8", errors="surrogatepass")).hexdigest()[:20],
+            "id": stable_finding_id(book, chapter, verse, rule, original, occurrences[(rule, original)]),
             "book": book, "chapter": chapter, "verse": verse, "rule": rule,
             "severity": severity, "start": start, "end": end,
             "originalText": original, "message": message, "textHash": digest,

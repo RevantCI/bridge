@@ -9941,3 +9941,114 @@ termbase/proper-name infrastructure (framework items 20-21/50), to be scoped
 separately once requested. If sandhi work resumes later, the next rule should
 again be narrowly bounded and validated before implementation, the same way
 B1 was.
+
+### 2026-09-22 LQA-2 termbase v1: explicit exact-match deprecated-form consistency (items 20-21/50)
+
+First implementation slice of the termbase track, following the architecture
+document accepted this session (four explicit maintainer decisions overrode
+two of that document's own recommendations):
+
+- **Pipeline**: routed through the existing, already-disposable Language QA
+  flow (`language_qa.py`/`language_qa_jobs.py`), not a new Greek-Room-style
+  adapter with its own persistence/review lifecycle as the architecture doc
+  had recommended. No second findings model, no parallel job manager.
+- **Storage**: the termbase itself (the curated data, as opposed to the
+  findings it produces) is durable, DB-backed — finishing the orphaned
+  `record_terminology_rule`/`terminology_rules()` write path in
+  `tc_project.py` (`human_decisions`, `kind='terminology'`), which already
+  existed with almost the right shape but zero callers anywhere. Extended,
+  not replaced: added `category` (person_name/place_name/key_term/other),
+  `provenance` (human/imported), a real `status` enum
+  (approved/provisional/imported, replacing a single hardcoded literal), and
+  validation (concept id required, at least one rendering list non-empty,
+  enum values checked, book-scope-only for now). Kept the existing
+  `approvedRenderings`/`allowedAlternatives`/`rejectedRenderings` field names
+  unchanged — `analytics.py`'s `translation_words_book_analytics()` is an
+  *active* reader of `approvedRenderings` specifically, and renaming it for
+  cosmetic clarity would have silently broken that consumer for no v1
+  benefit. `schemaVersion` bumped 1->2 inside the payload only; no SQL
+  migration, `WORKBENCH_SCHEMA_VERSION` stays at 3 — the payload column is
+  schema-less JSON and there was no production data anywhere to migrate
+  (zero prior callers, confirmed).
+
+**Authority, not frequency** (the maintainer's own framing): only entries
+with `status == "approved"` are ever matchable. A `provisional`/`imported`
+entry's `rejectedRenderings` are inert until something explicitly promotes
+them — including a pre-existing payload from before this change that has no
+`status` key at all, which degrades to "not approved" (the safe default),
+never silently authoritative. Automatic discovery/promotion is not built in
+this slice; `record_terminology_rule` represents explicit human/API
+curation and defaults to `approved` for that reason alone.
+
+**New domain module** `engine/tc_ai_bridge/terminology.py` — pure matching
+logic, no I/O, no orchestration, per the maintainer's explicit "keep
+terminology/domain logic separate from orchestration" instruction.
+`TermIndex` builds a phrase->term lookup from raw `terminology_rules()` rows
+(sorted by `conceptId` first, so two entries that happen to register the
+same phrase resolve deterministically rather than by loader iteration-order
+luck); `find_deprecated_forms()` does word/phrase-boundary-aware exact
+matching (multi-word phrases supported, whitespace-only gaps, same
+discipline as `tamil.vallinam-missing`'s two-token boundary check) — never a
+naive substring search. `language_qa.py` gained one small, behavior-preserving
+refactor: `add()`'s inline id-hashing formula was extracted to a top-level
+`stable_finding_id()` so the new rule can mint ids identically without
+duplicating the formula; full suite reran green immediately after, confirming
+no behavior change from the extraction alone.
+
+**Integration** (`language_qa_jobs.py`'s `_scan()`): the termbase is loaded
+fresh every scan pass (a single lightweight read, not worth caching across
+passes) via a loader reference captured at `bind()` time
+(`getattr(project, "terminology_rules", None)`) — the `SimpleNamespace` test
+fixture never has to provide one unless a test opts in, which is what makes
+"no termbase installed" degrade to zero findings with no code path change.
+A loader exception is caught and degrades to an empty termbase plus a
+"Terminology unavailable" limitation, never a crash. New rule
+`terminology.deprecated-form`, severity `high` (a curated fact, not a
+heuristic — deliberately distinct from `tamil.wordlist-variant`'s `low`
+corpus-suspicion tier, per the maintainer's explicit instruction to keep
+those two confidence classes separate), hedged message wording ("is marked
+deprecated... Verify this occurrence" — never an automatic-correction
+command). A curated term changing must invalidate every cached chapter's
+findings, not just whatever chapter's edit triggered the pass — the
+per-chapter cache key gained a third component, a hash of the raw termbase,
+alongside the existing content-digest and language-pack — proven by a
+dedicated regression that edits chapter 2 only and confirms chapter 1's
+stale-but-uncached finding still appears.
+
+**Tests**: 26 new, `engine/tests/service/test_terminology.py` — 10 pure
+`TermIndex`/`find_deprecated_forms` unit tests (approved-only authority,
+malformed/overlong-phrase defensive skipping, single- and multi-word
+matching, whitespace-only boundary, raw-span-vs-normalized-comparison,
+deterministic conflict resolution, pre-existing-payload backward
+compatibility), 5 real `TranslationCoreProject` storage round-trip tests
+(record/read, restart/reopen, upsert-by-concept-id, empty-entry and
+unknown-enum validation), 8 `LanguageQaManager` integration tests (clean on
+preferred/allowed forms, stable id across an unrelated rescan, finding
+clears on edit and on verse removal, no-termbase and malformed-loader
+graceful degradation, the cross-chapter cache-invalidation regression above),
+1 full real-project-to-manager end-to-end test. Existing suites unaffected:
+`test_language_qa.py` (67) and the full engine suite both reran green.
+Full engine suite: **1160 passed, 1 skipped** (up from 1134, matching the 26
+new tests exactly).
+
+**Performance** (synthetic, no real Tamil termbase or reviewed book
+available in this environment, same caveat as item 49's): 300 concepts /
+602 rejected forms against 30,000 generated verses (a generous whole-Bible
+upper bound) — 0.048 ms/verse, 1.45s total. The benchmark's "3204 incidental
+matches" is a synthetic-data artifact (both the termbase and verse text were
+generated by sampling the same small random-letter alphabet, producing
+coincidental collisions no real termbase against real Scripture would show)
+— not a false-positive-rate measurement, and not claimed as one.
+
+**Deferred, not built**: fuzzy/near-spelling suggestions, automatic
+variant/rendering promotion, general spelling correction, inferred preferred
+forms, full proper-name discovery, theological semantic inference, Tamil
+morphological parsing (case-suffix/sandhi-aware matching), whole-project/
+whole-Bible scope, any curation UI (this is backend/storage/domain only, by
+design), cross-entry write-time conflict validation (conflicts resolve
+deterministically at match time instead, per the dedicated regression — not
+rejected at write time).
+
+Desktop acceptance **not yet run** — this entry documents source-level
+verification only; the maintainer will test the actual build directly per
+`docs/QA_TEST_MATRIX.md`'s A45 row before this is called accepted.

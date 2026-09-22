@@ -189,12 +189,15 @@ def test_wordlist_findings_tie_break_is_deterministic():
     assert lower_count < higher_count
 
 
-def project_at(root, text="தமிழ் தமிழ்  ", book="php", verses=None):
+def project_at(root, text="தமிழ் தமிழ்  ", book="php", verses=None, terminology=None):
     folder = root / book
     folder.mkdir(parents=True)
     (folder / "1.json").write_text(json.dumps(verses or {"3a": text}, ensure_ascii=False), encoding="utf-8")
-    return SimpleNamespace(path=root, book_id=book, book_dir=folder,
-                           manifest={"target_language": {"id": "tam"}})
+    namespace = SimpleNamespace(path=root, book_id=book, book_dir=folder,
+                                manifest={"target_language": {"id": "tam"}})
+    if terminology is not None:
+        namespace.terminology_rules = terminology if callable(terminology) else (lambda: terminology)
+    return namespace
 
 
 def wait(manager, state="completed"):
