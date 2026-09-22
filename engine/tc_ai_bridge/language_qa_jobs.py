@@ -14,7 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .language_qa import RULE_VERSION, detect_language, scan_text
+from .language_qa import (MAX_WORDLIST_TERMS, RULE_VERSION, detect_language,
+                          scan_text, word_occurrences, wordlist_findings)
 
 MAX_CHAPTER_BYTES = 2 * 1024 * 1024
 MAX_BOOK_FINDINGS = 3000
@@ -220,7 +221,8 @@ class LanguageQaManager:
         candidates = (p for p in directory.glob("*.json") if p.stem.isdecimal())
         paths = sorted(itertools.islice(candidates, MAX_CHAPTERS + 1), key=lambda p: int(p.stem))
         limitations: list[str] = []
-        if len(paths) > MAX_CHAPTERS:
+        truncated = len(paths) > MAX_CHAPTERS
+        if truncated:
             limitations.append("Chapter limit reached; additional chapters omitted.")
             paths = paths[:MAX_CHAPTERS]
         if not paths:
@@ -245,6 +247,8 @@ class LanguageQaManager:
         findings: list[dict[str, Any]] = []
         checked = skipped = reused = 0
         cache: dict[str, tuple[str, str, dict[str, Any]]] = {}
+        book_counts: dict[str, int] = {}
+        book_first_seen: dict[str, tuple[str, str, int, int, str, str]] = {}
         for completed, path in enumerate(paths):
             if not self._yield(generation):
                 return None
@@ -262,7 +266,8 @@ class LanguageQaManager:
                     chapter_result = cached[2]
                     reused += 1
                 else:
-                    chapter_result = {"findings": [], "limitations": [], "checked": 0, "skipped": 0}
+                    chapter_result = {"findings": [], "limitations": [], "checked": 0, "skipped": 0,
+                                      "words": {}, "firstSeen": {}}
                     if len(data) > MAX_CHAPTER_VERSES:
                         chapter_result["limitations"].append("Chapter verse limit reached; remaining entries omitted.")
                     for verse, text in itertools.islice(data.items(), MAX_CHAPTER_VERSES):
@@ -280,6 +285,12 @@ class LanguageQaManager:
                                     f"{verse}: {message}" for message in result["limitations"])
                         else:
                             chapter_result["checked"] += 1
+                            if detection["pack"] == "tamil":
+                                for word, w_start, w_end in word_occurrences(text):
+                                    chapter_result["words"][word] = chapter_result["words"].get(word, 0) + 1
+                                    chapter_result["firstSeen"].setdefault(word, (
+                                        path.stem, verse, w_start, w_end,
+                                        text[w_start:w_end], result["textHash"]))
                         room = MAX_BOOK_FINDINGS - len(findings) - len(chapter_result["findings"])
                         chapter_result["findings"].extend(result["findings"][:max(0, room)])
                         if len(result["findings"]) > room:
@@ -293,6 +304,10 @@ class LanguageQaManager:
                 findings.extend(chapter_result["findings"][:room])
                 checked += chapter_result["checked"]
                 skipped += chapter_result["skipped"]
+                for word, count in chapter_result["words"].items():
+                    book_counts[word] = book_counts.get(word, 0) + count
+                for word, location in chapter_result["firstSeen"].items():
+                    book_first_seen.setdefault(word, location)
                 limitations.extend(f"Chapter {path.stem}: {m}" for m in chapter_result["limitations"])
                 if chapter_result["skipped"] and not chapter_result["limitations"]:
                     limitations.append(f"Chapter {path.stem}: non-verse or non-text entries omitted.")
@@ -304,10 +319,25 @@ class LanguageQaManager:
                 limitations.append(f"Chapter {path.stem}: {exc}")
             if len(findings) >= MAX_BOOK_FINDINGS:
                 limitations.append("Book finding limit reached; additional findings/chapters may be omitted.")
+                truncated = True
                 break
             if len(limitations) >= 200:
                 limitations = limitations[:200] + ["Diagnostic limit reached; remaining chapters omitted."]
+                truncated = True
                 break
+        # A truncated pass never opened every chapter, so a word that is genuinely
+        # common in the unread tail would look artificially rare here -- exactly
+        # the false-positive shape the rarity+similarity guardrail must prevent.
+        if truncated:
+            limitations.append("Wordlist audit skipped: book scan was truncated.")
+        elif len(book_counts) > MAX_WORDLIST_TERMS:
+            limitations.append("Wordlist audit skipped: too many distinct words to compare.")
+        else:
+            wordlist = wordlist_findings(book, book_counts, book_first_seen)
+            room = MAX_BOOK_FINDINGS - len(findings)
+            findings.extend(wordlist[:max(0, room)])
+            if len(wordlist) > room:
+                limitations.append("Book finding limit reached; wordlist audit findings omitted.")
         with self._lock:
             if self._cancelled(generation):
                 return None

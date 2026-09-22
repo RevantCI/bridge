@@ -15,6 +15,18 @@ import regex
 RULE_VERSION = "language-qa-1"
 MAX_VERSE_CHARS = 20_000
 MAX_VERSE_FINDINGS = 100
+# Whole-book wordlist audit (item 49). Rarity/frequency constants below are an
+# unvalidated starting point (mirroring bridge_service.py's
+# _CONSISTENCY_MIN_OCCURRENCES/_MIN_RENDERINGS/_DOMINANCE_THRESHOLD) -- measure
+# false-positive rate against a real, previously-reviewed Tamil book before
+# trusting these defaults. Rarity or spelling similarity alone are never
+# findings; both must hold together (docs/LANGUAGE_QA_PLAN.md's LQA-2 row).
+MAX_WORDLIST_TERMS = 20_000
+WORDLIST_MIN_LENGTH = 4
+WORDLIST_RARE_MAX = 2
+WORDLIST_COMMON_MIN = 6
+WORDLIST_RATIO_MIN = 5
+MAX_WORDLIST_FINDINGS = 200
 CONSONANTS = frozenset("கஙசஜஞடணதநனபமயரறலளழவஶஷஸஹ")
 SIGNS = frozenset("ாிீுூெேைொோௌ்ௗ")
 WORD = regex.compile(r"\p{L}[\p{L}\p{M}]*")
@@ -153,3 +165,79 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
             if regex.search(r"\p{Script=Tamil}", word.group()) and regex.search(r"\p{Script=Latin}", word.group()):
                 add("tamil.mixed-word", *word.span(), "Tamil and Latin letters occur inside one word; verify intentional mixed text.", "medium")
     return result
+
+
+def word_occurrences(text: str) -> list[tuple[str, int, int]]:
+    """NFC-normalized (word, start, end) triples; spans are raw offsets into
+    `text`. Same tokenizer as tamil.repeated-word -- do not add a second one."""
+    return [(unicodedata.normalize("NFC", m.group()), *m.span()) for m in WORD.finditer(text)]
+
+
+def _deletion_neighbors(word: str) -> list[str]:
+    return [word[:i] + word[i + 1:] for i in range(len(word))]
+
+
+def wordlist_findings(book: str, counts: dict[str, int],
+                       first_seen: dict[str, tuple[str, str, int, int, str, str]],
+                       ) -> list[dict[str, Any]]:
+    """Pure function, no I/O. `first_seen` maps a normalized word to
+    (chapter, verse, start, end, originalText, textHash) for its first
+    occurrence in book-walk order. Flags a rare word only when it is also an
+    edit-distance-1 near-duplicate (including a single pulli insertion/
+    deletion, which is just an ordinary edit-distance-1 case here) of a much
+    more common word in the same book -- rarity alone and spelling similarity
+    alone are never findings on their own.
+    """
+    words = [w for w in counts if len(w) >= WORDLIST_MIN_LENGTH]
+    word_set = set(words)
+    candidates: dict[str, set[str]] = {}
+
+    def link(a: str, b: str) -> None:
+        candidates.setdefault(a, set()).add(b)
+        candidates.setdefault(b, set()).add(a)
+
+    # Same-length substitutions: two words that reduce to the same string when
+    # the same relative letter is deleted from each share a deletion-neighbor
+    # bucket. Every entry in one bucket has the same length by construction
+    # (a word's deletion-neighbors are always exactly one codepoint shorter).
+    buckets: dict[str, list[str]] = {}
+    for word in words:
+        for neighbor in _deletion_neighbors(word):
+            buckets.setdefault(neighbor, []).append(word)
+    for group in buckets.values():
+        for i, a in enumerate(group):
+            for b in group[i + 1:]:
+                link(a, b)
+    # Insertion/deletion pairs (including a single pulli inserted or dropped):
+    # a word's own deletion-neighbor that happens to itself be a real word in
+    # this book is a direct edit-distance-1 match, no bucket needed.
+    for word in words:
+        for neighbor in _deletion_neighbors(word):
+            if neighbor in word_set:
+                link(word, neighbor)
+    findings: list[dict[str, Any]] = []
+    for rare in sorted(candidates):
+        rare_count = counts[rare]
+        if rare_count > WORDLIST_RARE_MAX:
+            continue
+        common_options = [w for w in candidates[rare]
+                          if counts[w] >= WORDLIST_COMMON_MIN
+                          and counts[w] >= rare_count * WORDLIST_RATIO_MIN]
+        if not common_options:
+            continue
+        # Deterministic tie-break: most frequent common match, then lexical order.
+        common = sorted(common_options, key=lambda w: (-counts[w], w))[0]
+        chapter, verse, start, end, original, text_hash = first_seen[rare]
+        identity = f"{book}:tamil.wordlist-variant:{rare}:{common}"
+        findings.append({
+            "id": hashlib.sha1(identity.encode("utf-8", errors="surrogatepass")).hexdigest()[:20],
+            "book": book, "chapter": chapter, "verse": verse, "rule": "tamil.wordlist-variant",
+            "severity": "low", "start": start, "end": end, "originalText": original,
+            "message": (f'"{rare}" occurs {rare_count} time(s) in this book; "{common}" '
+                        f'(a similar spelling) occurs {counts[common]} times here -- verify '
+                        f'whether this is a spelling variant or a distinct word/name.'),
+            "textHash": text_hash, "ruleVersion": RULE_VERSION, "status": "review-needed",
+        })
+        if len(findings) >= MAX_WORDLIST_FINDINGS:
+            break
+    return findings

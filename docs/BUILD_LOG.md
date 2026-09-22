@@ -9792,3 +9792,71 @@ with no worker thread and no rescan. An edit made while paused (verified with a
 direct external-file write, not just `invalidate()`) still produces a signature
 mismatch and rescans normally on resume. Two new focused regressions cover both
 paths. The focused Language QA suite is now **35 passed**.
+
+### 2026-09-22 LQA-2, first slice: whole-Bible wordlist audit (item 49)
+
+First LQA-2 delivery. Scope was narrowed deliberately across two rounds of
+questions with the maintainer: most of LQA-2 (items 1-10 grammar/morphology,
+20-21/50 termbase) needs either a real Tamil dictionary/morphological analyzer or
+expert-labelled examples neither of which exist yet, so this slice covers only
+the part of item 49 that's pure corpus statistics needing no external data —
+same word two ways, one-character variants, pulli presence/absence, and a rare
+form paired with a much more common near-duplicate. Per the LQA-2 scope note's
+own guardrail ("Rare words or spelling similarity alone are never errors"), the
+rule requires *both* rarity and similarity together; neither alone is ever a
+finding. Compound joined/split and name/theological-term variants are explicitly
+**not** covered — item 49 is not fully closed by this slice.
+
+`language_qa.py` gained `word_occurrences()` (reuses the existing `WORD`
+tokenizer, does not add a second one) and `wordlist_findings()` (pure function:
+counts + first-occurrence locations in, findings out). Near-duplicate matching
+uses SymSpell-style deletion-neighbor buckets rather than naive length bucketing
+(which is genuinely quadratic on Tamil's clustered word-length distribution) —
+this doubles as the pulli-variant case for free, since inserting/deleting one
+pulli is just an ordinary edit-distance-1 case under this scheme; an early
+version of this code only handled same-length substitutions and silently never
+caught the insertion/deletion case including the pulli example itself, caught by
+the first real test run, not by review — fixed by also checking each word's own
+deletion-neighbors against the vocabulary directly.
+
+`language_qa_jobs.py`'s `_scan()` now accumulates a book-wide word-frequency
+table and first-occurrence map alongside the existing per-chapter cache (a
+cache-hit chapter contributes without re-tokenizing); a verse that produced any
+limitation (inline USFM, corrupted, oversize) is excluded from word-counting so
+it can't manufacture spurious rare forms; a truncated pass (either book-finding
+or diagnostic-limit cap, or the pre-existing MAX_CHAPTERS cap) skips the audit
+entirely with an explicit limitation, since a word genuinely common in an unread
+tail chapter would otherwise look artificially rare. The finding id is
+`sha1(book:tamil.wordlist-variant:rare:common)` — word-pair only, no
+chapter/verse — so it survives an unrelated later edit that moves or removes the
+rare word's anchor occurrence elsewhere in the book; a focused regression pins
+this by moving the anchor and checking the id is unchanged.
+
+**Constants are an unvalidated starting point, not a calibrated default** —
+mirrored from `bridge_service.py`'s existing `_CONSISTENCY_MIN_OCCURRENCES`/
+`_MIN_RENDERINGS`/`_DOMINANCE_THRESHOLD` precedent for the same class of
+whole-book statistical check. This environment has no real, previously-reviewed
+Tamil Bible book to run a false-positive calibration against (only small
+synthetic fixtures exist in the test suite) — that calibration is still
+outstanding and should happen against a real project before this rule is
+trusted at scale. What *was* measured: a synthetic 20,000-distinct-word
+vocabulary (the `MAX_WORDLIST_TERMS` cap) runs in ~0.25s; realistic single-book
+sizes (2,000-5,000 distinct words, closer to what a real book's vocabulary is
+likely to be) run in 20-50ms. That whole pass runs as one atomic call at the end
+of `_scan()` with no internal yield point, so a pause/cancel request arriving
+during it can wait up to that ~0.25s worst case before taking effect — a known,
+minor responsiveness gap, not fixed here since real single-book sizes are far
+below the cap.
+
+9 new focused tests (5 pure-function unit tests on `wordlist_findings`, 4
+integration tests through `LanguageQaManager` covering end-to-end detection,
+limitation-verse exclusion, truncation skip, and id stability across a moved
+anchor). Focused Language QA suite: 35 -> 44. Full engine suite reran clean:
+1111 passed, 1 skipped, 0 failed (up from 1102 before this change, matching the
+9 new tests). No frontend changes needed or made — `LanguageQaPanel.svelte`
+already renders any finding generically by iterating `status.findings`, with no
+rule-id-specific handling, confirmed by reading the render loop directly.
+
+Grammar checks (item 3, சந்தி வல்லினம் doubling) remain blocked pending the
+maintainer's labelled examples and a precise rule statement, per the approved
+plan; not started in this slice.

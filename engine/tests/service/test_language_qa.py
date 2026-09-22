@@ -7,8 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from tc_ai_bridge.language_qa import detect_language, scan_text, text_hash
-from tc_ai_bridge.language_qa_jobs import LanguageQaManager, MAX_CHAPTER_BYTES
+from tc_ai_bridge.language_qa import (
+    WORDLIST_COMMON_MIN, WORDLIST_MIN_LENGTH, WORDLIST_RARE_MAX, WORDLIST_RATIO_MIN,
+    detect_language, scan_text, text_hash, wordlist_findings,
+)
+from tc_ai_bridge.language_qa_jobs import LanguageQaManager, MAX_CHAPTER_BYTES, MAX_BOOK_FINDINGS
 from tests.service.test_bridge_service import fixture_project, call
 from bridge_service import BridgeEngine
 
@@ -77,6 +80,73 @@ def test_detection_metadata_conflicts_shared_scripts_and_mixed_input():
     assert detect_language("123")["language"] == "und"
 
 
+def test_wordlist_findings_flags_a_rare_pulli_variant_of_a_common_word():
+    common, rare = "தமிழ்", "தமிழ"  # differ by exactly one pulli
+    assert len(common) >= WORDLIST_MIN_LENGTH and len(rare) >= WORDLIST_MIN_LENGTH
+    counts = {common: WORDLIST_COMMON_MIN, rare: 1}
+    first_seen = {
+        common: ("1", "1", 0, len(common), common, "hash-common"),
+        rare: ("1", "2", 3, 3 + len(rare), rare, "hash-rare"),
+    }
+    findings = wordlist_findings("php", counts, first_seen)
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["rule"] == "tamil.wordlist-variant"
+    assert finding["severity"] == "low" and finding["status"] == "review-needed"
+    assert finding["chapter"] == "1" and finding["verse"] == "2"
+    assert finding["start"] == 3 and finding["end"] == 3 + len(rare)
+    assert finding["originalText"] == rare  # the raw span, not the NFC counting key
+    assert finding["textHash"] == "hash-rare"
+    assert common in finding["message"] and str(WORDLIST_COMMON_MIN) in finding["message"]
+
+
+def test_wordlist_findings_never_flags_rarity_alone():
+    rare = "தமிழக"  # length >= WORDLIST_MIN_LENGTH, no similar word present at all
+    counts = {rare: 1}
+    first_seen = {rare: ("1", "1", 0, len(rare), rare, "hash")}
+    assert wordlist_findings("php", counts, first_seen) == []
+
+
+def test_wordlist_findings_never_flags_similarity_alone():
+    a, b = "தமிழ்", "தமிழ"
+    counts = {a: WORDLIST_COMMON_MIN, b: WORDLIST_COMMON_MIN}  # both common, neither rare
+    first_seen = {
+        a: ("1", "1", 0, len(a), a, "hash-a"),
+        b: ("1", "2", 0, len(b), b, "hash-b"),
+    }
+    assert wordlist_findings("php", counts, first_seen) == []
+
+
+def test_wordlist_findings_ignores_words_shorter_than_the_minimum():
+    common, rare = "தமி", "தம"
+    assert len(common) < WORDLIST_MIN_LENGTH and len(rare) < WORDLIST_MIN_LENGTH
+    counts = {common: WORDLIST_COMMON_MIN, rare: 1}
+    first_seen = {
+        common: ("1", "1", 0, len(common), common, "hash-common"),
+        rare: ("1", "2", 0, len(rare), rare, "hash-rare"),
+    }
+    assert wordlist_findings("php", counts, first_seen) == []
+
+
+def test_wordlist_findings_tie_break_is_deterministic():
+    rare = "தமிழ"
+    higher_count, lower_count = "தமிழ்", "தமிள"  # insertion vs. substitution, both edit-distance-1
+    counts = {rare: 1, higher_count: WORDLIST_COMMON_MIN + 6, lower_count: WORDLIST_COMMON_MIN + 2}
+    first_seen = {
+        rare: ("1", "1", 0, len(rare), rare, "hash-rare"),
+        higher_count: ("1", "2", 0, len(higher_count), higher_count, "hash-a"),
+        lower_count: ("1", "3", 0, len(lower_count), lower_count, "hash-b"),
+    }
+    findings = wordlist_findings("php", counts, first_seen)
+    assert len(findings) == 1
+    assert higher_count in findings[0]["message"]  # higher count wins over lexical order
+    # Equal counts: lexicographically smaller string wins instead.
+    counts[higher_count] = counts[lower_count]
+    findings = wordlist_findings("php", counts, first_seen)
+    assert lower_count in findings[0]["message"]
+    assert lower_count < higher_count
+
+
 def project_at(root, text="தமிழ் தமிழ்  ", book="php", verses=None):
     folder = root / book
     folder.mkdir(parents=True)
@@ -94,6 +164,60 @@ def wait(manager, state="completed"):
         assert status["state"] != "failed", status
         time.sleep(.005)
     pytest.fail(f"Language QA did not reach {state}: {manager.status()}")
+
+
+def test_wordlist_audit_end_to_end_via_manager(tmp_path):
+    project = project_at(tmp_path, verses={"1": "தமிழ்", "2": "தமிழ்", "3": "தமிழ்"})
+    (project.book_dir / "2.json").write_text(json.dumps(
+        {"1": "தமிழ்", "2": "தமிழ்", "3": "தமிழ்", "4": "தமிழ"}, ensure_ascii=False), encoding="utf-8")
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    variants = [f for f in result["findings"] if f["rule"] == "tamil.wordlist-variant"]
+    assert len(variants) == 1
+    assert variants[0]["chapter"] == "2" and variants[0]["verse"] == "4"
+    assert variants[0]["originalText"] == "தமிழ"
+
+
+def test_wordlist_audit_excludes_words_from_verses_with_limitations(tmp_path):
+    # An inline-USFM verse ("\\" present) produces a verse-level limitation and
+    # must not contribute its words to the book-wide wordlist audit.
+    verses = {str(n): "தமிழ்" for n in range(1, 7)}  # 6 occurrences: satisfies WORDLIST_COMMON_MIN
+    verses["7"] = "\\wj தமிழ\\wj*"
+    project = project_at(tmp_path, verses=verses)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    assert not [f for f in result["findings"] if f["rule"] == "tamil.wordlist-variant"]
+
+
+def test_wordlist_audit_skips_when_book_scan_is_truncated(tmp_path):
+    project = project_at(tmp_path, verses={str(n): "�" * 100 for n in range(100)})
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    assert result["totalFindings"] == MAX_BOOK_FINDINGS
+    assert any("Wordlist audit skipped: book scan was truncated." in m for m in result["limitations"])
+
+
+def test_wordlist_finding_id_is_stable_when_its_anchor_occurrence_moves(tmp_path):
+    project = project_at(tmp_path, verses={"1": "தமிழ"})
+    (project.book_dir / "2.json").write_text(json.dumps(
+        {"1": "தமிழ்", "2": "தமிழ்", "3": "தமிழ்", "4": "தமிழ்", "5": "தமிழ்", "6": "தமிழ்"},
+        ensure_ascii=False), encoding="utf-8")
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    first = wait(manager)
+    before = next(f for f in first["findings"] if f["rule"] == "tamil.wordlist-variant")
+    assert before["chapter"] == "1" and before["verse"] == "1"
+    # Move the rare word's only occurrence to a different verse in the same chapter.
+    (project.book_dir / "1.json").write_text(
+        json.dumps({"1": "புதிய வரி", "2": "தமிழ"}, ensure_ascii=False), encoding="utf-8")
+    manager.invalidate("1")
+    after = wait(manager)
+    after_finding = next(f for f in after["findings"] if f["rule"] == "tamil.wordlist-variant")
+    assert after_finding["verse"] == "2"
+    assert after_finding["id"] == before["id"]
 
 
 def test_background_external_edits_and_no_writes(tmp_path):
