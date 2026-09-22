@@ -1,3 +1,4 @@
+import type { LanguageQaStatus } from "../types/languageQa";
 import type {
   AIReviewChapterResponse,
   AIReviewJobSnapshot,
@@ -164,6 +165,8 @@ interface EngineEnvelope<T> {
  * the engine's dispatcher and sidecar.rs's timeout table key on the same
  * string. A typo fails to compile instead of failing at runtime. */
 export type EngineMethod =
+  | "languageQa.status"
+  | "languageQa.pause"
   | "ai.review.cancel"
   | "ai.review.listForChapter"
   | "ai.review.retry"
@@ -270,6 +273,14 @@ async function call<T>(method: EngineMethod, params?: Record<string, unknown>): 
 }
 
 export const bridge = {
+  languageQaStatus(projectPath: string, offset = 0, limit = 0): Promise<LanguageQaStatus> {
+    return call("languageQa.status", { projectPath, offset, limit });
+  },
+
+  languageQaPause(projectPath: string, paused: boolean): Promise<LanguageQaStatus> {
+    return call("languageQa.pause", { projectPath, paused });
+  },
+
   ping(): Promise<{ pong: boolean }> {
     return call("ping");
   },

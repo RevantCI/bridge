@@ -64,6 +64,7 @@ from tc_ai_bridge.analysis_jobs import (
     AnalysisJobNotFound,
 )
 from tc_ai_bridge.local_checks import run_local_qa
+from tc_ai_bridge.language_qa_jobs import LanguageQaManager
 from tc_ai_bridge.workbench_repository import WorkbenchConflict, WorkbenchValidationError
 from tc_ai_bridge.alignment_engine import (
     AlignmentError, apply_proposal, make_inventory, realign, unalign_bottom,
@@ -308,6 +309,8 @@ class Methods:
     CHAPTER_VERSE_DATA = "chapter.verseData"
 
     CHECKS_START = "checks.start"
+    LANGUAGE_QA_STATUS = "languageQa.status"
+    LANGUAGE_QA_PAUSE = "languageQa.pause"
     CHECKS_STATUS = "checks.status"
     CHECKS_CANCEL = "checks.cancel"
     CHECKS_RETRY = "checks.retry"
@@ -500,6 +503,7 @@ class BridgeEngine:
         self._checker_lock = threading.RLock()
         self._import_lock = threading.Lock()
         self._check_jobs = CheckJobManager()
+        self._language_qa = LanguageQaManager()
         self._ai_review_jobs = AIReviewJobManager()
         self._analysis_jobs = AnalysisJobManager()
         self._correction_application_service: CorrectionApplicationService | None = None
@@ -600,6 +604,7 @@ class BridgeEngine:
         except ProjectIdentityError as exc:
             raise ProjectError(str(exc)) from exc
         timer.mark("register")
+        self._language_qa.unbind()
         self.project = candidate
         self.passage_semantic_runtime = None
         self._correction_application_service = None
@@ -645,6 +650,7 @@ class BridgeEngine:
             })
             timer.mark("project_info")
             _trace(f"project.open {candidate.book_id} RECOVERY_REQUIRED {timer.summary()}")
+            self._language_qa.bind(candidate, blocked_reason="Project recovery requires attention.")
             return info
         self._passage_semantic_status = {
             "available": False, "readOnly": True, "state": "UNAVAILABLE",
@@ -691,6 +697,7 @@ class BridgeEngine:
             if self.passage_semantic_runtime is not None else ""
         )
         _trace(f"project.open {candidate.book_id} {timer.summary()}{runtime_phases}")
+        self._language_qa.bind(candidate)
         return info
 
     def list_projects(self) -> dict[str, Any]:
@@ -3738,6 +3745,7 @@ class BridgeEngine:
             username=self.settings.reviewer_name or "Bridge Reviewer",
             **strict_options,
         )
+        self._language_qa.invalidate(chapter)
         self._consistency_findings_by_book.pop(str(self.project.path), None)
         resolutions = self.project.list_issue_resolutions(chapter, verse)
         return {
@@ -4013,8 +4021,21 @@ class BridgeEngine:
     # -- protocol dispatch --------------------------------------------------
 
     def handle_request(self, request: EngineRequest) -> EngineResponse:
+        self._language_qa.touch()
         try:
             m, p = request.method, request.params
+
+            if m in {Methods.LANGUAGE_QA_STATUS, Methods.LANGUAGE_QA_PAUSE}:
+                self._require_project()
+                if p.get("projectPath") != str(self.project.path):
+                    raise ProjectError("Language QA request belongs to a different project.")
+                if m == Methods.LANGUAGE_QA_PAUSE:
+                    if not isinstance(p.get("paused"), bool):
+                        raise ProjectError("paused must be a boolean")
+                    result = self._language_qa.pause(p["paused"])
+                else:
+                    result = self._language_qa.status(offset=p.get("offset", 0), limit=p.get("limit", 0))
+                return EngineResponse.ok(request.id, result=result)
 
             if m == Methods.PING:
                 return EngineResponse.ok(request.id, result={"pong": True})

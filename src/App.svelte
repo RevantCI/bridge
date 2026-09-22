@@ -5,6 +5,7 @@
   import TopBar from "./lib/components/TopBar.svelte";
   import VerseList from "./lib/components/VerseList.svelte";
   import ReviewPanel from "./lib/components/ReviewPanel.svelte";
+  import LanguageQaPanel from "./lib/components/LanguageQaPanel.svelte";
   import AlignmentReview from "./lib/components/AlignmentReview.svelte";
   import CrossVerseAlignmentModal from "./lib/components/CrossVerseAlignmentModal.svelte";
   import {
@@ -1077,6 +1078,12 @@
         {#if $engineLog.some((entry) => entry.level === "error")}<span class="error-dot" />{/if}
       </button>
     </div>
+  {/if}
+
+  {#if $project && opened}
+    {#key $project.path}
+      <LanguageQaPanel projectPath={$project.path} onNavigate={navigateToReportRow} />
+    {/key}
   {/if}
 
   {#if $project && $crossVerseOpen && $crossVerseAnchor}

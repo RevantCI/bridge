@@ -1,0 +1,250 @@
+import json
+import os
+import threading
+import time
+import unicodedata
+from types import SimpleNamespace
+
+import pytest
+
+from tc_ai_bridge.language_qa import detect_language, scan_text, text_hash
+from tc_ai_bridge.language_qa_jobs import LanguageQaManager, MAX_CHAPTER_BYTES
+from tests.service.test_bridge_service import fixture_project, call
+from bridge_service import BridgeEngine
+
+
+def scan(text, tamil=True):
+    return scan_text(text, book="php", chapter="2", verse="3-4", tamil=tamil)
+
+
+@pytest.mark.parametrize("text", [
+    "தமிழ் மொழி", "கொ கோ கௌ ஔ", "க்ஷேத்திரம் ஸ்ரீ ஜீவன் ஹோசன்னா ஷ ஶ்ரீ",
+    "அவர் இல்லை.", "ர ற ல ள ழ ந ன ண", "௧௨௩ ௐ ஃ",
+    "க\u0bc6\u0bbe க\u0bc7\u0bbe க\u0bc6\u0bd7 ஒ\u0bd7",
+])
+def test_legal_tamil_signs_and_conjuncts(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.dependent-sign"]
+
+
+@pytest.mark.parametrize("text", ["ாக", "க்்", "குீ", "அா", " ் ", "கைா"])
+def test_broken_dependent_signs_have_exact_raw_spans(text):
+    findings = scan(text)["findings"]
+    assert any(f["rule"] == "tamil.dependent-sign" for f in findings)
+    for finding in findings:
+        assert text[finding["start"]:finding["end"]] == finding["originalText"]
+        assert finding["verse"] == "3-4"
+        assert finding["textHash"] == text_hash(text)
+
+
+def test_normalization_is_advisory_and_input_is_preserved():
+    raw = unicodedata.normalize("NFD", "கொடுத்தார்.")
+    assert scan(raw)["findings"][0]["rule"] == "unicode.nfc"
+    assert all(f["severity"] == "low" for f in scan(raw)["findings"])
+    assert raw != unicodedata.normalize("NFC", raw)
+
+
+def test_identity_survives_unrelated_text_shift_but_hash_changes():
+    one = next(f for f in scan("அவர் �")["findings"] if f["rule"] == "unicode.corruption")
+    two = next(f for f in scan("😀 அவர் �")["findings"] if f["rule"] == "unicode.corruption")
+    assert one["id"] == two["id"]
+    assert one["textHash"] != two["textHash"]
+    assert two["start"] == 7  # Python code points, not UTF-16 units.
+
+
+def test_review_candidates_and_explicit_omissions():
+    result = scan("மெல்ல மெல்ல தமிழ்a  ,,,\u200d\ue001")
+    rules = {f["rule"] for f in result["findings"]}
+    assert {"tamil.repeated-word", "tamil.mixed-word", "punctuation.repeated",
+            "spacing.extra", "unicode.invisible", "unicode.private-use"} <= rules
+    assert all(f["status"] == "review-needed" for f in result["findings"])
+    assert scan("\\wj அவர்\\wj*")["limitations"]
+    assert scan("அ" * 20_001)["limitations"]
+    assert len(scan("�" * 200)["findings"]) == 100
+    assert scan("�" * 200)["limitations"]
+    assert not scan("என்ன?! ... …", tamil=False)["findings"]
+
+
+def test_detection_metadata_conflicts_shared_scripts_and_mixed_input():
+    tamil = "தமிழ் மொழியில் எழுதப்பட்ட உரை. " * 10
+    assert detect_language(tamil)["pack"] == "tamil"
+    assert detect_language(tamil, "ta-IN")["language"] == "tam"
+    assert detect_language(tamil, "hin")["basis"] == "metadata-conflict"
+    assert detect_language(tamil, "hin")["pack"] == "common"
+    assert detect_language("देवनागरी " * 20)["language"] == "und"
+    assert detect_language("देवनागरी " * 20, "mar")["language"] == "mar"
+    assert detect_language("hello world " * 20, "ta-Latn")["pack"] == "common"
+    assert detect_language("தமிழ் abcde " * 20)["basis"] == "mixed-script"
+    assert detect_language("123")["language"] == "und"
+
+
+def project_at(root, text="தமிழ் தமிழ்  ", book="php", verses=None):
+    folder = root / book
+    folder.mkdir(parents=True)
+    (folder / "1.json").write_text(json.dumps(verses or {"3a": text}, ensure_ascii=False), encoding="utf-8")
+    return SimpleNamespace(path=root, book_id=book, book_dir=folder,
+                           manifest={"target_language": {"id": "tam"}})
+
+
+def wait(manager, state="completed"):
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        status = manager.status(limit=100)
+        if status["state"] == state:
+            return status
+        assert status["state"] != "failed", status
+        time.sleep(.005)
+    pytest.fail(f"Language QA did not reach {state}: {manager.status()}")
+
+
+def test_background_reuse_external_edits_and_no_writes(tmp_path):
+    project = project_at(tmp_path)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    source = project.book_dir / "1.json"
+    before = source.read_bytes()
+    manager.bind(project)
+    first = wait(manager)
+    assert first["totalFindings"] == 2
+    assert first["findings"][0]["verse"] == "3a"
+    assert source.read_bytes() == before
+    assert list(tmp_path.rglob("*")) == [project.book_dir, source]
+    manager._last_scan = 0
+    manager.status()
+    assert wait(manager)["reusedChapters"] == 1
+    source.write_text('{"3a":"clean"}', encoding="utf-8")
+    manager._last_scan = 0
+    assert manager.status()["findings"] == []
+    assert wait(manager)["totalFindings"] == 0
+
+
+def test_edit_switch_and_pause_discard_inflight_results(tmp_path, monkeypatch):
+    from tc_ai_bridge import language_qa_jobs as jobs
+    original = jobs.scan_text
+    entered, release = threading.Event(), threading.Event()
+    def blocked(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(jobs, "scan_text", blocked)
+    first = project_at(tmp_path / "first")
+    second = project_at(tmp_path / "second", text="சரியான உரை")
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(first)
+    assert entered.wait(5)
+    worker = manager._thread
+    start = time.perf_counter()
+    manager.pause(True)
+    assert manager.status()["state"] == "paused"
+    manager.bind(second)
+    assert manager._thread is worker  # Never spawn a second worker.
+    manager.invalidate("1")
+    assert manager.status()["findings"] == []
+    assert time.perf_counter() - start < .25
+    release.set()
+    final = wait(manager)
+    assert final["projectPath"] == str(second.path)
+    assert final["totalFindings"] == 0
+
+
+def test_paused_edits_remain_pending_until_resume(tmp_path):
+    manager = LanguageQaManager(debounce=.05, yield_seconds=0)
+    project = project_at(tmp_path)
+    manager.bind(project)
+    manager.pause(True)
+    manager.invalidate("1")
+    time.sleep(.06)
+    assert manager.status()["state"] == "paused"
+    manager.pause(False)
+    assert wait(manager)["totalFindings"] == 2
+
+
+@pytest.mark.parametrize("payload", [b"{bad json", b"\xff", b"[]", b" " * (MAX_CHAPTER_BYTES + 1),
+                                    b'{"1":"first", "1":"duplicate"}'],
+                         ids=["bad-json", "bad-utf8", "wrong-shape", "oversize", "duplicate-verse"])
+def test_unreadable_chapter_is_incomplete_not_clean(tmp_path, payload):
+    project = project_at(tmp_path)
+    (project.book_dir / "1.json").write_bytes(payload)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    assert result["incomplete"] and result["limitations"]
+    assert result["checkedVerses"] == 0
+
+
+def test_book_limits_and_status_page_are_bounded(tmp_path):
+    project = project_at(tmp_path, verses={str(n): "�" * 100 for n in range(100)})
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    assert result["totalFindings"] == 3000
+    assert result["incomplete"]
+    assert len(manager.status(limit=10000)["findings"]) == 100
+    assert manager.status()["findings"] == []
+    assert manager.status(offset=5000, limit=100)["findings"] == []
+
+
+def test_real_dispatcher_auto_open_edit_and_project_guard(fixture_project):
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        assert wait(engine._language_qa)["language"]["pack"] == "tamil"
+        wrong = call(engine, "languageQa.pause", {"projectPath": "other", "paused": True})
+        assert not wrong["success"]
+        assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "தமிழ் �"})["success"]
+        assert wait(engine._language_qa)["totalFindings"] == 1
+        response = call(engine, "languageQa.status", {"projectPath": str(fixture_project), "limit": 10})
+        assert response["result"]["findings"][0]["rule"] == "unicode.corruption"
+        assert call(engine, "ping")["success"]
+    finally:
+        engine._language_qa.unbind()
+
+
+def test_recovery_block_cannot_be_resumed(tmp_path):
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    project = project_at(tmp_path)
+    manager.bind(project, blocked_reason="Recovery required")
+    assert manager.pause(False)["state"] == "failed"
+    assert manager.status()["projectPath"] == str(project.path)
+    assert manager._thread is None
+
+
+def test_continuous_foreground_polling_does_not_starve_worker(tmp_path):
+    project = project_at(tmp_path, verses={str(n): "சரியான உரை" for n in range(50)})
+    manager = LanguageQaManager(debounce=0, yield_seconds=.001)
+    manager.bind(project)
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        manager.touch()
+        result = manager.status()
+        if result["state"] == "completed":
+            assert result["checkedVerses"] == 50
+            break
+        time.sleep(.005)
+    else:
+        pytest.fail("Frequent foreground requests starved Language QA")
+
+
+def test_external_edit_with_preserved_timestamp_and_size_is_not_cached(tmp_path):
+    project = project_at(tmp_path, text="a  b")
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    assert wait(manager)["totalFindings"] == 1
+    path = project.book_dir / "1.json"
+    previous = path.stat()
+    path.write_text(path.read_text(encoding="utf-8").replace("a  b", "a. b"), encoding="utf-8")
+    os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+    assert path.stat().st_size == previous.st_size
+    manager._last_scan = 0
+    manager.status()
+    assert wait(manager)["totalFindings"] == 0
+
+
+def test_escaped_json_surrogate_is_reported_without_breaking_utf8_protocol(tmp_path):
+    project = project_at(tmp_path)
+    (project.book_dir / "1.json").write_text('{"1":"\\ud800"}', encoding="utf-8")
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    status = wait(manager)
+    assert status["incomplete"]
+    assert "U+D800" in status["limitations"][0]
+    assert json.dumps(status, ensure_ascii=False).encode("utf-8")

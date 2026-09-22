@@ -9691,3 +9691,67 @@ sub-issues and 18 QA board items were read back, and `git diff --check` is clean
 apart from Git's existing LF→CRLF notices. No engine, frontend, Rust, frozen, or
 installed-app test was run because this work changes documentation and project
 tracking only.
+
+## 2026-09-22 — offline Language QA foundation, Tamil first (#169)
+
+User requested a separate automatic offline language QA layer, starting with the
+supplied Tamil 56-check publication framework, with a small package footprint and
+background execution. Work is on the requested `language-qa` branch. The supplied
+framework is preserved in `LANGUAGE_QA_TAMIL_SPECIFICATION.md`; staged scope,
+budgets, coverage and limits are in `LANGUAGE_QA_PLAN.md`.
+
+LQA-1 adds two small Python modules and a separate collapsible frontend panel.
+Project open/import starts a debounced worker; committed Scripture edits invalidate
+its generation and schedule a recheck. The worker reads current chapter JSON,
+never preserved original USFM or a live database connection. One worker yields
+between verses, bounds input/output, and exits after each pass. Status polling
+schedules a refresh every 15 seconds for external edits. SHA-256 chapter hashes
+permit reuse without trusting timestamps/size; per-verse hashes and raw code-point
+spans accompany stable, occurrence-aware finding IDs. Old-project requests/results
+cannot affect a new book. Pause/resume and transaction-recovery blocks are explicit.
+Results are disposable session analysis, not persisted decisions or automatic edits.
+
+Detection combines metadata with a bounded script sample. It suggests Tamil when
+supported, exposes conflicts/mixed scripts, and does not infer Hindi from
+Devanagari. Tamil rules accept decomposed vowels and Grantha conjuncts and flag
+invalid dependent signs, repeated words and mixed Tamil/Latin words. Common rules
+cover Unicode corruption, private-use/invisible characters, normalization, spacing
+and repeated punctuation. Lone-surrogate JSON receives an ASCII-safe diagnostic.
+Inline-USFM verses, bad files and resource limits are reported as incomplete;
+unsupported grammar, source-fidelity and publication checks never count as passed.
+
+An initial load test exposed worker starvation under continuous foreground polls.
+Deferral is now limited to once per half-second, with a regression test. The source
+401-verse benchmark completed in 15.297 seconds including deliberate sleeps, with
+ping median/max 0.300/2.647 ms. Frozen: 15.328 seconds, ping 0.311/2.252 ms. Both
+verified pause/edit/resume, three reused chapters and unchanged Scripture before
+the explicit edit. Typical pure checks took about 0.8 ms; 20,000-character stress
+checks took 7.6–44.9 ms. These are local observations, not a zero-cost guarantee.
+
+Verification: full engine **1,313 passed** in 20m50s, serial because pytest-xdist was
+absent. Final focused engine **31 passed**, including recovery, starvation,
+same-timestamp/size external edits and malformed surrogates. Frontend **480 passed**;
+final panel **6 passed**; Svelte **0 errors / 0 warnings**; production build passed
+with the existing large-chunk notice. Both PyInstaller executables built under
+`engine/dist/language-qa/`; new module payload is approximately 16 KB compressed.
+No dependency, model, schema, vendor code, semantic golden or Scripture writer was
+added. Rust source was unchanged; generic RPC forwarding needed no Rust change.
+
+The standard frozen-pair smoke stopped at an existing version mismatch: package
+and Tauri 0.12.0 versus engine constants 0.11.0 (also confirmed at starting HEAD).
+Filed **#170** separately; the known #130 import-classification failure was not
+reached. The Language-QA-specific frozen benchmark passed independently. Installed
+visual acceptance remains **NOT RUN**: no browser automation surface was available.
+The temporary preview server and its fixture files were cleaned up. No installed
+app was replaced, release published, commit made or branch pushed.
+
+Later stages need approved Tamil spelling/style/terminology/name data and reviewed
+morphology/sandhi examples. Source judgments, comprehension, typesetting and human
+sign-off remain separate gates. LQA-1 covers technical target-text checks on the
+open book, not all 56 publication checks or whole-collection grammar certification.
+
+Final post-hardening source/frozen reruns also passed: 401 verses in 15.328/15.484 s,
+ping maxima 0.831/1.321 ms; both reused three unchanged chapters after the explicit
+edit. Final compressed module payload: 15,788 bytes. `git diff --check` is clean
+apart from the repository's existing LF-to-CRLF notices. The full-suite count above
+precedes the last five focused cases; all 31 focused cases passed on the final code.
