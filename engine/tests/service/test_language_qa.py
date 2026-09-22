@@ -67,6 +67,48 @@ def test_review_candidates_and_explicit_omissions():
     assert not scan("என்ன?! ... …", tamil=False)["findings"]
 
 
+@pytest.mark.parametrize("text,flagged,initial", [
+    ("அந்த காகம்", "அந்த", "க"), ("அந்த பெண்", "அந்த", "ப"),
+    ("இந்த செய்தி", "இந்த", "ச"), ("இந்த தலைமுறை", "இந்த", "த"),
+    ("எந்த பக்கம்", "எந்த", "ப"), ("எந்த காரணம்", "எந்த", "க"),
+])
+def test_vallinam_missing_link_is_flagged(text, flagged, initial):
+    findings = [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["severity"] == "medium" and finding["status"] == "review-needed"
+    assert finding["originalText"] == text
+    assert flagged in finding["message"] and f"{flagged}{initial}்" in finding["message"]
+
+
+@pytest.mark.parametrize("text", [
+    "அந்தக் காகம்", "அந்தப் பெண்", "இந்தச் செய்தி",
+    "இந்தத் தலைமுறை", "எந்தப் பக்கம்", "எந்தக் காரணம்",
+])
+def test_vallinam_correct_forms_are_not_flagged(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["அந்த வீடு", "இந்த மனிதன்", "எந்த ஊர்"])
+def test_vallinam_ignores_non_trigger_initials(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["அந்த, காகம்", "அந்த. காகம்", "அந்த; காகம்"])
+def test_vallinam_ignores_a_punctuation_boundary(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["சிந்த காகம்", "அந்தநாள் காகம்"])
+def test_vallinam_requires_an_exact_token_match(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["அது காகம்", "இது சோலை", "எது தண்ணீர்"])
+def test_vallinam_does_not_generalize_to_adhu_idhu_edhu(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
 def test_detection_metadata_conflicts_shared_scripts_and_mixed_input():
     tamil = "தமிழ் மொழியில் எழுதப்பட்ட உரை. " * 10
     assert detect_language(tamil)["pack"] == "tamil"

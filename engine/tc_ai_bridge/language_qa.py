@@ -12,7 +12,7 @@ from typing import Any
 
 import regex
 
-RULE_VERSION = "language-qa-1"
+RULE_VERSION = "language-qa-2"
 MAX_VERSE_CHARS = 20_000
 MAX_VERSE_FINDINGS = 100
 # Whole-book wordlist audit (item 49). Rarity/frequency constants below are an
@@ -29,6 +29,11 @@ WORDLIST_RATIO_MIN = 5
 MAX_WORDLIST_FINDINGS = 200
 CONSONANTS = frozenset("கஙசஜஞடணதநனபமயரறலளழவஶஷஸஹ")
 SIGNS = frozenset("ாிீுூெேைொோௌ்ௗ")
+# Part B1: one closed-class வல்லினம் மிகுதல் environment only (demonstrative +
+# a following க/ச/த/ப-initial word). Deliberately not general sandhi -- see
+# docs/BUILD_LOG.md's dated entry for the bounded rule statement this mirrors.
+VALLINAM_TRIGGERS = frozenset({"அந்த", "இந்த", "எந்த"})
+VALLINAM_INITIALS = frozenset("கசதப")
 WORD = regex.compile(r"\p{L}[\p{L}\p{M}]*")
 GRAPHEME = regex.compile(r"\X")
 SCRIPT_NAMES = ("TAMIL", "DEVANAGARI", "BENGALI", "TELUGU", "KANNADA",
@@ -151,10 +156,18 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
     if tamil:
         previous = None
         for word in WORD.finditer(text):
-            if previous and text[previous.end():word.start()].isspace() and (
-                unicodedata.normalize("NFC", previous.group()) == unicodedata.normalize("NFC", word.group())
-            ):
-                add("tamil.repeated-word", *word.span(), "Adjacent repeated word; Tamil reduplication may be intentional.")
+            if previous and text[previous.end():word.start()].isspace():
+                prev_norm = unicodedata.normalize("NFC", previous.group())
+                word_norm = unicodedata.normalize("NFC", word.group())
+                if prev_norm == word_norm:
+                    add("tamil.repeated-word", *word.span(), "Adjacent repeated word; Tamil reduplication may be intentional.")
+                if prev_norm in VALLINAM_TRIGGERS and word_norm[:1] in VALLINAM_INITIALS:
+                    initial = word_norm[0]
+                    corrected = f"{prev_norm}{initial}்"
+                    add("tamil.vallinam-missing", previous.start(), word.end(),
+                        f'Possible missing வல்லினம் at this word boundary: "{prev_norm} {initial}..." '
+                        f'normally takes "{corrected} {initial}...". Verify before editing.',
+                        "medium")
             previous = word
         for cluster in GRAPHEME.finditer(text):
             normalized = unicodedata.normalize("NFC", cluster.group())

@@ -9860,3 +9860,49 @@ rule-id-specific handling, confirmed by reading the render loop directly.
 Grammar checks (item 3, சந்தி வல்லினம் doubling) remain blocked pending the
 maintainer's labelled examples and a precise rule statement, per the approved
 plan; not started in this slice.
+
+### 2026-09-22 LQA-2 Part B1: closed-class வல்லினம் மிகுதல் after அந்த/இந்த/எந்த
+
+First real grammar rule. The maintainer supplied a precise, bounded rule
+statement rather than general sandhi: demonstrative அந்த/இந்த/எந்த immediately
+followed (pure whitespace only) by a word beginning க/ச/த/ப must carry the
+matching linking consonant + pulli at the end of the demonstrative, e.g.
+அந்த + காகம் → அந்தக் காகம். New rule id `tamil.vallinam-missing`, merged into
+`scan_text`'s existing previous/current word walk (the same one
+`tamil.repeated-word` already does) rather than a third pass over the text.
+
+Every abstention the maintainer listed falls out of the existing design with no
+extra code: "linking consonant already present" is excluded because the
+previous token would then literally be `"அந்தக்"`, not `"அந்த"` — the exact-match
+check itself is the abstention. Punctuation/other boundaries reuse the same
+pure-whitespace gap `tamil.repeated-word` already requires. Verse/chapter
+boundaries and USFM markup are excluded by `scan_text`'s existing one-verse,
+early-bail-out signature — no new code needed for either. "Merely similar to"
+அந்த/இந்த/எந்த (e.g. a fused compound like அந்தநாள்) is excluded by exact-string
+membership, not a prefix match. அது/இது/எது are simply never in the trigger
+set — confirmed by an explicit regression, per the maintainer's strongest
+warning not to let this generalize.
+
+Span covers the whole two-word phrase (not just one token, unlike
+`tamil.repeated-word`'s convention) so the evidence line in the panel shows the
+actual boundary. Severity `medium` (identifiable pattern needing human
+judgement, not a certain structural defect); message is hedged
+("Possible... Verify before editing") matching the maintainer's own wording.
+`RULE_VERSION` bumped `language-qa-1` -> `language-qa-2` (confirmed
+informational only — not part of the in-memory chapter cache key, and the one
+hardcoded `"language-qa-1"` string in the frontend is an arbitrary mock-fixture
+literal in `LanguageQaPanel.test.ts`, not a comparison against this constant,
+so the bump needs no frontend change).
+
+23 new focused tests, directly against every example the maintainer gave
+(6 incorrect forms flagged, 6 correct forms not flagged) plus non-trigger
+initials, punctuation boundaries, exact-token matching (including a fused
+compound), and the explicit அது/இது/எது non-generalization regression. Focused
+Language QA suite: 44 -> 67. Full engine suite reran clean: 1134 passed, 1
+skipped, 0 failed (up from 1111, matching the 23 new tests).
+
+Scope: this is Part B1 only, one closed-class environment. Accusative -ஐ,
+dative -க்கு, compounds, adjectival compounds, verbal participles,
+குற்றியலுகரம், and general noun+noun joining are explicitly not covered and
+would each need their own rule and fixtures, per the maintainer's own scope
+note.
