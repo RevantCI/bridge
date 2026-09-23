@@ -433,3 +433,52 @@ def test_verse_decide_ignored_actually_takes_effect_through_the_real_dispatcher(
         assert not [f for f in after["findings"] if f["rule"] == "terminology.deprecated-form"]
     finally:
         engine._language_qa.unbind()
+
+
+def test_verse_edit_after_an_ignore_still_detects_a_new_occurrence_elsewhere(tmp_path):
+    # Reproduces the maintainer's exact desktop sequence: ignore one
+    # occurrence, then edit a DIFFERENT verse in the SAME chapter to
+    # introduce a fresh occurrence of the same deprecated word, through the
+    # real dispatcher end to end (project.open -> verse.decide -> verse.edit).
+    root = tmp_path / "rut"
+    align_dir = root / ".apps" / "translationCore" / "alignmentData" / "rut"
+    align_dir.mkdir(parents=True)
+    (root / "rut").mkdir(parents=True)
+    (root / "manifest.json").write_text(json.dumps({
+        "project": {"id": "rut", "name": "Ruth"},
+        "target_language": {"id": "tam", "name": "Tamil"},
+        "tc_version": "8", "tc_edit_version": "3.7.0",
+    }), encoding="utf-8")
+    (align_dir / "1.json").write_text(json.dumps({
+        "1": {"alignments": [], "wordBank": []},
+        "2": {"alignments": [], "wordBank": []},
+    }), encoding="utf-8")
+    (root / "rut" / "1.json").write_text(json.dumps({
+        "1": "தேவன் இருக்கிறார்.", "2": "வேறு வரி.",
+    }, ensure_ascii=False), encoding="utf-8")
+
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    try:
+        assert call(engine, "project.open", {"path": str(root)})["success"]
+        engine.project.record_terminology_rule("god", ["இறைவன்"], rejected_renderings=["தேவன்"])
+        engine._language_qa.invalidate("1")
+        first = wait(engine._language_qa)
+        matches = [f for f in first["findings"] if f["rule"] == "terminology.deprecated-form"]
+        assert len(matches) == 1 and matches[0]["verse"] == "1"
+
+        decide = call(engine, "verse.decide", {
+            "chapter": "1", "verse": "1", "findingId": matches[0]["id"], "status": "ignored",
+        })
+        assert decide["success"]
+        ignored = wait(engine._language_qa)
+        assert not [f for f in ignored["findings"] if f["rule"] == "terminology.deprecated-form"]
+
+        edit = call(engine, "verse.edit", {"chapter": "1", "verse": "2", "newText": "தேவன் இருக்கிறார்."})
+        assert edit["success"]
+        after_edit = wait(engine._language_qa)
+        matches2 = [f for f in after_edit["findings"] if f["rule"] == "terminology.deprecated-form"]
+        assert len(matches2) == 1, after_edit
+        assert matches2[0]["verse"] == "2"
+    finally:
+        engine._language_qa.unbind()

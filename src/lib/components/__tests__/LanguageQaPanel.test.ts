@@ -104,6 +104,41 @@ describe("Language QA", () => {
     expect(byVerse["2:3-4"]).toBeUndefined(); // the unicode.corruption finding never enters this store
   });
 
+  it("picks up a finding that appears at a different verse on a later poll, and drops one that no longer does", async () => {
+    // Reproduces the maintainer's reported sequence end to end through the
+    // panel's own polling path: ignore verse 9's occurrence (it stops being
+    // returned), then edit verse 10 to introduce a fresh occurrence of the
+    // same deprecated word (it starts being returned on the next completed
+    // pass). languageQaFindingsByVerse must track both changes, not just
+    // the first poll's snapshot.
+    languageQaFindingsByVerse.set({});
+    let call = 0;
+    statusCall.mockImplementation(async () => {
+      call += 1;
+      if (call === 1) {
+        return snapshot({
+          generation: 1,
+          findings: [{ id: "f-9", book: "rut", chapter: "1", verse: "9", rule: "terminology.deprecated-form",
+            severity: "high", start: 0, end: 3, originalText: "bad", message: "Deprecated.",
+            textHash: "h1", ruleVersion: "language-qa-2", status: "review-needed", suggestedReplacement: "good" }],
+        });
+      }
+      return snapshot({
+        generation: 2,
+        findings: [{ id: "f-10", book: "rut", chapter: "1", verse: "10", rule: "terminology.deprecated-form",
+          severity: "high", start: 0, end: 3, originalText: "bad", message: "Deprecated.",
+          textHash: "h2", ruleVersion: "language-qa-2", status: "review-needed", suggestedReplacement: "good" }],
+      });
+    });
+    render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
+    await waitFor(() => expect(get(languageQaFindingsByVerse)["1:9"]).toBeTruthy());
+    await fireEvent.click(await screen.findByRole("button", { name: /Language QA · completed/ }));
+    await waitFor(() => expect(get(languageQaFindingsByVerse)["1:10"]).toBeTruthy());
+    const byVerse = get(languageQaFindingsByVerse);
+    expect(byVerse["1:9"]).toBeUndefined();
+    expect(byVerse["1:10"]).toEqual([expect.objectContaining({ id: "f-10" })]);
+  });
+
   it("surfaces failure and leaves automatic retry scheduled", async () => {
     statusCall.mockRejectedValue(new Error("Engine unavailable"));
     render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
