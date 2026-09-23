@@ -10161,3 +10161,45 @@ against a full scan.
 
 Desktop acceptance not yet run -- awaiting the maintainer testing the
 actual build, same discipline as every prior slice this session.
+
+### 2026-09-23 termbase v2: two more bugs from the same desktop retest, both fixed
+
+The retest of `3dd074a` (the accepted-decision fix) surfaced two further,
+real bugs in the same feature, not hypothetical:
+
+**"Ignore" never actually took effect.** Recording an "ignored" decision has
+no text change for Language QA to notice on its own the way an edit does --
+`bridge_service.py`'s `decide_verse()` only ever wrote the decision and
+updated the progress rollup; nothing told `LanguageQaManager` to invalidate
+and rescan. The frontend's optimistic local removal (from `29c17a7`) did
+work, but the panel's very next poll (2-5s later) refetched the *old,
+unssuppressed* summary, since Language QA truly never rescanned, and
+silently undid the optimistic removal -- so the double underline reliably
+came back, indefinitely, not as a transient flicker. Fixed by having
+`decide_verse()` also call `self._language_qa.invalidate(chapter)`,
+mirroring exactly what `edit_verse()` already does. Unconditional, same as
+`edit_verse` -- `invalidate()` is a no-op when Language QA isn't bound, and
+the manager's own debounce coalesces a burst of decisions into one rescan.
+New real-dispatcher test (`test_verse_decide_ignored_actually_takes_effect_through_the_real_dispatcher`)
+proves the full RPC path end to end: record a term, get flagged, decide
+"ignored" through `verse.decide`, confirm the next scan no longer shows it
+-- not just that the backend function was called.
+
+**A stale double-underline briefly appeared on the *fixed* word after
+"Use".** `edit_verse()` already invalidates Language QA (unlike decide, this
+path was never broken), so the fix eventually self-corrected -- but
+`languageQaFindingsByVerse` still held the pre-edit finding with its
+now-stale offsets until the next poll caught up, and rendering that stale
+span against the *new* verse text put the mark on whatever text happened to
+fall in the old range -- often overlapping the just-applied preferred word.
+Fixed on the frontend: after a successful "Use", the whole verse's entry in
+`languageQaFindingsByVerse` is cleared immediately (not just the one
+finding id -- every offset in that verse is suspect once the text changes),
+the same way the existing `QaFinding` accept-flow replaces
+`findingsByVerse` wholesale after a recheck rather than waiting on a poll.
+
+Both fixes are small and were caught by actually driving the feature in the
+installed app, not by the test suite -- worth naming plainly, since neither
+gap would have been obvious from source review alone. Full engine suite
+reran clean. Same discipline as every fix this session: commit once
+verified, desktop-retest before calling it done.

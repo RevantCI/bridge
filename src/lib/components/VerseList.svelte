@@ -247,9 +247,25 @@
     try {
       if (event.detail.id === "use") {
         const result = await applyLanguageQaSuggestedFix(finding);
+        if (result.ok) {
+          // The verse text just changed underneath every Language QA finding
+          // in it, so every remaining offset for this verse is stale, not
+          // just the one that got fixed -- clear the whole verse rather than
+          // filtering one id, the same way editVerse's own recheck path
+          // replaces findingsByVerse wholesale rather than patching it.
+          // language_qa_jobs.py's invalidate(chapter) (triggered by the edit
+          // itself) repopulates this with fresh, correctly-offset data on
+          // its next pass; this just stops a stale mark rendering on the
+          // wrong word in the meantime.
+          languageQaFindingsByVerse.update((map) => {
+            const next = { ...map };
+            delete next[verseKey($currentChapter, verse)];
+            return next;
+          });
+          termContextMenu = null;
+        }
         contextNotice = result.message;
         contextNoticeError = !result.ok;
-        if (result.ok) termContextMenu = null;
       } else if (event.detail.id === "edit") {
         termContextMenu = null;
         startVerseEdit($currentChapter, verse);

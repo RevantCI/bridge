@@ -3644,6 +3644,18 @@ class BridgeEngine:
             chapter, verse, issue_key=finding_id, decision=status, note=comment,
         )
         self._apply_decision_to_progress(self.project, chapter, verse, finding_id, status)
+        # Language QA reads this same decision store back inside its own scan
+        # loop (language_qa_jobs.py) to suppress a decided terminology
+        # finding, but nothing else about recording a decision touches its
+        # in-memory summary -- unlike an edit, there is no text change for it
+        # to notice on its own. Without this, an "ignored" decision on a
+        # Language QA finding would never actually take visible effect until
+        # some unrelated trigger (an edit elsewhere, a reopen) happened to
+        # force a rescan. Cheap and safe to call unconditionally, same as
+        # edit_verse already does below -- invalidate() is a no-op if
+        # Language QA isn't bound to a project, and debounces if several
+        # decisions land in a burst.
+        self._language_qa.invalidate(chapter)
         return {"chapter": chapter, "verse": verse, "findingId": finding_id,
                 "status": status, "recordedAt": str(path)}
 

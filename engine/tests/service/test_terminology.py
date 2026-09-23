@@ -3,11 +3,13 @@ import unicodedata
 
 import pytest
 
+from bridge_service import BridgeEngine
 from tc_ai_bridge.language_qa import stable_finding_id
 from tc_ai_bridge.language_qa_jobs import LanguageQaManager
 from tc_ai_bridge.tc_project import ProjectError, TranslationCoreProject
 from tc_ai_bridge.terminology import MAX_PHRASE_WORDS, TermIndex, find_deprecated_forms, phrase_tokens
 from tests.persistence.test_workbench_repository import _build_minimal_project
+from tests.service.test_bridge_service import call, fixture_project
 from tests.service.test_language_qa import project_at, wait
 
 
@@ -406,3 +408,28 @@ def test_terminology_decision_change_invalidates_the_chapter_cache(tmp_path):
     manager.invalidate("2")
     after = wait(manager)
     assert not [f for f in after["findings"] if f["rule"] == "terminology.deprecated-form"]
+
+
+def test_verse_decide_ignored_actually_takes_effect_through_the_real_dispatcher(fixture_project):
+    # Bug found in desktop acceptance testing, not hypothetical: recording an
+    # "ignored" decision has no text change for Language QA to notice on its
+    # own, unlike an edit -- without bridge_service.py's decide_verse also
+    # invalidating the chapter, the finding would stay visible forever,
+    # because nothing else would ever trigger a rescan.
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        engine.project.record_terminology_rule("god", ["இறைவன்"], rejected_renderings=["தேவன்"])
+        engine._language_qa.invalidate("1")  # pick up the newly-recorded term
+        first = wait(engine._language_qa)
+        finding = next(f for f in first["findings"] if f["rule"] == "terminology.deprecated-form")
+        assert finding["originalText"] == "தேவன்"
+        response = call(engine, "verse.decide", {
+            "chapter": "1", "verse": "1", "findingId": finding["id"], "status": "ignored",
+        })
+        assert response["success"]
+        after = wait(engine._language_qa)
+        assert not [f for f in after["findings"] if f["rule"] == "terminology.deprecated-form"]
+    finally:
+        engine._language_qa.unbind()
