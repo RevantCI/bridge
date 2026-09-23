@@ -10415,3 +10415,70 @@ case tried live stayed clean (அப்படித்தான் கூறி�
 Multiple findings coexisting in one verse rendered and listed correctly.
 B1's own findings (verse 1, verse 3) stayed correct throughout. Part B2
 closed.
+
+### 2026-09-23 Extend inline highlight + suggest/edit/ignore to வல்லினம் (#173)
+
+After confirming B1/B2 work through the panel, the maintainer asked for the
+same inline treatment termbase v2 built (#171's predecessor): a flagged
+span shown directly in the verse editor, right-click offering the suggested
+fix, Edit, and Ignore. Termbase v2 had deliberately scoped that mechanism
+to `terminology.deprecated-form` only when it shipped -- this extends it to
+`tamil.vallinam-missing`, the second rule to ever get it.
+
+Style: a filled yellow highlight (`--vallinam`/`--vallinam-bg`,
+`mark.m-vallinam`), not another colored underline -- every existing mark,
+termbase's double underline included, is border-only. Confirmed with the
+maintainer via a side-by-side comparison (yellow highlight vs. a wavy
+grammar-checker-style underline) before writing any code.
+
+Traced the whole mechanism end to end before touching anything, per the
+maintainer's own standing instruction to reuse existing patterns rather
+than build a parallel one: `applyLanguageQaSuggestedFix`
+(`src/lib/verseEditor.ts`), `FindingContextMenu`, `bridge.decideVerse`, and
+the per-chapter cache's `decisions_version` were all already fully generic
+-- `term_decisions` in `language_qa_jobs.py` (despite its name) is built
+from every `kind='qa'` decision in the project, not scoped to terminology
+by construction, only by which code paths chose to consult it. That left
+exactly two real gaps to close, both narrow:
+
+1. **A structured suggested fix.** `add()` (`language_qa.py`) gained an
+   optional `suggested_replacement` parameter; the வல்லினம் block now
+   computes the *whole* corrected span (raw trigger text + the inserted
+   linking consonant + the untouched original whitespace and following
+   word, exactly as written) rather than only interpolating `corrected`
+   into the message string, which is all it did before.
+2. **Ignore-suppression.** `_scan()`'s வல்லினம் merge point had no
+   `term_decisions` check at all, unlike the terminology block just above
+   it -- an "Ignore" on this rule would have recorded a decision that
+   nothing ever consulted. Added the same `== "ignored"` check, scoped
+   narrowly to `tamil.vallinam-missing` -- deliberately not a general
+   suppression framework for every `scan_text` rule (wordlist-variant and
+   the rest stay exactly as disposable as before, matching how termbase v2
+   itself was scoped).
+
+`RULE_VERSION` bumped `language-qa-3` -> `language-qa-4` (informational
+only, same as the last two bumps -- finding *shape* changed, not matching
+logic). Renamed the termbase-specific menu plumbing in `VerseList.svelte`
+(`termContextMenu` -> `langQaContextMenu`, etc.) since "term" was actively
+misleading once a second rule used it -- `Settings > Terminology` (#171) is
+a different, unrelated feature. Purely mechanical; the logic inside was
+already keyed off `finding.suggestedReplacement`/`finding.id`, never
+`finding.rule`.
+
+**Tests**: the existing B1/B2 parametrized flagged-form tests gained one
+more assertion each (`suggestedReplacement` equals the text with the
+linking consonant inserted, derived from the existing `flagged`/`initial`
+params -- no new parametrize table). New: every other `scan_text` rule
+still defaults `suggestedReplacement` to `None`; an "ignored" decision on a
+வல்லினம் finding suppresses it on the next scan pass; a decision on one
+occurrence doesn't suppress a different one; a real-dispatcher test
+mirroring `test_terminology.py`'s own (`verse.decide` "ignored" through the
+actual `BridgeEngine`, not just the manager). Full engine suite: **1440
+passed / 1 skipped** (up from 1436). Frontend: a `tamil.vallinam-missing`
+finding now produces `.m-vallinam`; `applyLanguageQaSuggestedFix` proven
+explicitly rule-agnostic with a வல்லினம்-shaped finding rather than left
+merely inferred. Full Vitest suite: **495 passed** (up from 493). `npm run
+check` 0/0, `npm run build` clean.
+
+Desktop acceptance not yet run -- awaiting the maintainer testing the
+actual build.
