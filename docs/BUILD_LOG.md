@@ -10361,3 +10361,49 @@ correctly flagged; the earlier-ignored கடவுள் occurrence at verse 9 
 #169's own testing) correctly stayed suppressed while a different
 occurrence at verse 10 stayed flagged, confirming the fix didn't disturb
 existing decision-suppression behavior. #171 closed.
+
+### 2026-09-23 LQA-2 Part B2: வல்லினம் மிகுதல் after அப்படி/இப்படி/எப்படி
+
+A second maintainer-specified bounded rule, in the same closed-class family
+as Part B1 (2026-09-22, above): அப்படி/இப்படி/எப்படி (manner-adverbs, "in
+that way / in this way / how") followed by a க/ச/த/ப-initial word needs the
+matching linking consonant, exactly like B1's demonstratives.
+
+Reuses B1's mechanism with zero new logic -- the maintainer's explicit
+instruction was to inspect and reuse B1's implementation rather than build a
+second tokenizer or a parallel sandhi engine, and the actual change is one
+line: `VALLINAM_TRIGGERS` gained the three new words. Every abstention case
+in the spec turned out to already be covered by the existing exact-match-
+against-the-bare-trigger-token check, with no new exclusion logic:
+
+- A token that already carries the linking consonant (`அப்படிக்`) tokenizes
+  as one word, distinct from the bare trigger `அப்படி` -- never matches.
+- Look-alike words that merely contain a trigger as a prefix
+  (அப்படித்தான், இப்படியும், எப்படியோ, அப்படியான், இப்படிப்பட்ட) are each
+  one glued token (letters+marks, no internal whitespace) -- also never
+  equal to the bare trigger.
+- Punctuation and verse/USFM boundaries were already handled by the
+  existing whitespace-only-adjacency check and `scan_text()`'s own early
+  abstention on inline USFM markers.
+
+`RULE_VERSION` bumped `language-qa-2` -> `language-qa-3` (informational
+only, same as B1's own bump).
+
+**Tests**: 45 new focused cases in `test_language_qa.py`, directly against
+every example in the maintainer's spec -- all 12 missing-form combinations
+(3 triggers x 4 consonant classes) flagged with exact wording/span, all 12
+corrected forms clean, non-trigger-initial words clean, a punctuation
+boundary for each trigger, all 5 named look-alike/suffixed forms clean,
+trigger-at-end-of-verse (3 cases, no crash/no flag), inline-USFM
+abstention, NFD-decomposed input still matches with the raw span preserved,
+finding identity stable across repeated scans, the input text is never
+mutated, B1 and B2 triggers coexist correctly in one verse, and an explicit
+direct check that B1's own behavior is unaffected (B1's existing test
+functions were left untouched, satisfying "B1 regression tests remain
+unchanged" as specified). Full engine suite: **1436 passed / 1 skipped**,
+up from 1391 -- the delta is exactly the 45 new tests, confirming nothing
+else moved. No frontend files touched.
+
+Desktop acceptance not yet run -- awaiting the maintainer testing all four
+consonant classes and the negative cases in the real Bridge application, per
+their explicit instruction not to call this closed before that.
