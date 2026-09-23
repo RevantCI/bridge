@@ -343,7 +343,17 @@ class LanguageQaManager:
                                     finding_id = stable_finding_id(
                                         book, path.stem, verse, "terminology.deprecated-form",
                                         match["matchedText"], term_occurrences[key])
-                                    if term_decisions.get(finding_id) in ("ignored", "accepted"):
+                                    # Only "ignored" is a sticky, deliberate reviewer
+                                    # decision. "accepted" is an audit record of a past
+                                    # Use action, not a standing verdict on this text --
+                                    # the fix already removed the match naturally, and
+                                    # if the identical deprecated text is reintroduced
+                                    # later at the same position (same id, since the id
+                                    # is where-based, not when-based) that is a new
+                                    # violation, not a stale one. Suppressing it too was
+                                    # a real bug, caught in desktop acceptance, not a
+                                    # hypothetical.
+                                    if term_decisions.get(finding_id) == "ignored":
                                         continue
                                     preferred = ", ".join(match["preferredRenderings"]) or "no preferred form recorded yet"
                                     note = f" {match['note']}" if match["note"] else ""

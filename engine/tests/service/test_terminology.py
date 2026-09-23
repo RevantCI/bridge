@@ -329,7 +329,15 @@ def test_terminology_ignored_decision_suppresses_the_finding(tmp_path):
     assert not [f for f in result["findings"] if f["rule"] == "terminology.deprecated-form"]
 
 
-def test_terminology_accepted_decision_suppresses_the_finding(tmp_path):
+def test_terminology_accepted_decision_does_not_suppress_a_reintroduced_occurrence(tmp_path):
+    # Caught in desktop acceptance, not hypothetical: "accepted" is recorded
+    # as an audit trail when Use fixes a verse, but the finding id is
+    # where-based (book/chapter/verse/text/occurrence-index), not tied to a
+    # point in time. If the identical deprecated text is later reintroduced
+    # at the same position -- paste, undo, retyping the same mistake -- it
+    # produces the exact same id, and a stale "accepted" must not silently
+    # suppress what is, in the text, a brand new violation. Only "ignored"
+    # is a sticky, deliberate reviewer decision.
     terms = [approved_term("god", ["கடவுள்"], preferred=["இறைவன்"])]
     finding_id = stable_finding_id("php", "1", "1", "terminology.deprecated-form", "கடவுள்", 1)
     decisions = [{"issueKey": finding_id, "decision": "accepted"}]
@@ -338,7 +346,7 @@ def test_terminology_accepted_decision_suppresses_the_finding(tmp_path):
     manager = LanguageQaManager(debounce=0, yield_seconds=0)
     manager.bind(project)
     result = wait(manager)
-    assert not [f for f in result["findings"] if f["rule"] == "terminology.deprecated-form"]
+    assert any(f["rule"] == "terminology.deprecated-form" for f in result["findings"])
 
 
 def test_terminology_decision_on_one_occurrence_does_not_suppress_another(tmp_path):
