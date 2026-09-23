@@ -10203,3 +10203,53 @@ installed app, not by the test suite -- worth naming plainly, since neither
 gap would have been obvious from source review alone. Full engine suite
 reran clean. Same discipline as every fix this session: commit once
 verified, desktop-retest before calling it done.
+
+### 2026-09-23 "not getting the double underline on the new verse" -- investigated, no code defect
+
+A third desktop report on the same retest ("i am not getting the double
+underline on the new verse" after ignoring verse 9's occurrence, then editing
+verse 10 to introduce a fresh one) looked at first like a third real bug in
+the same run. Two new regression tests were written to reproduce the exact
+sequence and both passed cleanly: `test_verse_edit_after_an_ignore_still_detects_a_new_occurrence_elsewhere`
+(real `BridgeEngine` dispatcher, ignore one verse then edit a different one
+in the same chapter) and a matching `LanguageQaPanel.test.ts` case simulating
+two consecutive polls. Full engine suite (1385 passed) and frontend gate all
+green with both added -- committed as `7ed01e9` regardless, since they're
+real coverage of a sequence that was previously untested.
+
+The maintainer retested with a longer wait and the underline still never
+appeared, even on a freshly typed, never-touched verse (verse 8) -- ruling
+out both of the leading hypotheses (a logic bug in the ignore-then-edit path,
+and simple poll latency). Direct inspection of the live project's
+`bridge-workbench.sqlite3` (`human_decisions` table) showed the real cause:
+**zero rows, zero `change_log` history for that table, ever**, in this
+project instance. The `vallinam-test` project had been freshly reimported
+earlier that session (created 04:32:52 the same day), and the termbase rule
+(concept `god`, preferred `இறைவன்`, rejected `கடவுள்`) that made every earlier
+round of testing work was never re-seeded into the new instance -- because,
+per the 2026-09-22 entry above, there is still no UI to add one; it has
+always been a one-off `record_terminology_rule()` script call. With zero
+termbase rows, no text was ever going to be flagged, on any verse, ignored
+or not -- which is exactly what was observed once the actual data was
+checked instead of the code.
+
+Reseeded the identical rule directly against the live project via the real
+`TranslationCoreProject.record_terminology_rule()` API (SQLite WAL mode
+makes this safe with the app still running against the same file). The
+running `LanguageQaManager` doesn't notice a termbase change on its own --
+its idle-refresh check only watches chapter file mtimes/sizes, not termbase
+state -- so a project reopen (fresh `bind()`, full rescan) was needed to
+pick it up. After reopening: all three verses (8, 9, 10) showed the double
+underline, panel count went 4 -> 7 (4 வல்லினம் + 3 terminology), matching
+expectations exactly.
+
+No code changes were needed for the actual reported symptom -- the pipeline,
+cache invalidation, and decision suppression all check out. Filed #171
+separately for the real underlying gap this surfaced: no UI (and no
+"termbase is empty" signal anywhere) makes an empty termbase indistinguishable
+from "checked, nothing found," which is what made a data-seeding gap look
+like a live regression. Worth naming as its own lesson: two passing,
+faithful regression tests were necessary but not sufficient here -- they
+correctly proved the *code* had no defect, but only inspecting the actual
+live project data surfaced what was really different about the failing
+case.
