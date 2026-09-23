@@ -10333,4 +10333,31 @@ Fixed with a new `LanguageQaManager.invalidate_all()`
 one chapter's entry, since a termbase change is book-wide by nature, unlike
 `verse.decide`/`verse.edit`'s existing chapter-scoped `invalidate(chapter)`.
 Called from `terminology_record()` right after the write. Full engine suite
-reran clean (1391 passed / 1 skipped). Sidecars rebuilt; retest pending.
+reran clean (1391 passed / 1 skipped).
+
+Verified the fix directly against the rebuilt frozen binary and the real
+`vallinam-test` project before asking for a second desktop retest, not just
+the source-level test suite -- a raw JSON-lines session against
+`bridge-engine.exe`: open the project, poll `languageQa.status` until the
+initial scan settles to `completed`, call `terminology.record` with a
+rejected form (`செய்தி`) that actually appears in the fixture text, then
+poll again with no manual intervention. Picked up the new occurrence
+cleanly, `totalFindings` 7 -> 9. (The first attempt at this same check used
+"தேவன்" as the rejected form, copied from a different test fixture's
+convention -- this project's text never contains that word, so it produced
+a false failure. Worth naming: a script-level smoke check is exactly as
+easy to get wrong as a unit test's fixture data, and needs the same
+scrutiny before trusting its result either way.) Cleaned up both throwaway
+rules from the project's database afterward via the proper
+`WorkbenchRepository._delete` API (journaled through `change_log`, not a
+raw `DELETE`), the same way the earlier #169 seed/cleanup was done.
+
+Second desktop retest 2026-09-23 confirmed clean end to end: added a
+`water` rule (preferred நீர், rejected தண்ணீர்) through the Terminology
+pane, both pre-existing occurrences (verses 5-6) grew the double underline
+immediately with no extra step; "Use" on verse 5 applied நீர் and
+re-checked the verse ("Fix applied and verse re-checked"); verse 6 stayed
+correctly flagged; the earlier-ignored கடவுள் occurrence at verse 9 (from
+#169's own testing) correctly stayed suppressed while a different
+occurrence at verse 10 stayed flagged, confirming the fix didn't disturb
+existing decision-suppression behavior. #171 closed.
