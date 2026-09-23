@@ -10482,3 +10482,40 @@ check` 0/0, `npm run build` clean.
 
 Desktop acceptance not yet run -- awaiting the maintainer testing the
 actual build.
+
+### 2026-09-23 #173 desktop retest: LanguageQaPanel had its own, separate copy of the rule filter
+
+First desktop retest found no yellow highlight anywhere, on any verse, even
+though the backend was independently verified correct beforehand (a raw
+JSON-lines session against the rebuilt frozen `bridge-engine.exe`, not just
+the source test suite -- confirmed a structured `suggestedReplacement`
+computed correctly and ignore-suppression working end to end). What
+appeared instead were red single-underline marks on இப்படி/எப்படி in one
+test verse -- the same coincidental, unrelated Greek Room "spelling
+similarity" finding pattern identified earlier during #169's own
+investigation, not வல்லினம் at all (`எப்படி முடியும்` is a confirmed
+negative case; it can never produce a வல்லினம் mark).
+
+Root cause: `buildSegments()` (`highlight.ts`) was correctly extended
+earlier today to handle both `terminology.deprecated-form` and
+`tamil.vallinam-missing`, but `LanguageQaPanel.svelte`'s
+`updateInlineStore()` -- which populates `languageQaFindingsByVerse`, the
+store `buildSegments` actually reads from -- had its own separate,
+hardcoded `rule !== "terminology.deprecated-form"` filter, missed entirely
+during today's earlier research pass. It dropped every வல்லினம் finding
+before it ever reached the store, so `buildSegments` never even saw one to
+decorate, despite handling the rule correctly itself. Two independently
+maintained copies of the same rule list, and they had already drifted the
+moment the first one was written.
+
+Fixed by exporting `INLINE_LANGUAGE_QA_MARKS` from `highlight.ts` as the
+one source of truth and having `LanguageQaPanel`'s filter check membership
+in it (`finding.rule in INLINE_LANGUAGE_QA_MARKS`) instead of keeping a
+second, driftable copy. Swept the rest of `src/` for any other hardcoded
+`"terminology.deprecated-form"` checks afterward -- none remained outside
+this shared map and doc comments, confirmed by grep, not assumed. Extended
+the existing `LanguageQaPanel.test.ts` coverage (previously titled "...only
+terminology.deprecated-form entries...", now proven to also include
+வல்லினம்) rather than adding a parallel test. Full Vitest suite reran clean
+(495 passed, same count -- an existing test grew stronger rather than a new
+one being added). Commit `b72b75f`.
