@@ -12,9 +12,11 @@ export interface LanguageQaFinding {
   textHash: string;
   ruleVersion: string;
   status: "review-needed";
-  /** Only present on terminology.deprecated-form findings; null when the
-   * termbase entry has no preferred rendering recorded yet. Absent (not
-   * just undefined) on every other Language QA rule. */
+  /** Present (as language-qa-4) on every finding scan_text's shared add()
+   * helper produces, and on terminology.deprecated-form's own hand-built
+   * dict -- null when no fix applies (e.g. a termbase entry with no
+   * preferred rendering recorded yet). Today only terminology.deprecated-form
+   * and tamil.vallinam-missing ever carry a real, non-null value. */
   suggestedReplacement?: string | null;
 }
 

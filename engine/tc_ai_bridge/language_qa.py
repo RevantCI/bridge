@@ -12,7 +12,7 @@ from typing import Any
 
 import regex
 
-RULE_VERSION = "language-qa-3"
+RULE_VERSION = "language-qa-4"
 MAX_VERSE_CHARS = 20_000
 MAX_VERSE_FINDINGS = 100
 # Whole-book wordlist audit (item 49). Rarity/frequency constants below are an
@@ -138,7 +138,8 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
     findings = result["findings"]
     occurrences: Counter[tuple[str, str]] = Counter()
 
-    def add(rule: str, start: int, end: int, message: str, severity: str = "low") -> None:
+    def add(rule: str, start: int, end: int, message: str, severity: str = "low",
+            suggested_replacement: str | None = None) -> None:
         if len(findings) >= MAX_VERSE_FINDINGS:
             if "Finding limit reached; additional candidates omitted." not in result["limitations"]:
                 result["limitations"].append("Finding limit reached; additional candidates omitted.")
@@ -151,6 +152,7 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
             "severity": severity, "start": start, "end": end,
             "originalText": original, "message": message, "textHash": digest,
             "ruleVersion": RULE_VERSION, "status": "review-needed",
+            "suggestedReplacement": suggested_replacement,
         })
 
     if not unicodedata.is_normalized("NFC", text):
@@ -186,10 +188,18 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
                 if prev_norm in VALLINAM_TRIGGERS and word_norm[:1] in VALLINAM_INITIALS:
                     initial = word_norm[0]
                     corrected = f"{prev_norm}{initial}்"
+                    # The suggested fix is the whole flagged span with only the
+                    # linking consonant inserted -- the raw trigger text and
+                    # everything after it (original whitespace, the following
+                    # word exactly as written) are preserved untouched.
+                    replacement = (
+                        text[previous.start():previous.end()] + initial + "்"
+                        + text[previous.end():word.end()]
+                    )
                     add("tamil.vallinam-missing", previous.start(), word.end(),
                         f'Possible missing வல்லினம் at this word boundary: "{prev_norm} {initial}..." '
                         f'normally takes "{corrected} {initial}...". Verify before editing.',
-                        "medium")
+                        "medium", suggested_replacement=replacement)
             previous = word
         for cluster in GRAPHEME.finditer(text):
             normalized = unicodedata.normalize("NFC", cluster.group())

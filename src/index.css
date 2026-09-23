@@ -56,6 +56,12 @@
      alignment sources above, since this is a different confidence class
      entirely (a curated fact, not an engine's suspicion). */
   --term:#7C3AED; --term-bg:#F1E9FE;
+  /* வல்லினம் (tamil.vallinam-missing) grammar findings get a filled yellow
+     highlight rather than an underline -- every mark above is border-only,
+     so this is deliberately the first background fill, distinct at a glance
+     from both the four Greek Room/tN/tW/alignment sources and termbase's
+     double underline. */
+  --vallinam:#A16207; --vallinam-bg:#FEF9C3;
   /* Generic "this succeeded" green: passed coverage, a ready gate, the live
      check indicator, a confirmed validation. Split out of --gr, which used to
      serve both and would now paint every one of those red. Same value tN
@@ -121,6 +127,7 @@ mark.m-tw { border-color: var(--tw); }
 mark.m-align { border-color: var(--align); }
 mark.m-gr { border-color: var(--gr); }
 mark.m-term { border-color: var(--term); border-bottom-style: double; border-bottom-width: 3px; }
+mark.m-vallinam { background: var(--vallinam-bg); border-color: var(--vallinam); }
 mark.m-tn.m-tw { border-bottom-color: var(--tn); box-shadow: inset 0 -1px 0 var(--tw); }
 
 /* Printing the QA report (ProjectReportScreen → Export → PDF): only the

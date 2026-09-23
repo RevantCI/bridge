@@ -387,8 +387,19 @@ class LanguageQaManager:
                                         "status": "review-needed",
                                         "suggestedReplacement": match["suggestedReplacement"],
                                     })
+                        # Same "ignored" is sticky, "accepted" is not distinction as the
+                        # terminology block above, scoped narrowly to this one rule --
+                        # not a general suppression framework for every scan_text rule.
+                        # Filtered before the room slice, like the terminology block's
+                        # own `continue`, so an ignored finding never consumes budget it
+                        # will never use.
+                        scan_findings = [
+                            f for f in result["findings"]
+                            if not (f["rule"] == "tamil.vallinam-missing"
+                                    and term_decisions.get(f["id"]) == "ignored")
+                        ]
                         room = MAX_BOOK_FINDINGS - len(findings) - len(chapter_result["findings"])
-                        chapter_result["findings"].extend(result["findings"][:max(0, room)])
+                        chapter_result["findings"].extend(scan_findings[:max(0, room)])
                         if len(result["findings"]) > room:
                             chapter_result["limitations"].append("Book finding limit reached; remaining verses omitted.")
                             break

@@ -9,7 +9,7 @@ import pytest
 
 from tc_ai_bridge.language_qa import (
     WORDLIST_COMMON_MIN, WORDLIST_MIN_LENGTH, WORDLIST_RARE_MAX, WORDLIST_RATIO_MIN,
-    detect_language, scan_text, text_hash, wordlist_findings,
+    detect_language, scan_text, stable_finding_id, text_hash, wordlist_findings,
 )
 from tc_ai_bridge.language_qa_jobs import LanguageQaManager, MAX_CHAPTER_BYTES, MAX_BOOK_FINDINGS
 from tests.service.test_bridge_service import fixture_project, call
@@ -79,6 +79,7 @@ def test_vallinam_missing_link_is_flagged(text, flagged, initial):
     assert finding["severity"] == "medium" and finding["status"] == "review-needed"
     assert finding["originalText"] == text
     assert flagged in finding["message"] and f"{flagged}{initial}்" in finding["message"]
+    assert finding["suggestedReplacement"] == text.replace(flagged, f"{flagged}{initial}்", 1)
 
 
 @pytest.mark.parametrize("text", [
@@ -131,6 +132,7 @@ def test_vallinam_b2_missing_link_is_flagged(text, flagged, initial):
     assert finding["originalText"] == text
     assert flagged in finding["message"] and f"{flagged}{initial}்" in finding["message"]
     assert text[finding["start"]:finding["end"]] == finding["originalText"]
+    assert finding["suggestedReplacement"] == text.replace(flagged, f"{flagged}{initial}்", 1)
 
 
 @pytest.mark.parametrize("text", [
@@ -207,6 +209,62 @@ def test_vallinam_b1_regression_is_unaffected_by_b2():
     # the B2 trigger words did not change B1's existing behavior.
     findings = [f for f in scan("அந்த காகம்")["findings"] if f["rule"] == "tamil.vallinam-missing"]
     assert len(findings) == 1 and findings[0]["originalText"] == "அந்த காகம்"
+
+
+def test_other_scan_text_rules_default_suggested_replacement_to_none():
+    # add()'s new parameter defaults to None for every rule that doesn't
+    # explicitly pass one -- only தமிழ்.vallinam-missing does today.
+    result = scan("மெல்ல மெல்ல தமிழ்a  ,,,")
+    assert result["findings"]
+    for finding in result["findings"]:
+        if finding["rule"] != "tamil.vallinam-missing":
+            assert finding["suggestedReplacement"] is None, finding
+
+
+def test_vallinam_ignored_decision_suppresses_the_finding(tmp_path):
+    finding_id = stable_finding_id("php", "1", "1", "tamil.vallinam-missing", "அந்த காகம்", 1)
+    decisions = [{"issueKey": finding_id, "decision": "ignored"}]
+    project = project_at(tmp_path, verses={"1": "அந்த காகம் பறந்தது."}, decisions=decisions)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    assert not [f for f in result["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+def test_vallinam_decision_on_one_occurrence_does_not_suppress_another(tmp_path):
+    first_occurrence_id = stable_finding_id("php", "1", "1", "tamil.vallinam-missing", "அந்த காகம்", 1)
+    decisions = [{"issueKey": first_occurrence_id, "decision": "ignored"}]
+    project = project_at(tmp_path, verses={
+        "1": "அந்த காகம் பறந்தது.", "2": "அந்த காகம் பறந்தது.",
+    }, decisions=decisions)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    matches = [f for f in result["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(matches) == 1 and matches[0]["verse"] == "2"
+
+
+def test_verse_decide_ignored_actually_suppresses_a_vallinam_finding_through_the_real_dispatcher(fixture_project):
+    # Mirrors test_terminology.py's own real-dispatcher test for the same
+    # class of bug (decide_verse not invalidating Language QA) -- proves
+    # the fix generalizes through the actual RPC path, not just the manager.
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        edit = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})
+        assert edit["success"]
+        first = wait(engine._language_qa)
+        finding = next(f for f in first["findings"] if f["rule"] == "tamil.vallinam-missing")
+        assert finding["originalText"] == "அந்த காகம்"
+        response = call(engine, "verse.decide", {
+            "chapter": "1", "verse": "1", "findingId": finding["id"], "status": "ignored",
+        })
+        assert response["success"]
+        after = wait(engine._language_qa)
+        assert not [f for f in after["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    finally:
+        engine._language_qa.unbind()
 
 
 def test_detection_metadata_conflicts_shared_scripts_and_mixed_input():

@@ -90,7 +90,14 @@ describe("verse-text underlines", () => {
     expect(marked(segments)).toEqual([["beta", "m-term"]]);
   });
 
-  it("does not underline any other Language QA rule -- only terminology.deprecated-form has a span today", () => {
+  it("highlights a tamil.vallinam-missing finding with its own class, not m-term", () => {
+    const segments = buildSegments(TEXT, [], [], [], [termFinding({
+      rule: "tamil.vallinam-missing", suggestedReplacement: "betak",
+    })]);
+    expect(marked(segments)).toEqual([["beta", "m-vallinam"]]);
+  });
+
+  it("does not underline any other Language QA rule -- only terminology.deprecated-form and tamil.vallinam-missing have a span today", () => {
     const segments = buildSegments(TEXT, [], [], [], [termFinding({ rule: "tamil.wordlist-variant" })]);
     expect(marked(segments)).toEqual([]);
   });

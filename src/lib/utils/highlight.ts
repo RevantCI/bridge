@@ -14,6 +14,15 @@ export function categoryClass(category: FindingCategory): string {
   }
 }
 
+// Language QA rule -> CSS class, for the subset of rules that carry a span
+// and so can be underlined/highlighted inline. Every other Language QA rule
+// (wordlist-variant included) is a deliberate panel-only omission, not an
+// oversight -- see buildSegments' own comment below.
+const INLINE_LANGUAGE_QA_MARKS: Record<string, string> = {
+  "terminology.deprecated-form": "m-term",
+  "tamil.vallinam-missing": "m-vallinam",
+};
+
 export interface TextSegment {
   text: string;
   findingIds: string[];
@@ -156,13 +165,15 @@ export function buildSegments(
   // (see language_qa_jobs.py's own docstring) and never get cast into a fake
   // QaFinding here, matching how nativeChecks/aiReviews above are mapped in
   // their own native shape rather than forced into QaFinding's either.
-  // Currently only terminology.deprecated-form carries a span; other
-  // Language QA rules are shown in the panel only, same as before.
+  // Only the rules below carry a span -- every other Language QA rule
+  // (wordlist-variant included) is shown in the panel only, deliberately,
+  // the same scope decision made when this mechanism first shipped.
   for (const finding of languageQaFindings) {
-    if (finding.rule !== "terminology.deprecated-form") continue;
+    const className = INLINE_LANGUAGE_QA_MARKS[finding.rule];
+    if (!className) continue;
     spans.push({
       start: finding.start, end: finding.end, id: finding.id,
-      className: "m-term", title: finding.message,
+      className, title: finding.message,
     });
   }
 

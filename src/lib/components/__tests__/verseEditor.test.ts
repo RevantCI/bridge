@@ -113,4 +113,17 @@ describe("applyLanguageQaSuggestedFix", () => {
     expect(result.ok).toBe(true);
     expect(editVerse).toHaveBeenCalled();
   });
+
+  it("works identically for a tamil.vallinam-missing finding -- the logic is rule-agnostic", async () => {
+    const original = "அப்படி கூறினான்";
+    verseTexts.set({ [verseKey("1", "6")]: `${original} பின்னர்` });
+    const result = await applyLanguageQaSuggestedFix(languageQaFinding({
+      id: "vallinam-1", rule: "tamil.vallinam-missing",
+      start: 0, end: Array.from(original).length, originalText: original,
+      suggestedReplacement: "அப்படிக் கூறினான்",
+    }));
+    expect(result.ok).toBe(true);
+    expect(editVerse).toHaveBeenCalledWith("1", "6", "அப்படிக் கூறினான் பின்னர்");
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "vallinam-1", "accepted");
+  });
 });
