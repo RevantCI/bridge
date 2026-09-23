@@ -4049,6 +4049,12 @@ class BridgeEngine:
             rejected_renderings=rejected_renderings,
             username=self.settings.reviewer_name or "Bridge Reviewer",
         )
+        # #171 desktop testing: a rule added here has no chapter-file change
+        # for Language QA's idle-refresh to notice on its own, unlike an edit
+        # or a decision -- without this it would sit invisible until
+        # something unrelated triggered a rescan (same bug class as
+        # decide_verse not invalidating, fixed 2026-09-23 in 3a095c0).
+        self._language_qa.invalidate_all()
         return {"rules": self.project.terminology_rules()}
 
     # -- protocol dispatch --------------------------------------------------

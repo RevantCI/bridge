@@ -83,6 +83,23 @@ class LanguageQaManager:
             self._cache.pop(str(chapter), None)
             self._schedule()
 
+    def invalidate_all(self) -> None:
+        """Discard every chapter's cached result, not just one.
+
+        For something book-wide that changed underneath Language QA rather
+        than one chapter's text -- a termbase rule added or edited through
+        Settings (#171). `_scan()` already recomputes `termbase_version`
+        fresh every pass and would eventually bust every chapter's cache
+        entry on its own the next time anything triggers a scan, but nothing
+        else does that on its own when only the termbase changed -- the
+        idle-refresh check only watches chapter file mtimes/sizes. Without
+        this, a rule added via terminology.record would sit invisible until
+        an unrelated edit happened to trigger a fresh pass.
+        """
+        with self._lock:
+            self._cache.clear()
+            self._schedule()
+
     def pause(self, paused: bool) -> dict[str, Any]:
         with self._lock:
             if self._blocked_reason:

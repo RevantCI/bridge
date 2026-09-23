@@ -563,11 +563,25 @@ def test_terminology_record_through_the_dispatcher_is_picked_up_by_the_next_lang
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     try:
         assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        # Let the initial post-open scan fully finish BEFORE recording a rule
+        # -- otherwise a fast test process can race the background thread and
+        # pass by luck (the open's own first pass happening to run after the
+        # record call), the same way the real desktop sequence never would:
+        # a translator opens a project, its scan settles to "completed", and
+        # only then adds a rule through Settings.
+        initial = wait(engine._language_qa)
+        assert not [f for f in initial["findings"] if f["rule"] == "terminology.deprecated-form"]
+
+        # No manual invalidate() call here on purpose -- terminology.record
+        # itself must trigger the rescan, the same way verse.decide/verse.edit
+        # already do for their own writes. A manual invalidate() here would
+        # mask exactly the bug desktop testing found: the RPC recorded the
+        # rule but never told LanguageQaManager, so the double underline
+        # never appeared until something unrelated happened to rescan.
         recorded = call(engine, "terminology.record", {
             "conceptId": "god", "approvedRenderings": ["இறைவன்"], "rejectedRenderings": ["தேவன்"],
         })
         assert recorded["success"]
-        engine._language_qa.invalidate("1")
         result = wait(engine._language_qa)
         matches = [f for f in result["findings"] if f["rule"] == "terminology.deprecated-form"]
         assert matches and matches[0]["originalText"] == "தேவன்"
