@@ -10519,3 +10519,74 @@ terminology.deprecated-form entries...", now proven to also include
 வல்லினம்) rather than adding a parallel test. Full Vitest suite reran clean
 (495 passed, same count -- an existing test grew stronger rather than a new
 one being added). Commit `b72b75f`.
+
+### 2026-09-23 Researched and rejected external Tamil dictionary/morphology libraries for LQA-2 items 1/2/6
+
+Surveyed the full 56-item framework (`docs/LANGUAGE_QA_TAMIL_SPECIFICATION.md`)
+against what LQA-2 actually covers so far: items 1 (spelling), 2 (morphology),
+4-8 (word division/case/agreement/syntax/completeness), 10 (register) are all
+unstarted and explicitly blocked on "dictionary and morphology feasibility
+measured offline" (LQA-2's own scope note in issue #169). Investigated whether
+an external Tamil NLP library could unblock that, following this project's
+standing discipline for every external dependency so far: install it, run it
+against real input, don't trust the docs.
+
+**Open-Tamil** (`pip install open-tamil`, MIT): installed and tested three
+components against real vallinam-test vocabulary and B1's own hand-verified
+correct/incorrect pairs.
+- `solthiruthi.dictionary.TamilVU` (bundled 63,896-word dictionary): only has
+  root forms. Ordinary inflected verbs (கூறினான், பறந்தது, இருந்தது, செய்தான்,
+  இருக்கிறார்) all return `isWord() == False` despite being perfectly correct
+  Tamil.
+- `tamilstemmer.TamilStemmer`: tried to fix the above by stemming before
+  lookup. Makes it worse, not better -- mis-stems கடவுள் (correct, already a
+  dictionary word on its own) to கட (not a word, false positive), and
+  மொ-stems இருக்கிறார் to இர் (a *different*, unrelated dictionary word --
+  an accidental match for the wrong reason, not evidence of correctness).
+- `tamilsandhi.check_sandhi`: the component most relevant to further B-series
+  sandhi rules. Tested directly against B1's own known-correct sentence
+  ("அந்தக் காகம் பறந்தது") -- it reports 2 separate spurious errors on text
+  we already know is correct, and its own "fixed" output is always identical
+  to the input (never actually corrects anything). Its source has ~24 named
+  rules (விதி 1, விதி 2, ...) covering similar territory to B1/B2
+  (சுட்டு/வினா-derived words, numerals, specific word-final patterns) --
+  possibly useful as *reading material* for hand-verifying a future B3 spec,
+  never as a component to run.
+
+**AI4Bharat / `indic-nlp-library`** (`pip install indic-nlp-library` +
+a separate 258 MB resource download, MIT, from IIT Madras -- a real academic
+lab, not a hobby package): its `UnsupervisedMorphAnalyzer` (morfessor-based)
+is genuinely better-behaved than Open-Tamil's stemmer -- it never mangled a
+correctly-spelled word into an unrelated wrong root in this testing. But
+combined with the same TamilVU dictionary for a spell-check signal (whole
+word or any segment matches a dictionary entry), coverage is still the
+blocker, not segmentation quality: of 17 real test words, 9 correctly-spelled
+ordinary words got no dictionary signal at all, and one real misspelling
+(கடவுல்) slipped through as looking fine because it coincidentally segmented
+into a dictionary-valid piece.
+
+**Conclusion: rejected, not integrated.** A general-purpose 64K-root Tamil
+dictionary -- classical/academic in origin, not Biblical-register -- doesn't
+have adequate coverage of ordinary running Tamil text regardless of which
+segmentation/stemming algorithm sits in front of it. Wiring either library in
+as an automated spelling/morphology check would produce a real stream of
+false positives on correctly-spelled text, exactly the trust-eroding failure
+mode this project has been careful to avoid with every rule shipped so far
+(B1/B2 only landed after validation against the maintainer's own
+hand-supplied correct/incorrect pairs). Both packages uninstalled, the 258 MB
+resource clone removed, engine venv confirmed clean and fully functional
+afterward (`pytest tests/service/test_language_qa.py`, 116 passed) -- nothing
+was ever added to `pyproject.toml` or vendored.
+
+**Direction going forward, per the maintainer:** build a corpus-internal
+vocabulary baseline instead of relying on an external dictionary --
+extending item 49's wordlist-audit approach (already built, already proven)
+using the Tamil IRV project's own already-translated text as the vocabulary
+source, rather than a generic dictionary that doesn't match this project's
+register. Explicit caution from the maintainer, worth recording permanently:
+**the IRV project's own existing text has known quality problems -- that is
+the whole reason Bridge exists.** Any corpus-derived resource built from it
+needs human curation/review layered on top, not automatic ingestion, or it
+will enshrine the project's existing errors as "valid vocabulary" instead of
+catching them. Not yet scoped as concrete work; no code changed in this
+session.
