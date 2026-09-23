@@ -10298,3 +10298,39 @@ only).
 
 Desktop acceptance not yet run -- awaiting the maintainer testing the actual
 build, same discipline as every prior slice this session.
+
+### 2026-09-23 #171 desktop retest: terminology.record never told Language QA to rescan
+
+First desktop retest of A47 found a real bug immediately: added a "water"
+rule (preferred நீர், rejected தண்ணீர்) through the new Terminology pane,
+confirmed it appeared in the list, but the pre-existing occurrences of
+தண்ணீர் at verses 5-6 (already on screen from Part B1's fixture) never grew
+a double underline, and the panel's total stayed unchanged.
+
+Root cause, confirmed the same way as the earlier `decide_verse` bug
+(2026-09-23, above): `terminology_record()` wrote the rule through the real
+storage API but never invalidated `LanguageQaManager`. Unlike an edit, a
+termbase-only change touches no chapter file, so nothing else notices --
+the idle-refresh check only watches chapter file mtimes/sizes
+(`_chapter_signature`), never termbase state. The rule sits correctly
+persisted and correctly readable, just invisible to the running scan until
+something unrelated (an edit, a decision) happens to trigger a fresh pass.
+
+The test written for exactly this scenario
+(`test_terminology_record_through_the_dispatcher_is_picked_up_by_the_next_language_qa_scan`)
+had passed anyway -- a real process gap, not a false negative caught later.
+It called `terminology.record` immediately after `project.open`, before
+that open's own initial scan had settled; a fast test process let the
+initial pass happen to run *after* the record call and pick up the rule by
+luck of thread timing, never proving the RPC itself invalidated anything.
+Rewritten to `wait()` for the initial scan to fully complete first --
+matching how a translator actually uses this (open a project, let it settle
+to "completed", *then* add a rule) -- and it correctly failed against the
+unfixed code before the fix below.
+
+Fixed with a new `LanguageQaManager.invalidate_all()`
+(`language_qa_jobs.py`): clears the *whole* per-chapter cache rather than
+one chapter's entry, since a termbase change is book-wide by nature, unlike
+`verse.decide`/`verse.edit`'s existing chapter-scoped `invalidate(chapter)`.
+Called from `terminology_record()` right after the write. Full engine suite
+reran clean (1391 passed / 1 skipped). Sidecars rebuilt; retest pending.
