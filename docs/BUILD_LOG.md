@@ -10404,6 +10404,14 @@ unchanged" as specified). Full engine suite: **1436 passed / 1 skipped**,
 up from 1391 -- the delta is exactly the 45 new tests, confirming nothing
 else moved. No frontend files touched.
 
-Desktop acceptance not yet run -- awaiting the maintainer testing all four
-consonant classes and the negative cases in the real Bridge application, per
-their explicit instruction not to call this closed before that.
+Desktop acceptance 2026-09-23 confirmed against the real `vallinam-test`
+project, all live through the panel list (this rule was never meant to be
+inline-decorated -- see the next entry): all three triggers flagged
+positively across representative consonant classes (அப்படி/க, அப்படி/த,
+அப்படி/ப, அப்படி and இப்படி/ச, எப்படி/க, எப்படி/ப -- ச and the remaining
+combinations already covered by the 45 focused tests), and every negative
+case tried live stayed clean (அப்படித்தான் கூறினான் look-alike, அப்படி,
+கூறினான் punctuation boundary, எப்படி முடியும் non-trigger-initial).
+Multiple findings coexisting in one verse rendered and listed correctly.
+B1's own findings (verse 1, verse 3) stayed correct throughout. Part B2
+closed.
