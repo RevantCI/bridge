@@ -482,3 +482,94 @@ def test_verse_edit_after_an_ignore_still_detects_a_new_occurrence_elsewhere(tmp
         assert matches2[0]["verse"] == "2"
     finally:
         engine._language_qa.unbind()
+
+
+def test_terminology_list_and_record_fail_without_an_open_project():
+    # #171: there was no RPC surface for this at all before -- guard the
+    # same project.open gate every other book-scoped method already has.
+    engine = BridgeEngine()
+    listing = call(engine, "terminology.list")
+    assert not listing["success"]
+    assert listing["error"]["code"] == "project_error"
+    recorded = call(engine, "terminology.record", {
+        "conceptId": "god", "approvedRenderings": ["இறைவன்"], "rejectedRenderings": [],
+    })
+    assert not recorded["success"]
+    assert recorded["error"]["code"] == "project_error"
+
+
+def test_terminology_list_returns_empty_for_a_project_with_no_rules(fixture_project):
+    engine = BridgeEngine()
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        listing = call(engine, "terminology.list")
+        assert listing["success"]
+        assert listing["result"]["rules"] == []
+    finally:
+        engine._language_qa.unbind()
+
+
+def test_terminology_record_through_the_dispatcher_persists_and_list_reflects_it(fixture_project):
+    # #171's actual fix: a rule can now be added without a backend script.
+    engine = BridgeEngine()
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        recorded = call(engine, "terminology.record", {
+            "conceptId": "god", "approvedRenderings": ["இறைவன்"], "rejectedRenderings": ["கடவுள்"],
+        })
+        assert recorded["success"]
+        assert [r["conceptId"] for r in recorded["result"]["rules"]] == ["god"]
+        rule = recorded["result"]["rules"][0]
+        assert rule["approvedRenderings"] == ["இறைவன்"]
+        assert rule["rejectedRenderings"] == ["கடவுள்"]
+
+        listing = call(engine, "terminology.list")
+        assert listing["success"]
+        assert listing["result"]["rules"] == recorded["result"]["rules"]
+    finally:
+        engine._language_qa.unbind()
+
+
+def test_terminology_record_rejects_a_missing_concept_id(fixture_project):
+    engine = BridgeEngine()
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        recorded = call(engine, "terminology.record", {
+            "conceptId": "", "approvedRenderings": ["இறைவன்"], "rejectedRenderings": [],
+        })
+        assert not recorded["success"]
+        assert recorded["error"]["code"] == "project_error"
+    finally:
+        engine._language_qa.unbind()
+
+
+def test_terminology_record_rejects_no_renderings_at_all(fixture_project):
+    engine = BridgeEngine()
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        recorded = call(engine, "terminology.record", {
+            "conceptId": "god", "approvedRenderings": [], "rejectedRenderings": [],
+        })
+        assert not recorded["success"]
+        assert recorded["error"]["code"] == "project_error"
+    finally:
+        engine._language_qa.unbind()
+
+
+def test_terminology_record_through_the_dispatcher_is_picked_up_by_the_next_language_qa_scan(fixture_project):
+    # Ties directly back to the actual 2026-09-23 incident: a rule added
+    # without a script must still be visible to Language QA's next pass.
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        recorded = call(engine, "terminology.record", {
+            "conceptId": "god", "approvedRenderings": ["இறைவன்"], "rejectedRenderings": ["தேவன்"],
+        })
+        assert recorded["success"]
+        engine._language_qa.invalidate("1")
+        result = wait(engine._language_qa)
+        matches = [f for f in result["findings"] if f["rule"] == "terminology.deprecated-form"]
+        assert matches and matches[0]["originalText"] == "தேவன்"
+    finally:
+        engine._language_qa.unbind()

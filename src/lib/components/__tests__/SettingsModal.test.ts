@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 
-const { getSettings, getNavigationStatus, setSettings, engineInfo } = vi.hoisted(() => ({
+const { getSettings, getNavigationStatus, setSettings, engineInfo, terminologyList, terminologyRecord } = vi.hoisted(() => ({
   getSettings: vi.fn(),
   getNavigationStatus: vi.fn(),
   setSettings: vi.fn(),
   engineInfo: vi.fn(),
+  terminologyList: vi.fn(),
+  terminologyRecord: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
@@ -14,10 +16,14 @@ vi.mock("../../api/bridgeClient", () => ({
     navigationStatus: getNavigationStatus,
     setSettings,
     engineInfo,
+    terminologyList,
+    terminologyRecord,
   },
 }));
 
 import SettingsModal from "../SettingsModal.svelte";
+import { project } from "../../stores";
+import type { ProjectInfo } from "../../types/finding";
 
 const target = {
   enabled: true,
@@ -225,5 +231,97 @@ describe("SettingsModal version display (V11-011)", () => {
 
     await waitFor(() => expect(screen.queryByText(/Loading/)).not.toBeInTheDocument());
     expect(container.querySelector(".about-version")).toBeNull();
+  });
+});
+
+describe("SettingsModal terminology (#171)", () => {
+  function minimalProject(): ProjectInfo {
+    return {
+      path: "C:/projects/php", bookId: "php", bookName: "Philippians",
+      targetLanguage: "Tamil", tcVersion: "9", chapters: ["1"], checkTypes: {},
+    } as ProjectInfo;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    project.set(null);
+    engineInfo.mockResolvedValue({
+      bridgeVersion: "0.9.6", companionSchemaVersion: 14, projectOpen: true, greekRoom: {},
+    });
+    getNavigationStatus.mockResolvedValue(navigationState());
+    getSettings.mockResolvedValue({
+      provider: "openai", apiBaseUrl: "", model: "gpt-5.6", hasApiKey: false,
+      reviewerMode: "basic", paratextNavigation: false, logosNavigation: false,
+    });
+  });
+
+  it("prompts to open a project instead of calling the RPC when none is open", async () => {
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+
+    expect(await screen.findByText(/Open a project to manage its terminology/)).toBeInTheDocument();
+    expect(terminologyList).not.toHaveBeenCalled();
+  });
+
+  it("renders existing rules for the open project", async () => {
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({
+      rules: [{
+        conceptId: "god", approvedRenderings: ["இறைவன்"], allowedAlternatives: [],
+        rejectedRenderings: ["கடவுள்"], status: "approved", provenance: "human",
+        modifiedTimestamp: "2026-09-23T05:24:44.736Z",
+      }],
+    });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+
+    expect(await screen.findByText("god")).toBeInTheDocument();
+    expect(screen.getByText(/preferred: இறைவன்.*rejected: கடவுள்/)).toBeInTheDocument();
+  });
+
+  it("shows an empty-termbase message rather than nothing when there are no rules", async () => {
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+
+    expect(await screen.findByText(/No terminology rules recorded/)).toBeInTheDocument();
+  });
+
+  it("adds a rule, splitting comma-separated renderings, and refreshes the list from the response", async () => {
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    terminologyRecord.mockResolvedValue({
+      rules: [{
+        conceptId: "god", approvedRenderings: ["இறைவன்"], allowedAlternatives: [],
+        rejectedRenderings: ["கடவுள்", "தேவன்"], status: "approved", provenance: "human",
+        modifiedTimestamp: "2026-09-23T05:24:44.736Z",
+      }],
+    });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    await screen.findByText(/No terminology rules recorded/);
+
+    await fireEvent.input(screen.getByLabelText("Concept ID"), { target: { value: "god" } });
+    await fireEvent.input(screen.getByLabelText("Preferred rendering(s)"), { target: { value: "இறைவன்" } });
+    await fireEvent.input(screen.getByLabelText("Rejected rendering(s)"), { target: { value: "கடவுள், தேவன்" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+
+    await waitFor(() => expect(terminologyRecord).toHaveBeenCalledWith(
+      "god", ["இறைவன்"], ["கடவுள்", "தேவன்"],
+    ));
+    expect(await screen.findByText("god")).toBeInTheDocument();
+    expect(screen.queryByText(/No terminology rules recorded/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Concept ID")).toHaveValue("");
+  });
+
+  it("shows the RPC's validation error instead of silently doing nothing", async () => {
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    terminologyRecord.mockRejectedValue(new Error("At least one approved, allowed, or rejected rendering is required."));
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    await screen.findByText(/No terminology rules recorded/);
+
+    await fireEvent.input(screen.getByLabelText("Concept ID"), { target: { value: "god" } });
+    await fireEvent.input(screen.getByLabelText("Preferred rendering(s)"), { target: { value: "இறைவன்" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+
+    expect(await screen.findByText(/At least one approved, allowed, or rejected rendering is required/)).toBeInTheDocument();
   });
 });

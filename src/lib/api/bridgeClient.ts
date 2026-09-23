@@ -28,6 +28,7 @@ import type {
   VerseData,
   QaFinding,
   SettingsData,
+  TerminologyRule,
   IssueResolutionHandoffResult,
   IssueResolutionListResponse,
   IssueResolutionRecord,
@@ -250,6 +251,8 @@ export type EngineMethod =
   | "settings.get"
   | "settings.set"
   | "targetSemantic.getRange"
+  | "terminology.list"
+  | "terminology.record"
   | "triage.cancel"
   | "triage.override"
   | "triage.results"
@@ -655,6 +658,16 @@ export const bridge = {
 
   setSettings(params: Record<string, unknown>): Promise<SettingsData> {
     return call("settings.set", params);
+  },
+
+  terminologyList(): Promise<{ rules: TerminologyRule[] }> {
+    return call("terminology.list");
+  },
+
+  terminologyRecord(
+    conceptId: string, approvedRenderings: string[], rejectedRenderings: string[],
+  ): Promise<{ rules: TerminologyRule[] }> {
+    return call("terminology.record", { conceptId, approvedRenderings, rejectedRenderings });
   },
 
   pickSavePath(defaultName: string): Promise<string | null> {

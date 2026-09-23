@@ -2,12 +2,14 @@
   import { onMount } from "svelte";
   import { bridge, type EngineInfo } from "../api/bridgeClient";
   import { manualOverrideMode, navigationStatus, project, reviewerMode } from "../stores";
-  import type { NavigationSyncState, SettingsData } from "../types/finding";
+  import type { NavigationSyncState, SettingsData, TerminologyRule } from "../types/finding";
+
+  type Pane = "ai" | "quality" | "connections" | "resources" | "terminology" | "security";
 
   export let onClose: () => void;
-  export let initialPane: "ai" | "quality" | "connections" | "resources" | "security" = "ai";
+  export let initialPane: Pane = "ai";
 
-  let activePane: "ai" | "quality" | "connections" | "resources" | "security" = initialPane;
+  let activePane: Pane = initialPane;
   let loading = true;
   let saving = false;
   let saveMessage = "";
@@ -23,6 +25,15 @@
   let reviewerName = "";
   let reviewerNameUpdatedAt = "";
   let engineInfo: EngineInfo | null = null;
+
+  let terminologyRules: TerminologyRule[] = [];
+  let terminologyLoaded = false;
+  let terminologyLoading = false;
+  let terminologySaving = false;
+  let terminologyMessage = "";
+  let newConceptId = "";
+  let newPreferred = "";
+  let newRejected = "";
 
   const providerPresets: Record<string, string> = {
     openai: "",
@@ -121,6 +132,55 @@
       saveMessage = e instanceof Error ? e.message : String(e);
     }
   }
+
+  async function loadTerminology(): Promise<void> {
+    if (terminologyLoading) return;
+    terminologyLoading = true;
+    try {
+      const result = await bridge.terminologyList();
+      terminologyRules = result.rules;
+      terminologyLoaded = true;
+    } catch (e) {
+      terminologyMessage = e instanceof Error ? e.message : String(e);
+    } finally {
+      terminologyLoading = false;
+    }
+  }
+
+  // Rules are book-scoped, so this only fires once a project is actually
+  // open -- otherwise the pane shows the same "open a project" message the
+  // Resources pane already uses, rather than calling an RPC that would
+  // reject with project_error.
+  $: if (activePane === "terminology" && $project && !terminologyLoaded && !terminologyLoading) {
+    void loadTerminology();
+  }
+
+  async function addTerminologyRule(): Promise<void> {
+    const conceptId = newConceptId.trim();
+    if (!conceptId) {
+      terminologyMessage = "Concept ID is required.";
+      return;
+    }
+    const approved = newPreferred.split(",").map((s) => s.trim()).filter(Boolean);
+    const rejected = newRejected.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!approved.length && !rejected.length) {
+      terminologyMessage = "Enter at least one preferred or rejected rendering.";
+      return;
+    }
+    terminologySaving = true;
+    terminologyMessage = "";
+    try {
+      const result = await bridge.terminologyRecord(conceptId, approved, rejected);
+      terminologyRules = result.rules;
+      newConceptId = "";
+      newPreferred = "";
+      newRejected = "";
+    } catch (e) {
+      terminologyMessage = e instanceof Error ? e.message : String(e);
+    } finally {
+      terminologySaving = false;
+    }
+  }
 </script>
 
 <div class="modal-overlay">
@@ -132,6 +192,7 @@
       <button class="nav-item" class:active={activePane === "quality"} on:click={() => (activePane = "quality")}>Quality engine</button>
       <button class="nav-item" class:active={activePane === "connections"} on:click={() => (activePane = "connections")}>Connections</button>
       <button class="nav-item" class:active={activePane === "resources"} on:click={() => (activePane = "resources")}>Resources & licenses</button>
+      <button class="nav-item" class:active={activePane === "terminology"} on:click={() => (activePane = "terminology")}>Terminology</button>
       <button class="nav-item" class:active={activePane === "security"} on:click={() => (activePane = "security")}>Security</button>
       {#if engineInfo}
         <div class="about-version" title="What this window is actually running, not what Windows says was installed">
@@ -271,6 +332,42 @@
         <div class="kv"><span>Greek</span><span>Gentium Plus</span></div>
         <div class="resource-note">All bundled fonts are licensed under the SIL Open Font License 1.1, with the MIT/X11 licence additionally covering Ezra SIL's Hebrew layout intelligence. The full licence texts ship alongside the font files in the installed app under <code>fonts/</code>.</div>
         <div class="resource-note">On Windows, Tamil and the other Indian scripts prefer Vijaya and Nirmala UI where they are installed. Those are Microsoft fonts and are not redistributed with Bridge; the bundled faces above are the fallback.</div>
+      {:else if activePane === "terminology"}
+        <h3>Terminology</h3>
+        <p class="desc">Preferred and deprecated target-language renderings for this book. Language QA flags a rejected rendering inline as it's typed; nothing here changes Scripture text automatically.</p>
+        {#if !$project}
+          <p class="muted">Open a project to manage its terminology.</p>
+        {:else}
+          {#if terminologyLoading && !terminologyLoaded}
+            <p class="muted">Loading…</p>
+          {:else if terminologyRules.length}
+            {#each terminologyRules as rule (rule.conceptId)}
+              <div class="kv">
+                <span>{rule.conceptId}</span>
+                <span>preferred: {rule.approvedRenderings.join(", ") || "none"} · rejected: {rule.rejectedRenderings.join(", ") || "none"}</span>
+              </div>
+            {/each}
+          {:else}
+            <p class="muted">No terminology rules recorded for this book yet.</p>
+          {/if}
+          <h3 class="sub">Add a rule</h3>
+          <div class="field">
+            <label for="termConcept">Concept ID</label>
+            <input id="termConcept" type="text" bind:value={newConceptId} placeholder="e.g. god" />
+          </div>
+          <div class="field">
+            <label for="termPreferred">Preferred rendering(s)</label>
+            <input id="termPreferred" type="text" bind:value={newPreferred} placeholder="Comma-separated, e.g. இறைவன்" />
+          </div>
+          <div class="field">
+            <label for="termRejected">Rejected rendering(s)</label>
+            <input id="termRejected" type="text" bind:value={newRejected} placeholder="Comma-separated, e.g. கடவுள்" />
+          </div>
+          <div class="save-row">
+            <button class="btn primary" on:click={addTerminologyRule} disabled={terminologySaving}>{terminologySaving ? "Saving…" : "Add rule"}</button>
+            {#if terminologyMessage}<span class="save-msg">{terminologyMessage}</span>{/if}
+          </div>
+        {/if}
       {:else if activePane === "security"}
         <h3>Security & privacy</h3>
         <p class="desc">Project data and Greek Room findings never leave this machine unless you explicitly use AI explain.</p>

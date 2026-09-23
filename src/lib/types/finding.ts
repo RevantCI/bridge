@@ -919,6 +919,16 @@ export interface SettingsData {
   aiUsage: { tokens: number; estimatedCostUSD: number };
 }
 
+export interface TerminologyRule {
+  conceptId: string;
+  approvedRenderings: string[];
+  allowedAlternatives: string[];
+  rejectedRenderings: string[];
+  status: string;
+  provenance: string;
+  modifiedTimestamp: string;
+}
+
 export const STATUS_COLOR: Record<string, string> = {
   passed: "#22c55e",
   needs_review: "#f59e0b",

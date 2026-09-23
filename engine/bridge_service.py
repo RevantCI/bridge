@@ -346,6 +346,9 @@ class Methods:
     SETTINGS_GET = "settings.get"
     SETTINGS_SET = "settings.set"
 
+    TERMINOLOGY_LIST = "terminology.list"
+    TERMINOLOGY_RECORD = "terminology.record"
+
     EXPORT_ALIGNED = "export.aligned"
     EXPORT_NON_ALIGNED = "export.nonAligned"
 
@@ -4030,6 +4033,24 @@ class BridgeEngine:
         if not self.project:
             raise ProjectError("No project open — call project.open first")
 
+    # -- terminology ----------------------------------------------------
+
+    def terminology_list(self) -> dict[str, Any]:
+        self._require_project()
+        return {"rules": self.project.terminology_rules()}
+
+    def terminology_record(
+        self, concept_id: str, approved_renderings: list[str] | None = None,
+        rejected_renderings: list[str] | None = None,
+    ) -> dict[str, Any]:
+        self._require_project()
+        self.project.record_terminology_rule(
+            concept_id, approved_renderings=approved_renderings,
+            rejected_renderings=rejected_renderings,
+            username=self.settings.reviewer_name or "Bridge Reviewer",
+        )
+        return {"rules": self.project.terminology_rules()}
+
     # -- protocol dispatch --------------------------------------------------
 
     def handle_request(self, request: EngineRequest) -> EngineResponse:
@@ -4230,6 +4251,12 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.get_settings())
             if m == Methods.SETTINGS_SET:
                 return EngineResponse.ok(request.id, result=self.set_settings(**p))
+            if m == Methods.TERMINOLOGY_LIST:
+                return EngineResponse.ok(request.id, result=self.terminology_list())
+            if m == Methods.TERMINOLOGY_RECORD:
+                return EngineResponse.ok(request.id, result=self.terminology_record(
+                    p["conceptId"], p.get("approvedRenderings"), p.get("rejectedRenderings"),
+                ))
             if m == Methods.EXPORT_ALIGNED:
                 return EngineResponse.ok(request.id, result=self.export_aligned(p["outputPath"]))
             if m == Methods.EXPORT_NON_ALIGNED:
