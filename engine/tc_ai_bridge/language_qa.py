@@ -12,7 +12,7 @@ from typing import Any
 
 import regex
 
-RULE_VERSION = "language-qa-2"
+RULE_VERSION = "language-qa-3"
 MAX_VERSE_CHARS = 20_000
 MAX_VERSE_FINDINGS = 100
 # Whole-book wordlist audit (item 49). Rarity/frequency constants below are an
@@ -29,10 +29,22 @@ WORDLIST_RATIO_MIN = 5
 MAX_WORDLIST_FINDINGS = 200
 CONSONANTS = frozenset("கஙசஜஞடணதநனபமயரறலளழவஶஷஸஹ")
 SIGNS = frozenset("ாிீுூெேைொோௌ்ௗ")
-# Part B1: one closed-class வல்லினம் மிகுதல் environment only (demonstrative +
-# a following க/ச/த/ப-initial word). Deliberately not general sandhi -- see
-# docs/BUILD_LOG.md's dated entry for the bounded rule statement this mirrors.
-VALLINAM_TRIGGERS = frozenset({"அந்த", "இந்த", "எந்த"})
+# Part B1/B2: closed-class வல்லினம் மிகுதல் environments only -- a
+# demonstrative (B1: அந்த/இந்த/எந்த) or a manner-adverb (B2: அப்படி/இப்படி/
+# எப்படி) followed by a க/ச/த/ப-initial word. Deliberately not general sandhi
+# -- see docs/BUILD_LOG.md's dated entries for each bounded rule statement
+# this mirrors. Both trigger sets share this one mechanism on purpose (same
+# tokenizer, same exact-match-against-the-bare-trigger-token, same
+# whitespace-only-adjacency and initial-consonant-class checks below) --
+# not two parallel rule engines. Exact-match against the bare trigger form
+# is also what keeps this from firing on a token that already carries the
+# linking consonant (e.g. "அப்படிக்" tokenizes as one word, not equal to
+# "அப்படி") or on a longer word that merely contains a trigger as a prefix
+# (அப்படித்தான், இப்படியும், எப்படியோ, ...) -- no separate exclusion list
+# needed for either case.
+VALLINAM_TRIGGERS = frozenset({
+    "அந்த", "இந்த", "எந்த", "அப்படி", "இப்படி", "எப்படி",
+})
 VALLINAM_INITIALS = frozenset("கசதப")
 WORD = regex.compile(r"\p{L}[\p{L}\p{M}]*")
 GRAPHEME = regex.compile(r"\X")

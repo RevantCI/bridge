@@ -109,6 +109,106 @@ def test_vallinam_does_not_generalize_to_adhu_idhu_edhu(text):
     assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
 
 
+# Part B2: same rule, same mechanism, a second closed-class trigger set
+# (அப்படி/இப்படி/எப்படி, manner-adverbs, rather than B1's demonstratives).
+# See VALLINAM_TRIGGERS's own comment in language_qa.py for why one shared
+# mechanism covers both without any new logic.
+
+
+@pytest.mark.parametrize("text,flagged,initial", [
+    ("அப்படி கூறினான்", "அப்படி", "க"), ("அப்படி செய்தான்", "அப்படி", "ச"),
+    ("அப்படி திரும்பினான்", "அப்படி", "த"), ("அப்படி பேசினான்", "அப்படி", "ப"),
+    ("இப்படி காட்டினான்", "இப்படி", "க"), ("இப்படி சொன்னான்", "இப்படி", "ச"),
+    ("இப்படி தெரியும்", "இப்படி", "த"), ("இப்படி பார்த்தான்", "இப்படி", "ப"),
+    ("எப்படி கண்டாய்", "எப்படி", "க"), ("எப்படி செய்வாய்", "எப்படி", "ச"),
+    ("எப்படி தெரியும்", "எப்படி", "த"), ("எப்படி பேசுவாய்", "எப்படி", "ப"),
+])
+def test_vallinam_b2_missing_link_is_flagged(text, flagged, initial):
+    findings = [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["severity"] == "medium" and finding["status"] == "review-needed"
+    assert finding["originalText"] == text
+    assert flagged in finding["message"] and f"{flagged}{initial}்" in finding["message"]
+    assert text[finding["start"]:finding["end"]] == finding["originalText"]
+
+
+@pytest.mark.parametrize("text", [
+    "அப்படிக் கூறினான்", "அப்படிச் செய்தான்", "அப்படித் திரும்பினான்", "அப்படிப் பேசினான்",
+    "இப்படிக் காட்டினான்", "இப்படிச் சொன்னான்", "இப்படித் தெரியும்", "இப்படிப் பார்த்தான்",
+    "எப்படிக் கண்டாய்", "எப்படிச் செய்வாய்", "எப்படித் தெரியும்", "எப்படிப் பேசுவாய்",
+])
+def test_vallinam_b2_correct_forms_are_not_flagged(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["அப்படி நடந்தது", "இப்படி வந்தான்", "எப்படி முடியும்", "அப்படி எழுதினான்"])
+def test_vallinam_b2_ignores_non_trigger_initials(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["அப்படி, கூறினான்", "இப்படி; சொன்னான்", "எப்படி? தெரியும்"])
+def test_vallinam_b2_ignores_a_punctuation_boundary(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", [
+    "அப்படித்தான் கூறினான்", "இப்படியும் சொன்னான்", "எப்படியோ தெரியும்",
+    "அப்படியான செயல்", "இப்படிப்பட்ட மனிதன்",
+])
+def test_vallinam_b2_does_not_generalize_to_lookalike_suffixed_forms(text):
+    # அப்படித்தான்/இப்படியும்/எப்படியோ/அப்படியான/இப்படிப்பட்ட tokenize as one
+    # word each (letters+marks with no whitespace inside), so none of them
+    # equal a bare trigger -- the same exact-match mechanism that keeps this
+    # rule from generalizing for B1's அது/இது/எது, with no separate
+    # exclusion list needed.
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["அப்படி", "இப்படி.", "எப்படி?"])
+def test_vallinam_b2_trigger_at_end_of_verse_does_not_crash_or_flag(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+def test_vallinam_b2_ignores_inline_usfm():
+    # scan_text() abstains on the whole verse when raw USFM markers are
+    # present -- a genuine cross-verse boundary can never occur inside one
+    # scan_text() call, since it always receives exactly one verse's text.
+    assert scan("\\wj அப்படி கூறினான்\\wj*")["limitations"]
+
+
+def test_vallinam_b2_matches_nfd_decomposed_trigger_text():
+    nfd_text = unicodedata.normalize("NFD", "அப்படி கூறினான்")
+    findings = [f for f in scan(nfd_text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(findings) == 1
+    assert findings[0]["originalText"] == nfd_text  # raw span, never rewritten to NFC
+
+
+def test_vallinam_b2_finding_identity_is_stable_across_repeated_scans():
+    first = next(f for f in scan("அப்படி கூறினான்")["findings"] if f["rule"] == "tamil.vallinam-missing")
+    second = next(f for f in scan("அப்படி கூறினான்")["findings"] if f["rule"] == "tamil.vallinam-missing")
+    assert first["id"] == second["id"]
+
+
+def test_vallinam_b2_never_mutates_the_input_text():
+    text = "அப்படி கூறினான்"
+    scan(text)
+    assert text == "அப்படி கூறினான்"
+
+
+def test_vallinam_b2_coexists_with_b1_triggers_in_the_same_verse():
+    result = scan("அந்த காகம் அப்படி கூறினான்.")
+    findings = [f for f in result["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert {f["originalText"] for f in findings} == {"அந்த காகம்", "அப்படி கூறினான்"}
+
+
+def test_vallinam_b1_regression_is_unaffected_by_b2():
+    # B1's own tests above are untouched; this is a direct check that adding
+    # the B2 trigger words did not change B1's existing behavior.
+    findings = [f for f in scan("அந்த காகம்")["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(findings) == 1 and findings[0]["originalText"] == "அந்த காகம்"
+
+
 def test_detection_metadata_conflicts_shared_scripts_and_mixed_input():
     tamil = "தமிழ் மொழியில் எழுதப்பட்ட உரை. " * 10
     assert detect_language(tamil)["pack"] == "tamil"
