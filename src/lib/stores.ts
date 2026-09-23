@@ -25,9 +25,9 @@ export const nativeChecksByVerse = writable<Record<string, NativeCheckReview[]>>
 export const aiCheckReviewsByVerse = writable<Record<string, AiCheckReview[]>>({});
 // Populated by LanguageQaPanel's own poll (the only Language QA poller) —
 // disposable, recomputed on every scan pass, never the source of truth the
-// way findingsByVerse is for QaFinding. Currently only ever holds
-// terminology.deprecated-form entries; VerseList reads this for inline
-// double-underline decoration.
+// way findingsByVerse is for QaFinding. Only ever holds entries for rules
+// listed in highlight.ts's INLINE_LANGUAGE_QA_MARKS (terminology.deprecated-
+// form, tamil.vallinam-missing); VerseList reads this for inline decoration.
 export const languageQaFindingsByVerse = writable<Record<string, LanguageQaFinding[]>>({});
 export type ReviewerMode = "basic" | "advanced";
 export const reviewerMode = writable<ReviewerMode>("basic");

@@ -84,7 +84,13 @@ describe("Language QA", () => {
     expect(screen.queryByText("Check source encoding.")).toBeNull();
   });
 
-  it("populates languageQaFindingsByVerse with only terminology.deprecated-form entries, grouped and keyed", async () => {
+  it("populates languageQaFindingsByVerse with only the inline-decorated rules, grouped and keyed", async () => {
+    // Regression coverage: this filter and buildSegments' own filter
+    // (highlight.ts) used to be two separately-maintained copies of the
+    // same rule list, and drifted -- tamil.vallinam-missing findings never
+    // reached buildSegments at all despite buildSegments itself already
+    // handling the rule correctly, because this filter dropped them first.
+    // Both now share INLINE_LANGUAGE_QA_MARKS from highlight.ts.
     languageQaFindingsByVerse.set({});
     statusCall.mockResolvedValue(snapshot({
       findings: [
@@ -95,12 +101,17 @@ describe("Language QA", () => {
           severity: "high", start: 0, end: 3, originalText: "bad", message: "Deprecated.",
           textHash: "hash2", ruleVersion: "language-qa-2", status: "review-needed",
           suggestedReplacement: "good" },
+        { id: "f3", book: "php", chapter: "1", verse: "5", rule: "tamil.vallinam-missing",
+          severity: "medium", start: 0, end: 8, originalText: "அப்படி கூறினான்",
+          message: "Possible missing வல்லினம்.", textHash: "hash3", ruleVersion: "language-qa-4",
+          status: "review-needed", suggestedReplacement: "அப்படிக் கூறினான்" },
       ],
     }));
     render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
     await waitFor(() => expect(get(languageQaFindingsByVerse)["1:9"]).toBeTruthy());
     const byVerse = get(languageQaFindingsByVerse);
     expect(byVerse["1:9"]).toEqual([expect.objectContaining({ id: "f2", suggestedReplacement: "good" })]);
+    expect(byVerse["1:5"]).toEqual([expect.objectContaining({ id: "f3", suggestedReplacement: "அப்படிக் கூறினான்" })]);
     expect(byVerse["2:3-4"]).toBeUndefined(); // the unicode.corruption finding never enters this store
   });
 

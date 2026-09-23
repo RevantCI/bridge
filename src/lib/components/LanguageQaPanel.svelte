@@ -3,6 +3,7 @@
   import { bridge } from "../api/bridgeClient";
   import type { LanguageQaFinding, LanguageQaStatus } from "../types/languageQa";
   import { languageQaFindingsByVerse, verseKey } from "../stores";
+  import { INLINE_LANGUAGE_QA_MARKS } from "../utils/highlight";
 
   export let projectPath: string;
   export let onNavigate: (book: string, chapter: string, verse: string) => void;
@@ -32,7 +33,7 @@
   function updateInlineStore(next: LanguageQaStatus): void {
     const byVerse: Record<string, LanguageQaFinding[]> = {};
     for (const finding of next.findings) {
-      if (finding.rule !== "terminology.deprecated-form") continue;
+      if (!(finding.rule in INLINE_LANGUAGE_QA_MARKS)) continue;
       const key = verseKey(finding.chapter, finding.verse);
       (byVerse[key] ??= []).push(finding);
     }
