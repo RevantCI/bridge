@@ -10253,3 +10253,48 @@ faithful regression tests were necessary but not sufficient here -- they
 correctly proved the *code* had no defect, but only inspecting the actual
 live project data surfaced what was really different about the failing
 case.
+
+### 2026-09-23 #171: minimal termbase curation UI -- add a rule without a script
+
+The gap filed as #171 (above) got fixed the same day it was found. Two new
+thin RPC methods, `terminology.list`/`terminology.record`
+(`bridge_service.py`), wrap the already-built and already-tested
+`tc_project.py` storage API (`terminology_rules()`/`record_terminology_rule()`
+from termbase v1) with the same `_require_project()` gate and
+`ProjectError` -> `project_error` handling every other book-scoped method
+already has -- no new error-handling pattern, no schema change.
+
+Frontend: a new "Terminology" pane in `SettingsModal.svelte`, placed there
+rather than as a new top-level workspace (the maintainer's call, explicitly
+revisiting the original termbase v1 Decision 3 for this minimal first slice
+only -- Settings already hosts project-scoped content this way, via the
+existing "Resources & licenses" pane). Lists existing rules read-only
+(concept id, joined preferred/rejected renderings) and a 3-field add form
+(concept id, preferred renderings, rejected renderings -- the latter two as
+comma-separated text, split client-side into the `string[]` the backend
+expects). Deliberately does not expose edit, delete, `allowedAlternatives`,
+`category`, `sourceLemma`, `strong`, `note`, or `status` -- those all stay at
+their existing defaults; the backend already supports them if a later slice
+needs to expose them. Rules load lazily (only once the pane is opened, and
+only when `$project` is set, mirroring the Resources pane's own
+`{#if $project}` gate) rather than eagerly on every Settings open, since
+they're book-scoped and the RPC would otherwise reject with `project_error`
+on the common "Settings opened before any project" path.
+
+Tests: 6 new backend dispatcher-level tests (`test_terminology.py`,
+37 -> 43) covering both methods with no project open, list-when-empty,
+record-then-list round trip, both validation failures (missing concept id,
+no renderings at all), and -- directly reproducing what #169's incident
+actually needed -- a rule added through `terminology.record` being picked up
+by the very next `LanguageQaManager` scan pass with no script involved. Full
+engine suite 1391 passed / 1 skipped (up from 1385). 6 new frontend tests
+(`SettingsModal.test.ts`, 9 -> 15): empty-project message instead of a failed
+fetch, rendering existing rules, the empty-termbase message, adding a rule
+with comma-split renderings and the list refreshing from the response value
+(no second round trip), and the RPC's own validation error surfacing in the
+pane rather than being swallowed. Full Vitest suite 493 passed (up from 488).
+`npm run check` 0/0, `npm run build` clean (pre-existing large-chunk notice
+only).
+
+Desktop acceptance not yet run -- awaiting the maintainer testing the actual
+build, same discipline as every prior slice this session.
