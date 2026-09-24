@@ -306,7 +306,9 @@ class LanguageQaManager:
         pack = loaded_pack()
         return inline_rule_names(pack) if pack is not None else sorted(INLINE_RULES)
 
-    def bind(self, project: Any, *, blocked_reason: str = "") -> None:
+    def bind(self, project: Any, *, blocked_reason: str = "", autostart: bool = True) -> None:
+        """`autostart=False` binds without starting the background worker: a
+        caller that runs its own pass (`run_pass`, the collection runner)."""
         target = project.manifest.get("target_language", {})
         declared = str(target.get("id") or "") if isinstance(target, dict) else ""
         with self._lock:
@@ -323,7 +325,12 @@ class LanguageQaManager:
             self._decisions_loader = getattr(project, "project_qa_decisions", None)
             self._paused = bool(blocked_reason)
             self._blocked_reason = blocked_reason
-            self._schedule()
+            if autostart:
+                self._schedule()
+            else:
+                self._generation += 1
+                self._summary = {"state": "idle", "findings": [], "limitations": [],
+                                 "completedChapters": 0, "totalChapters": 0}
             if blocked_reason:
                 self._summary.update(state="failed", error=blocked_reason, incomplete=True,
                                      limitations=["Project recovery must complete before checking."])

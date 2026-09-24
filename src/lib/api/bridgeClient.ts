@@ -1,6 +1,25 @@
 import type {
   LanguageQaDecisionIssue, LanguageQaHistory, LanguageQaInline, LanguageQaStatus, LanguageQaVerse, LanguageQaView,
 } from "../types/languageQa";
+import type { CollectionQaSnapshot } from "../types/collectionQa";
+
+/** One thing that blocks an export (reporting.publication_gate, layered-rules 4.5). */
+export interface ExportGateItem {
+  source: "aiReview" | "languageQa" | "translationHelps" | string;
+  reference: string;
+  summary: string;
+}
+
+export interface ExportResult {
+  written: boolean;
+  path: string;
+  chapters?: number;
+  /** True when blocking items are open and no override was given: nothing was written. */
+  blocked?: boolean;
+  /** True when it was written over blocking items, with the override recorded. */
+  overridden?: boolean;
+  gate?: { blocking: boolean; items: ExportGateItem[]; counts: Record<string, number> };
+}
 import type {
   AIReviewChapterResponse,
   AIReviewJobSnapshot,
@@ -173,6 +192,10 @@ export type EngineMethod =
   | "languageQa.inline"
   | "languageQa.history"
   | "languageQa.verse"
+  | "collection.runChecks"
+  | "collection.qaStatus"
+  | "collection.pauseChecks"
+  | "collection.cancelChecks"
   | "ai.review.cancel"
   | "ai.review.listForChapter"
   | "ai.review.retry"
@@ -305,6 +328,24 @@ export const bridge = {
    * unpaged -- what the verse marks are drawn from. */
   languageQaInline(projectPath: string, chapter?: string): Promise<LanguageQaInline> {
     return call("languageQa.inline", { projectPath, chapter });
+  },
+
+  /** Check every book of the open collection in turn (layered-rules 4.4). */
+  collectionRunChecks(checks: string[], force = false): Promise<CollectionQaSnapshot> {
+    return call("collection.runChecks", { checks, force });
+  },
+
+  /** The run's snapshot; with jobId "" and no run, each book's last recorded run. */
+  collectionQaStatus(jobId: string): Promise<CollectionQaSnapshot> {
+    return call("collection.qaStatus", { jobId });
+  },
+
+  collectionPauseChecks(paused: boolean): Promise<CollectionQaSnapshot> {
+    return call("collection.pauseChecks", { paused });
+  },
+
+  collectionCancelChecks(): Promise<CollectionQaSnapshot> {
+    return call("collection.cancelChecks", {});
   },
 
   /** Every Language QA finding of one verse, inline or not, for the review panel. */
@@ -704,12 +745,14 @@ export const bridge = {
     return invoke<string | null>("pick_save_path", { defaultName });
   },
 
-  exportAligned(outputPath: string): Promise<{ written: boolean; path: string; chapters: number }> {
-    return call("export.aligned", { outputPath });
+  /** With blocking publication-gate items open and no override, nothing is
+   * written and the answer is `{written: false, blocked: true, gate}`. */
+  exportAligned(outputPath: string, override = false): Promise<ExportResult> {
+    return call("export.aligned", { outputPath, override });
   },
 
-  exportNonAligned(outputPath: string): Promise<{ written: boolean; path: string; chapters: number }> {
-    return call("export.nonAligned", { outputPath });
+  exportNonAligned(outputPath: string, override = false): Promise<ExportResult> {
+    return call("export.nonAligned", { outputPath, override });
   },
 
   // --- Stage 8 QA audit (analysis; read-only) -------------------------------

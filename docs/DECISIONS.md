@@ -210,4 +210,18 @@ deferred, not rejected; anything in the UI that assumes several users on one mac
 **Rules out:** a second concurrent Language QA worker; blocking the dispatcher on Language QA.
 **Revisit when:** Language QA needs a resource that `_checker_lock` guards.
 
+## 2026-09-24 — A collection QA run is offered after import, never started automatically
+
+**Decision:** `collection.runChecks` runs only when the user clicks "Run QA on all N books". The button is on the dashboard, which is where a multi-book import lands. While a run is active the app is read-only: no editing, no book switching, no `checks.start`. Pause takes effect between books.
+**Because:** the brief requires it. A whole Bible is 66 sequential book jobs on one worker thread, which is an unattended operation (measured wall time in BUILD_LOG). An automatic start would lock a translator out of the book they just imported.
+**Rules out:** background whole-collection checking while a translator works; pausing mid-book.
+**Revisit when:** checks run in a separate worker process that can yield to edits.
+
+## 2026-09-24 — Export is gated by one function, and the override is a recorded decision
+
+**Decision:** `export.aligned` and `export.nonAligned` consult `reporting.publication_gate(project)`. Its blocking items are open AI critical issues, open Language QA findings with severity high and confidence high, and tN/tW checks marked needs-discussion. With blocking items open, nothing is written until the reviewer ticks "Export anyway". The override is then recorded as a `kind='qa'` decision with key `export.override`, listing the items open at that moment, so it lands in `change_log`.
+**Because:** the brief requires one gate definition fed by every source. The full book report takes minutes, so the export gate reads persisted state only. Blocking with an override keeps export possible while making it deliberate.
+**Rules out:** an export that silently ignores open blocking findings; a hard block with no override; a second gate definition.
+**Revisit when:** a team role model decides who may override (TEAM_ARCHITECTURE §5).
+
 <!-- New entries go above this line. -->

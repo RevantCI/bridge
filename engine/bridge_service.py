@@ -42,11 +42,14 @@ from tc_ai_bridge.tc_project import (
 from tc_ai_bridge.project_import import (
     apply_resource_materialization,
     collection_projects,
+    collection_qa_runs,
     ensure_bridge_original_language,
     import_source,
     inspect_import,
     materialize_lazy_project,
+    record_collection_qa_run,
 )
+from collection_jobs import CollectionJobConflict, CollectionJobError, CollectionJobManager, CollectionJobSpec
 from tc_ai_bridge.original_language_resources import resource_inventory
 from tc_ai_bridge.lexicon_resources import lexicon_entry_for_strong, HEBREW_PREFIX_LABELS
 from tc_ai_bridge.morphology_codes import decode_morph
@@ -94,7 +97,7 @@ from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_gaps
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
 from tc_ai_bridge import cross_verse_proposals, cross_verse_ai_proposals
-from tc_ai_bridge.reporting import LANGUAGE_QA_MEDIUM_ADVISORY, ReportService
+from tc_ai_bridge.reporting import LANGUAGE_QA_MEDIUM_ADVISORY, ReportService, publication_gate
 from tc_ai_bridge.qa_report import (
     aggregate_qa_report,
     build_book_qa_report,
@@ -176,6 +179,24 @@ class _PhaseTimer:
     def summary(self) -> str:
         total = time.perf_counter() - self._start
         return f"total={total:.2f}s " + " ".join(f"{p}={s:.2f}s" for p, s in self.phases)
+
+
+def _termbase_coverage(book_id: str, rules: list[dict[str, Any]], text_map: dict[str, str]) -> dict[str, Any]:
+    """One book's termbase coverage for the collection report (Phase 4.4):
+    approved renderings the book never uses, and rejected ones still present.
+    A substring count over the verse text: Tamil attaches case endings to the
+    rendering, so a whole-token match would miss inflected uses."""
+    text = "\n".join(text_map.values())
+    issues = []
+    for rule in rules:
+        approved = [r for r in rule.get("approvedRenderings") or [] if isinstance(r, str) and r]
+        rejected = [r for r in rule.get("rejectedRenderings") or [] if isinstance(r, str) and r]
+        never_seen = [r for r in approved if r not in text]
+        still_present = [{"rendering": r, "count": text.count(r)} for r in rejected if r in text]
+        if never_seen or still_present:
+            issues.append({"conceptId": str(rule.get("conceptId") or ""),
+                           "approvedNeverSeen": never_seen, "rejectedStillPresent": still_present})
+    return {"bookId": book_id, "concepts": len(rules), "issues": issues}
 
 
 def _stable_finding_id(*, chapter: str, verse: str, engine: str,
@@ -311,6 +332,10 @@ class Methods:
     CHAPTER_VERSE_DATA = "chapter.verseData"
 
     CHECKS_START = "checks.start"
+    COLLECTION_RUN_CHECKS = "collection.runChecks"
+    COLLECTION_QA_STATUS = "collection.qaStatus"
+    COLLECTION_PAUSE_CHECKS = "collection.pauseChecks"
+    COLLECTION_CANCEL_CHECKS = "collection.cancelChecks"
     LANGUAGE_QA_STATUS = "languageQa.status"
     LANGUAGE_QA_PAUSE = "languageQa.pause"
     LANGUAGE_QA_INLINE = "languageQa.inline"
@@ -511,6 +536,7 @@ class BridgeEngine:
         self._checker_lock = threading.RLock()
         self._import_lock = threading.Lock()
         self._check_jobs = CheckJobManager()
+        self._collection_jobs = CollectionJobManager()
         self._language_qa = LanguageQaManager()
         self._ai_review_jobs = AIReviewJobManager()
         self._analysis_jobs = AnalysisJobManager()
@@ -3549,12 +3575,20 @@ class BridgeEngine:
         return self._start_check_job_from_spec(spec, project)
 
     def _start_check_job_from_spec(
-        self, spec: CheckJobSpec, project: TranslationCoreProject,
+        self, spec: CheckJobSpec, project: TranslationCoreProject, *,
+        language_qa: Optional[LanguageQaManager] = None,
+        check_jobs: Optional[CheckJobManager] = None,
     ) -> dict[str, Any]:
+        """`language_qa`/`check_jobs` default to the open project's own. The
+        collection runner (Phase 4.4) passes its own for a book that is not the
+        open one, so the editor's Language QA and check job are never touched."""
+        language_qa = language_qa or self._language_qa
+        check_jobs = check_jobs or self._check_jobs
+
         def run_stage(chapter: str, verse: str, stage_checks: list[str]) -> Any:
             if stage_checks == [LANGUAGE_QA_CHECK]:
                 # The book pass ran in the preflight; this verse's share of it.
-                return self._language_qa.verse_results(chapter, verse)
+                return language_qa.verse_results(chapter, verse)
             with self._checker_lock:
                 return [
                     finding.to_dict()
@@ -3574,7 +3608,7 @@ class BridgeEngine:
                     # with the background worker by Language QA's own pass lock,
                     # not _checker_lock: the dispatcher takes _checker_lock for
                     # verse.runChecks, and must not wait on a book pass.
-                    if self._language_qa.run_pass(cancel_event) is None and not cancel_event.is_set():
+                    if language_qa.run_pass(cancel_event) is None and not cancel_event.is_set():
                         raise CheckJobError("Language QA could not check this book.")
                     if cancel_event.is_set():
                         return
@@ -3599,10 +3633,171 @@ class BridgeEngine:
                         self._names_findings_for_book(project)
             preflight = run_preflight
 
-        return self._check_jobs.start(
+        return check_jobs.start(
             spec, run_stage=run_stage, preflight=preflight,
             on_complete=lambda job: self._on_check_job_complete(project, job),
         )
+
+    # -- collection-level QA runs (layered-rules Phase 4.4) -------------------
+
+    def start_collection_checks(self, *, checks: Optional[list[str]] = None, force: bool = False) -> dict[str, Any]:
+        """collection.runChecks: every book of the open collection, in
+        `.bridge/collection.json` order, each through the same check job a
+        "Run whole book" starts. Books whose recorded run still matches their
+        chapter files are skipped (resumable), unless `force`."""
+        self._require_project()
+        if self._check_jobs.active():
+            raise CheckJobConflict("Wait for the running check to finish.")
+        selected = tuple(dict.fromkeys(checks or ["local", "greekroom", LANGUAGE_QA_CHECK]))
+        supported = {"local", "tN", "tW", "alignment", "usfm", "greekroom", "wildebeest", LANGUAGE_QA_CHECK}
+        invalid = [name for name in selected if name not in supported]
+        if invalid:
+            raise CheckJobError(f"Unknown check type(s): {', '.join(invalid)}")
+        collection_path = str(self.project.path)
+        siblings = collection_projects(collection_path) or [{
+            "path": collection_path, "bookId": self.project.book_id,
+            "bookName": self.project.summary.book_name, "lazy": False,
+        }]
+        books = tuple(
+            {"path": str(entry.get("path") or ""), "bookId": str(entry.get("bookId") or ""),
+             "bookName": str(entry.get("bookName") or "")}
+            for entry in siblings if Path(str(entry.get("path") or "")).is_dir()
+        )
+        spec = CollectionJobSpec(
+            collection_path=collection_path, books=books, checks=selected,
+            previous_runs=collection_qa_runs(collection_path), force=bool(force),
+        )
+        return self._collection_jobs.start(
+            spec,
+            run_book=lambda book, cancel: self._run_collection_book(book, selected, cancel),
+            record_run=lambda entry: record_collection_qa_run(collection_path, entry),
+            final_stage=lambda done, cancel: self._collection_final_stage(collection_path, done, cancel),
+        )
+
+    def _run_collection_book(self, book: dict[str, Any], checks: tuple[str, ...],
+                             cancel_event: threading.Event) -> dict[str, Any]:
+        """One book, end to end, on the collection runner's thread: materialize
+        a lazy sibling, run the whole-book check job, persist (the job's own
+        completion hook writes the rollup and snapshots), then let go of it."""
+        path = str(book["path"])
+        materialize_lazy_project(path)
+        project = TranslationCoreProject(Path(path), workspace=self.workspace)
+        chapters = project.chapters()
+        spec = CheckJobSpec(scope="book", project_path=path, chapters=tuple(chapters),
+                            chapter_verses={ch: list(project.verses(ch)) for ch in chapters}, checks=checks)
+        language_qa = LanguageQaManager(debounce=0, yield_seconds=0) if LANGUAGE_QA_CHECK in checks else None
+        manager = CheckJobManager()
+        try:
+            if language_qa is not None:
+                language_qa.bind(project, autostart=False)
+            snapshot = self._start_check_job_from_spec(spec, project, language_qa=language_qa, check_jobs=manager)
+            while snapshot["state"] not in {"succeeded", "failed", "cancelled"}:
+                if cancel_event.is_set():
+                    manager.cancel(snapshot["jobId"])
+                # A snapshot deep-copies every verse's results; poll gently.
+                time.sleep(0.2)
+                snapshot = manager.status(snapshot["jobId"])
+        finally:
+            if language_qa is not None:
+                language_qa.unbind()
+        by_category: dict[str, int] = {}
+        for result in snapshot["results"].values():
+            for finding in result.get("findings") or []:
+                if finding.get("status") == "open":
+                    category = str(finding.get("category") or "other")
+                    by_category[category] = by_category.get(category, 0) + 1
+            open_lqa = len((result.get("languageQa") or {}).get("findings") or [])
+            if open_lqa:
+                by_category["languageQa"] = by_category.get("languageQa", 0) + open_lqa
+        return {"state": snapshot["state"], "jobId": snapshot["jobId"], "error": snapshot.get("error"),
+                "findingsByCategory": by_category, "checkedVerses": snapshot.get("completedVerses", 0)}
+
+    def _collection_final_stage(self, collection_path: str, books: list[dict[str, Any]],
+                                cancel_event: threading.Event) -> dict[str, Any]:
+        """The passes that only make sense across the whole collection, run
+        once after every book: a termbase coverage report and cross-book name
+        consistency. Reports only; nothing here writes Scripture."""
+        stage: dict[str, Any] = {"completedAt": None, "termbaseCoverage": [], "crossBookNames": None,
+                                 "houseStylePropagation": {
+                                     "available": False,
+                                     "reason": "House-style learning is layered-rules Phase 6; not built yet."}}
+        texts: dict[str, dict[str, str]] = {}
+        for book in books:
+            if cancel_event.is_set():
+                return {**stage, "cancelled": True}
+            project = TranslationCoreProject(Path(book["path"]), workspace=self.workspace)
+            texts[book["bookId"]] = self._book_verse_text_map(project)
+            stage["termbaseCoverage"].append(_termbase_coverage(book["bookId"], project.terminology_rules(),
+                                                                texts[book["bookId"]]))
+        if not cancel_event.is_set() and len(texts) > 1:
+            stage["crossBookNames"] = self._cross_book_names(texts)
+        stage["completedAt"] = datetime.now(timezone.utc).isoformat()
+        try:
+            record_collection_qa_run(collection_path, {}, final_stage={
+                "completedAt": stage["completedAt"],
+                "termbaseCoverage": stage["termbaseCoverage"],
+                "crossBookNames": (stage["crossBookNames"] or {}).get("summary"),
+            })
+        except Exception as exc:
+            stage["recordError"] = str(exc)
+        return stage
+
+    def _cross_book_names(self, texts: dict[str, dict[str, str]]) -> dict[str, Any]:
+        """The names adapter over the union of every book's tokens: a spelling
+        that is the minority form across books, which no single book shows."""
+        occurrences: dict[str, list[tuple[str, str]]] = {}
+        for book_id, text_map in texts.items():
+            for ref, text in text_map.items():
+                chapter, _, verse = ref.partition(":")
+                for token in whitespace_tokens(text):
+                    occurrences.setdefault(token, []).append((f"{book_id.upper()} {chapter}", verse))
+        target = self.project.manifest.get("target_language", {}) if self.project else {}
+        lang_code = str(target.get("id") or "") if isinstance(target, dict) else ""
+        try:
+            findings = self.greek_room.check_book_names(
+                project_id="collection", book_id="collection", lang_code=lang_code,
+                token_occurrences=occurrences)
+        except Exception as exc:
+            return {"available": False, "error": str(exc), "summary": {"available": False}}
+        rows = [{"explanation": f.explanation, "originalText": f.original_text,
+                 "suggestedReplacement": f.suggested_replacement,
+                 "evidence": [{"label": e.label, "value": e.value} for e in f.evidence][:6]}
+                for f in findings[:500]]
+        return {"available": True, "findings": rows,
+                "summary": {"available": True, "count": len(findings)}}
+
+    def collection_check_status(self, job_id: str = "") -> dict[str, Any]:
+        """The run's snapshot; with no run in this session, an idle one built
+        from the recorded `qaRuns[]`, so the Collection QA screen shows each
+        book's last run after a restart."""
+        try:
+            return self._collection_jobs.status(job_id)
+        except CollectionJobError:
+            if job_id:
+                raise
+        self._require_project()
+        collection_path = str(self.project.path)
+        runs = collection_qa_runs(collection_path)
+        siblings = collection_projects(collection_path) or [{
+            "path": collection_path, "bookId": self.project.book_id,
+            "bookName": self.project.summary.book_name}]
+        books = []
+        for entry in siblings:
+            run = runs.get(str(entry.get("bookId") or "")) or {}
+            books.append({
+                "bookId": str(entry.get("bookId") or ""), "bookName": str(entry.get("bookName") or ""),
+                "path": str(entry.get("path") or ""),
+                "state": run.get("state") or "pending", "elapsedSeconds": run.get("elapsedSeconds"),
+                "jobId": run.get("jobId"), "findingsByCategory": run.get("findingsByCategory") or {},
+                "checkedVerses": int(run.get("checkedVerses") or 0), "error": None,
+                "completedAt": run.get("completedAt"),
+            })
+        return {"jobId": "", "state": "idle", "paused": False, "collectionPath": collection_path,
+                "checks": [], "totalBooks": len(books),
+                "completedBooks": sum(1 for b in books if b["state"] == "done"),
+                "percent": 0, "currentBook": None, "books": books, "finalStage": None,
+                "elapsedSeconds": 0, "estimatedRemainingSeconds": None, "error": None,
+                "createdAt": None, "finishedAt": None}
 
     def _on_check_job_complete(self, project: TranslationCoreProject, job: Any) -> None:
         """Rebuilds the progress rollup's entries for exactly the chapters
@@ -3953,9 +4148,32 @@ class BridgeEngine:
         rendered = "".join(pieces)
         return rendered if rendered.endswith("\n") else rendered + "\n"
 
-    def export_non_aligned(self, output_path: str) -> dict[str, Any]:
+    def _export_gate(self, kind: str, output_path: str, override: bool) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+        """(refusal, gate). The one publication gate (reporting.publication_gate,
+        layered-rules 4.5) is consulted before any export. With blocking items
+        and no override the export is refused with those items, and nothing is
+        written. With the override it proceeds, and the override is recorded
+        as a decision (kind 'qa', key 'export.override') listing the items
+        open at that moment, so it is in change_log for the export ledger."""
+        gate = publication_gate(self.project)
+        if not gate["blocking"]:
+            return None, gate
+        if not override:
+            return {"written": False, "blocked": True, "path": output_path, "gate": gate}, gate
+        self.project.record_qa_decision(
+            "", "", issue_key="export.override", decision="accepted",
+            note=f"Exported {kind} with {len(gate['items'])} blocking item(s) open.",
+            issue={"source": "export", "format": kind, "outputPath": output_path,
+                   "openItems": gate["items"][:200], "counts": gate["counts"]},
+        )
+        return None, gate
+
+    def export_non_aligned(self, output_path: str, override: bool = False) -> dict[str, Any]:
         """Write current verse text as non-aligned, re-importable USFM."""
         self._require_project()
+        refusal, gate = self._export_gate("nonAligned", output_path, override)
+        if refusal is not None:
+            return refusal
         summary = self.project.summary
         content = self._source_preserving_usfm()
         fidelity = "source-preserving"
@@ -3980,9 +4198,10 @@ class BridgeEngine:
                 if fidelity == "source-preserving"
                 else "No source USFM was available; generated id/chapter/verse markers only."
             ),
+            "gate": gate, "overridden": bool(gate and gate["blocking"]),
         }
 
-    def export_aligned(self, output_path: str) -> dict[str, Any]:
+    def export_aligned(self, output_path: str, override: bool = False) -> dict[str, Any]:
         """Write interoperable aligned USFM 3.
 
         A `.json` destination remains supported for backward compatibility
@@ -3990,8 +4209,12 @@ class BridgeEngine:
         `.usfm` and emits unfoldingWord-compatible `zaln`/`w` markers.
         """
         self._require_project()
+        refusal, gate = self._export_gate("aligned", output_path, override)
+        if refusal is not None:
+            return refusal
         if Path(output_path).suffix.lower() == ".json":
-            return self._export_alignment_json(output_path)
+            return {**self._export_alignment_json(output_path),
+                    "gate": gate, "overridden": bool(gate and gate["blocking"])}
         summary = self.project.summary
         book = summary.book_id
 
@@ -4031,6 +4254,7 @@ class BridgeEngine:
             "written": True, "path": output_path, "bookId": book,
             "chapters": len(self.project.chapters()), "format": "usfm3-aligned",
             "fidelity": fidelity, "alignmentStatus": status["counts"],
+            "gate": gate, "overridden": bool(gate and gate["blocking"]),
         }
 
     def _export_alignment_json(self, output_path: str) -> dict[str, Any]:
@@ -4252,7 +4476,24 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result={"verses": self.chapter_verses(p["chapter"])})
             if m == Methods.CHAPTER_VERSE_DATA:
                 return EngineResponse.ok(request.id, result=self.get_chapter_verse_data(p["chapter"]))
+            if m == Methods.COLLECTION_RUN_CHECKS:
+                checks = p.get("checks")
+                if checks is not None and not (isinstance(checks, list) and all(isinstance(c, str) for c in checks)):
+                    raise ProjectError("checks must be a list of check names")
+                return EngineResponse.ok(request.id, result=self.start_collection_checks(
+                    checks=checks, force=bool(p.get("force", False))))
+            if m == Methods.COLLECTION_QA_STATUS:
+                return EngineResponse.ok(request.id, result=self.collection_check_status(str(p.get("jobId", ""))))
+            if m == Methods.COLLECTION_PAUSE_CHECKS:
+                if not isinstance(p.get("paused"), bool):
+                    raise ProjectError("paused must be a boolean")
+                return EngineResponse.ok(request.id, result=self._collection_jobs.pause(
+                    p["paused"], str(p.get("jobId", ""))))
+            if m == Methods.COLLECTION_CANCEL_CHECKS:
+                return EngineResponse.ok(request.id, result=self._collection_jobs.cancel(str(p.get("jobId", ""))))
             if m == Methods.CHECKS_START:
+                if self._collection_jobs.active():
+                    raise CheckJobConflict("A collection QA run is in progress; wait for it or cancel it.")
                 return EngineResponse.ok(request.id, result=self.start_check_job(
                     scope=p.get("scope", "chapter"),
                     chapters=p.get("chapters"),
@@ -4383,9 +4624,11 @@ class BridgeEngine:
                     p["conceptId"], p.get("approvedRenderings"), p.get("rejectedRenderings"), overwrite,
                 ))
             if m == Methods.EXPORT_ALIGNED:
-                return EngineResponse.ok(request.id, result=self.export_aligned(p["outputPath"]))
+                return EngineResponse.ok(request.id, result=self.export_aligned(
+                    p["outputPath"], override=p.get("override") is True))
             if m == Methods.EXPORT_NON_ALIGNED:
-                return EngineResponse.ok(request.id, result=self.export_non_aligned(p["outputPath"]))
+                return EngineResponse.ok(request.id, result=self.export_non_aligned(
+                    p["outputPath"], override=p.get("override") is True))
             if m == Methods.ALIGNMENT_AI_PROPOSE:
                 return EngineResponse.ok(request.id, result=self.propose_ai_alignment(
                     p["chapter"], p["verse"], p.get("mode", "gap_fill"),
@@ -4793,6 +5036,10 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "checker_error", str(exc))
         except versification_tool.VersificationUnavailable as exc:
             return EngineResponse.fail(request.id, "versification_unavailable", str(exc))
+        except CollectionJobConflict as exc:
+            return EngineResponse.fail(request.id, "job_conflict", str(exc))
+        except CollectionJobError as exc:
+            return EngineResponse.fail(request.id, "job_error", str(exc))
         except CheckJobNotFound as exc:
             return EngineResponse.fail(request.id, "job_not_found", str(exc))
         except CheckJobConflict as exc:

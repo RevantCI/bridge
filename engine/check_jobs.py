@@ -132,6 +132,12 @@ class CheckJobManager:
         thread.start()
         return job.snapshot()
 
+    def active(self) -> bool:
+        """True while a job is queued, running or cancelling."""
+        with self._lock:
+            job = self._jobs.get(self._active_job_id or "")
+            return job is not None and job.state not in TERMINAL_STATES
+
     def status(self, job_id: str = "") -> dict[str, Any]:
         with self._lock:
             resolved_id = job_id or self._active_job_id or ""

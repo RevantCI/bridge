@@ -18,6 +18,39 @@ from .git_service import GitService
 from .team import TeamWorkflow
 
 
+def publication_gate(project) -> dict[str, Any]:
+    """The one definition of what blocks an export (layered-rules Phase 4.5):
+    open AI critical issues, open Language QA findings of severity high and
+    confidence high, and tN/tW checks marked needs-discussion. Cheap on
+    purpose -- persisted state only, no project scan -- because export calls it
+    on the dispatcher; the full book report builds on it and adds advisory
+    inputs. Returns {blocking, items, counts}; each item names its source."""
+    items: list[dict[str, Any]] = []
+    for review in project.list_ai_review_results():
+        ref = f"{review.get('chapter')}:{review.get('verse')}"
+        for issue in review.get('qaIssues', []) if isinstance(review.get('qaIssues'), list) else []:
+            if str(issue.get('severity', '')).lower() == 'critical':
+                items.append({'source': 'aiReview', 'reference': ref,
+                              'summary': str(issue.get('title') or issue.get('code') or 'Critical AI issue')})
+    try:
+        language_qa = reported_language_qa(project)
+    except Exception:
+        language_qa = []
+    for finding in language_qa:
+        if finding.get('status') in ('open', 'needs_discussion') and \
+                (str(finding.get('severity')), str(finding.get('confidence'))) == LANGUAGE_QA_BLOCKING:
+            items.append({'source': 'languageQa', 'reference': f"{finding.get('chapter')}:{finding.get('verse')}",
+                          'summary': f"{finding.get('ruleId')}: {finding.get('originalText')}"})
+    for decision in project.project_decisions():
+        if decision.get('decision') == 'needs_discussion':
+            items.append({'source': 'translationHelps',
+                          'reference': f"{decision.get('chapter', '')}:{decision.get('verse', '')}",
+                          'summary': f"{decision.get('tool') or 'check'} {decision.get('groupId') or decision.get('checkId') or ''} needs discussion".strip()})
+    counts = Counter(item['source'] for item in items)
+    return {'blocking': bool(items), 'items': items,
+            'counts': {k: counts.get(k, 0) for k in ('aiReview', 'languageQa', 'translationHelps')}}
+
+
 class ReportService:
     """Deterministic, print-friendly publication/QA reporting.
 
@@ -69,7 +102,9 @@ class ReportService:
             'knowledgeBaseProvenance':provenance,'git':{'available':git.available,'repository':git.repository,'branch':git.branch,'dirty':git.dirty},
             'team':team,'metrics':self._metrics(),
             'languageQa':language_qa,
-            'publicationGate':self._publication_gate(scan,queue,qa,discussions,language_qa,self.language_qa_medium_advisory),
+            'publicationGate':{**self._publication_gate(scan,queue,qa,discussions,language_qa,self.language_qa_medium_advisory),
+                               # What an export would be blocked by: the same function export consults.
+                               'exportBlocking':publication_gate(self.project)},
             'coverage':{'verses':self._verse_coverage(),'resources':self._resource_coverage()},
         }
 

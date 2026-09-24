@@ -853,6 +853,33 @@ def collection_projects(project_root: str | Path) -> list[dict[str, Any]]:
     return _collection_projects(Path(project_root).resolve())
 
 
+def collection_qa_runs(project_root: str | Path) -> dict[str, dict[str, Any]]:
+    """bookId -> the last recorded collection QA run for it (layered-rules 4.4),
+    from this project's `.bridge/collection.json` `qaRuns[]`."""
+    data = _read_json(Path(project_root).resolve() / _COLLECTION_PATH)
+    runs = data.get("qaRuns") if isinstance(data.get("qaRuns"), list) else []
+    return {str(r.get("bookId")): r for r in runs if isinstance(r, dict) and r.get("bookId")}
+
+
+def record_collection_qa_run(project_root: str | Path, entry: dict[str, Any],
+                             final_stage: dict[str, Any] | None = None) -> None:
+    """Upsert one book's run into `qaRuns[]` (one entry per book, the latest),
+    and optionally the whole-collection stage's summary under `qaFinalStage`.
+    Every other key of the file is kept as it was; the write is atomic."""
+    path = Path(project_root).resolve() / _COLLECTION_PATH
+    data = _read_json(path) if path.is_file() else {}
+    if not isinstance(data, dict):
+        data = {}
+    if entry:
+        runs = [r for r in (data.get("qaRuns") or []) if isinstance(r, dict) and r.get("bookId") != entry.get("bookId")]
+        runs.append(dict(entry))
+        data["qaRuns"] = runs
+    if final_stage is not None:
+        data["qaFinalStage"] = final_stage
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(path, data)
+
+
 def materialize_lazy_project(project_root: str | Path) -> bool:
     """Normalize a lightweight imported book the first time it is opened.
 

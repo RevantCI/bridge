@@ -219,6 +219,36 @@ def test_many_open_medium_findings_add_an_advisory_line_that_never_blocks():
         "readyForHumanPublicationSignoff"] is False
 
 
+# export.aligned writes .json here: the fixture's alignment does not match its
+# edited verse text, which the USFM renderer refuses; the gate runs first either way.
+@pytest.mark.parametrize("method,suffix", [("export.aligned", ".json"), ("export.nonAligned", ".usfm")])
+def test_export_is_blocked_by_the_publication_gate_until_overridden_and_the_override_is_recorded(
+        lqa_engine, tmp_path, method, suffix):
+    engine = lqa_engine
+    clean = tmp_path / f"clean{suffix}"
+    first = call(engine, method, {"outputPath": str(clean)})
+    assert first["success"], first
+    assert first["result"]["written"] is True and not first["result"].get("overridden")  # nothing blocks yet
+    engine.project.record_terminology_rule("god", ["இறைவன்"], rejected_renderings=["தேவன்"])
+    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "தேவன் பேசினார்."})["success"]
+    started = call(engine, "checks.start", {"scope": "book", "checks": ["languageQa"]})["result"]
+    assert wait_for_job(engine, started["jobId"], timeout=30)["state"] == "succeeded"
+    out = tmp_path / f"out{suffix}"
+    refused = call(engine, method, {"outputPath": str(out)})["result"]
+    assert refused["written"] is False and refused["blocked"] is True and not out.exists()
+    assert refused["gate"]["counts"]["languageQa"] == 1
+    assert refused["gate"]["items"][0]["source"] == "languageQa"
+    written = call(engine, method, {"outputPath": str(out), "override": True})["result"]
+    assert written["written"] is True and written["overridden"] is True and out.exists()
+    [override] = [d for d in engine.project.project_qa_decisions() if d.get("issueKey") == "export.override"]
+    assert override["issue"]["source"] == "export" and override["issue"]["counts"]["languageQa"] == 1
+    assert override["issue"]["openItems"][0]["summary"].endswith("தேவன்")
+    # The report's gate names the same items: one definition.
+    from tc_ai_bridge.reporting import ReportService
+    assert ReportService(engine.project).build_book_report()["publicationGate"]["exportBlocking"]["items"] == \
+        refused["gate"]["items"]
+
+
 def test_a_job_without_the_stage_keeps_the_previous_language_qa_snapshot(lqa_engine):
     engine = lqa_engine
     _language_qa_job(engine)

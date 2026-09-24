@@ -12099,3 +12099,134 @@ acted on where every other finding is.
   - `npm run check` 0/0; `npx vitest run` 546 passed; `npm run build` ok.
 - **Not verified:** how the new tab and the mixed menu look at 1366×768.
   jsdom does not lay out, so that needs the desktop app.
+
+## 2026-09-24 — Layered-rules Phases 4.4 and 4.5: collection runner and export gate
+
+### 4.4 `collection.runChecks`
+
+**The runner** (`engine/collection_jobs.py`) follows the `check_jobs.py`
+pattern:
+- one active run, on a worker thread, with JSON snapshots;
+- it owns ordering, skipping, pause, cancel and timing.
+
+**The engine supplies the work.** `_run_collection_book` handles one book:
+1. it materializes a lazy sibling;
+2. it builds a fresh `TranslationCoreProject` and a Language QA manager bound
+   with `autostart=False`;
+3. it runs the ordinary whole-book check job on a **private
+   `CheckJobManager`**, through the same `_start_check_job_from_spec`, now
+   parametrised with its Language QA manager and job manager;
+4. it waits, then releases the book.
+
+The editor's open project, its Language QA and its check job are never
+touched. The job's own completion hook writes the book's rollup and
+snapshots as usual.
+
+**Resumable.**
+- Each finished book is upserted into the opened project's
+  `.bridge/collection.json` → `qaRuns[]` as `{bookId, state, completedAt,
+  jobId, contentHash, checks, elapsedSeconds, findingsByCategory,
+  checkedVerses}`.
+- The next run skips a book whose recorded run is `done`, whose content hash
+  (sha256 of its chapter JSON files) is unchanged, and whose recorded checks
+  cover the requested ones.
+- `force` re-runs everything.
+- A cancelled book records nothing, so a crash or cancel resumes at that
+  book.
+
+**Controls.**
+- Pause holds the next book, not the one in flight.
+- Cancel stops the book in flight after its current verse, through the
+  check job's own cancellation.
+- `checks.start` is refused while a run is active.
+- One failing book does not stop the others.
+
+**Final stage.** It runs once, after every book, and writes reports only:
+- **termbase coverage** per book: approved renderings never used, and
+  rejected ones still present. This is a substring count, because Tamil
+  inflects the rendering.
+- **cross-book name consistency**: the names adapter over the union of every
+  book's tokens.
+- **house-style propagation**: reported as unavailable until Phase 6.
+
+Its summary is kept in `collection.json` → `qaFinalStage`.
+
+**RPCs.** `collection.runChecks {checks?, force?}`,
+`collection.qaStatus {jobId?}`, `collection.pauseChecks {paused}` and
+`collection.cancelChecks`. With no run in the session, `qaStatus` returns an
+idle snapshot built from `qaRuns[]`, so the screen shows each book's last
+run after a restart.
+
+**UI.**
+- `CollectionQaPanel` appears on the dashboard for any collection with more
+  than one book. It shows one row per book: state, verses checked, open
+  findings by source, last run, time, and an Open-book link.
+- It also shows elapsed time and an estimate from the measured books, plus
+  Pause/Resume/Cancel and "Run all again" (force).
+- `collectionQa.ts` polls once a second, and only while a run is active.
+- While a run is active, `checkingProgress.running` is held (so editing,
+  alignment and AI review are disabled) and `switchBook` refuses.
+
+**The import offer.** The brief asks for "Run QA on all N books" from the
+import summary. A multi-book import already lands on the dashboard, so the
+panel's button is that offer. It is never started automatically
+(DECISIONS.md).
+
+**Whole-Bible wall time: measurement in progress.** The run imports all 66
+IRV books (6.8 s) and runs `collection.runChecks` with the default checks on
+this machine.
+- Genesis took 260 s with the machine otherwise idle.
+- Exodus took 650 s while the engine test suite ran beside it.
+- After two books the runner estimated 5 to 8 hours for the collection.
+
+This confirms the brief's "run-overnight operation" and the no-auto-start
+decision. Most of the per-book time is the pre-existing checks, not
+Language QA: a full Language QA pass on Psalms is 2.45 s cold. The final
+figure will be appended here when the run completes.
+
+### 4.5 Export gate
+
+`reporting.publication_gate(project)` is the single definition of what
+blocks an export:
+- open AI critical issues;
+- open Language QA findings with severity high **and** confidence high;
+- tN/tW checks marked needs-discussion.
+
+It reads persisted state only, because export runs on the dispatcher and the
+full book report takes minutes. The book report embeds it as
+`publicationGate.exportBlocking`.
+
+`export.aligned` and `export.nonAligned` consult it first:
+- With blocking items and no `override`, nothing is written. The answer is
+  `{written: false, blocked: true, gate}`, a success response, because
+  `EngineResponse.fail` cannot carry the items.
+- With `override: true`, the export proceeds, and a `kind='qa'` decision
+  with key `export.override` records the items open at that moment. It lands
+  in `change_log` for the Phase 6.5 export ledger.
+
+`ExportModal` lists the blocking items. "Export anyway" stays disabled until
+the override box is ticked, then reuses the chosen path.
+
+### Verification
+
+- **Engine.**
+  - `tests/jobs/test_collection_jobs.py` (7 tests):
+    - every book runs in order, each is recorded, and the final stage runs
+      once;
+    - an unchanged book is skipped, while a changed book, fewer recorded
+      checks or `force` all rerun;
+    - cancel records nothing and skips the final stage;
+    - pause holds the next book, and a second start is refused;
+    - one failing book does not stop the rest;
+    - a real three-book run records `qaRuns` and the final stage, and an
+      edited book reruns while the others are skipped;
+    - `checks.start` is refused during a run.
+  - `test_qa_report.py`, export gate for both formats (2 tests): not blocked
+    when nothing is open; blocked with nothing written; override writes the
+    file and records the decision with its open items; the report's gate
+    lists the same items.
+- **Frontend.** `CollectionQaPanel.test.ts` (2 tests): last runs shown, never
+  auto-started; the app is held read-only during a run and released after.
+  `ExportModal.test.ts` (1 test).
+- **Not covered by a test:** the App-level wiring (the panel's placement, and
+  `switchBook` refusing during a run). There is no App test harness.

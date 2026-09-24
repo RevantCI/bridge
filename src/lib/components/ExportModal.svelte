@@ -1,6 +1,7 @@
 <script lang="ts">
   import { bridge } from "../api/bridgeClient";
   import { project } from "../stores";
+  import type { ExportGateItem } from "../api/bridgeClient";
 
   export let onClose: () => void;
   export let reviewComplete = false;
@@ -8,6 +9,29 @@
   let exporting = false;
   let resultMessage = "";
   let errorMessage = "";
+  // The publication gate (layered-rules 4.5): an export with blocking items
+  // open comes back unwritten with the items; the reviewer can tick the
+  // override and export anyway, which the engine records as a decision.
+  let blocked: { kind: "aligned" | "nonAligned"; path: string; items: ExportGateItem[] } | null = null;
+  let override = false;
+
+  const SOURCE_LABEL: Record<string, string> = {
+    aiReview: "AI critical issue", languageQa: "Language QA (high severity, high confidence)",
+    translationHelps: "tN/tW needs discussion",
+  };
+
+  async function run(kind: "aligned" | "nonAligned", path: string, withOverride: boolean): Promise<void> {
+    const result = kind === "aligned"
+      ? await bridge.exportAligned(path, withOverride) : await bridge.exportNonAligned(path, withOverride);
+    if (result.blocked) {
+      blocked = { kind, path, items: result.gate?.items ?? [] };
+      override = false;
+      return;
+    }
+    blocked = null;
+    resultMessage = `Wrote ${result.chapters} chapter(s) to ${result.path}`
+      + (result.overridden ? " (exported over the publication gate; the override is recorded)" : "");
+  }
 
   async function doExport(kind: "aligned" | "nonAligned") {
     exporting = true;
@@ -21,9 +45,20 @@
         exporting = false;
         return;
       }
-      const result =
-        kind === "aligned" ? await bridge.exportAligned(path) : await bridge.exportNonAligned(path);
-      resultMessage = `Wrote ${result.chapters} chapter(s) to ${result.path}`;
+      await run(kind, path, false);
+    } catch (e) {
+      errorMessage = e instanceof Error ? e.message : String(e);
+    } finally {
+      exporting = false;
+    }
+  }
+
+  async function exportAnyway(): Promise<void> {
+    if (!blocked || !override) return;
+    exporting = true;
+    errorMessage = "";
+    try {
+      await run(blocked.kind, blocked.path, true);
     } catch (e) {
       errorMessage = e instanceof Error ? e.message : String(e);
     } finally {
@@ -50,6 +85,23 @@
       <div class="d">Current verse text without alignment data. When the imported source is available, headings, poetry, footnotes, verse bridges, and custom/ESFM markers are preserved. Older projects without source files use basic \id / \c / \v markers.</div>
     </button>
 
+    {#if blocked}
+      <div class="gate" role="alert">
+        <p class="gate-title">Not exported: {blocked.items.length} item(s) block publication</p>
+        <ul>
+          {#each blocked.items.slice(0, 12) as item}
+            <li><b>{SOURCE_LABEL[item.source] ?? item.source}</b> · {item.reference} · {item.summary}</li>
+          {/each}
+          {#if blocked.items.length > 12}<li>… and {blocked.items.length - 12} more</li>{/if}
+        </ul>
+        <label class="override">
+          <input type="checkbox" bind:checked={override} />
+          Export anyway. The override and these open items are recorded.
+        </label>
+        <button class="btn" on:click={exportAnyway} disabled={!override || exporting}>Export anyway</button>
+      </div>
+    {/if}
+
     {#if exporting}<p class="status">Writing…</p>{/if}
     {#if resultMessage}<p class="status success">{resultMessage}</p>{/if}
     {#if errorMessage}<p class="status error">{errorMessage}</p>{/if}
@@ -74,6 +126,10 @@
   .status { font-size: var(--fs-xs); margin: 8px 0 0; }
   .status.success { color: var(--success); }
   .status.error { color: var(--danger); }
+  .gate { border: 1px solid var(--danger); border-radius: 10px; padding: 10px 12px; margin: 4px 0 8px; font-size: var(--fs-xs); }
+  .gate-title { margin: 0 0 6px; font-weight: 700; color: var(--danger); }
+  .gate ul { margin: 0 0 8px; padding-left: 18px; max-height: 160px; overflow: auto; }
+  .override { display: flex; gap: 6px; align-items: flex-start; margin-bottom: 8px; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
   .btn { font-size: var(--fs-sm); font-weight: 600; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
   .btn.ghost { background: transparent; }

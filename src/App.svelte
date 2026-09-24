@@ -31,6 +31,8 @@
   } from "./lib/stores";
   import { editingChapter, editingVerse, editSaving } from "./lib/verseEditor";
   import { nudgeLanguageQa, startLanguageQaInline } from "./lib/languageQaInline";
+  import { collectionQaRunning, stopCollectionQa } from "./lib/collectionQa";
+  import CollectionQaPanel from "./lib/components/CollectionQaPanel.svelte";
 
   let opened = false;
   let engineStatus: "checking" | "ready" | "error" = "checking";
@@ -269,6 +271,19 @@
     }
   }
   onDestroy(() => stopLanguageQaInline?.());
+
+  // Collection QA (layered-rules 4.4): while a run checks every book, the app
+  // is read-only. checkingProgress.running is what already holds editing,
+  // alignment and AI review; the book switcher checks collectionQaRunning.
+  let collectionHeldProgress = false;
+  $: if ($collectionQaRunning && !collectionHeldProgress) {
+    collectionHeldProgress = true;
+    checkingProgress.update((p) => ({ ...p, running: true, label: "Collection QA running", state: "running" }));
+  } else if (!$collectionQaRunning && collectionHeldProgress) {
+    collectionHeldProgress = false;
+    checkingProgress.update((p) => ({ ...p, running: false, label: "Collection QA finished", state: "succeeded" }));
+  }
+  $: if (!$project || !opened) stopCollectionQa();
 
   onMount(() => {
     let unlisten: (() => void) | null = null;
@@ -639,6 +654,10 @@
   async function switchBook(path: string, enterEditor = true): Promise<boolean> {
     if (!$project || openingBook) return false;
     if (path === $project.path) return true;
+    if ($collectionQaRunning) {
+      bookOpenError = "Collection QA is running. Pause or cancel it before switching books.";
+      return false;
+    }
     const siblings = $project.importedProjects;
     const destination = siblings?.find((book) => book.path === path);
     openingBook = destination?.bookName ?? "book";
@@ -1009,6 +1028,11 @@
   {#if screen === "home"}
     <ImportScreen onOpened={handleOpened} {droppedPath} {dropSequence} />
   {:else if screen === "dashboard"}
+    {#if bookProgress.length > 1}
+      <div class="collection-qa-host">
+        <CollectionQaPanel bookCount={bookProgress.length} onOpenBook={enterBookFromDashboard} />
+      </div>
+    {/if}
     <ProjectDashboard
       {projectName}
       subtitle={dashboardSubtitle}
@@ -1156,6 +1180,8 @@
   .check-notice { color: var(--danger); height: auto; min-height: 32px; max-height: 96px; align-items: flex-start; padding-top: 7px; padding-bottom: 7px; }
   .check-message { flex: 1; min-width: 0; max-height: 78px; overflow: auto; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
   .body { flex: 1; display: flex; overflow: hidden; }
+  /* A 66-book table must not push the dashboard off screen: it scrolls. */
+  .collection-qa-host { flex-shrink: 0; max-height: 40vh; overflow: auto; padding: 12px 16px 0; background: var(--bg); }
   .editor-col { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .editor-toolbar { height: 34px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: var(--fs-xs); color: var(--text-2); flex-shrink: 0; }
   .whole-book-btn { font-size: var(--fs-xs); font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
