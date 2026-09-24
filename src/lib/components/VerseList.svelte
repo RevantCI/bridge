@@ -7,10 +7,9 @@
   import { parseVerseNotes, withNoteMarkers, type ParsedVerse, type VerseNote, type VerseNoteKind } from "../utils/usfmNotes";
   import VerseNotesPopup from "./VerseNotesPopup.svelte";
   import FindingContextMenu from "./FindingContextMenu.svelte";
-  import { decideLocalFinding } from "../findingActions";
+  import { decideLanguageQaFinding, decideLocalFinding } from "../findingActions";
   import type { QaFinding } from "../types/finding";
   import type { LanguageQaFinding } from "../types/languageQa";
-  import { bridge } from "../api/bridgeClient";
   import {
     applySuggestedFindingFix, applyLanguageQaSuggestedFix, editingChapter, editingVerse, editText, editSaving,
     editError, saveVerseEdit, cancelVerseEdit, startVerseEdit, recheckingKey,
@@ -276,7 +275,7 @@
         langQaContextMenu = null;
         startVerseEdit($currentChapter, verse);
       } else if (event.detail.id === "ignore") {
-        await bridge.decideVerse($currentChapter, verse, finding.id, "ignored");
+        await decideLanguageQaFinding(finding, "ignored");
         // Optimistic removal so the underline disappears immediately; the
         // next real scan pass independently confirms suppression
         // server-side (language_qa_jobs.py reads the same decision back).

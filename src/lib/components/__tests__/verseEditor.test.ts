@@ -89,7 +89,12 @@ describe("applyLanguageQaSuggestedFix", () => {
     expect(result.ok).toBe(true);
     expect(editVerse).toHaveBeenCalledWith("1", "6", "omega beta");
     expect(runVerseChecks).toHaveBeenCalledWith("1", "6", ["local", "greekroom"]);
-    expect(decideVerse).toHaveBeenCalledWith("1", "6", "term-1", "accepted");
+    // The issue marks it as Language QA, so the engine keeps it out of the
+    // review-progress rollup, and records what the reviewer saw.
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "term-1", "accepted", undefined, {
+      source: "languageQa", rule: "terminology.deprecated-form", ruleVersion: "language-qa-2",
+      originalText: "alpha", suggestedReplacement: "omega", message: "Deprecated form.", start: 0, end: 5,
+    });
     expect(get(verseTexts)[verseKey("1", "6")]).toBe("omega beta");
   });
 
@@ -124,7 +129,8 @@ describe("applyLanguageQaSuggestedFix", () => {
     }));
     expect(result.ok).toBe(true);
     expect(editVerse).toHaveBeenCalledWith("1", "6", "அப்படிக் கூறினான் பின்னர்");
-    expect(decideVerse).toHaveBeenCalledWith("1", "6", "vallinam-1", "accepted");
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "vallinam-1", "accepted", undefined,
+      expect.objectContaining({ source: "languageQa", rule: "tamil.vallinam-missing" }));
   });
 
   it("splices a footnoted verse at the engine's raw offsets and keeps the note byte-identical", async () => {

@@ -82,6 +82,11 @@ VALLINAM_INITIALS = frozenset("கசதப")
 # highlight.ts's INLINE_LANGUAGE_QA_MARKS only maps these names to CSS classes
 # and must have exactly these keys (test_inline_rules_match_the_frontend_class_map).
 INLINE_RULES = frozenset({"terminology.deprecated-form", "tamil.vallinam-missing"})
+# Every Language QA finding carries this, and the frontend sends it back in the
+# `issue` of a verse.decide call. decide_verse keys on it to keep Language QA
+# decisions out of the review-progress rollup. Origin is never inferred from
+# the finding id.
+FINDING_SOURCE = "languageQa"
 WORD = regex.compile(r"\p{L}[\p{L}\p{M}]*")
 GRAPHEME = regex.compile(r"\X")
 SCRIPT_NAMES = ("TAMIL", "DEVANAGARI", "BENGALI", "TELUGU", "KANNADA",
@@ -292,7 +297,7 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
             "severity": severity, "start": raw_start, "end": raw_end,
             "originalText": original, "message": message, "textHash": digest,
             "ruleVersion": RULE_VERSION, "status": "review-needed",
-            "suggestedReplacement": suggested_replacement,
+            "suggestedReplacement": suggested_replacement, "source": FINDING_SOURCE,
         })
 
     if not unicodedata.is_normalized("NFC", text):
@@ -424,6 +429,7 @@ def wordlist_findings(book: str, counts: dict[str, int],
                         f'(a similar spelling) occurs {counts[common]} times here -- verify '
                         f'whether this is a spelling variant or a distinct word/name.'),
             "textHash": text_hash, "ruleVersion": RULE_VERSION, "status": "review-needed",
+            "source": FINDING_SOURCE,
         })
         if len(findings) >= MAX_WORDLIST_FINDINGS:
             break

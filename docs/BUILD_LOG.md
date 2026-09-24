@@ -11002,3 +11002,57 @@ normally flatten `\w`. Footnote text itself is not checked.
 code units while engine offsets are code points. The two agree for Tamil
 and every other BMP script, but would drift for astral-plane text on the
 display path. This is pre-existing and out of scope here.
+
+### 3. Language QA decisions no longer move the review-progress totals
+
+**Defect.** Use and Ignore on a Language QA mark call `verse.decide`, which
+went straight to `_apply_decision_to_progress`. So every வல்லினம் or
+termbase decision became a finding row in the book's progress rollup, and
+moved `findingCount`, `approvedFindingCount` and `reviewedVerseCount`, plus
+the dashboard's cached copy of those totals. Language QA findings are
+disposable text-only review candidates. They are not the checked QaFindings
+those totals measure, so an "ignored" vallinam made a verse look reviewed.
+
+**Cause.** `verse.decide` had no way to know what kind of finding it was
+deciding, and nothing told it.
+
+**Fix.**
+- Every Language QA finding carries `"source": "languageQa"`
+  (`language_qa.FINDING_SOURCE`). That covers `scan_text`'s findings,
+  terminology findings and wordlist findings.
+- `decide_verse` takes an optional `issue` dict. The dispatcher rejects a
+  non-object value. `issue` is stored as the decision's payload through the
+  existing `record_qa_decision(issue=…)`, which needs no storage change.
+- The rollup update is skipped when `issue.source == "languageQa"`. Origin
+  comes only from `issue`, never from the finding id.
+- The decision is still recorded in `human_decisions` and `change_log`, and
+  the chapter is still invalidated.
+- Semantics are unchanged: "ignored" still suppresses, and "accepted" still
+  does not.
+- Frontend: `findingActions.ts` gains `languageQaDecisionIssue(finding)`
+  and `decideLanguageQaFinding`. The issue is `{source, rule, ruleVersion,
+  originalText, suggestedReplacement, message, start, end}`, and its
+  `source` is always `"languageQa"`, whatever the finding object carries.
+  `bridge.decideVerse` gains an optional `issue`. VerseList's Ignore and
+  `applyLanguageQaSuggestedFix`'s accepted both use the helper.
+
+**Verification.**
+- Engine:
+  - Through the real dispatcher, accepting and then ignoring a vallinam
+    finding leaves `load_progress_rollup()` exactly equal to before: no
+    finding row, no totals change, no verse entry. This test fails without
+    the `decide_verse` change.
+  - The payload records `issue.source`, `issue.rule` and
+    `issue.originalText`.
+  - "accepted" leaves the finding in place, and the next scan suppresses
+    the ignored one.
+  - Greek Room regression, parametrized over no issue, an empty issue and an
+    issue with another source: the rollup still records the decision and
+    counts it.
+  - A non-object `issue` is refused and nothing is recorded.
+  - Every Language QA producer's findings carry `source`.
+- Frontend: `verseEditor.test.ts` asserts the exact issue sent on Use.
+  `VerseList.test.ts` asserts it on Ignore, and that the mark disappears.
+- Gates: `npm run check` 0/0; `npx vitest run` 504 passed; `npm run build`
+  ok; engine `pytest -n auto` 1579 passed.
+- Desktop acceptance not yet run.

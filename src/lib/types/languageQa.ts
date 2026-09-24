@@ -18,6 +18,24 @@ export interface LanguageQaFinding {
    * preferred rendering recorded yet). Today only terminology.deprecated-form
    * and tamil.vallinam-missing ever carry a real, non-null value. */
   suggestedReplacement?: string | null;
+  /** Always "languageQa" from the engine (language_qa.FINDING_SOURCE). Sent
+   * back in verse.decide's `issue` so the decision stays out of the review
+   * progress rollup; see languageQaDecisionIssue. Optional only because the
+   * issue builder does not depend on it. */
+  source?: "languageQa";
+}
+
+/** The `issue` a Language QA verse.decide carries: what the reviewer saw,
+ * recorded in the decision payload for the audit trail. */
+export interface LanguageQaDecisionIssue {
+  source: "languageQa";
+  rule: string;
+  ruleVersion: string;
+  originalText: string;
+  suggestedReplacement: string | null;
+  message: string;
+  start: number;
+  end: number;
 }
 
 export interface LanguageQaStatus {

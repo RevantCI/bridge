@@ -64,6 +64,7 @@ from tc_ai_bridge.analysis_jobs import (
     AnalysisJobNotFound,
 )
 from tc_ai_bridge.local_checks import run_local_qa
+from tc_ai_bridge.language_qa import FINDING_SOURCE as LANGUAGE_QA_SOURCE
 from tc_ai_bridge.language_qa_jobs import LanguageQaManager
 from tc_ai_bridge.workbench_repository import WorkbenchConflict, WorkbenchValidationError
 from tc_ai_bridge.alignment_engine import (
@@ -3638,16 +3639,25 @@ class BridgeEngine:
         return self._start_check_job_from_spec(spec, self.project)
 
     def decide_verse(self, chapter: str, verse: str, finding_id: str,
-                      status: str, comment: str = "") -> dict[str, Any]:
+                      status: str, comment: str = "",
+                      issue: dict[str, Any] | None = None) -> dict[str, Any]:
         """Records a human decision (accept/reject/ignore/needs_discussion)
         on a specific finding. Uses tc_ai_bridge's existing QA-decision
         store (companion_dir()/qaDecisions/...) rather than reinventing
-        persistence — this already exists, is atomic, and is audited."""
+        persistence — this already exists, is atomic, and is audited.
+
+        `issue` is what the caller knows about the finding, stored as the
+        decision's payload. A Language QA finding (`issue.source ==
+        "languageQa"`) is a disposable text-only review candidate, not a
+        checked-and-reviewed QaFinding, so its decision is recorded and
+        audited but never counted in the review-progress rollup. The origin
+        comes only from `issue`, never from the finding id."""
         self._require_project()
         path = self.project.record_qa_decision(
-            chapter, verse, issue_key=finding_id, decision=status, note=comment,
+            chapter, verse, issue_key=finding_id, decision=status, note=comment, issue=issue,
         )
-        self._apply_decision_to_progress(self.project, chapter, verse, finding_id, status)
+        if (issue or {}).get("source") != LANGUAGE_QA_SOURCE:
+            self._apply_decision_to_progress(self.project, chapter, verse, finding_id, status)
         # Language QA reads this same decision store back inside its own scan
         # loop (language_qa_jobs.py) to suppress a decided terminology
         # finding, but nothing else about recording a decision touches its
@@ -4170,7 +4180,11 @@ class BridgeEngine:
                 findings = self.run_verse_checks(p["chapter"], p["verse"], p.get("checks", ["local", "greekroom"]))
                 return EngineResponse.ok(request.id, findings=findings)
             if m == Methods.VERSE_DECIDE:
-                result = self.decide_verse(p["chapter"], p["verse"], p["findingId"], p["status"], p.get("comment", ""))
+                issue = p.get("issue")
+                if issue is not None and not isinstance(issue, dict):
+                    raise ProjectError("issue must be an object when given")
+                result = self.decide_verse(p["chapter"], p["verse"], p["findingId"], p["status"],
+                                           p.get("comment", ""), issue)
                 return EngineResponse.ok(request.id, result=result)
             if m == Methods.VERSE_EDIT:
                 result = self.edit_verse(p["chapter"], p["verse"], p["newText"])

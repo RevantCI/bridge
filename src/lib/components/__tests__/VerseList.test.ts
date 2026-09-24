@@ -236,6 +236,29 @@ describe("VerseList footnote handling", () => {
     }
   });
 
+  it("ignores a Language QA mark with an issue that keeps it out of review progress", async () => {
+    seed("அந்த காகம் பறந்தது.");
+    languageQaFindingsByVerse.set({ "1:6": [{
+      id: "lqa-2", book: "php", chapter: "1", verse: "6", rule: "tamil.vallinam-missing",
+      severity: "medium", start: 0, end: 10, originalText: "அந்த காகம்", message: "Possible missing வல்லினம்.",
+      textHash: "h", ruleVersion: "language-qa-6", status: "review-needed",
+      suggestedReplacement: "அந்தக் காகம்", source: "languageQa",
+    }] });
+    try {
+      render(VerseList, { props: { onSelect: vi.fn() } });
+      await fireEvent.contextMenu(document.querySelector("mark.m-vallinam") as HTMLElement);
+      await fireEvent.click(screen.getByRole("menuitem", { name: "Ignore" }));
+      expect(decideVerse).toHaveBeenCalledWith("1", "6", "lqa-2", "ignored", undefined, {
+        source: "languageQa", rule: "tamil.vallinam-missing", ruleVersion: "language-qa-6",
+        originalText: "அந்த காகம்", suggestedReplacement: "அந்தக் காகம்",
+        message: "Possible missing வல்லினம்.", start: 0, end: 10,
+      });
+      expect(document.querySelector("mark.m-vallinam")).toBeNull();
+    } finally {
+      languageQaFindingsByVerse.set({});
+    }
+  });
+
   it("offers exactly the two actions the review panel offers", async () => {
     seed("alpha beta", [finding({
       start_offset: 0, end_offset: 5, original_text: "alpha", suggested_replacement: null,

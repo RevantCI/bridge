@@ -518,6 +518,76 @@ def test_verse_decide_ignored_actually_suppresses_a_vallinam_finding_through_the
         engine._language_qa.unbind()
 
 
+def issue_for(finding):
+    """What the frontend sends with a Language QA verse.decide."""
+    return {key: finding[key] for key in ("source", "rule", "ruleVersion", "originalText",
+                                          "suggestedReplacement", "message", "start", "end")}
+
+
+def test_every_language_qa_finding_carries_its_source(tmp_path):
+    assert all(f["source"] == "languageQa" for f in scan("அந்த காகம்  ,,")["findings"])
+    terms = [{"conceptId": "god", "status": "approved", "approvedRenderings": ["இறைவன்"],
+              "rejectedRenderings": ["கடவுள்"], "note": ""}]
+    verses = {str(n): "தமிழ்" for n in range(1, 7)} | {"7": "தமிழ", "8": "கடவுள்"}
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project_at(tmp_path, verses=verses, terminology=terms))
+    findings = wait(manager)["findings"]
+    assert {"terminology.deprecated-form", "tamil.wordlist-variant"} <= {f["rule"] for f in findings}
+    assert all(f["source"] == "languageQa" for f in findings)
+
+
+def test_language_qa_decision_is_recorded_but_never_counted_in_review_progress(fixture_project):
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]
+        finding = next(f for f in wait(engine._language_qa)["findings"] if f["rule"] == "tamil.vallinam-missing")
+        before = engine.project.load_progress_rollup()
+
+        # "accepted" is recorded but is not a standing verdict: the finding stays.
+        assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": finding["id"],
+                                             "status": "accepted", "issue": issue_for(finding)})["success"]
+        assert any(f["id"] == finding["id"] for f in wait(engine._language_qa)["findings"])
+        assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": finding["id"],
+                                             "status": "ignored", "issue": issue_for(finding)})["success"]
+
+        # No finding row, no totals change, no verse entry: the rollup is untouched.
+        assert engine.project.load_progress_rollup() == before
+        # The decision itself is recorded, with what the reviewer saw.
+        payload = engine.project.qa_decisions_for_verse("1", "1")[finding["id"]]
+        assert payload["decision"] == "ignored"
+        assert payload["issue"]["source"] == "languageQa"
+        assert payload["issue"]["rule"] == "tamil.vallinam-missing"
+        assert payload["issue"]["originalText"] == "அந்த காகம்"
+        # And the next scan still suppresses the ignored occurrence.
+        assert not [f for f in wait(engine._language_qa)["findings"] if f["id"] == finding["id"]]
+    finally:
+        engine._language_qa.unbind()
+
+
+@pytest.mark.parametrize("issue", [None, {}, {"source": "greekRoom", "rule": "spelling"}])
+def test_other_decisions_still_update_review_progress(fixture_project, issue):
+    engine = BridgeEngine()
+    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    params = {"chapter": "1", "verse": "1", "findingId": "greek-room-finding", "status": "accepted"}
+    if issue is not None:
+        params["issue"] = issue
+    assert call(engine, "verse.decide", params)["success"]
+    rollup = engine.project.load_progress_rollup()
+    assert rollup["chapters"]["1"]["verses"]["1"]["findings"]["greek-room-finding"] == "accepted"
+    assert rollup["totals"]["approvedFindingCount"] == 1
+
+
+def test_verse_decide_rejects_a_non_object_issue(fixture_project):
+    engine = BridgeEngine()
+    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    response = call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": "x",
+                                             "status": "ignored", "issue": "languageQa"})
+    assert not response["success"]
+    assert engine.project.qa_decisions_for_verse("1", "1") == {}
+
+
 def test_detection_metadata_conflicts_shared_scripts_and_mixed_input():
     tamil = "தமிழ் மொழியில் எழுதப்பட்ட உரை. " * 10
     assert detect_language(tamil)["pack"] == "tamil"

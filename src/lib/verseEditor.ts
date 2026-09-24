@@ -7,6 +7,7 @@
 // into the other's internals.
 import { get, writable } from "svelte/store";
 import { bridge } from "./api/bridgeClient";
+import { decideLanguageQaFinding } from "./findingActions";
 import type { QaFinding } from "./types/finding";
 import type { LanguageQaFinding } from "./types/languageQa";
 import type { CorrectionApplicationIntent } from "./types/correctionReview";
@@ -243,7 +244,7 @@ export async function applyLanguageQaSuggestedFix(finding: LanguageQaFinding): P
     return { ok: false, message: get(editError) || "The fix could not be applied." };
   }
   try {
-    await bridge.decideVerse(chapter, verse, finding.id, "accepted");
+    await decideLanguageQaFinding(finding, "accepted");
   } catch {
     // The text fix already landed and the verse was re-checked -- a
     // decision-recording failure here must not be reported as the fix

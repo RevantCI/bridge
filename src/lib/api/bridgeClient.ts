@@ -1,4 +1,4 @@
-import type { LanguageQaInline, LanguageQaStatus } from "../types/languageQa";
+import type { LanguageQaDecisionIssue, LanguageQaInline, LanguageQaStatus } from "../types/languageQa";
 import type {
   AIReviewChapterResponse,
   AIReviewJobSnapshot,
@@ -441,9 +441,9 @@ export const bridge = {
 
   decideVerse(
     chapter: string, verse: string, findingId: string,
-    status: string, comment?: string,
+    status: string, comment?: string, issue?: LanguageQaDecisionIssue,
   ): Promise<Record<string, unknown>> {
-    return call("verse.decide", { chapter, verse, findingId, status, comment });
+    return call("verse.decide", { chapter, verse, findingId, status, comment, issue });
   },
 
   editVerse(chapter: string, verse: string, newText: string): Promise<{

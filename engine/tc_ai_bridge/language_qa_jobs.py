@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import terminology
-from .language_qa import (CROSSING_LIMITATION, INLINE_RULES, MAX_VERSE_CHARS, MAX_WORDLIST_TERMS,
+from .language_qa import (CROSSING_LIMITATION, FINDING_SOURCE, INLINE_RULES, MAX_VERSE_CHARS, MAX_WORDLIST_TERMS,
                           RULE_VERSION, detect_language, lift_inline_usfm, scan_text,
                           stable_finding_id, word_occurrences, wordlist_findings)
 
@@ -432,6 +432,7 @@ class LanguageQaManager:
                                         "textHash": result["textHash"], "ruleVersion": RULE_VERSION,
                                         "status": "review-needed",
                                         "suggestedReplacement": match["suggestedReplacement"],
+                                        "source": FINDING_SOURCE,
                                     })
                                 if crossing:
                                     verse_limitations.append(f"{crossing} terminology {CROSSING_LIMITATION}")
