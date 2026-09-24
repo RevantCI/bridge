@@ -579,6 +579,44 @@ def test_other_decisions_still_update_review_progress(fixture_project, issue):
     assert rollup["totals"]["approvedFindingCount"] == 1
 
 
+def test_only_decisions_that_may_concern_language_qa_bust_other_chapters(fixture_project):
+    # decisions_version is part of every chapter's cache key. Before it was
+    # scoped, any decision anywhere (a Greek Room accept) forced a rescan of
+    # the whole book; decide_verse already invalidates its own chapter.
+    (fixture_project / "rut" / "2.json").write_text(
+        json.dumps({"1": "அந்த காகம் பறந்தது."}, ensure_ascii=False), encoding="utf-8")
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        first = wait(engine._language_qa)
+        assert first["totalChapters"] == 2
+        finding = next(f for f in first["findings"] if f["chapter"] == "2" and f["rule"] == "tamil.vallinam-missing")
+
+        # A Greek Room decision on chapter 1: chapter 2 is reused.
+        assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": "greek-room-finding",
+                                             "status": "accepted"})["success"]
+        assert engine.project.qa_decisions_for_verse("1", "1")["greek-room-finding"]["issue"] == {
+            "source": "unspecified"}
+        assert wait(engine._language_qa)["reusedChapters"] == 1
+
+        # A Language QA decision on chapter 2: chapter 1 is rescanned too.
+        assert call(engine, "verse.decide", {"chapter": "2", "verse": "1", "findingId": finding["id"],
+                                             "status": "ignored", "issue": issue_for(finding)})["success"]
+        assert wait(engine._language_qa)["reusedChapters"] == 0
+
+        # A legacy row (recorded before sources were stamped) is kept, not guessed away.
+        engine.project.record_qa_decision("2", "1", issue_key="legacy-row", decision="ignored")
+        engine._language_qa.invalidate("2")
+        assert wait(engine._language_qa)["reusedChapters"] == 0
+        engine.project.record_qa_decision("2", "1", issue_key="new-row", decision="ignored",
+                                          issue={"source": "unspecified"})
+        engine._language_qa.invalidate("2")
+        assert wait(engine._language_qa)["reusedChapters"] == 1
+    finally:
+        engine._language_qa.unbind()
+
+
 def test_verse_decide_rejects_a_non_object_issue(fixture_project):
     engine = BridgeEngine()
     assert call(engine, "project.open", {"path": str(fixture_project)})["success"]

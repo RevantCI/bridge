@@ -11056,3 +11056,52 @@ deciding, and nothing told it.
 - Gates: `npm run check` 0/0; `npx vitest run` 504 passed; `npm run build`
   ok; engine `pytest -n auto` 1579 passed.
 - Desktop acceptance not yet run.
+
+### 4. Offset consistency, stale marks after any edit, and a decision cache key that only Language QA can move
+
+**Offset consistency (defect 4).** Its regression test landed with its fix
+in commit 2 (`VerseList.test.ts`). With a footnote before the flagged span,
+right-click Use calls `editVerse` with exactly the manual raw splice. This
+commit adds two smaller items the review asked for in the same PR.
+
+**`saveVerseEdit` now clears `languageQaFindingsByVerse[verseKey]` on
+success.**
+- Defect: only VerseList's own Use handler cleared a verse's Language QA
+  marks. After a typed edit, or a Greek Room fix applied through the same
+  save path, the old marks kept their old offsets, and drew on the wrong
+  words until the next inline poll replaced them.
+- Fix: the verse's entry is cleared right after `editVerse` succeeds, next
+  to the other per-verse derived stores that are already cleared there. A
+  failed save leaves the marks alone.
+
+**`decisions_version` counts only decisions that may concern Language QA.**
+- Defect: the key was a hash of *every* QA decision in the book, and it is
+  part of every chapter's cache key. So any Greek Room accept anywhere
+  forced a full-book Language QA rescan.
+- Fix: the key is built only from rows whose `issue.source == "languageQa"`,
+  plus legacy rows whose `issue` has no `source` key at all. Those are kept
+  rather than guessed away (`_may_concern_language_qa`).
+- To make a new non-Language-QA decision distinguishable from a legacy row,
+  `decide_verse` now stamps `issue.source = "unspecified"`
+  (`language_qa.UNSPECIFIED_DECISION_SOURCE`) when its caller names none.
+  That records that the caller did not say. It is not an inference from the
+  id.
+- Suppression still reads every decision, so an "ignored" from any caller
+  keeps working, and `decide_verse` still invalidates its own chapter.
+- Nothing else reads `issue`: checked by grep before relying on it.
+
+**Verification.**
+- Engine: a two-chapter project through the real dispatcher.
+  - A Greek Room decision on chapter 1 leaves chapter 2 reused. This test
+    fails on the previous `language_qa_jobs.py` with 0 reused, expected 1.
+  - The recorded issue is `{"source": "unspecified"}`.
+  - A Language QA decision on chapter 2 rescans chapter 1.
+  - A legacy row with no source rescans; a row stamped "unspecified" does
+    not.
+- Frontend: `verseEditor.test.ts`:
+  - A successful save clears only that verse's marks. This fails without
+    the change.
+  - A failed save keeps them.
+- Gates: `npm run check` 0/0; `npx vitest run` 506 passed; `npm run build`
+  ok; engine `pytest -n auto` 1580 passed.
+- Desktop acceptance not yet run.

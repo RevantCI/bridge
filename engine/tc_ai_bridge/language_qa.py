@@ -87,6 +87,10 @@ INLINE_RULES = frozenset({"terminology.deprecated-form", "tamil.vallinam-missing
 # decisions out of the review-progress rollup. Origin is never inferred from
 # the finding id.
 FINDING_SOURCE = "languageQa"
+# What decide_verse records as `issue.source` when its caller names none, so a
+# new non-Language-QA decision is distinguishable from a legacy row that has no
+# source key (language_qa_jobs._may_concern_language_qa).
+UNSPECIFIED_DECISION_SOURCE = "unspecified"
 WORD = regex.compile(r"\p{L}[\p{L}\p{M}]*")
 GRAPHEME = regex.compile(r"\X")
 SCRIPT_NAMES = ("TAMIL", "DEVANAGARI", "BENGALI", "TELUGU", "KANNADA",

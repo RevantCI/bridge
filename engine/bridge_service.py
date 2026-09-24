@@ -64,7 +64,7 @@ from tc_ai_bridge.analysis_jobs import (
     AnalysisJobNotFound,
 )
 from tc_ai_bridge.local_checks import run_local_qa
-from tc_ai_bridge.language_qa import FINDING_SOURCE as LANGUAGE_QA_SOURCE
+from tc_ai_bridge.language_qa import FINDING_SOURCE as LANGUAGE_QA_SOURCE, UNSPECIFIED_DECISION_SOURCE
 from tc_ai_bridge.language_qa_jobs import LanguageQaManager
 from tc_ai_bridge.workbench_repository import WorkbenchConflict, WorkbenchValidationError
 from tc_ai_bridge.alignment_engine import (
@@ -3653,10 +3653,15 @@ class BridgeEngine:
         audited but never counted in the review-progress rollup. The origin
         comes only from `issue`, never from the finding id."""
         self._require_project()
+        # A caller that names no source gets "unspecified": that records that
+        # nobody said, and it is what lets Language QA tell a new non-Language-QA
+        # decision from a legacy row with no source key at all
+        # (language_qa_jobs._may_concern_language_qa).
+        issue = {"source": UNSPECIFIED_DECISION_SOURCE, **(issue or {})}
         path = self.project.record_qa_decision(
             chapter, verse, issue_key=finding_id, decision=status, note=comment, issue=issue,
         )
-        if (issue or {}).get("source") != LANGUAGE_QA_SOURCE:
+        if issue["source"] != LANGUAGE_QA_SOURCE:
             self._apply_decision_to_progress(self.project, chapter, verse, finding_id, status)
         # Language QA reads this same decision store back inside its own scan
         # loop (language_qa_jobs.py) to suppress a decided terminology

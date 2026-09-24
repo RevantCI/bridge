@@ -26,6 +26,16 @@ MAX_CHAPTER_VERSES = 2000
 REFRESH_SECONDS = 15.0
 
 
+def _may_concern_language_qa(decision: dict[str, Any]) -> bool:
+    """True for a decision recorded against a Language QA finding, or recorded
+    before decide_verse stamped every decision's issue with a source (a row with
+    no `source` key cannot be told apart, so it is kept, never guessed away)."""
+    issue = decision.get("issue")
+    if not isinstance(issue, dict) or "source" not in issue:
+        return True
+    return issue["source"] == FINDING_SOURCE
+
+
 class LanguageQaManager:
     def __init__(self, *, debounce: float = .75, yield_seconds: float = .02) -> None:
         self._lock = threading.RLock()
@@ -331,9 +341,15 @@ class LanguageQaManager:
         termbase_version = hashlib.sha1(
             json.dumps(raw_terms, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
         ).hexdigest()
-        decisions_version = hashlib.sha1(
-            json.dumps(term_decisions, sort_keys=True, ensure_ascii=False).encode("utf-8")
-        ).hexdigest()
+        # Only decisions that can be about a Language QA finding bust every
+        # chapter: those whose issue says "languageQa", plus legacy rows
+        # recorded before verse.decide stamped a source at all. A Greek Room
+        # decision (source "unspecified" or its own) cannot change a Language
+        # QA result, and its own chapter is invalidated by decide_verse anyway.
+        decisions_version = hashlib.sha1(json.dumps({
+            str(row.get("issueKey", "")): str(row.get("decision", ""))
+            for row in raw_decisions if isinstance(row, dict) and _may_concern_language_qa(row)
+        }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
         findings: list[dict[str, Any]] = []
         checked = skipped = reused = 0
         cache: dict[str, tuple[str, str, str, str, dict[str, Any]]] = {}

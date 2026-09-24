@@ -13,7 +13,7 @@ import type { LanguageQaFinding } from "./types/languageQa";
 import type { CorrectionApplicationIntent } from "./types/correctionReview";
 import {
   alignmentStatusByVerse, checkStatusByVerse, checkingProgress, findingsByVerse,
-  nativeChecksByVerse, aiCheckReviewsByVerse, verseKey, verseTexts,
+  nativeChecksByVerse, aiCheckReviewsByVerse, languageQaFindingsByVerse, verseKey, verseTexts,
 } from "./stores";
 
 // The "BOOK C:V" shape the engine's displayed references use. Verse bridges
@@ -124,6 +124,14 @@ export async function saveVerseEdit(): Promise<boolean> {
       return next;
     });
     nativeChecksByVerse.update((values) => {
+      const next = { ...values };
+      delete next[key];
+      return next;
+    });
+    // Every Language QA offset in this verse is now stale, whoever made the
+    // edit (a typed edit, a Use, a Greek Room fix). languageQaInline.ts
+    // repopulates it from the next pass; until then no mark sits on the wrong word.
+    languageQaFindingsByVerse.update((values) => {
       const next = { ...values };
       delete next[key];
       return next;

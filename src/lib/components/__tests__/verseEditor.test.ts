@@ -15,6 +15,7 @@ import { applyLanguageQaSuggestedFix, applySuggestedFindingFix, cancelVerseEdit 
 import {
   checkingProgress,
   findingsByVerse,
+  languageQaFindingsByVerse,
   verseKey,
   verseTexts,
 } from "../../stores";
@@ -59,6 +60,25 @@ describe("applySuggestedFindingFix", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/stale/i);
     expect(editVerse).not.toHaveBeenCalled();
+  });
+
+  it("clears the edited verse's Language QA marks on success, and only that verse's", async () => {
+    // Any saved edit makes every Language QA offset in that verse stale, not
+    // only an edit made through a Language QA Use.
+    const mark = languageQaFinding();
+    languageQaFindingsByVerse.set({ "1:6": [mark], "1:7": [{ ...mark, id: "other", verse: "7" }] });
+    const result = await applySuggestedFindingFix(finding());
+    expect(result.ok).toBe(true);
+    expect(get(languageQaFindingsByVerse)["1:6"]).toBeUndefined();
+    expect(get(languageQaFindingsByVerse)["1:7"]).toEqual([expect.objectContaining({ id: "other" })]);
+  });
+
+  it("keeps the Language QA marks when the save fails", async () => {
+    languageQaFindingsByVerse.set({ "1:6": [languageQaFinding()] });
+    editVerse.mockRejectedValue(new Error("disk full"));
+    const result = await applySuggestedFindingFix(finding());
+    expect(result.ok).toBe(false);
+    expect(get(languageQaFindingsByVerse)["1:6"]).toHaveLength(1);
   });
 });
 
