@@ -304,11 +304,45 @@ describe("SettingsModal terminology (#171)", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
 
     await waitFor(() => expect(terminologyRecord).toHaveBeenCalledWith(
-      "god", ["இறைவன்"], ["கடவுள்", "தேவன்"],
+      "god", ["இறைவன்"], ["கடவுள்", "தேவன்"], false,
     ));
     expect(await screen.findByText("god")).toBeInTheDocument();
     expect(screen.queryByText(/No terminology rules recorded/)).not.toBeInTheDocument();
     expect(screen.getByLabelText("Concept ID")).toHaveValue("");
+  });
+
+  it("asks before replacing an existing rule, and replaces it only when told to", async () => {
+    const existing = {
+      conceptId: "god", approvedRenderings: ["இறைவன்"], allowedAlternatives: [],
+      rejectedRenderings: ["கடவுள்"], status: "approved", provenance: "human",
+      modifiedTimestamp: "2026-09-23T05:24:44.736Z",
+    };
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [existing] });
+    terminologyRecord.mockImplementation(async (_id, approved, _rejected, overwrite) => overwrite
+      ? { rules: [{ ...existing, approvedRenderings: approved }] }
+      : { rules: [existing], conflict: existing });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    await screen.findByText(/preferred: இறைவன்/);
+
+    await fireEvent.input(screen.getByLabelText("Concept ID"), { target: { value: "god" } });
+    await fireEvent.input(screen.getByLabelText("Preferred rendering(s)"), { target: { value: "தேவன்" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Replace existing terminology rule" });
+    expect(dialog.textContent).toContain("already exists");
+    expect(terminologyRecord).toHaveBeenLastCalledWith("god", ["தேவன்"], [], false);
+    // Nothing replaced yet, and the entry is kept for the reviewer to decide.
+    expect(screen.getByLabelText("Concept ID")).toHaveValue("god");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Keep existing" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(terminologyRecord).toHaveBeenCalledTimes(1);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
+    await waitFor(() => expect(terminologyRecord).toHaveBeenLastCalledWith("god", ["தேவன்"], [], true));
+    expect(await screen.findByText(/preferred: தேவன்/)).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
   it("shows the RPC's validation error instead of silently doing nothing", async () => {

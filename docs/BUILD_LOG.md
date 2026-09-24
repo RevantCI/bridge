@@ -11138,6 +11138,10 @@ behaviour change:
 Also noted by the audit: the brief asks for `docs/DECISIONS.md` to be read,
 but that file does not exist in the repository.
 
+- Gates: `npm run check` 0/0; `npx vitest run` 507 passed; `npm run build`
+  ok; engine `pytest -n auto` 1581 passed.
+- Desktop acceptance not yet run.
+
 ### Regression from `ca4dc5f`: poetry line breaks were reported as control characters
 
 **How it was found.** The layered-rules brief asks for a Psalms wall-time
@@ -11200,6 +11204,196 @@ line break still separates words, as any whitespace does:
 Psalms among them, reach exactly 200, so the cut is invisible to the
 reviewer. It should become a reported limitation like every other cap.
 
-- Gates: `npm run check` 0/0; `npx vitest run` 507 passed; `npm run build`
-  ok; engine `pytest -n auto` 1581 passed.
-- Desktop acceptance not yet run.
+## 2026-09-24 — Layered-rules Phase 1: finding model, category marks, menu, history, ignore-expiry
+
+This is Phase 1 of the layered, data-driven Tamil rule brief. It closes the
+gaps in the current model that every later layer depends on. It adds no new
+linguistic rule, and changes no finding id and no rule's matching.
+Prerequisites: the four review fixes, `e74eb2d`…`0887ce5`, plus the
+line-break regression fix `ec9b55b`.
+
+**Performance baseline (the brief measures it before Phase 1).** Measured
+on this machine; IRV Psalms is imported to a scratch folder and given a full
+Language QA pass:
+
+| When | Wall | Peak working set | Verses checked | Findings |
+|---|---|---|---|---|
+| Before the line-break fix | 1.1 s | 46 MB | 1,364, truncated at chapter 87 | 3,000 |
+| After `ec9b55b` (the real baseline) | 2.0 s | 68 MB | 2,461 | 226 |
+| After Phase 1 | 2.0 s | 68 MB | 2,461 | 226 |
+
+Phase 1 adds no measurable time or memory.
+
+### 1.1 Finding model
+
+- `language_qa.RULES` gives every existing rule a `RuleMeta`: pack
+  (`common` / `ta-irv` / `project`), layer, category, confidence and its
+  own `revision`. `rule_fields()` stamps these on every finding, from
+  `scan_text`, the terminology pass and the wordlist audit alike.
+- Each finding now carries:
+  - `source`, `layer`, `category`, `confidence`;
+  - `suggestions[]`, ranked, at most 5, each `{text, rank, source,
+    rationale}`;
+  - `ruleId`, pack-qualified, e.g. `ta-irv/tamil.vallinam-missing`;
+  - `packVersion`, `ruleRevision` and `inline`.
+- `rule` and `suggestedReplacement` stay for one release as aliases;
+  `suggestedReplacement` is `suggestions[0].text` or None.
+- `packVersion` is `RULE_VERSION` until the Phase 3 pack exists.
+- `unicode.invisible` and `spacing.unusual` are at revision 2, because the
+  line-break fix changed what they match.
+- Confidence labels are categorical and provisional until the Phase 2
+  benchmark measures each rule. They are not calibrated probabilities.
+- `ruleRevision` is not in the brief's field list. Ignore-expiry (1.5)
+  needs the rule's own version, and `ruleVersion` already means the pack
+  version, so this was the least confusing name.
+
+### 1.2 Inline indicator per category
+
+- Each finding's `inline` flag, set by the engine from `INLINE_RULES`, is
+  now the only authority on what is drawn; `languageQa.inline` filters on
+  it.
+- `highlight.ts` maps category → class through
+  `LANGUAGE_QA_CATEGORY_MARKS`. A parity test checks it against the
+  engine's `CATEGORIES`, and another checks `languageQa.ts`'s unions
+  against `LAYERS` / `CATEGORIES` / `CONFIDENCES`.
+- CSS, every style told apart by line style as well as colour:
+
+  | Findings | Style |
+  |---|---|
+  | typo, high confidence | red wavy (`m-lqa-typo-high`) |
+  | typo otherwise, and any lexicon finding | amber dotted |
+  | sandhi / word-joining | green dashed |
+  | punctuation / spacing | grey thin solid |
+  | unicode | grey hatch |
+  | termbase / name | purple double (`m-term`, unchanged) |
+
+- **The yellow வல்லினம் highlight chosen in #173 is replaced by the green
+  dashed underline.** The brief's table requires it. Flagged here because
+  the yellow was a maintainer choice.
+- Overlap: a segment keeps every finding id and every non-Language-QA
+  class, but only one Language QA class, chosen by severity and then the
+  table's category order (`languageQaMarkRank`). Language QA ids follow in
+  rank order, so the menu opens on the primary finding. This replaces the
+  stale "first-match-wins" comment.
+
+### 1.3 Context menu
+
+- The menu offers:
+  - one `Use "<suggestion>"` per ranked suggestion, at most 5, with the
+    rationale as tooltip;
+  - **Edit…**, which opens the editor with the flagged span selected. Code
+    points are converted to UTF-16 by `codePointToUtf16`, tested with an
+    astral-plane character before the span;
+  - **Ignore this occurrence**;
+  - **Mark as false positive**.
+- A false positive is decision `rejected`. It is hidden like an ignore and
+  listed in the panel's own **False positives** list.
+- Decisions now apply to every rule's findings, not only the two inline
+  ones (`apply_decisions` / `decision_effect`). It is one code path.
+- The decision payload carries source, rule, ruleId, pack version, rule
+  revision, layer, category, original text, the chosen suggestion and its
+  rank, message and span.
+- **No click waits on the engine.**
+  - Ignore and False positive drop the mark first and restore it only if
+    recording fails (`decideLanguageQaFindingOptimistically`).
+  - Use shows the corrected verse and closes the editor before
+    `verse.edit` answers (`saveVerseEdit({optimistic: true})`). It rolls
+    back the text and everything derived from it if the save fails.
+  - A typed save still waits, so a refused save can be fixed in place.
+- **Ignore ▸ this word in this book / this rule for this project are not
+  built yet.** They need Phase 6's house-style store, so the item is a
+  plain "Ignore this occurrence" until then. A one-item submenu, or two
+  disabled items, would be worse for translators.
+
+### 1.4 Decision history
+
+- New `languageQa.history(projectPath, chapter, verse, findingId?)`,
+  project-guarded, with parameters validated. It reads each Language QA
+  decision row's append-only `change_log` images
+  (`TranslationCoreProject.language_qa_decision_history`) and returns
+  every decision in order: verdict, chosen suggestion and rank, time,
+  revision, ruleId.
+- The panel shows it under each finding (History toggle); the verse
+  right-click menu has **Language QA history…**. Both load in the
+  background behind a placeholder.
+- Decisions recorded before issues carried a source are not listed; they
+  cannot be told apart from Greek Room ones.
+
+### 1.5 Ignore-expiry
+
+- An "ignored" or "rejected" decision recorded under a different
+  `packVersion` or `ruleRevision` is not re-applied. The finding comes
+  back with `previouslyIgnored: true` and is listed in the panel's
+  **Re-check** list; `languageQa.status` gains `view`.
+- Decisions from before Phase 1 recorded the pack version as `ruleVersion`,
+  and that is compared too.
+- A decision with no version at all still suppresses, because it cannot be
+  compared.
+- **Consequence to know about:** every `RULE_VERSION` bump now sends every
+  existing ignore back for re-checking, as the brief specifies. The ignores
+  recorded before this commit, under `language-qa-6`/`-7`, are listed for
+  re-check where their version differs.
+
+### 1.6 Termbase and cache scope
+
+- `decisions_version` was already scoped to Language QA decisions
+  (`0da441a`).
+- `terminology.record` from the Settings pane no longer replaces an
+  existing concept silently. Without `overwrite: true` it writes nothing
+  and returns the existing rule as `conflict`; the pane asks inline
+  (Replace / Keep existing).
+- `TranslationCoreProject.record_terminology_rule` itself still upserts, as
+  its own test pins; the guard is on the Settings path.
+
+### Performance contract
+
+- Delivered in this phase:
+  - no Language QA menu action waits on the engine;
+  - the inline poller patches the store per verse
+    (`patchInlineFindings`). An unchanged verse keeps its array, and an
+    unchanged poll writes nothing. A Svelte store notifies on every object
+    write, same reference or not, so an unchanged answer now wakes no
+    subscriber.
+- **Not yet done, and not claimed:**
+  - one status channel in place of three pollers;
+  - the p95 foreground-RPC and click-to-paint measurements;
+  - their CI gates.
+
+  They need the Phase 2 measurement harness and are scheduled there.
+
+### Verification
+
+- Engine (`test_language_qa.py` with `test_terminology.py`: 326 passed).
+  New tests cover:
+  - finding shape for every producer, and the metadata registry;
+  - category and type parity with the frontend;
+  - the inline flag;
+  - `decision_effect` over twelve cases;
+  - `apply_decisions`;
+  - false positives, hidden and listed;
+  - decisions applying to a non-inline rule;
+  - pack-version and rule-revision expiry, and re-deciding;
+  - status view validation;
+  - history order, chosen suggestion, revisions, filtering, validation and
+    project guard;
+  - terminology conflict and overwrite.
+- Frontend (535 passed, up from 507). New or updated tests cover:
+  - class per category, all 11 cases;
+  - overlap priority in both orders, and the tie-break order;
+  - coexistence with other sources' classes;
+  - the menu with 0, 1 and 5+ suggestions, Use of the second suggestion
+    recording its rank, Use changing the verse before the engine answers,
+    Use rolling back on failure, and a false positive restored on failure;
+  - Edit… selection past an astral character;
+  - verse-menu history;
+  - the panel's re-check and false-positive lists, and history loading
+    lazily;
+  - per-verse store patching;
+  - the Settings conflict flow.
+- The fixtures now come from one builder, `languageQaFixture.ts`.
+- Gates: `npm run check` 0/0; `npx vitest run` 535 passed; `npm run build`
+  ok; engine `pytest -n auto` 1613 passed.
+- Desktop acceptance not yet run. `LANGUAGE_QA_REVIEW_FIXES_ACCEPTANCE.md`
+  is updated for the new mark style and menu labels.
+- Also fixed: the audit follow-up's gate lines had been left after the
+  regression entry in `ec9b55b`; they are moved back to their own section.

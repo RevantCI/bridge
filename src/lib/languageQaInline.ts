@@ -26,6 +26,38 @@ export function groupInlineFindings(findings: LanguageQaFinding[]): Record<strin
   return byVerse;
 }
 
+function sameFindings(a: LanguageQaFinding[] | undefined, b: LanguageQaFinding[]): boolean {
+  return a !== undefined && a.length === b.length && a.every((finding, i) => {
+    const other = b[i];
+    return finding.id === other.id && finding.start === other.start && finding.end === other.end
+      && finding.textHash === other.textHash && finding.previouslyIgnored === other.previouslyIgnored
+      && finding.packVersion === other.packVersion;
+  });
+}
+
+/**
+ * The next map, reusing the current entry of every verse whose findings did
+ * not change. When nothing changed at all the SAME map comes back, so a poll
+ * that finds nothing new never notifies the store's subscribers, and a verse
+ * whose marks did not change keeps its array. Exported for its test.
+ */
+export function patchInlineFindings(
+  current: Record<string, LanguageQaFinding[]>,
+  incoming: Record<string, LanguageQaFinding[]>,
+): Record<string, LanguageQaFinding[]> {
+  let changed = Object.keys(current).length !== Object.keys(incoming).length;
+  const next: Record<string, LanguageQaFinding[]> = {};
+  for (const [key, findings] of Object.entries(incoming)) {
+    if (sameFindings(current[key], findings)) {
+      next[key] = current[key];
+    } else {
+      next[key] = findings;
+      changed = true;
+    }
+  }
+  return changed ? next : current;
+}
+
 /**
  * Poll languageQa.inline for $currentChapter until the returned stop
  * function is called. Only the newest request may write the store or
@@ -52,7 +84,11 @@ export function startLanguageQaInline(
     try {
       const next = await bridge.languageQaInline(projectPath, requested);
       if (disposed || ticket !== sequence || requested !== chapter || next.projectPath !== projectPath) return;
-      languageQaFindingsByVerse.set(groupInlineFindings(next.findings));
+      // A Svelte store notifies on every object write, same reference or not,
+      // so an unchanged poll must not write at all.
+      const current = get(languageQaFindingsByVerse);
+      const patched = patchInlineFindings(current, groupInlineFindings(next.findings));
+      if (patched !== current) languageQaFindingsByVerse.set(patched);
     } catch {
       // Keep the last marks; the next tick retries.
     } finally {

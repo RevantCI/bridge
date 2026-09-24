@@ -99,6 +99,30 @@ measured before release.
 | LQA-5 | 18–19, 39–47, 52, 54 | Reader, community and consultant workflows; typeset PDF/font/layout checks require final production artifacts. Record explicit completion, never infer it from a clean text scan. |
 | LQA-6 | Expansion across Indian languages, then other languages | Register independently tested small language packs. Shared Unicode checks remain available everywhere; report unsupported language rules honestly. Test shared-script ambiguity and mixed-language input for each addition. |
 
+### Layered rule system (LQA-2 → LQA-3 boundary), 2026-09-24
+
+The work moves from hard-coded triggers to three data layers under one engine:
+- **pattern rules**, a versioned pack whose labelled examples run as tests;
+- **a corpus lexicon**, with ranked suggestions;
+- **project house style**, learned from decisions, which may only narrow.
+
+A benchmark decides per rule whether it may be drawn inline. The phases run
+in order, and each is its own commit series:
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1 | Finding model (layer/category/confidence/suggestions/ruleId/packVersion); marks per category; menu with ranked suggestions, Edit-in-place, false positive; decision history; ignore-expiry on rule change; termbase overwrite guard | Done, source-verified (A56–A60); desktop pending |
+| 2 | Benchmark harness over the Round 2 review CSVs; labelled fixtures; `--gate` | Next |
+| 3 | `ta-irv` rule pack as data; B1–B4 migrated to shape rules; known IRV defect rules | Planned |
+| 4 | Language QA as a check-framework stage; reports, exception queue, publication gate; collection runner | Planned |
+| 5 | Corpus lexicon and Tamil confusion-set distance | Planned |
+| 6 | Termbase v3, name pack, scoped ignores, house-style learner, export ledger | Planned |
+| 7 | Structured "checks / does not check" boundary shown in the panel | Planned |
+
+The "Ignore ▸ this word / this rule" menu scopes arrive with Phase 6. The
+single status channel and the p95/click-latency gates from the performance
+contract arrive with Phase 2's measurement harness.
+
 Execution of LQA-1 is authorized by the user's request. Later linguistic packs
 require approved project-specific data; the broad prose framework does not supply
 a dictionary, exhaustive grammar, reference corpus or production PDFs. Fully

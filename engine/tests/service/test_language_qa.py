@@ -9,10 +9,12 @@ from types import SimpleNamespace
 import pytest
 
 from tc_ai_bridge.language_qa import (
-    INLINE_RULES, WORDLIST_COMMON_MIN, WORDLIST_MIN_LENGTH, WORDLIST_RARE_MAX, WORDLIST_RATIO_MIN,
+    CATEGORIES, CONFIDENCES, INLINE_RULES, LAYERS, RULE_VERSION, RULES, WORDLIST_COMMON_MIN, WORDLIST_MIN_LENGTH, WORDLIST_RARE_MAX, WORDLIST_RATIO_MIN,
     detect_language, lift_inline_usfm, scan_text, stable_finding_id, text_hash, wordlist_findings,
 )
-from tc_ai_bridge.language_qa_jobs import LanguageQaManager, MAX_CHAPTER_BYTES, MAX_BOOK_FINDINGS
+from tc_ai_bridge.language_qa_jobs import (
+    LanguageQaManager, MAX_CHAPTER_BYTES, MAX_BOOK_FINDINGS, apply_decisions, decision_effect,
+)
 from tests.service.test_bridge_service import fixture_project, call
 from tests.support.paths import REPO_ROOT
 from bridge_service import BridgeEngine
@@ -617,6 +619,184 @@ def test_only_decisions_that_may_concern_language_qa_bust_other_chapters(fixture
         engine._language_qa.unbind()
 
 
+# ---- Phase 1.3/1.5: decisions on any finding; false positives; ignore-expiry ----
+
+def fake(finding_id="f", pack=RULE_VERSION, revision=1):
+    return {"id": finding_id, "packVersion": pack, "ruleRevision": revision}
+
+
+@pytest.mark.parametrize("decision,expected", [
+    (None, None),
+    ({"decision": "accepted", "issue": {"packVersion": RULE_VERSION, "ruleRevision": 1}}, None),
+    ({"decision": "ignored", "issue": {"packVersion": RULE_VERSION, "ruleRevision": 1}}, "suppress"),
+    ({"decision": "rejected", "issue": {"packVersion": RULE_VERSION, "ruleRevision": 1}}, "suppress"),
+    ({"decision": "ignored", "issue": {"packVersion": "language-qa-1", "ruleRevision": 1}}, "recheck"),
+    ({"decision": "ignored", "issue": {"packVersion": RULE_VERSION, "ruleRevision": 2}}, "recheck"),
+    ({"decision": "rejected", "issue": {"packVersion": "language-qa-1"}}, "recheck"),
+    # Decisions from before Phase 1 recorded the pack version as ruleVersion.
+    ({"decision": "ignored", "issue": {"source": "languageQa", "ruleVersion": "language-qa-6"}}, "recheck"),
+    ({"decision": "ignored", "issue": {"source": "languageQa", "ruleVersion": RULE_VERSION}}, "suppress"),
+    # No version at all (legacy, or a caller that sent no issue): cannot be compared, still suppresses.
+    ({"decision": "ignored", "issue": {}}, "suppress"),
+    ({"decision": "ignored", "issue": {"source": "unspecified"}}, "suppress"),
+    ({"decision": "ignored"}, "suppress"),
+])
+def test_decision_effect(decision, expected):
+    assert decision_effect(fake(), decision) == expected
+
+
+def test_apply_decisions_keeps_false_positives_aside_and_flags_rechecks():
+    findings = [fake("a"), fake("b"), fake("c"), fake("d")]
+    decisions = {
+        "a": {"decision": "ignored", "issue": {"packVersion": RULE_VERSION, "ruleRevision": 1}},
+        "b": {"decision": "rejected", "issue": {"packVersion": RULE_VERSION, "ruleRevision": 1}},
+        "c": {"decision": "ignored", "issue": {"packVersion": "language-qa-1"}},
+    }
+    false_positives = []
+    shown = apply_decisions(findings, decisions, false_positives)
+    assert [f["id"] for f in shown] == ["c", "d"]
+    assert shown[0]["previouslyIgnored"] is True and "previouslyIgnored" not in shown[1]
+    assert [f["id"] for f in false_positives] == ["b"]
+
+
+def decide(engine, finding, status, **issue_overrides):
+    response = call(engine, "verse.decide", {"chapter": finding["chapter"], "verse": finding["verse"],
+                                             "findingId": finding["id"], "status": status,
+                                             "issue": {**issue_for(finding), **issue_overrides}})
+    assert response["success"], response
+    return response
+
+
+def phase1_issue(finding, chosen=None):
+    """The issue the frontend now sends (findingActions.languageQaDecisionIssue)."""
+    return {**issue_for(finding), "ruleId": finding["ruleId"], "packVersion": finding["packVersion"],
+            "ruleRevision": finding["ruleRevision"], "layer": finding["layer"], "category": finding["category"],
+            "chosenSuggestion": chosen["text"] if chosen else None, "chosenRank": chosen["rank"] if chosen else None}
+
+
+@pytest.fixture
+def vallinam_engine(fixture_project):
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம்  பறந்தது."})["success"]
+    finding = next(f for f in wait(engine._language_qa)["findings"] if f["rule"] == "tamil.vallinam-missing")
+    yield engine, finding, fixture_project
+    engine._language_qa.unbind()
+
+
+def status_view(engine, project, view):
+    response = call(engine, "languageQa.status", {"projectPath": str(project), "limit": 100, "view": view})
+    assert response["success"], response
+    return response["result"]
+
+
+def test_a_false_positive_is_hidden_and_listed_on_its_own(vallinam_engine):
+    engine, finding, project = vallinam_engine
+    decide(engine, finding, "rejected", **phase1_issue(finding))
+    after = wait(engine._language_qa)
+    assert finding["id"] not in {f["id"] for f in after["findings"]}
+    assert after["falsePositiveCount"] == 1 and "falsePositives" not in after
+    listed = status_view(engine, project, "falsePositives")
+    assert [f["id"] for f in listed["findings"]] == [finding["id"]] and listed["totalFindings"] == 1
+    assert finding["id"] not in {f["id"] for f in engine._language_qa.inline()["findings"]}
+
+
+def test_decisions_now_apply_to_every_rule_not_only_the_inline_two(vallinam_engine):
+    engine, _, _ = vallinam_engine
+    spacing = next(f for f in wait(engine._language_qa)["findings"] if f["rule"] == "spacing.extra")
+    decide(engine, spacing, "ignored", **phase1_issue(spacing))
+    assert spacing["id"] not in {f["id"] for f in wait(engine._language_qa)["findings"]}
+
+
+def test_an_ignore_under_an_older_pack_version_comes_back_for_rechecking(vallinam_engine):
+    engine, finding, project = vallinam_engine
+    decide(engine, finding, "ignored", **{**phase1_issue(finding), "packVersion": "language-qa-1"})
+    after = wait(engine._language_qa)
+    [back] = [f for f in after["findings"] if f["id"] == finding["id"]]
+    assert back["previouslyIgnored"] is True and after["recheckCount"] == 1
+    recheck = status_view(engine, project, "recheck")
+    assert [f["id"] for f in recheck["findings"]] == [finding["id"]]
+    assert [f["id"] for f in engine._language_qa.inline()["findings"]] == [finding["id"]]
+    # Deciding it again under the current version suppresses it again.
+    decide(engine, finding, "ignored", **phase1_issue(finding))
+    again = wait(engine._language_qa)
+    assert finding["id"] not in {f["id"] for f in again["findings"]} and again["recheckCount"] == 0
+
+
+def test_an_ignore_under_an_older_rule_revision_comes_back_for_rechecking(vallinam_engine):
+    engine, finding, _ = vallinam_engine
+    decide(engine, finding, "ignored", **{**phase1_issue(finding), "ruleRevision": finding["ruleRevision"] + 1})
+    [back] = [f for f in wait(engine._language_qa)["findings"] if f["id"] == finding["id"]]
+    assert back["previouslyIgnored"] is True
+
+
+def test_status_rejects_an_unknown_view(vallinam_engine):
+    engine, _, project = vallinam_engine
+    response = call(engine, "languageQa.status", {"projectPath": str(project), "view": "everything"})
+    assert not response["success"]
+
+
+# ---- Phase 1.4: decision history ----
+
+def test_history_lists_every_decision_on_a_finding_in_order(vallinam_engine):
+    engine, finding, project = vallinam_engine
+    chosen = finding["suggestions"][0]
+    decide(engine, finding, "ignored", **phase1_issue(finding))
+    decide(engine, finding, "rejected", **phase1_issue(finding))
+    decide(engine, finding, "accepted", **phase1_issue(finding, chosen))
+    # A Greek Room decision on the same verse is not Language QA history.
+    assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": "gr-1", "status": "accepted"})["success"]
+    response = call(engine, "languageQa.history", {"projectPath": str(project), "chapter": "1", "verse": "1",
+                                                   "findingId": finding["id"]})
+    assert response["success"], response
+    entries = response["result"]["entries"]
+    assert [e["decision"] for e in entries] == ["ignored", "rejected", "accepted"]
+    assert [e["seq"] for e in entries] == sorted(e["seq"] for e in entries)
+    assert entries[-1]["chosenSuggestion"] == chosen["text"] and entries[-1]["chosenRank"] == 1
+    assert [e["revision"] for e in entries] == [1, 2, 3]
+    assert all(e["ruleId"] == "ta-irv/tamil.vallinam-missing" and e["recordedAt"] for e in entries)
+    verse = call(engine, "languageQa.history", {"projectPath": str(project), "chapter": "1", "verse": "1"})
+    assert {e["findingId"] for e in verse["result"]["entries"]} == {finding["id"]}
+
+
+@pytest.mark.parametrize("params", [
+    {"chapter": 1, "verse": "1"}, {"chapter": "1"}, {"chapter": "1", "verse": "1", "findingId": 3},
+])
+def test_history_validates_its_parameters(vallinam_engine, params):
+    engine, _, project = vallinam_engine
+    assert not call(engine, "languageQa.history", {"projectPath": str(project), **params})["success"]
+
+
+def test_history_is_project_guarded(vallinam_engine):
+    engine, _, _ = vallinam_engine
+    response = call(engine, "languageQa.history", {"projectPath": "C:/elsewhere", "chapter": "1", "verse": "1"})
+    assert not response["success"]
+
+
+# ---- Phase 1.6: the Settings pane never replaces a termbase rule silently ----
+
+def test_terminology_record_refuses_to_replace_without_overwrite(fixture_project):
+    engine = BridgeEngine()
+    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    first = call(engine, "terminology.record", {"conceptId": "god", "approvedRenderings": ["இறைவன்"],
+                                                "rejectedRenderings": ["கடவுள்"]})
+    assert first["success"] and "conflict" not in first["result"]
+    second = call(engine, "terminology.record", {"conceptId": "god", "approvedRenderings": ["தேவன்"],
+                                                 "rejectedRenderings": []})
+    assert second["success"]
+    assert second["result"]["conflict"]["approvedRenderings"] == ["இறைவன்"]
+    [rule] = [r for r in engine.project.terminology_rules() if r["conceptId"] == "god"]
+    assert rule["approvedRenderings"] == ["இறைவன்"]  # nothing written
+    third = call(engine, "terminology.record", {"conceptId": "god", "approvedRenderings": ["தேவன்"],
+                                                "rejectedRenderings": [], "overwrite": True})
+    assert third["success"] and "conflict" not in third["result"]
+    [rule] = [r for r in engine.project.terminology_rules() if r["conceptId"] == "god"]
+    assert rule["approvedRenderings"] == ["தேவன்"]
+    assert not call(engine, "terminology.record", {"conceptId": "god", "approvedRenderings": ["x"],
+                                                   "overwrite": "yes"})["success"]
+
+
 def test_verse_decide_rejects_a_non_object_issue(fixture_project):
     engine = BridgeEngine()
     assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
@@ -978,13 +1158,95 @@ def test_inline_without_a_chapter_returns_the_whole_book_and_only_inline_rules(t
     assert manager.status()["inlineRules"] == sorted(INLINE_RULES)
 
 
-def test_inline_rules_match_the_frontend_class_map():
-    # highlight.ts maps each inline rule to a CSS class. The engine decides
-    # which rules are inline; the two lists must never drift again.
+def test_category_marks_match_the_engine():
+    # highlight.ts maps each category to a CSS class; the engine owns the
+    # category list and decides which findings are inline.
     source = (REPO_ROOT / "src" / "lib" / "utils" / "highlight.ts").read_text(encoding="utf-8")
-    block = re.search(r"INLINE_LANGUAGE_QA_MARKS[^=]*=\s*\{(.*?)\};", source, re.S)
-    assert block, "INLINE_LANGUAGE_QA_MARKS not found in highlight.ts"
-    assert set(re.findall(r'"([^"]+)"\s*:', block.group(1))) == INLINE_RULES
+    block = re.search(r"LANGUAGE_QA_CATEGORY_MARKS[^=]*=\s*\{(.*?)\};", source, re.S)
+    assert block, "LANGUAGE_QA_CATEGORY_MARKS not found in highlight.ts"
+    keys = set(re.findall(r'^\s*"?([a-z-]+)"?\s*:', block.group(1), re.M))
+    assert keys == set(CATEGORIES)
+
+
+def test_frontend_types_list_the_engine_vocabulary():
+    # languageQa.ts's unions must match the engine's layer/category/confidence vocabularies.
+    source = (REPO_ROOT / "src" / "lib" / "types" / "languageQa.ts").read_text(encoding="utf-8")
+
+    def union(name):
+        match = re.search(rf"type {name} =\s*(.*?);", source, re.S)
+        assert match, name
+        return set(re.findall(r'"([^"]+)"', match.group(1)))
+
+    assert union("LanguageQaLayer") == set(LAYERS)
+    assert union("LanguageQaCategory") == set(CATEGORIES)
+    assert union("LanguageQaConfidence") == set(CONFIDENCES)
+
+
+def test_every_rule_has_valid_metadata_and_inline_flags_follow_the_engine_list():
+    for rule, meta in RULES.items():
+        assert meta.layer in LAYERS and meta.category in CATEGORIES and meta.confidence in CONFIDENCES, rule
+        assert meta.pack in {"common", "ta-irv", "project"} and meta.revision >= 1, rule
+    assert INLINE_RULES <= set(RULES)
+
+
+FINDING_FIELDS = {"id", "book", "chapter", "verse", "rule", "severity", "start", "end", "originalText",
+                  "message", "textHash", "ruleVersion", "status", "suggestedReplacement", "source",
+                  "layer", "category", "confidence", "suggestions", "ruleId", "packVersion",
+                  "ruleRevision", "inline"}
+
+
+def assert_finding_shape(finding):
+    assert set(finding) == FINDING_FIELDS, set(finding) ^ FINDING_FIELDS
+    meta = RULES[finding["rule"]]
+    assert (finding["layer"], finding["category"], finding["confidence"]) == (meta.layer, meta.category, meta.confidence)
+    assert finding["ruleId"] == f'{meta.pack}/{finding["rule"]}'
+    assert finding["packVersion"] == RULE_VERSION and finding["ruleRevision"] == meta.revision
+    assert finding["inline"] is (finding["rule"] in INLINE_RULES)
+    assert finding["source"] == "languageQa"
+    ranks = [s["rank"] for s in finding["suggestions"]]
+    assert ranks == list(range(1, len(ranks) + 1)) and len(ranks) <= 5
+    for s in finding["suggestions"]:
+        assert set(s) == {"text", "rank", "source", "rationale"} and s["text"] and s["rationale"]
+    assert finding["suggestedReplacement"] == (finding["suggestions"][0]["text"] if finding["suggestions"] else None)
+
+
+def test_every_scan_text_finding_has_the_layered_shape():
+    text = "மெல்ல மெல்ல தமிழ்a  ,,,‍ அந்த காகம் க்்"
+    findings = scan(text)["findings"]
+    assert {"tamil.repeated-word", "tamil.mixed-word", "punctuation.repeated", "spacing.extra",
+            "unicode.invisible", "unicode.private-use", "tamil.vallinam-missing"} <= {f["rule"] for f in findings}
+    for finding in findings:
+        assert_finding_shape(finding)
+    [vallinam] = [f for f in findings if f["rule"] == "tamil.vallinam-missing"]
+    assert vallinam["ruleId"] == "ta-irv/tamil.vallinam-missing" and vallinam["category"] == "sandhi"
+    assert vallinam["suggestions"] == [{"text": "அந்தக் காகம்", "rank": 1, "source": "rule",
+                                        "rationale": '"அந்த" before a க-initial word takes the linking க்'}]
+
+
+def test_terminology_and_wordlist_findings_have_the_layered_shape(tmp_path):
+    terms = [{"conceptId": "god", "status": "approved", "approvedRenderings": ["இறைவன்"],
+              "rejectedRenderings": ["கடவுள்"], "note": ""},
+             {"conceptId": "nothing-preferred", "status": "approved", "approvedRenderings": [],
+              "rejectedRenderings": ["தேவதை"], "note": ""}]
+    verses = {str(n): "தமிழ்" for n in range(1, 7)} | {"7": "தமிழ", "8": "கடவுள் தேவதை"}
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project_at(tmp_path, verses=verses, terminology=terms))
+    findings = wait(manager)["findings"]
+    by_text = {f["originalText"]: f for f in findings}
+    for finding in findings:
+        assert_finding_shape(finding)
+    assert by_text["கடவுள்"]["suggestions"] == [
+        {"text": "இறைவன்", "rank": 1, "source": "termbase", "rationale": "Preferred form for god"}]
+    assert by_text["தேவதை"]["suggestions"] == [] and by_text["தேவதை"]["suggestedReplacement"] is None
+    assert by_text["தமிழ"]["layer"] == "lexicon" and by_text["தமிழ"]["inline"] is False
+
+
+def test_inline_rpc_filters_on_the_findings_own_flag(tmp_path):
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project_at(tmp_path, verses={"1": "அந்த காகம்  பறந்தது"}))
+    wait(manager)
+    assert [f["rule"] for f in manager.inline()["findings"]] == ["tamil.vallinam-missing"]
+    assert all(f["inline"] for f in manager.inline()["findings"])
 
 
 def test_inline_rpc_is_project_guarded_and_validates_chapter(fixture_project):

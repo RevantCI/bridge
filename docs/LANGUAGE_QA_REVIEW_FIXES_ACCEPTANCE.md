@@ -105,10 +105,17 @@ Titus really has 16/15/15 verses, so Bridge's versification or USFM checks
 may also complain about the extra verses. That is expected noise and not
 part of these tests.
 
-**How to read a mark.** A வல்லினம் finding is a **yellow highlight** on two
-words. A termbase finding is a double underline, but this fixture has none.
-Right-clicking a yellow highlight opens a menu with `Use "<suggestion>"`,
-**Edit** and **Ignore**.
+**How to read a mark.** A வல்லினம் finding is a **green dashed underline**
+under two words. Until the layered-rules Phase 1 it was a yellow highlight;
+a build from before that commit still shows yellow. A termbase finding is a
+purple double underline, but this fixture has none. Right-clicking a mark
+opens a menu with:
+- `Use "<suggestion>"`
+- **Edit…**
+- **Ignore this occurrence**
+- **Mark as false positive**
+
+Older builds show only **Edit** and **Ignore**.
 
 To see a verse's raw text with its markers, double-click the verse to open
 the editor, look, then press ✕ (Cancel). Never press ✓ unless the step says
@@ -128,7 +135,7 @@ and the start of chapter 2, and none at all in chapter 3.
 1. Go to chapter 1.
 2. Look at verse 1.
 
-**Expected:** `அந்த காகம்` in 1:1 has a yellow highlight. Every verse
+**Expected:** `அந்த காகம்` in 1:1 has a green dashed underline. Every verse
 1:1–1:40 has the same highlight.
 
 ### A52.2 Marks deep in the book, past the panel's first page
@@ -149,7 +156,7 @@ and the start of chapter 2, and none at all in chapter 3.
 1. Right-click the highlight in **3:40**.
 
 **Expected:**
-- The menu shows `Use "அந்தக் காகம்"`, **Edit** and **Ignore**.
+- The menu shows `Use "அந்தக் காகம்"`, **Edit…**, **Ignore this occurrence** and **Mark as false positive**.
 - Press Esc to close it without choosing.
 
 ### A52.4 Switching chapters swaps the marks
@@ -188,7 +195,7 @@ and the start of chapter 2, and none at all in chapter 3.
 
 **Expected:**
 - The verse reads `அவன் சொன்னான்` [footnote marker] `அந்த காகம் பறந்தது.`
-- `அந்த காகம்`, *after* the footnote marker, is highlighted yellow.
+- `அந்த காகம்`, *after* the footnote marker, has the green dashed underline.
 - The footnote marker button opens a note reading `இது ஒரு குறிப்பு.`
 
 ### A53.2 Footnote before the flagged words (3:41) — Use
@@ -253,7 +260,7 @@ This case is created by editing, because it cannot be imported cleanly.
 3. Wait for Language QA to reach **completed** again.
 
 **Expected:**
-- 3:40 has **no** yellow highlight, even though `அந்த காகம்` is in it. The
+- 3:40 has **no** mark, even though `அந்த காகம்` is in it. The
   verse was deliberately not checked.
 - Expand the panel's **Coverage details**. It contains:
   ```
@@ -291,7 +298,7 @@ Language QA.
 1. Go to **3:44**. The verse contains `\wj … \wj*`.
 
 **Expected:**
-- `அவனை கொன்றார்கள்`, inside the words of Jesus, is highlighted yellow.
+- `அவனை கொன்றார்கள்`, inside the words of Jesus, has the green dashed underline.
 - Right-click shows `Use "அவனைக் கொன்றார்கள்"`.
 - The panel may also list a low-severity `tamil.wordlist-variant` finding on
   `அவனை`. That is panel-only and expected.
@@ -344,7 +351,7 @@ checked, so run a check first.
 4. Back in the editor, pick a chapter-3 verse that meets all three
    conditions:
    - it shows **✓** next to its number (checked, no open findings);
-   - it has a yellow highlight;
+   - it has a green dashed underline;
    - you have not touched it yet.
 
    3:41 or 3:42 are the likely candidates. A verse with open Greek Room
@@ -353,7 +360,7 @@ checked, so run a check first.
 
 ### A55.1 Ignore does not count as review
 
-1. Right-click the chosen verse's highlight and choose **Ignore**.
+1. Right-click the chosen verse's mark and choose **Ignore this occurrence**.
 2. The highlight disappears and the notice says "Occurrence ignored."
 3. Go to the dashboard.
 

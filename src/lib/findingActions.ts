@@ -1,17 +1,34 @@
 import { bridge } from "./api/bridgeClient";
-import { findingsByVerse, verseKey } from "./stores";
+import { findingsByVerse, languageQaFindingsByVerse, verseKey } from "./stores";
 import type { FindingStatus } from "./types/finding";
-import type { LanguageQaDecisionIssue, LanguageQaFinding } from "./types/languageQa";
+import type { LanguageQaDecisionIssue, LanguageQaFinding, LanguageQaSuggestion } from "./types/languageQa";
 
-/** Always marked "languageQa", whatever the finding object carries: this is
- * what keeps the decision out of the review-progress rollup (decide_verse). */
-export function languageQaDecisionIssue(finding: LanguageQaFinding): LanguageQaDecisionIssue {
+/** A Language QA decision: "accepted" (a Use), "ignored", or "rejected"
+ * (marked as a false positive). */
+export type LanguageQaDecision = "accepted" | "ignored" | "rejected";
+
+/** What the reviewer saw and chose, recorded in the decision payload. `source`
+ * is always "languageQa", whatever the finding object carries: that is what
+ * keeps the decision out of the review-progress rollup (decide_verse). The
+ * pack version and rule revision are what let a later rule change expire an
+ * "ignored" (language_qa_jobs.decision_effect). */
+export function languageQaDecisionIssue(
+  finding: LanguageQaFinding,
+  chosen: LanguageQaSuggestion | null = null,
+): LanguageQaDecisionIssue {
   return {
     source: "languageQa",
     rule: finding.rule,
+    ruleId: finding.ruleId,
     ruleVersion: finding.ruleVersion,
+    packVersion: finding.packVersion,
+    ruleRevision: finding.ruleRevision,
+    layer: finding.layer,
+    category: finding.category,
     originalText: finding.originalText,
-    suggestedReplacement: finding.suggestedReplacement ?? null,
+    suggestedReplacement: chosen?.text ?? finding.suggestions?.[0]?.text ?? finding.suggestedReplacement ?? null,
+    chosenSuggestion: chosen?.text ?? null,
+    chosenRank: chosen?.rank ?? null,
     message: finding.message,
     start: finding.start,
     end: finding.end,
@@ -22,10 +39,38 @@ export function languageQaDecisionIssue(finding: LanguageQaFinding): LanguageQaD
  * touches no QaFinding store: these findings live in languageQaFindingsByVerse. */
 export function decideLanguageQaFinding(
   finding: LanguageQaFinding,
-  status: "accepted" | "ignored",
+  status: LanguageQaDecision,
+  chosen: LanguageQaSuggestion | null = null,
 ): Promise<Record<string, unknown>> {
   return bridge.decideVerse(finding.chapter, finding.verse, finding.id, status, undefined,
-    languageQaDecisionIssue(finding));
+    languageQaDecisionIssue(finding, chosen));
+}
+
+/**
+ * Ignore or mark as false positive, without the click waiting on the engine:
+ * the mark leaves the store at once, the decision is sent afterwards, and the
+ * mark is put back only if recording fails. Resolves to an error message, or
+ * "" on success. The next scan independently confirms the suppression
+ * (language_qa_jobs reads the same decision back).
+ */
+export function decideLanguageQaFindingOptimistically(
+  finding: LanguageQaFinding,
+  status: "ignored" | "rejected",
+): Promise<string> {
+  const key = verseKey(finding.chapter, finding.verse);
+  languageQaFindingsByVerse.update((map) =>
+    key in map ? { ...map, [key]: map[key].filter((f) => f.id !== finding.id) } : map);
+  return decideLanguageQaFinding(finding, status).then(
+    () => "",
+    (error: unknown) => {
+      languageQaFindingsByVerse.update((map) => {
+        const current = map[key] ?? [];
+        if (current.some((f) => f.id === finding.id)) return map;
+        return { ...map, [key]: [...current, finding].sort((a, b) => a.start - b.start) };
+      });
+      return error instanceof Error ? error.message : String(error);
+    },
+  );
 }
 
 /** Persist a local finding decision and update every visible copy of that finding. */

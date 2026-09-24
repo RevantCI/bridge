@@ -78,9 +78,10 @@ VALLINAM_TRIGGERS = frozenset({
 VALLINAM_INITIALS = frozenset("கசதப")
 # The rules whose findings are drawn inline in the verse text, as opposed to
 # listed only in the Language QA panel. The one authority for that choice:
-# languageQa.inline filters on it server-side and languageQa.status exposes it.
-# highlight.ts's INLINE_LANGUAGE_QA_MARKS only maps these names to CSS classes
-# and must have exactly these keys (test_inline_rules_match_the_frontend_class_map).
+# every finding carries `inline` from it, languageQa.inline filters on that
+# flag server-side, and languageQa.status exposes the list. The frontend never
+# decides this; it only styles a finding by its category. (Phase 3 moves the
+# choice into the rule pack.)
 INLINE_RULES = frozenset({"terminology.deprecated-form", "tamil.vallinam-missing"})
 # Every Language QA finding carries this, and the frontend sends it back in the
 # `issue` of a verse.decide call. decide_verse keys on it to keep Language QA
@@ -91,6 +92,76 @@ FINDING_SOURCE = "languageQa"
 # new non-Language-QA decision is distinguishable from a legacy row that has no
 # source key (language_qa_jobs._may_concern_language_qa).
 UNSPECIFIED_DECISION_SOURCE = "unspecified"
+
+
+@dataclass(frozen=True)
+class RuleMeta:
+    """What a finding says about the rule that produced it (layered-rules
+    brief, Phase 1.1). `pack` qualifies `ruleId`: "common" for the
+    language-independent integrity checks, "ta-irv" for the Tamil rules,
+    "project" for the project's own house-style data. `revision` is the
+    rule's own version, bumped only when that rule's matching changes;
+    together with PACK_VERSION it decides when an old "ignored" decision
+    stops applying (Phase 1.5). `confidence` is a categorical label, not a
+    calibrated probability, and is provisional until the Phase 2 benchmark
+    measures each rule."""
+    pack: str
+    layer: str       # "pattern" | "lexicon" | "housestyle" | "integrity"
+    category: str    # "typo" | "sandhi" | "word-joining" | "punctuation" | "unicode" | "spacing" | "termbase" | "name"
+    confidence: str  # "high" | "medium" | "low"
+    revision: int = 1
+
+
+LAYERS = ("pattern", "lexicon", "housestyle", "integrity")
+# highlight.ts's LANGUAGE_QA_CATEGORY_MARKS must have exactly these keys
+# (test_category_marks_match_the_engine).
+CATEGORIES = ("typo", "sandhi", "word-joining", "punctuation", "unicode", "spacing", "termbase", "name")
+CONFIDENCES = ("high", "medium", "low")
+
+RULES: dict[str, RuleMeta] = {
+    "unicode.nfc": RuleMeta("common", "integrity", "unicode", "low"),
+    "unicode.corruption": RuleMeta("common", "integrity", "unicode", "high"),
+    "unicode.private-use": RuleMeta("common", "integrity", "unicode", "medium"),
+    "unicode.invisible": RuleMeta("common", "integrity", "unicode", "low", revision=2),  # 2: line breaks no longer reported
+    "spacing.unusual": RuleMeta("common", "integrity", "spacing", "low", revision=2),    # same change
+    "spacing.extra": RuleMeta("common", "integrity", "spacing", "medium"),
+    "punctuation.repeated": RuleMeta("common", "integrity", "punctuation", "medium"),
+    "punctuation.space-before": RuleMeta("common", "integrity", "punctuation", "medium"),
+    "tamil.repeated-word": RuleMeta("ta-irv", "pattern", "typo", "low"),
+    "tamil.dependent-sign": RuleMeta("ta-irv", "integrity", "unicode", "high"),
+    "tamil.mixed-word": RuleMeta("ta-irv", "integrity", "typo", "medium"),
+    "tamil.vallinam-missing": RuleMeta("ta-irv", "pattern", "sandhi", "medium"),
+    "tamil.wordlist-variant": RuleMeta("ta-irv", "lexicon", "typo", "low"),
+    "terminology.deprecated-form": RuleMeta("project", "housestyle", "termbase", "high"),
+}
+# Until the Phase 3 rule pack carries its own version, every finding's
+# packVersion is the engine's rule version.
+PACK_VERSION = RULE_VERSION
+MAX_SUGGESTIONS = 5
+
+
+def suggestion(text: str, source: str, rationale: str, rank: int = 1) -> dict[str, Any]:
+    """One ranked fix. `source` is "rule" | "lexicon" | "termbase" |
+    "majority-form" | "housestyle"; `rationale` is shown as the menu item's tooltip."""
+    return {"text": text, "rank": rank, "source": source, "rationale": rationale}
+
+
+def rule_fields(rule: str, suggestions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The Phase 1.1 finding fields every producer shares (scan_text's
+    add(), the terminology pass, the wordlist audit). `rule` and
+    `suggestedReplacement` stay as aliases for one release:
+    suggestedReplacement is suggestions[0].text, or None."""
+    meta = RULES[rule]
+    ranked = [dict(s, rank=i) for i, s in enumerate((suggestions or [])[:MAX_SUGGESTIONS], start=1)]
+    return {
+        "source": FINDING_SOURCE, "layer": meta.layer, "category": meta.category,
+        "confidence": meta.confidence, "ruleId": f"{meta.pack}/{rule}",
+        "packVersion": PACK_VERSION, "ruleRevision": meta.revision,
+        "inline": rule in INLINE_RULES, "suggestions": ranked,
+        "suggestedReplacement": ranked[0]["text"] if ranked else None,
+    }
+
+
 WORD = regex.compile(r"\p{L}[\p{L}\p{M}]*")
 GRAPHEME = regex.compile(r"\X")
 SCRIPT_NAMES = ("TAMIL", "DEVANAGARI", "BENGALI", "TELUGU", "KANNADA",
@@ -288,7 +359,7 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
     crossing = 0
 
     def add(rule: str, start: int, end: int, message: str, severity: str = "low",
-            suggested_replacement: str | None = None) -> None:
+            suggestions: list[dict[str, Any]] | None = None) -> None:
         nonlocal crossing
         span = lifted.raw_span(start, end)
         if span is None:
@@ -307,7 +378,7 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
             "severity": severity, "start": raw_start, "end": raw_end,
             "originalText": original, "message": message, "textHash": digest,
             "ruleVersion": RULE_VERSION, "status": "review-needed",
-            "suggestedReplacement": suggested_replacement, "source": FINDING_SOURCE,
+            **rule_fields(rule, suggestions),
         })
 
     if not unicodedata.is_normalized("NFC", text):
@@ -356,7 +427,9 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
                     add("tamil.vallinam-missing", previous.start(), word.end(),
                         f'Possible missing வல்லினம் at this word boundary: "{prev_norm} {initial}..." '
                         f'normally takes "{corrected} {initial}...". Verify before editing.',
-                        "medium", suggested_replacement=replacement)
+                        "medium", suggestions=[suggestion(
+                            replacement, "rule",
+                            f'"{prev_norm}" before a {initial}-initial word takes the linking {initial}்')])
             previous = word
         for cluster in GRAPHEME.finditer(text):
             normalized = unicodedata.normalize("NFC", cluster.group())
@@ -441,7 +514,7 @@ def wordlist_findings(book: str, counts: dict[str, int],
                         f'(a similar spelling) occurs {counts[common]} times here -- verify '
                         f'whether this is a spelling variant or a distinct word/name.'),
             "textHash": text_hash, "ruleVersion": RULE_VERSION, "status": "review-needed",
-            "source": FINDING_SOURCE,
+            **rule_fields("tamil.wordlist-variant"),
         })
         if len(findings) >= MAX_WORDLIST_FINDINGS:
             break

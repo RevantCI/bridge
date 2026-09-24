@@ -1,16 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSegments, categoryClass } from "../../utils/highlight";
+import {
+  LANGUAGE_QA_CATEGORY_MARKS, buildSegments, categoryClass, languageQaMarkClass, languageQaMarkRank,
+} from "../../utils/highlight";
 import type { AiCheckReview } from "../../types/finding";
-import type { LanguageQaFinding } from "../../types/languageQa";
+import type { LanguageQaCategory, LanguageQaFinding } from "../../types/languageQa";
+import { lqaFinding } from "./languageQaFixture";
 
 function termFinding(overrides: Partial<LanguageQaFinding> = {}): LanguageQaFinding {
-  return {
-    id: "t1", book: "php", chapter: "1", verse: "9", rule: "terminology.deprecated-form",
-    severity: "high", start: 6, end: 10, originalText: "beta", message: "Deprecated form.",
-    textHash: "hash", ruleVersion: "language-qa-2", status: "review-needed",
-    suggestedReplacement: "gamma", ...overrides,
-  };
+  return lqaFinding({
+    id: "t1", verse: "9", rule: "terminology.deprecated-form", start: 6, end: 10,
+    originalText: "beta", message: "Deprecated form.", suggestedReplacement: "gamma", ...overrides,
+  });
 }
 
 function aiReview(overrides: Partial<AiCheckReview> = {}): AiCheckReview {
@@ -90,15 +91,80 @@ describe("verse-text underlines", () => {
     expect(marked(segments)).toEqual([["beta", "m-term"]]);
   });
 
-  it("highlights a tamil.vallinam-missing finding with its own class, not m-term", () => {
+  it("marks a tamil.vallinam-missing finding with the sandhi class, not m-term", () => {
     const segments = buildSegments(TEXT, [], [], [], [termFinding({
       rule: "tamil.vallinam-missing", suggestedReplacement: "betak",
     })]);
-    expect(marked(segments)).toEqual([["beta", "m-vallinam"]]);
+    expect(marked(segments)).toEqual([["beta", "m-lqa-sandhi"]]);
   });
 
-  it("does not underline any other Language QA rule -- only terminology.deprecated-form and tamil.vallinam-missing have a span today", () => {
-    const segments = buildSegments(TEXT, [], [], [], [termFinding({ rule: "tamil.wordlist-variant" })]);
-    expect(marked(segments)).toEqual([]);
+  it("draws only findings the engine marked inline, whatever their rule", () => {
+    expect(marked(buildSegments(TEXT, [], [], [], [termFinding({ rule: "tamil.wordlist-variant" })]))).toEqual([]);
+    // The engine's flag decides, not the rule name.
+    expect(marked(buildSegments(TEXT, [], [], [], [termFinding({ inline: false })]))).toEqual([]);
+    expect(marked(buildSegments(TEXT, [], [], [], [termFinding({
+      rule: "spacing.extra", layer: "integrity", category: "spacing", inline: true,
+    })]))).toEqual([["beta", "m-lqa-spacing"]]);
+  });
+});
+
+describe("Language QA indicator per category", () => {
+  const cases: Array<[Partial<LanguageQaFinding>, string]> = [
+    [{ category: "typo", confidence: "high", layer: "pattern" }, "m-lqa-typo-high"],
+    [{ category: "typo", confidence: "medium", layer: "pattern" }, "m-lqa-typo"],
+    [{ category: "typo", confidence: "low", layer: "integrity" }, "m-lqa-typo"],
+    [{ category: "typo", confidence: "high", layer: "lexicon" }, "m-lqa-typo"],
+    [{ category: "sandhi", confidence: "high", layer: "pattern" }, "m-lqa-sandhi"],
+    [{ category: "word-joining", confidence: "medium", layer: "pattern" }, "m-lqa-sandhi"],
+    [{ category: "punctuation", confidence: "medium", layer: "integrity" }, "m-lqa-spacing"],
+    [{ category: "spacing", confidence: "low", layer: "integrity" }, "m-lqa-spacing"],
+    [{ category: "unicode", confidence: "high", layer: "integrity" }, "m-lqa-unicode"],
+    [{ category: "termbase", confidence: "high", layer: "housestyle" }, "m-term"],
+    [{ category: "name", confidence: "medium", layer: "housestyle" }, "m-term"],
+  ];
+  it.each(cases)("%o -> %s", (overrides, expected) => {
+    expect(languageQaMarkClass(lqaFinding(overrides))).toBe(expected);
+    expect(marked(buildSegments(TEXT, [], [], [], [termFinding({ ...overrides, inline: true })])))
+      .toEqual([["beta", expected]]);
+  });
+
+  it("styles every category the engine can send", () => {
+    const categories: LanguageQaCategory[] = ["typo", "sandhi", "word-joining", "punctuation", "unicode", "spacing", "termbase", "name"];
+    expect(Object.keys(LANGUAGE_QA_CATEGORY_MARKS).sort()).toEqual([...categories].sort());
+  });
+});
+
+describe("overlapping Language QA marks", () => {
+  // "beta gamma" is flagged twice: [6,16) and [11,16) overlap on "gamma".
+  const wide = (overrides: Partial<LanguageQaFinding>) =>
+    termFinding({ id: "wide", start: 6, end: 16, originalText: "beta gamma", ...overrides });
+  const narrow = (overrides: Partial<LanguageQaFinding>) =>
+    termFinding({ id: "narrow", start: 11, end: 16, originalText: "gamma", ...overrides });
+
+  it("lets the higher severity supply the one Language QA class, whichever comes first", () => {
+    const sandhiMedium = { rule: "tamil.vallinam-missing", category: "sandhi" as const, layer: "pattern" as const, severity: "medium", confidence: "medium" as const };
+    const termHigh = { category: "termbase" as const, layer: "housestyle" as const, severity: "high", confidence: "high" as const };
+    for (const order of [[wide(sandhiMedium), narrow(termHigh)], [narrow(termHigh), wide(sandhiMedium)]]) {
+      const segments = buildSegments(TEXT, [], [], [], order);
+      expect(marked(segments)).toEqual([["beta ", "m-lqa-sandhi"], ["gamma", "m-term"]]);
+      const overlap = segments.find((s) => s.text === "gamma")!;
+      expect(overlap.findingIds).toEqual(["narrow", "wide"]);  // the primary finding first
+    }
+  });
+
+  it("breaks a severity tie by category order: typo before sandhi before spacing before unicode before termbase", () => {
+    const at = (category: LanguageQaCategory, id: string) =>
+      termFinding({ id, category, layer: "pattern", severity: "medium", confidence: "medium", start: 6, end: 10 });
+    const ranked = [at("unicode", "u"), at("termbase", "t"), at("spacing", "s"), at("sandhi", "d"), at("typo", "y")]
+      .sort((a, b) => languageQaMarkRank(a) - languageQaMarkRank(b))
+      .map((f) => f.id);
+    expect(ranked).toEqual(["y", "d", "s", "u", "t"]);
+    const segments = buildSegments(TEXT, [], [], [], [at("unicode", "u"), at("sandhi", "d")]);
+    expect(marked(segments)).toEqual([["beta", "m-lqa-sandhi"]]);
+  });
+
+  it("keeps the other sources' classes alongside the one Language QA class", () => {
+    const segments = buildSegments(TEXT, [], [], [aiReview()], [termFinding({})]);
+    expect(marked(segments)).toEqual([["beta", "m-tn m-term"]]);
   });
 });

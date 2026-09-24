@@ -9,7 +9,7 @@ import { get, writable } from "svelte/store";
 import { bridge } from "./api/bridgeClient";
 import { decideLanguageQaFinding } from "./findingActions";
 import type { QaFinding } from "./types/finding";
-import type { LanguageQaFinding } from "./types/languageQa";
+import type { LanguageQaFinding, LanguageQaSuggestion } from "./types/languageQa";
 import type { CorrectionApplicationIntent } from "./types/correctionReview";
 import {
   alignmentStatusByVerse, checkStatusByVerse, checkingProgress, findingsByVerse,
@@ -100,7 +100,52 @@ export function cancelVerseEdit(): void {
   pendingAcceptFindingId = "";
 }
 
-export async function saveVerseEdit(): Promise<boolean> {
+function withoutKey<T>(values: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...values };
+  delete next[key];
+  return next;
+}
+
+/**
+ * Show a saved verse text and drop everything derived from the old text.
+ * Returns an undo that restores the text and the derived stores exactly.
+ * Every Language QA offset in the verse becomes stale, whoever made the edit
+ * (typed, a Use, a Greek Room fix); languageQaInline.ts repopulates it from
+ * the next pass, and until then no mark sits on the wrong word.
+ */
+function showVerseText(key: string, text: string): () => void {
+  const before = {
+    text: get(verseTexts)[key],
+    ai: get(aiCheckReviewsByVerse)[key],
+    native: get(nativeChecksByVerse)[key],
+    languageQa: get(languageQaFindingsByVerse)[key],
+    alignment: get(alignmentStatusByVerse)[key],
+  };
+  verseTexts.update((t) => ({ ...t, [key]: text }));
+  aiCheckReviewsByVerse.update((values) => withoutKey(values, key));
+  nativeChecksByVerse.update((values) => withoutKey(values, key));
+  languageQaFindingsByVerse.update((values) => withoutKey(values, key));
+  alignmentStatusByVerse.update((values) => ({ ...values, [key]: "invalid" }));
+  return () => {
+    verseTexts.update((t) => (before.text === undefined ? withoutKey(t, key) : { ...t, [key]: before.text }));
+    if (before.ai !== undefined) aiCheckReviewsByVerse.update((v) => ({ ...v, [key]: before.ai! }));
+    if (before.native !== undefined) nativeChecksByVerse.update((v) => ({ ...v, [key]: before.native! }));
+    if (before.languageQa !== undefined) languageQaFindingsByVerse.update((v) => ({ ...v, [key]: before.languageQa! }));
+    alignmentStatusByVerse.update((v) =>
+      before.alignment === undefined ? withoutKey(v, key) : { ...v, [key]: before.alignment! });
+  };
+}
+
+/**
+ * Save the open edit, then re-check the verse.
+ *
+ * `optimistic` (a Language QA Use): the new text is shown, and the editor
+ * closed, before the engine answers, so the click never waits on it. If the
+ * save fails, the old text and everything derived from it are put back and
+ * editError explains why. A typed save keeps the editor open until the
+ * engine has accepted the text, so a refused save can be corrected in place.
+ */
+export async function saveVerseEdit({ optimistic = false }: { optimistic?: boolean } = {}): Promise<boolean> {
   const chapter = get(editingChapter);
   const verse = get(editingVerse);
   if (!chapter || !verse) return false;
@@ -115,29 +160,18 @@ export async function saveVerseEdit(): Promise<boolean> {
   const acceptFindingId = pendingAcceptFindingId;
   editError.set("");
   editSaving.set(true);
+  let undo: (() => void) | null = null;
+  if (optimistic) {
+    undo = showVerseText(key, text);
+    cancelVerseEdit();
+  }
   try {
     const editResult = await bridge.editVerse(chapter, verse, text);
-    verseTexts.update((t) => ({ ...t, [key]: text }));
-    aiCheckReviewsByVerse.update((values) => {
-      const next = { ...values };
-      delete next[key];
-      return next;
-    });
-    nativeChecksByVerse.update((values) => {
-      const next = { ...values };
-      delete next[key];
-      return next;
-    });
-    // Every Language QA offset in this verse is now stale, whoever made the
-    // edit (a typed edit, a Use, a Greek Room fix). languageQaInline.ts
-    // repopulates it from the next pass; until then no mark sits on the wrong word.
-    languageQaFindingsByVerse.update((values) => {
-      const next = { ...values };
-      delete next[key];
-      return next;
-    });
-    alignmentStatusByVerse.update((values) => ({ ...values, [key]: "invalid" }));
-    cancelVerseEdit();
+    undo = null;
+    if (!optimistic) {
+      showVerseText(key, text);
+      cancelVerseEdit();
+    }
     recheckingKey.set(key);
     recheckedKey.set("");
     checkStatusByVerse.update((map) => ({ ...map, [key]: "pending" }));
@@ -155,6 +189,9 @@ export async function saveVerseEdit(): Promise<boolean> {
     }, 3500);
     return true;
   } catch (e) {
+    // Only an unconfirmed optimistic text is rolled back. Once the engine has
+    // saved it, a failed re-check leaves the saved text showing.
+    undo?.();
     recheckingKey.set("");
     checkStatusByVerse.update((map) => ({ ...map, [key]: "failed" }));
     editError.set(e instanceof Error ? e.message : String(e));
@@ -223,8 +260,17 @@ export async function applySuggestedFindingFix(finding: QaFinding): Promise<Find
  * finding type already uses -- language_qa_jobs.py's _scan() reads it back
  * on the next pass to keep the finding from reappearing.
  */
-export async function applyLanguageQaSuggestedFix(finding: LanguageQaFinding): Promise<FindingFixOutcome> {
-  if (!finding.suggestedReplacement) {
+export async function applyLanguageQaSuggestedFix(
+  finding: LanguageQaFinding,
+  chosen: LanguageQaSuggestion | null = null,
+): Promise<FindingFixOutcome> {
+  // The reviewer's pick, or the top-ranked suggestion. suggestedReplacement
+  // is the one-release alias for findings from an older engine.
+  const pick: LanguageQaSuggestion | null = chosen ?? finding.suggestions?.[0]
+    ?? (finding.suggestedReplacement
+      ? { text: finding.suggestedReplacement, rank: 1, source: "rule", rationale: "" }
+      : null);
+  if (!pick) {
     return { ok: false, message: "No suggested form is recorded for this term." };
   }
   const chapter = finding.chapter;
@@ -246,13 +292,13 @@ export async function applyLanguageQaSuggestedFix(finding: LanguageQaFinding): P
   if (!startVerseEdit(chapter, verse)) {
     return { ok: false, message: "Finish the current check or edit before applying this fix." };
   }
-  editText.set(points.slice(0, start).join("") + finding.suggestedReplacement + points.slice(end).join(""));
-  const saved = await saveVerseEdit();
+  editText.set(points.slice(0, start).join("") + pick.text + points.slice(end).join(""));
+  const saved = await saveVerseEdit({ optimistic: true });
   if (!saved) {
     return { ok: false, message: get(editError) || "The fix could not be applied." };
   }
   try {
-    await decideLanguageQaFinding(finding, "accepted");
+    await decideLanguageQaFinding(finding, "accepted", pick);
   } catch {
     // The text fix already landed and the verse was re-checked -- a
     // decision-recording failure here must not be reported as the fix

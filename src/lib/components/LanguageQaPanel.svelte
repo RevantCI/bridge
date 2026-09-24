@@ -1,12 +1,18 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
-  import type { LanguageQaStatus } from "../types/languageQa";
+  import type { LanguageQaStatus, LanguageQaView } from "../types/languageQa";
+  import LanguageQaHistoryList from "./LanguageQaHistoryList.svelte";
 
   export let projectPath: string;
   export let onNavigate: (book: string, chapter: string, verse: string) => void;
 
   let expanded = false;
+  // Which list is paged: every open finding; those shown again because the
+  // rule changed since they were ignored; or those marked as false positives.
+  let view: LanguageQaView = "findings";
+  // Finding ids whose decision history is expanded.
+  let historyOpen = new Set<string>();
   let status: LanguageQaStatus | null = null;
   let error = "";
   let offset = 0;
@@ -34,7 +40,7 @@
     const path = projectPath;
     busy = true;
     try {
-      const next = await bridge.languageQaStatus(path, offset, expanded ? 50 : 0);
+      const next = await bridge.languageQaStatus(path, offset, expanded ? 50 : 0, view);
       if (disposed || ticket !== sequence || path !== projectPath || next.projectPath !== path) return;
       if (status && next.generation !== status.generation && offset !== 0) {
         offset = 0;
@@ -51,7 +57,8 @@
       }
     } finally {
       busy = false;
-      if (!disposed) timer = setTimeout(() => void refresh(), expanded ? 2000 : 5000);
+      const stale = ticket !== sequence;
+      if (!disposed) timer = setTimeout(() => void refresh(), stale ? 0 : expanded ? 2000 : 5000);
     }
   }
 
@@ -85,6 +92,20 @@
   function page(delta: number): void {
     offset = Math.max(0, offset + delta);
     void refresh();
+  }
+
+  function showView(next: LanguageQaView): void {
+    if (view === next) return;
+    view = next;
+    offset = 0;
+    ++sequence;  // an answer for the previous list must not land in this one
+    if (!busy) void refresh();  // otherwise the stale answer re-polls at once
+  }
+
+  function toggleHistory(id: string): void {
+    const next = new Set(historyOpen);
+    if (!next.delete(id)) next.add(id);
+    historyOpen = next;
   }
 
   onMount(() => { void refresh(); });
@@ -128,18 +149,40 @@
             <ul>{#each status.limitations as limitation}<li>{limitation}</li>{/each}</ul>
           </details>
         {/if}
-        {#if status.state === "completed" && !status.totalFindings}
+        <div class="views" role="tablist" aria-label="Language QA lists">
+          <button role="tab" aria-selected={view === "findings"} on:click={() => showView("findings")}>Findings</button>
+          <button role="tab" aria-selected={view === "recheck"} on:click={() => showView("recheck")}>
+            Re-check ({status.recheckCount ?? 0})
+          </button>
+          <button role="tab" aria-selected={view === "falsePositives"} on:click={() => showView("falsePositives")}>
+            False positives ({status.falsePositiveCount ?? 0})
+          </button>
+        </div>
+        {#if view === "recheck"}
+          <p class="muted">Ignored before, under an older version of the rule. Check each one again.</p>
+        {:else if view === "falsePositives"}
+          <p class="muted">Marked as false positives and hidden from the verse text.</p>
+        {/if}
+        {#if view === "findings" && status.state === "completed" && !status.totalFindings}
           <p>No candidates found by the enabled checks. This is not publication approval.</p>
         {/if}
-        <ol aria-label="Language QA findings" start={status.offset + 1}>
+        <ol aria-label={view === "findings" ? "Language QA findings" : view === "recheck" ? "Findings to re-check" : "False positives"} start={status.offset + 1}>
           {#each status.findings as finding (finding.id)}
             <li>
               <button on:click={() => onNavigate(finding.book, finding.chapter, finding.verse)}>
                 {finding.book.toUpperCase()} {finding.chapter}:{finding.verse}
               </button>
               <span class="severity">{finding.severity}</span>
+              {#if finding.category}<span class="category">{finding.category}</span>{/if}
+              {#if finding.previouslyIgnored}<span class="recheck">Re-check</span>{/if}
               <p class="evidence">{finding.originalText}</p>
               <p>{finding.message}</p>
+              <button class="history-toggle" aria-expanded={historyOpen.has(finding.id)} on:click={() => toggleHistory(finding.id)}>
+                History
+              </button>
+              {#if historyOpen.has(finding.id)}
+                <LanguageQaHistoryList {projectPath} chapter={finding.chapter} verse={finding.verse} findingId={finding.id} />
+              {/if}
             </li>
           {/each}
         </ol>
@@ -172,7 +215,11 @@
   ol { padding-left: 22px; }
   li { padding: 8px 0; border-bottom: 1px solid var(--border, #ddd); }
   .evidence { font-size: 16px; white-space: pre-wrap; }
-  .severity { margin-left: 8px; }
+  .severity, .category { margin-left: 8px; }
+  .recheck { margin-left: 8px; font-weight: 600; color: var(--warning); }
+  .views { display: flex; gap: 6px; margin: 8px 0; }
+  .views button[aria-selected="true"] { border-color: var(--accent); background: var(--accent-bg); }
+  .history-toggle { font-size: 11px; padding: 2px 6px; }
   .notice { font-weight: 600; }
   .muted { opacity: .75; }
 </style>

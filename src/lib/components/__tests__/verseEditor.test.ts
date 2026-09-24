@@ -23,6 +23,7 @@ import {
 } from "../../stores";
 import type { QaFinding } from "../../types/finding";
 import type { LanguageQaFinding } from "../../types/languageQa";
+import { lqaFinding } from "./languageQaFixture";
 
 function finding(overrides: Partial<QaFinding> = {}): QaFinding {
   return {
@@ -95,12 +96,10 @@ describe("applySuggestedFindingFix", () => {
 });
 
 function languageQaFinding(overrides: Partial<LanguageQaFinding> = {}): LanguageQaFinding {
-  return {
-    id: "term-1", book: "php", chapter: "1", verse: "6", rule: "terminology.deprecated-form",
-    severity: "high", start: 0, end: 5, originalText: "alpha", message: "Deprecated form.",
-    textHash: "hash", ruleVersion: "language-qa-2", status: "review-needed",
-    suggestedReplacement: "omega", ...overrides,
-  };
+  return lqaFinding({
+    id: "term-1", rule: "terminology.deprecated-form", start: 0, end: 5, originalText: "alpha",
+    message: "Deprecated form.", suggestedReplacement: "omega", ...overrides,
+  });
 }
 
 describe("applyLanguageQaSuggestedFix", () => {
@@ -124,10 +123,25 @@ describe("applyLanguageQaSuggestedFix", () => {
     // The issue marks it as Language QA, so the engine keeps it out of the
     // review-progress rollup, and records what the reviewer saw.
     expect(decideVerse).toHaveBeenCalledWith("1", "6", "term-1", "accepted", undefined, {
-      source: "languageQa", rule: "terminology.deprecated-form", ruleVersion: "language-qa-2",
-      originalText: "alpha", suggestedReplacement: "omega", message: "Deprecated form.", start: 0, end: 5,
+      source: "languageQa", rule: "terminology.deprecated-form", ruleId: "project/terminology.deprecated-form",
+      ruleVersion: "language-qa-7", packVersion: "language-qa-7", ruleRevision: 1,
+      layer: "housestyle", category: "termbase", originalText: "alpha",
+      suggestedReplacement: "omega", chosenSuggestion: "omega", chosenRank: 1,
+      message: "Deprecated form.", start: 0, end: 5,
     });
     expect(get(verseTexts)[verseKey("1", "6")]).toBe("omega beta");
+  });
+
+  it("applies the suggestion the reviewer chose, not always the first", async () => {
+    const finding = languageQaFinding({ suggestions: [
+      { text: "omega", rank: 1, source: "termbase", rationale: "first" },
+      { text: "psi", rank: 2, source: "termbase", rationale: "second" },
+    ] });
+    const result = await applyLanguageQaSuggestedFix(finding, finding.suggestions[1]);
+    expect(result.ok).toBe(true);
+    expect(editVerse).toHaveBeenCalledWith("1", "6", "psi beta");
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "term-1", "accepted", undefined,
+      expect.objectContaining({ chosenSuggestion: "psi", chosenRank: 2 }));
   });
 
   it("does not write when the finding no longer matches the verse", async () => {

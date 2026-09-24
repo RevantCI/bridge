@@ -1,15 +1,17 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress, languageQaFindingsByVerse } from "../stores";
+  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress, languageQaFindingsByVerse, project } from "../stores";
   import { rangeBetween } from "../crossVerseRange";
   import { unionInChapterOrder } from "../crossVerseSuggest";
   import { buildSegments } from "../utils/highlight";
   import { parseVerseNotes, withNoteMarkers, type ParsedVerse, type VerseNote, type VerseNoteKind } from "../utils/usfmNotes";
   import VerseNotesPopup from "./VerseNotesPopup.svelte";
   import FindingContextMenu from "./FindingContextMenu.svelte";
-  import { decideLanguageQaFinding, decideLocalFinding } from "../findingActions";
+  import { decideLanguageQaFindingOptimistically, decideLocalFinding } from "../findingActions";
+  import { codePointToUtf16 } from "../utils/codePoints";
+  import LanguageQaHistoryPopup from "./LanguageQaHistoryPopup.svelte";
   import type { QaFinding } from "../types/finding";
-  import type { LanguageQaFinding } from "../types/languageQa";
+  import type { LanguageQaFinding, LanguageQaSuggestion } from "../types/languageQa";
   import {
     applySuggestedFindingFix, applyLanguageQaSuggestedFix, editingChapter, editingVerse, editText, editSaving,
     editError, saveVerseEdit, cancelVerseEdit, startVerseEdit, recheckingKey,
@@ -36,6 +38,8 @@
   // never open at once: a right-click on a mark stops propagation before it
   // reaches the row.
   let verseMenu: { verse: string; x: number; y: number } | null = null;
+  // The verse whose Language QA decision history is open (verse menu).
+  let historyFor: { projectPath: string; chapter: string; verse: string } | null = null;
   // Which underlined finding Left/Right last landed on, scoped to one verse
   // key so switching verses starts at that verse's first finding again.
   let activeFindingVerseKey = "";
@@ -77,34 +81,56 @@
   ] : [];
 
   /**
-   * The inline Language QA context menu: the suggested fix (when this
-   * finding has one recorded), plus Edit and Ignore. Shared by every
-   * inline-decorated Language QA rule (terminology.deprecated-form,
-   * tamil.vallinam-missing). "Use" is omitted rather than shown disabled
-   * when suggestedReplacement is null -- a termbase entry can exist with
-   * only rejected forms recorded, per terminology.py's own contract, and
-   * there is nothing to offer applying in that case.
+   * The inline Language QA context menu: one "Use" per ranked suggestion (at
+   * most five, each with its rationale as the tooltip), Edit… (the verse
+   * opens with the flagged text selected), Ignore this occurrence, and Mark as
+   * false positive. A finding with no suggestion (a termbase entry with only
+   * rejected forms) simply has no Use item. Every action closes the menu at
+   * once: nothing here waits on the engine before the screen changes.
+   * (Ignore scoped to a word or rule -- house style -- is layered-rules Phase 6.)
    */
-  $: langQaContextActions = langQaContextMenu ? [
-    ...(langQaContextMenu.finding.suggestedReplacement ? [{
-      id: "use",
-      label: `Use "${langQaContextMenu.finding.suggestedReplacement}"`,
-      disabled: langQaContextBusy,
-      title: "Replace the flagged text with the suggested fix, re-check the verse, and record this as accepted.",
-    }] : []),
-    {
-      id: "edit",
-      label: "Edit",
-      disabled: langQaContextBusy,
-      title: "Open this verse for manual editing.",
-    },
-    {
-      id: "ignore",
-      label: "Ignore",
-      disabled: langQaContextBusy,
-      title: "Leave the verse as it is and record this occurrence as ignored.",
-    },
-  ] : [];
+  $: langQaContextActions = langQaContextMenu ? buildLangQaActions(langQaContextMenu.finding) : [];
+
+  function buildLangQaActions(finding: LanguageQaFinding) {
+    const suggestions = languageQaSuggestions(finding);
+    return [
+      ...suggestions.map((s) => ({
+        id: `use:${s.rank}`,
+        label: `Use "${s.text}"`,
+        disabled: langQaContextBusy,
+        title: s.rationale || "Replace the flagged text with this form, re-check the verse, and record it as accepted.",
+      })),
+      {
+        id: "edit",
+        label: "Edit…",
+        separatorBefore: suggestions.length > 0,
+        disabled: langQaContextBusy,
+        title: "Open this verse for editing, with the flagged text selected.",
+      },
+      {
+        id: "ignore",
+        label: "Ignore this occurrence",
+        separatorBefore: true,
+        disabled: langQaContextBusy,
+        title: "Leave the verse as it is and record this occurrence as ignored.",
+      },
+      {
+        id: "false-positive",
+        label: "Mark as false positive",
+        disabled: langQaContextBusy,
+        title: "This is not a problem: hide it and list it under False positives in the Language QA panel.",
+      },
+    ];
+  }
+
+  /** Ranked, at most five. Falls back to the one-release alias for a finding
+   * from an older engine. */
+  function languageQaSuggestions(finding: LanguageQaFinding): LanguageQaSuggestion[] {
+    if (finding.suggestions?.length) return finding.suggestions.slice(0, 5);
+    return finding.suggestedReplacement
+      ? [{ text: finding.suggestedReplacement, rank: 1, source: "rule", rationale: "" }]
+      : [];
+  }
 
   /**
    * The general verse right-click menu (issue #69): "AI review" opens a
@@ -158,6 +184,12 @@
           ? "This verse is already being edited."
           : editBlocked ? "Wait for background checking to finish before editing" : "Edit this verse",
       },
+      {
+        id: "lqa-history",
+        label: "Language QA history…",
+        disabled: !$project,
+        title: "Every Language QA decision recorded on this verse (read-only)",
+      },
     ];
   }
 
@@ -175,6 +207,10 @@
     verseMenu = null;
     if (id === "edit-verse") {
       startVerseEdit($currentChapter, verse);
+      return;
+    }
+    if (id === "lqa-history") {
+      if ($project) historyFor = { projectPath: $project.path, chapter: $currentChapter, verse };
       return;
     }
     const scope: AIReviewScope | null =
@@ -244,56 +280,53 @@
     }
   }
 
-  async function onLangQaContextAction(event: CustomEvent<{ id: string }>): Promise<void> {
+  /**
+   * Every action closes the menu and changes the screen before any engine
+   * call: Use shows the corrected verse at once (applyLanguageQaSuggestedFix
+   * saves optimistically and rolls back if the save fails); Ignore and False
+   * positive drop the mark at once and put it back only if recording fails.
+   * The notice reports the outcome when it arrives.
+   */
+  function onLangQaContextAction(event: CustomEvent<{ id: string }>): void {
     if (!langQaContextMenu || langQaContextBusy) return;
     const { finding, verse } = langQaContextMenu;
-    langQaContextBusy = true;
+    const id = event.detail.id;
+    langQaContextMenu = null;
     contextNotice = "";
-    try {
-      if (event.detail.id === "use") {
-        const result = await applyLanguageQaSuggestedFix(finding);
-        if (result.ok) {
-          // The verse text just changed underneath every Language QA finding
-          // in it, so every remaining offset for this verse is stale, not
-          // just the one that got fixed -- clear the whole verse rather than
-          // filtering one id, the same way editVerse's own recheck path
-          // replaces findingsByVerse wholesale rather than patching it.
-          // language_qa_jobs.py's invalidate(chapter) (triggered by the edit
-          // itself) repopulates this with fresh, correctly-offset data on
-          // its next pass; this just stops a stale mark rendering on the
-          // wrong word in the meantime.
-          languageQaFindingsByVerse.update((map) => {
-            const next = { ...map };
-            delete next[verseKey($currentChapter, verse)];
-            return next;
-          });
-          langQaContextMenu = null;
-        }
+    if (id.startsWith("use:")) {
+      const chosen = languageQaSuggestions(finding).find((s) => `use:${s.rank}` === id) ?? null;
+      langQaContextBusy = true;
+      void applyLanguageQaSuggestedFix(finding, chosen).then((result) => {
         contextNotice = result.message;
         contextNoticeError = !result.ok;
-      } else if (event.detail.id === "edit") {
-        langQaContextMenu = null;
-        startVerseEdit($currentChapter, verse);
-      } else if (event.detail.id === "ignore") {
-        await decideLanguageQaFinding(finding, "ignored");
-        // Optimistic removal so the underline disappears immediately; the
-        // next real scan pass independently confirms suppression
-        // server-side (language_qa_jobs.py reads the same decision back).
-        languageQaFindingsByVerse.update((map) => {
-          const key = verseKey($currentChapter, verse);
-          const remaining = (map[key] ?? []).filter((f) => f.id !== finding.id);
-          return { ...map, [key]: remaining };
+      }).finally(() => { langQaContextBusy = false; });
+    } else if (id === "edit") {
+      void editWithSelection(finding, verse);
+    } else if (id === "ignore" || id === "false-positive") {
+      contextNotice = id === "ignore" ? "Occurrence ignored." : "Marked as a false positive.";
+      contextNoticeError = false;
+      void decideLanguageQaFindingOptimistically(finding, id === "ignore" ? "ignored" : "rejected")
+        .then((error) => {
+          if (error) {
+            contextNotice = error;
+            contextNoticeError = true;
+          }
         });
-        contextNotice = "Occurrence ignored.";
-        contextNoticeError = false;
-        langQaContextMenu = null;
-      }
-    } catch (error) {
-      contextNotice = error instanceof Error ? error.message : String(error);
-      contextNoticeError = true;
-    } finally {
-      langQaContextBusy = false;
     }
+  }
+
+  /** Edit… opens the editor with the flagged span selected. Engine offsets
+   * are code points; a textarea selection is UTF-16, so they are converted
+   * over the raw text the editor holds. */
+  async function editWithSelection(finding: LanguageQaFinding, verse: string): Promise<void> {
+    if (!startVerseEdit($currentChapter, verse)) return;
+    await tick();
+    const area = scrollContainer?.querySelector<HTMLTextAreaElement>(
+      `[data-verse-key="${verseKey($currentChapter, verse)}"] textarea`);
+    if (!area) return;
+    const text = area.value;
+    area.focus();
+    area.setSelectionRange(codePointToUtf16(text, finding.start), codePointToUtf16(text, finding.end));
   }
 
   /**
@@ -697,6 +730,15 @@
     actions={langQaContextActions}
     on:action={onLangQaContextAction}
     on:close={() => (langQaContextMenu = null)}
+  />
+{/if}
+
+{#if historyFor}
+  <LanguageQaHistoryPopup
+    projectPath={historyFor.projectPath}
+    chapter={historyFor.chapter}
+    verse={historyFor.verse}
+    onClose={() => (historyFor = null)}
   />
 {/if}
 

@@ -56,12 +56,15 @@
      alignment sources above, since this is a different confidence class
      entirely (a curated fact, not an engine's suspicion). */
   --term:#7C3AED; --term-bg:#F1E9FE;
-  /* வல்லினம் (tamil.vallinam-missing) grammar findings get a filled yellow
-     highlight rather than an underline -- every mark above is border-only,
-     so this is deliberately the first background fill, distinct at a glance
-     from both the four Greek Room/tN/tW/alignment sources and termbase's
-     double underline. */
-  --vallinam:#A16207; --vallinam-bg:#FEF9C3;
+  /* Language QA categories (highlight.ts LANGUAGE_QA_CATEGORY_MARKS). Each is
+     told apart from the sources above, and from the others, by line style as
+     well as colour: typo wavy (high confidence) or dotted, sandhi dashed,
+     punctuation/spacing thin solid, unicode hatched, termbase/name double. */
+  --lqa-typo-high:#BE123C;
+  --lqa-typo:#D97706;
+  --lqa-sandhi:#15803D;
+  --lqa-neutral:#6B7280;
+  --lqa-hatch:rgba(107, 114, 128, 0.35);
   /* Generic "this succeeded" green: passed coverage, a ready gate, the live
      check indicator, a confirmed validation. Split out of --gr, which used to
      serve both and would now paint every one of those red. Same value tN
@@ -127,7 +130,18 @@ mark.m-tw { border-color: var(--tw); }
 mark.m-align { border-color: var(--align); }
 mark.m-gr { border-color: var(--gr); }
 mark.m-term { border-color: var(--term); border-bottom-style: double; border-bottom-width: 3px; }
-mark.m-vallinam { background: var(--vallinam-bg); border-color: var(--vallinam); }
+mark.m-lqa-typo-high {
+  border-bottom-color: transparent;
+  text-decoration: underline wavy var(--lqa-typo-high);
+  text-decoration-thickness: 1.5px; text-underline-offset: 4px; text-decoration-skip-ink: none;
+}
+mark.m-lqa-typo { border-bottom: 2px dotted var(--lqa-typo); }
+mark.m-lqa-sandhi { border-bottom: 2px dashed var(--lqa-sandhi); }
+mark.m-lqa-spacing { border-bottom: 1px solid var(--lqa-neutral); }
+mark.m-lqa-unicode {
+  border-bottom-color: transparent;
+  background-image: repeating-linear-gradient(135deg, var(--lqa-hatch) 0 2px, transparent 2px 5px);
+}
 mark.m-tn.m-tw { border-bottom-color: var(--tn); box-shadow: inset 0 -1px 0 var(--tw); }
 
 /* Printing the QA report (ProjectReportScreen → Export → PDF): only the

@@ -1,4 +1,6 @@
-import type { LanguageQaDecisionIssue, LanguageQaInline, LanguageQaStatus } from "../types/languageQa";
+import type {
+  LanguageQaDecisionIssue, LanguageQaHistory, LanguageQaInline, LanguageQaStatus, LanguageQaView,
+} from "../types/languageQa";
 import type {
   AIReviewChapterResponse,
   AIReviewJobSnapshot,
@@ -169,6 +171,7 @@ export type EngineMethod =
   | "languageQa.status"
   | "languageQa.pause"
   | "languageQa.inline"
+  | "languageQa.history"
   | "ai.review.cancel"
   | "ai.review.listForChapter"
   | "ai.review.retry"
@@ -277,8 +280,20 @@ async function call<T>(method: EngineMethod, params?: Record<string, unknown>): 
 }
 
 export const bridge = {
-  languageQaStatus(projectPath: string, offset = 0, limit = 0): Promise<LanguageQaStatus> {
-    return call("languageQa.status", { projectPath, offset, limit });
+  /** One page of one list: every open finding, only those shown again for
+   * re-checking, or those marked as false positives. */
+  languageQaStatus(
+    projectPath: string, offset = 0, limit = 0, view: LanguageQaView = "findings",
+  ): Promise<LanguageQaStatus> {
+    return call("languageQa.status", { projectPath, offset, limit, view });
+  },
+
+  /** Every decision recorded on this verse's Language QA findings (or one of
+   * them), oldest first. Read-only. */
+  languageQaHistory(
+    projectPath: string, chapter: string, verse: string, findingId?: string,
+  ): Promise<LanguageQaHistory> {
+    return call("languageQa.history", { projectPath, chapter, verse, findingId });
   },
 
   languageQaPause(projectPath: string, paused: boolean): Promise<LanguageQaStatus> {
@@ -671,10 +686,12 @@ export const bridge = {
     return call("terminology.list");
   },
 
+  /** Without `overwrite`, an existing rule for the concept is not replaced:
+   * nothing is written and it comes back as `conflict`. */
   terminologyRecord(
-    conceptId: string, approvedRenderings: string[], rejectedRenderings: string[],
-  ): Promise<{ rules: TerminologyRule[] }> {
-    return call("terminology.record", { conceptId, approvedRenderings, rejectedRenderings });
+    conceptId: string, approvedRenderings: string[], rejectedRenderings: string[], overwrite = false,
+  ): Promise<{ rules: TerminologyRule[]; conflict?: TerminologyRule }> {
+    return call("terminology.record", { conceptId, approvedRenderings, rejectedRenderings, overwrite });
   },
 
   pickSavePath(defaultName: string): Promise<string | null> {

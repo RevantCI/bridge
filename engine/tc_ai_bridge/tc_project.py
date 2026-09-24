@@ -2569,6 +2569,46 @@ class TranslationCoreProject:
             )
         }
 
+    def language_qa_decision_history(
+        self, chapter: str | int, verse: str | int, finding_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Every decision ever recorded on this verse's Language QA findings
+        (or on one finding), oldest first. Read-only.
+
+        A decision row is updated in place when a finding is decided again,
+        so its current value alone loses the history. The history is the row's
+        change_log images, which are append-only. Only rows whose issue says
+        "languageQa" are included: a decision recorded before issues carried a
+        source cannot be told apart from a Greek Room one."""
+        identity = self.workbench_identity
+        entries: list[dict[str, Any]] = []
+        for row in self.workbench.rows(
+            'human_decisions', project_id=identity.project_id, book_id=self.book_id,
+            equals={'kind': 'qa', 'chapter': str(chapter), 'verse': str(verse)},
+        ):
+            if finding_id is not None and row.get('key') != finding_id:
+                continue
+            current = json.loads(row.get('payload_json') or '{}')
+            if (current.get('issue') or {}).get('source') != 'languageQa':
+                continue
+            for event in self.workbench.events_for_row('human_decisions', row['id'], project_id=identity.project_id):
+                payload = json.loads(event.get('payload_json') or '{}')
+                if not payload:
+                    continue  # a pure domain event carries no decision image
+                issue = payload.get('issue') or {}
+                entries.append({
+                    'seq': event['seq'], 'findingId': row.get('key'),
+                    'decision': payload.get('decision'), 'note': payload.get('note', ''),
+                    'rule': issue.get('rule'), 'ruleId': issue.get('ruleId'),
+                    'originalText': issue.get('originalText'),
+                    'chosenSuggestion': issue.get('chosenSuggestion'), 'chosenRank': issue.get('chosenRank'),
+                    'packVersion': issue.get('packVersion', issue.get('ruleVersion')),
+                    'recordedAt': event.get('created_at'), 'revision': event.get('new_revision'),
+                    'actorId': event.get('actor_id'),
+                })
+        entries.sort(key=lambda entry: entry['seq'])
+        return entries
+
     def timestamp_iso(self) -> str:
         """Public wrapper so bridge_service can stamp a rollup entry with the
         same timestamp format used everywhere else in this file."""

@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 from . import terminology
 from .language_qa import (CROSSING_LIMITATION, FINDING_SOURCE, INLINE_RULES, MAX_VERSE_CHARS, MAX_WORDLIST_TERMS,
+                          rule_fields, suggestion,
                           RULE_VERSION, detect_language, lift_inline_usfm, scan_text,
                           stable_finding_id, word_occurrences, wordlist_findings)
 
@@ -34,6 +35,54 @@ def _may_concern_language_qa(decision: dict[str, Any]) -> bool:
     if not isinstance(issue, dict) or "source" not in issue:
         return True
     return issue["source"] == FINDING_SOURCE
+
+
+MAX_FALSE_POSITIVES = 500
+STATUS_VIEWS = frozenset({"findings", "recheck", "falsePositives"})
+SUPPRESSING_DECISIONS = frozenset({"ignored", "rejected"})  # "rejected" = marked as a false positive
+
+
+def decision_effect(finding: dict[str, Any], decision: dict[str, Any] | None) -> str | None:
+    """What a recorded decision does to the finding it names.
+
+    None: no effect, show the finding. "accepted" is an audit record of a
+    past Use, not a standing verdict: if the identical text comes back at the
+    same place (same id), that is a new problem, not a stale one. Suppressing
+    it too was a real bug, caught in desktop acceptance.
+    "suppress": "ignored" or "rejected", made under this finding's current
+    pack version and rule revision.
+    "recheck": the same decision made under an older pack version or rule
+    revision. The rule changed underneath it, so it is not re-applied
+    silently: the finding is shown again, flagged previouslyIgnored (Phase
+    1.5). A legacy decision that recorded no version at all cannot be
+    compared and still suppresses."""
+    if not decision or str(decision.get("decision", "")) not in SUPPRESSING_DECISIONS:
+        return None
+    issue = decision.get("issue") if isinstance(decision.get("issue"), dict) else {}
+    pack = issue.get("packVersion", issue.get("ruleVersion"))
+    revision = issue.get("ruleRevision")
+    if pack is not None and pack != finding.get("packVersion"):
+        return "recheck"
+    if revision is not None and revision != finding.get("ruleRevision"):
+        return "recheck"
+    return "suppress"
+
+
+def apply_decisions(findings: list[dict[str, Any]], decisions: dict[str, dict[str, Any]],
+                    false_positives: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The findings still shown after decisions. Every finding is handled
+    the same way, whatever its rule. A suppressed "rejected" finding is kept
+    in `false_positives`, for the panel's own list."""
+    shown = []
+    for finding in findings:
+        decision = decisions.get(finding["id"])
+        effect = decision_effect(finding, decision)
+        if effect == "suppress":
+            if decision and decision.get("decision") == "rejected":
+                false_positives.append(finding)
+            continue
+        shown.append({**finding, "previouslyIgnored": True} if effect == "recheck" else finding)
+    return shown
 
 
 class LanguageQaManager:
@@ -194,7 +243,7 @@ class LanguageQaManager:
             wanted = None if chapter is None else str(chapter)
             findings = [
                 f for f in self._summary.get("findings", [])
-                if f.get("rule") in INLINE_RULES
+                if f.get("inline")
                 and (wanted is None or str(f.get("chapter")) == wanted)
             ]
             return copy.deepcopy({
@@ -206,14 +255,26 @@ class LanguageQaManager:
                 "inlineRules": sorted(INLINE_RULES), "findings": findings,
             })
 
-    def status(self, *, offset: int = 0, limit: int = 0) -> dict[str, Any]:
+    def status(self, *, offset: int = 0, limit: int = 0, view: str = "findings") -> dict[str, Any]:
+        """One page of one list. `view`: "findings" (every open finding),
+        "recheck" (only those shown again after an old decision expired) or
+        "falsePositives" (findings marked as false positives, now hidden).
+        totalFindings counts the chosen list; the other two lists' sizes are
+        always reported as recheckCount and falsePositiveCount."""
+        if view not in STATUS_VIEWS:
+            raise ValueError(f"view must be one of {sorted(STATUS_VIEWS)}")
         self._refresh_if_due()
         with self._lock:
             offset = max(0, int(offset))
             limit = max(0, min(100, int(limit)))
-            findings = self._summary.get("findings", [])
-            result = {k: v for k, v in self._summary.items() if k != "findings"}
+            false_positives = self._summary.get("falsePositives", [])
+            findings = (false_positives if view == "falsePositives" else
+                        [f for f in self._summary.get("findings", []) if f.get("previouslyIgnored")]
+                        if view == "recheck" else self._summary.get("findings", []))
+            result = {k: v for k, v in self._summary.items() if k not in {"findings", "falsePositives"}}
             result.update({
+                "view": view, "falsePositiveCount": len(false_positives),
+                "recheckCount": self._summary.get("recheckCount", 0),
                 "projectPath": self._context[0] if self._context else "",
                 "book": self._context[1] if self._context else "",
                 "generation": self._generation, "ruleVersion": RULE_VERSION,
@@ -326,11 +387,11 @@ class LanguageQaManager:
         except Exception as exc:
             raw_decisions = []
             limitations.append(f"Decisions unavailable: {exc}")
-        # Only terminology.deprecated-form findings ever consult this -- see
-        # the per-verse block below. Not a general Language QA decision
-        # framework; every other rule stays exactly as disposable as before.
-        term_decisions = {
-            str(row.get("issueKey", "")): str(row.get("decision", ""))
+        # Every QA decision by finding id. decision_effect() decides what each
+        # one does to the finding it names; ids are content hashes, so a Greek
+        # Room decision can never name a Language QA finding.
+        decisions = {
+            str(row.get("issueKey", "")): row
             for row in raw_decisions if isinstance(row, dict)
         }
         # A book-wide hash of the raw termbase and decisions, folded into the
@@ -351,6 +412,7 @@ class LanguageQaManager:
             for row in raw_decisions if isinstance(row, dict) and _may_concern_language_qa(row)
         }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
         findings: list[dict[str, Any]] = []
+        false_positives: list[dict[str, Any]] = []
         checked = skipped = reused = 0
         cache: dict[str, tuple[str, str, str, str, dict[str, Any]]] = {}
         book_counts: dict[str, int] = {}
@@ -372,8 +434,8 @@ class LanguageQaManager:
                     chapter_result = cached[4]
                     reused += 1
                 else:
-                    chapter_result = {"findings": [], "limitations": [], "checked": 0, "skipped": 0,
-                                      "words": {}, "firstSeen": {}}
+                    chapter_result = {"findings": [], "falsePositives": [], "limitations": [],
+                                      "checked": 0, "skipped": 0, "words": {}, "firstSeen": {}}
                     if len(data) > MAX_CHAPTER_VERSES:
                         chapter_result["limitations"].append("Chapter verse limit reached; remaining entries omitted.")
                     for verse, text in itertools.islice(data.items(), MAX_CHAPTER_VERSES):
@@ -385,6 +447,7 @@ class LanguageQaManager:
                         result = scan_text(text, book=book, chapter=path.stem, verse=verse,
                                            tamil=detection["pack"] == "tamil")
                         verse_limitations = list(result["limitations"])
+                        verse_findings: list[dict[str, Any]] = []
                         if not result["checked"]:
                             chapter_result["skipped"] += 1
                         else:
@@ -422,21 +485,9 @@ class LanguageQaManager:
                                     finding_id = stable_finding_id(
                                         book, path.stem, verse, "terminology.deprecated-form",
                                         match["matchedText"], term_occurrences[key])
-                                    # Only "ignored" is a sticky, deliberate reviewer
-                                    # decision. "accepted" is an audit record of a past
-                                    # Use action, not a standing verdict on this text --
-                                    # the fix already removed the match naturally, and
-                                    # if the identical deprecated text is reintroduced
-                                    # later at the same position (same id, since the id
-                                    # is where-based, not when-based) that is a new
-                                    # violation, not a stale one. Suppressing it too was
-                                    # a real bug, caught in desktop acceptance, not a
-                                    # hypothetical.
-                                    if term_decisions.get(finding_id) == "ignored":
-                                        continue
                                     preferred = ", ".join(match["preferredRenderings"]) or "no preferred form recorded yet"
                                     note = f" {match['note']}" if match["note"] else ""
-                                    chapter_result["findings"].append({
+                                    verse_findings.append({
                                         "id": finding_id,
                                         "book": book, "chapter": path.stem, "verse": verse,
                                         "rule": "terminology.deprecated-form", "severity": "high",
@@ -447,8 +498,10 @@ class LanguageQaManager:
                                                    f'Verify this occurrence.'),
                                         "textHash": result["textHash"], "ruleVersion": RULE_VERSION,
                                         "status": "review-needed",
-                                        "suggestedReplacement": match["suggestedReplacement"],
-                                        "source": FINDING_SOURCE,
+                                        **rule_fields("terminology.deprecated-form", [
+                                            suggestion(match["suggestedReplacement"], "termbase",
+                                                       f'Preferred form for {match["conceptId"]}')
+                                        ] if match["suggestedReplacement"] else []),
                                     })
                                 if crossing:
                                     verse_limitations.append(f"{crossing} terminology {CROSSING_LIMITATION}")
@@ -458,20 +511,13 @@ class LanguageQaManager:
                         if verse_limitations and len(chapter_result["limitations"]) < 20:
                             chapter_result["limitations"].extend(
                                 f"{verse}: {message}" for message in verse_limitations)
-                        # Same "ignored" is sticky, "accepted" is not distinction as the
-                        # terminology block above, scoped narrowly to this one rule --
-                        # not a general suppression framework for every scan_text rule.
-                        # Filtered before the room slice, like the terminology block's
-                        # own `continue`, so an ignored finding never consumes budget it
-                        # will never use.
-                        scan_findings = [
-                            f for f in result["findings"]
-                            if not (f["rule"] == "tamil.vallinam-missing"
-                                    and term_decisions.get(f["id"]) == "ignored")
-                        ]
+                        # Decisions apply before the room slice, so a suppressed
+                        # finding never consumes budget it will never use.
+                        shown = apply_decisions(verse_findings + result["findings"], decisions,
+                                                chapter_result["falsePositives"])
                         room = MAX_BOOK_FINDINGS - len(findings) - len(chapter_result["findings"])
-                        chapter_result["findings"].extend(scan_findings[:max(0, room)])
-                        if len(result["findings"]) > room:
+                        chapter_result["findings"].extend(shown[:max(0, room)])
+                        if len(shown) > room:
                             chapter_result["limitations"].append("Book finding limit reached; remaining verses omitted.")
                             break
                     final = path.stat()
@@ -480,6 +526,8 @@ class LanguageQaManager:
                 # Even cached data is bounded by the current book's remaining room.
                 room = MAX_BOOK_FINDINGS - len(findings)
                 findings.extend(chapter_result["findings"][:room])
+                false_positives.extend(
+                    chapter_result.get("falsePositives", [])[:max(0, MAX_FALSE_POSITIVES - len(false_positives))])
                 checked += chapter_result["checked"]
                 skipped += chapter_result["skipped"]
                 for word, count in chapter_result["words"].items():
@@ -511,7 +559,9 @@ class LanguageQaManager:
         elif len(book_counts) > MAX_WORDLIST_TERMS:
             limitations.append("Wordlist audit skipped: too many distinct words to compare.")
         else:
-            wordlist = wordlist_findings(book, book_counts, book_first_seen)
+            wordlist = apply_decisions(wordlist_findings(book, book_counts, book_first_seen),
+                                       decisions, false_positives)
+            del false_positives[MAX_FALSE_POSITIVES:]
             room = MAX_BOOK_FINDINGS - len(findings)
             findings.extend(wordlist[:max(0, room)])
             if len(wordlist) > room:
@@ -521,6 +571,8 @@ class LanguageQaManager:
                 return None
             self._cache = cache
         return {"state": "completed", "language": detection, "findings": findings,
+                "falsePositives": false_positives,
+                "recheckCount": sum(1 for f in findings if f.get("previouslyIgnored")),
                 "limitations": limitations, "incomplete": bool(limitations or skipped),
                 "checkedVerses": checked, "skippedVerses": skipped,
                 "reusedChapters": reused, "completedChapters": completed + 1,

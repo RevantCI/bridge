@@ -155,7 +155,11 @@
     void loadTerminology();
   }
 
-  async function addTerminologyRule(): Promise<void> {
+  // A rule already recorded for the concept being added: the engine wrote
+  // nothing and the pane asks before replacing it.
+  let terminologyConflict: TerminologyRule | null = null;
+
+  async function addTerminologyRule(overwrite = false): Promise<void> {
     const conceptId = newConceptId.trim();
     if (!conceptId) {
       terminologyMessage = "Concept ID is required.";
@@ -169,9 +173,14 @@
     }
     terminologySaving = true;
     terminologyMessage = "";
+    terminologyConflict = null;
     try {
-      const result = await bridge.terminologyRecord(conceptId, approved, rejected);
+      const result = await bridge.terminologyRecord(conceptId, approved, rejected, overwrite);
       terminologyRules = result.rules;
+      if (result.conflict) {
+        terminologyConflict = result.conflict;
+        return;
+      }
       newConceptId = "";
       newPreferred = "";
       newRejected = "";
@@ -364,9 +373,22 @@
             <input id="termRejected" type="text" bind:value={newRejected} placeholder="Comma-separated, e.g. கடவுள்" />
           </div>
           <div class="save-row">
-            <button class="btn primary" on:click={addTerminologyRule} disabled={terminologySaving}>{terminologySaving ? "Saving…" : "Add rule"}</button>
+            <button class="btn primary" on:click={() => addTerminologyRule()} disabled={terminologySaving}>{terminologySaving ? "Saving…" : "Add rule"}</button>
             {#if terminologyMessage}<span class="save-msg">{terminologyMessage}</span>{/if}
           </div>
+          {#if terminologyConflict}
+            <div class="term-conflict" role="alertdialog" aria-label="Replace existing terminology rule">
+              <p>
+                A rule for <strong>{terminologyConflict.conceptId}</strong> already exists
+                (preferred: {terminologyConflict.approvedRenderings.join(", ") || "none"} · rejected:
+                {terminologyConflict.rejectedRenderings.join(", ") || "none"}). Replace it?
+              </p>
+              <div class="save-row">
+                <button class="btn primary" on:click={() => addTerminologyRule(true)} disabled={terminologySaving}>Replace</button>
+                <button class="btn" on:click={() => (terminologyConflict = null)} disabled={terminologySaving}>Keep existing</button>
+              </div>
+            </div>
+          {/if}
         {/if}
       {:else if activePane === "security"}
         <h3>Security & privacy</h3>
@@ -409,6 +431,8 @@
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .save-msg { font-size: var(--fs-xs); color: var(--success); }
+  .term-conflict { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--warning); border-radius: 6px; background: var(--warning-bg); font-size: var(--fs-sm); }
+  .term-conflict p { margin: 0 0 8px; }
   .kv { display: flex; justify-content: space-between; font-size: var(--fs-sm); padding: 6px 0; border-bottom: 1px dashed var(--border); }
   .kv .on { color: var(--success); font-weight: 700; }
   .resource-note { font-size: var(--fs-2xs); line-height: 1.45; color: var(--text-3); margin-top: 10px; overflow-wrap: anywhere; }

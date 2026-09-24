@@ -313,6 +313,7 @@ class Methods:
     LANGUAGE_QA_STATUS = "languageQa.status"
     LANGUAGE_QA_PAUSE = "languageQa.pause"
     LANGUAGE_QA_INLINE = "languageQa.inline"
+    LANGUAGE_QA_HISTORY = "languageQa.history"
     CHECKS_STATUS = "checks.status"
     CHECKS_CANCEL = "checks.cancel"
     CHECKS_RETRY = "checks.retry"
@@ -4057,9 +4058,17 @@ class BridgeEngine:
 
     def terminology_record(
         self, concept_id: str, approved_renderings: list[str] | None = None,
-        rejected_renderings: list[str] | None = None,
+        rejected_renderings: list[str] | None = None, overwrite: bool = False,
     ) -> dict[str, Any]:
+        """Add a termbase rule from the Settings pane. A rule that already
+        exists for this concept is never replaced silently: without
+        `overwrite`, nothing is written and the existing rule comes back as
+        `conflict`, so the pane can ask first."""
         self._require_project()
+        existing = next((rule for rule in self.project.terminology_rules()
+                         if str(rule.get("conceptId", "")) == concept_id), None)
+        if existing is not None and not overwrite:
+            return {"rules": self.project.terminology_rules(), "conflict": existing}
         self.project.record_terminology_rule(
             concept_id, approved_renderings=approved_renderings,
             rejected_renderings=rejected_renderings,
@@ -4080,7 +4089,8 @@ class BridgeEngine:
         try:
             m, p = request.method, request.params
 
-            if m in {Methods.LANGUAGE_QA_STATUS, Methods.LANGUAGE_QA_PAUSE, Methods.LANGUAGE_QA_INLINE}:
+            if m in {Methods.LANGUAGE_QA_STATUS, Methods.LANGUAGE_QA_PAUSE, Methods.LANGUAGE_QA_INLINE,
+                     Methods.LANGUAGE_QA_HISTORY}:
                 self._require_project()
                 if p.get("projectPath") != str(self.project.path):
                     raise ProjectError("Language QA request belongs to a different project.")
@@ -4093,8 +4103,19 @@ class BridgeEngine:
                     if chapter is not None and not isinstance(chapter, str):
                         raise ProjectError("chapter must be a string when given")
                     result = self._language_qa.inline(chapter=chapter)
+                elif m == Methods.LANGUAGE_QA_HISTORY:
+                    chapter, verse, finding_id = p.get("chapter"), p.get("verse"), p.get("findingId")
+                    if not isinstance(chapter, str) or not isinstance(verse, str):
+                        raise ProjectError("chapter and verse must be strings")
+                    if finding_id is not None and not isinstance(finding_id, str):
+                        raise ProjectError("findingId must be a string when given")
+                    result = {"chapter": chapter, "verse": verse, "findingId": finding_id,
+                              "entries": self.project.language_qa_decision_history(chapter, verse, finding_id)}
                 else:
-                    result = self._language_qa.status(offset=p.get("offset", 0), limit=p.get("limit", 0))
+                    view = p.get("view", "findings")
+                    if view not in {"findings", "recheck", "falsePositives"}:
+                        raise ProjectError("view must be findings, recheck or falsePositives")
+                    result = self._language_qa.status(offset=p.get("offset", 0), limit=p.get("limit", 0), view=view)
                 return EngineResponse.ok(request.id, result=result)
 
             if m == Methods.PING:
@@ -4285,8 +4306,11 @@ class BridgeEngine:
             if m == Methods.TERMINOLOGY_LIST:
                 return EngineResponse.ok(request.id, result=self.terminology_list())
             if m == Methods.TERMINOLOGY_RECORD:
+                overwrite = p.get("overwrite", False)
+                if not isinstance(overwrite, bool):
+                    raise ProjectError("overwrite must be a boolean")
                 return EngineResponse.ok(request.id, result=self.terminology_record(
-                    p["conceptId"], p.get("approvedRenderings"), p.get("rejectedRenderings"),
+                    p["conceptId"], p.get("approvedRenderings"), p.get("rejectedRenderings"), overwrite,
                 ))
             if m == Methods.EXPORT_ALIGNED:
                 return EngineResponse.ok(request.id, result=self.export_aligned(p["outputPath"]))
