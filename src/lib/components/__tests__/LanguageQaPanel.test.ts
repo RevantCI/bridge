@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { get } from "svelte/store";
-import type { LanguageQaStatus } from "../../types/languageQa";
+import type { LanguageQaFinding, LanguageQaStatus } from "../../types/languageQa";
 import { languageQaFindingsByVerse } from "../../stores";
 
 const statusCall = vi.fn();
@@ -34,14 +34,11 @@ beforeEach(() => {
 });
 
 describe("Language QA", () => {
-  it("stays collapsed automatically, but still fetches real findings for VerseList's inline decoration", async () => {
-    // Collapsed used to request limit=0 (count only) since the panel itself
-    // only ever showed the total while closed. It now requests a real page
-    // even collapsed -- VerseList's double-underline decoration needs
-    // finding data regardless of whether this panel is open -- while the
-    // panel's own UI still stays visually collapsed either way.
+  it("stays collapsed automatically and fetches only the count while closed", async () => {
+    // Inline marks come from languageQa.inline (languageQaInline.ts), not
+    // from this panel's page, so collapsed needs the total only.
     render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
-    await waitFor(() => expect(statusCall).toHaveBeenCalledWith("C:/project", 0, 100));
+    await waitFor(() => expect(statusCall).toHaveBeenCalledWith("C:/project", 0, 0));
     expect(screen.queryByRole("region", { name: "Language QA results" })).toBeNull();
     expect(screen.queryByText("Check source encoding.")).toBeNull();
   });
@@ -84,70 +81,26 @@ describe("Language QA", () => {
     expect(screen.queryByText("Check source encoding.")).toBeNull();
   });
 
-  it("populates languageQaFindingsByVerse with only the inline-decorated rules, grouped and keyed", async () => {
-    // Regression coverage: this filter and buildSegments' own filter
-    // (highlight.ts) used to be two separately-maintained copies of the
-    // same rule list, and drifted -- tamil.vallinam-missing findings never
-    // reached buildSegments at all despite buildSegments itself already
-    // handling the rule correctly, because this filter dropped them first.
-    // Both now share INLINE_LANGUAGE_QA_MARKS from highlight.ts.
-    languageQaFindingsByVerse.set({});
-    statusCall.mockResolvedValue(snapshot({
-      findings: [
-        { id: "f1", book: "php", chapter: "2", verse: "3-4", rule: "unicode.corruption",
-          severity: "high", start: 0, end: 1, originalText: "\ufffd", message: "Check source encoding.",
-          textHash: "hash", ruleVersion: "language-qa-1", status: "review-needed" },
-        { id: "f2", book: "php", chapter: "1", verse: "9", rule: "terminology.deprecated-form",
-          severity: "high", start: 0, end: 3, originalText: "bad", message: "Deprecated.",
-          textHash: "hash2", ruleVersion: "language-qa-2", status: "review-needed",
-          suggestedReplacement: "good" },
-        { id: "f3", book: "php", chapter: "1", verse: "5", rule: "tamil.vallinam-missing",
-          severity: "medium", start: 0, end: 8, originalText: "அப்படி கூறினான்",
-          message: "Possible missing வல்லினம்.", textHash: "hash3", ruleVersion: "language-qa-4",
-          status: "review-needed", suggestedReplacement: "அப்படிக் கூறினான்" },
-      ],
+  it("never writes the inline-marks store, whatever page it shows", async () => {
+    // The panel used to fill languageQaFindingsByVerse from its own page, so
+    // any inline finding past the first 100 in the book never got a mark.
+    // The store now belongs to languageQaInline.ts; paging here must not touch it.
+    const seeded: Record<string, LanguageQaFinding[]> = { "1:1": [{ id: "keep", book: "php", chapter: "1",
+      verse: "1", rule: "terminology.deprecated-form", severity: "high", start: 0, end: 3,
+      originalText: "bad", message: "Deprecated.", textHash: "h", ruleVersion: "language-qa-6",
+      status: "review-needed", suggestedReplacement: "good" }] };
+    languageQaFindingsByVerse.set(seeded);
+    statusCall.mockImplementation(async (_path, _offset, limit) => snapshot({
+      totalFindings: 120,
+      findings: limit ? [{ id: "f2", book: "php", chapter: "3", verse: "9", rule: "terminology.deprecated-form",
+        severity: "high", start: 0, end: 3, originalText: "bad", message: "Deprecated.",
+        textHash: "hash2", ruleVersion: "language-qa-6", status: "review-needed",
+        suggestedReplacement: "good" }] : [],
     }));
     render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
-    await waitFor(() => expect(get(languageQaFindingsByVerse)["1:9"]).toBeTruthy());
-    const byVerse = get(languageQaFindingsByVerse);
-    expect(byVerse["1:9"]).toEqual([expect.objectContaining({ id: "f2", suggestedReplacement: "good" })]);
-    expect(byVerse["1:5"]).toEqual([expect.objectContaining({ id: "f3", suggestedReplacement: "அப்படிக் கூறினான்" })]);
-    expect(byVerse["2:3-4"]).toBeUndefined(); // the unicode.corruption finding never enters this store
-  });
-
-  it("picks up a finding that appears at a different verse on a later poll, and drops one that no longer does", async () => {
-    // Reproduces the maintainer's reported sequence end to end through the
-    // panel's own polling path: ignore verse 9's occurrence (it stops being
-    // returned), then edit verse 10 to introduce a fresh occurrence of the
-    // same deprecated word (it starts being returned on the next completed
-    // pass). languageQaFindingsByVerse must track both changes, not just
-    // the first poll's snapshot.
-    languageQaFindingsByVerse.set({});
-    let call = 0;
-    statusCall.mockImplementation(async () => {
-      call += 1;
-      if (call === 1) {
-        return snapshot({
-          generation: 1,
-          findings: [{ id: "f-9", book: "rut", chapter: "1", verse: "9", rule: "terminology.deprecated-form",
-            severity: "high", start: 0, end: 3, originalText: "bad", message: "Deprecated.",
-            textHash: "h1", ruleVersion: "language-qa-2", status: "review-needed", suggestedReplacement: "good" }],
-        });
-      }
-      return snapshot({
-        generation: 2,
-        findings: [{ id: "f-10", book: "rut", chapter: "1", verse: "10", rule: "terminology.deprecated-form",
-          severity: "high", start: 0, end: 3, originalText: "bad", message: "Deprecated.",
-          textHash: "h2", ruleVersion: "language-qa-2", status: "review-needed", suggestedReplacement: "good" }],
-      });
-    });
-    render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
-    await waitFor(() => expect(get(languageQaFindingsByVerse)["1:9"]).toBeTruthy());
     await fireEvent.click(await screen.findByRole("button", { name: /Language QA · completed/ }));
-    await waitFor(() => expect(get(languageQaFindingsByVerse)["1:10"]).toBeTruthy());
-    const byVerse = get(languageQaFindingsByVerse);
-    expect(byVerse["1:9"]).toBeUndefined();
-    expect(byVerse["1:10"]).toEqual([expect.objectContaining({ id: "f-10" })]);
+    await screen.findByText("Deprecated.");
+    expect(get(languageQaFindingsByVerse)).toEqual(seeded);
   });
 
   it("surfaces failure and leaves automatic retry scheduled", async () => {

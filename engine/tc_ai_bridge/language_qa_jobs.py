@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import terminology
-from .language_qa import (MAX_WORDLIST_TERMS, RULE_VERSION, detect_language,
+from .language_qa import (INLINE_RULES, MAX_WORDLIST_TERMS, RULE_VERSION, detect_language,
                           scan_text, stable_finding_id, word_occurrences, wordlist_findings)
 
 MAX_CHAPTER_BYTES = 2 * 1024 * 1024
@@ -149,7 +149,10 @@ class LanguageQaManager:
             self._thread = threading.Thread(target=self._run, name="language-qa", daemon=True)
             self._thread.start()
 
-    def status(self, *, offset: int = 0, limit: int = 0) -> dict[str, Any]:
+    def _refresh_if_due(self) -> None:
+        """Idle-refresh probe shared by every poll: reschedule when chapter
+        files changed on disk since the last completed pass (an external
+        editor), at most once per REFRESH_SECONDS."""
         probe: tuple[int, tuple[str, str, str, Path]] | None = None
         with self._lock:
             if (self._context and not self._paused and self._thread is None
@@ -167,6 +170,33 @@ class LanguageQaManager:
                         and not self._paused and self._thread is None
                         and signature != self._source_signature):
                     self._schedule()
+
+    def inline(self, *, chapter: str | None = None) -> dict[str, Any]:
+        """Every finding of an INLINE_RULES rule, for one chapter or the whole
+        book -- not paged. The verse marks are drawn from this; status() is a
+        page for the panel's list, and a page cannot back marks (a book with
+        more findings than one page lost marks past it). Still bounded: the
+        summary itself never holds more than MAX_BOOK_FINDINGS, and each
+        verse contributes at most MAX_VERSE_FINDINGS."""
+        self._refresh_if_due()
+        with self._lock:
+            wanted = None if chapter is None else str(chapter)
+            findings = [
+                f for f in self._summary.get("findings", [])
+                if f.get("rule") in INLINE_RULES
+                and (wanted is None or str(f.get("chapter")) == wanted)
+            ]
+            return copy.deepcopy({
+                "projectPath": self._context[0] if self._context else "",
+                "book": self._context[1] if self._context else "",
+                "generation": self._generation,
+                "state": self._summary.get("state", "idle"),
+                "ruleVersion": RULE_VERSION, "chapter": wanted,
+                "inlineRules": sorted(INLINE_RULES), "findings": findings,
+            })
+
+    def status(self, *, offset: int = 0, limit: int = 0) -> dict[str, Any]:
+        self._refresh_if_due()
         with self._lock:
             offset = max(0, int(offset))
             limit = max(0, min(100, int(limit)))
@@ -176,6 +206,7 @@ class LanguageQaManager:
                 "projectPath": self._context[0] if self._context else "",
                 "book": self._context[1] if self._context else "",
                 "generation": self._generation, "ruleVersion": RULE_VERSION,
+                "inlineRules": sorted(INLINE_RULES),
                 "totalFindings": len(findings), "offset": offset,
                 "findings": findings[offset:offset + limit],
                 "coverage": "Enabled technical checks only; no grammar or publication certification.",

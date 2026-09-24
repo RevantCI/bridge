@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { bridge } from "./lib/api/bridgeClient";
   import ImportScreen from "./lib/components/ImportScreen.svelte";
   import TopBar from "./lib/components/TopBar.svelte";
@@ -30,6 +30,7 @@
     aiCheckReviewsByVerse, diagnosticsOpen, engineLog, appendEngineLog, navigationStatus,
   } from "./lib/stores";
   import { editingChapter, editingVerse, editSaving } from "./lib/verseEditor";
+  import { startLanguageQaInline } from "./lib/languageQaInline";
 
   let opened = false;
   let engineStatus: "checking" | "ready" | "error" = "checking";
@@ -252,6 +253,22 @@
     }
     engineNoticeTimer = setTimeout(() => { engineNotice = ""; }, 10000);
   }
+
+  // The verse marks' own poll (languageQaInline.ts), on the same lifecycle as
+  // LanguageQaPanel below -- running while a book is open, restarted when the
+  // book changes -- but independent of the panel, which only pages its list.
+  let stopLanguageQaInline: (() => void) | null = null;
+  let languageQaInlinePath = "";
+  $: {
+    const path = $project && opened ? $project.path : "";
+    if (path !== languageQaInlinePath) {
+      stopLanguageQaInline?.();
+      stopLanguageQaInline = null;
+      languageQaInlinePath = path;
+      if (path) stopLanguageQaInline = startLanguageQaInline(path);
+    }
+  }
+  onDestroy(() => stopLanguageQaInline?.());
 
   onMount(() => {
     let unlisten: (() => void) | null = null;

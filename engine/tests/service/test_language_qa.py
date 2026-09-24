@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import threading
 import time
 import unicodedata
@@ -8,11 +9,12 @@ from types import SimpleNamespace
 import pytest
 
 from tc_ai_bridge.language_qa import (
-    WORDLIST_COMMON_MIN, WORDLIST_MIN_LENGTH, WORDLIST_RARE_MAX, WORDLIST_RATIO_MIN,
+    INLINE_RULES, WORDLIST_COMMON_MIN, WORDLIST_MIN_LENGTH, WORDLIST_RARE_MAX, WORDLIST_RATIO_MIN,
     detect_language, scan_text, stable_finding_id, text_hash, wordlist_findings,
 )
 from tc_ai_bridge.language_qa_jobs import LanguageQaManager, MAX_CHAPTER_BYTES, MAX_BOOK_FINDINGS
 from tests.service.test_bridge_service import fixture_project, call
+from tests.support.paths import REPO_ROOT
 from bridge_service import BridgeEngine
 
 
@@ -802,6 +804,75 @@ def test_book_limits_and_status_page_are_bounded(tmp_path):
     assert len(manager.status(limit=10000)["findings"]) == 100
     assert manager.status()["findings"] == []
     assert manager.status(offset=5000, limit=100)["findings"] == []
+
+
+def _three_chapter_project(root, verses_per_chapter=60):
+    # Every verse yields one inline finding (tamil.vallinam-missing, "அந்த காகம்")
+    # and one panel-only finding (spacing.extra, the trailing double space), so
+    # the book holds 180 inline findings -- well past one 100-finding page.
+    project = project_at(root, verses={str(n): "அந்த காகம்  " for n in range(1, verses_per_chapter + 1)})
+    for chapter in ("2", "3"):
+        (project.book_dir / f"{chapter}.json").write_text(json.dumps(
+            {str(n): "அந்த காகம்  " for n in range(1, verses_per_chapter + 1)},
+            ensure_ascii=False), encoding="utf-8")
+    return project
+
+
+def test_inline_returns_a_whole_chapter_past_the_status_page(tmp_path):
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(_three_chapter_project(tmp_path))
+    status = wait(manager)
+    assert status["totalFindings"] == 360
+    # The panel's page is still a page: 100 rows, starting at chapter 1.
+    page = manager.status(offset=0, limit=100)
+    assert len(page["findings"]) == 100
+    assert {f["chapter"] for f in page["findings"]} == {"1"}
+    # Chapter 3 lies entirely past that page, and inline still returns all of it.
+    inline = manager.inline(chapter="3")
+    assert len(inline["findings"]) == 60
+    assert {f["chapter"] for f in inline["findings"]} == {"3"}
+    assert {f["rule"] for f in inline["findings"]} == {"tamil.vallinam-missing"}
+    assert inline["chapter"] == "3" and inline["state"] == "completed"
+    assert inline["generation"] == status["generation"]
+
+
+def test_inline_without_a_chapter_returns_the_whole_book_and_only_inline_rules(tmp_path):
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(_three_chapter_project(tmp_path))
+    wait(manager)
+    inline = manager.inline()
+    assert len(inline["findings"]) == 180
+    assert {f["rule"] for f in inline["findings"]} <= INLINE_RULES
+    assert inline["chapter"] is None
+    assert inline["inlineRules"] == sorted(INLINE_RULES)
+    assert manager.status()["inlineRules"] == sorted(INLINE_RULES)
+
+
+def test_inline_rules_match_the_frontend_class_map():
+    # highlight.ts maps each inline rule to a CSS class. The engine decides
+    # which rules are inline; the two lists must never drift again.
+    source = (REPO_ROOT / "src" / "lib" / "utils" / "highlight.ts").read_text(encoding="utf-8")
+    block = re.search(r"INLINE_LANGUAGE_QA_MARKS[^=]*=\s*\{(.*?)\};", source, re.S)
+    assert block, "INLINE_LANGUAGE_QA_MARKS not found in highlight.ts"
+    assert set(re.findall(r'"([^"]+)"\s*:', block.group(1))) == INLINE_RULES
+
+
+def test_inline_rpc_is_project_guarded_and_validates_chapter(fixture_project):
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]
+        wait(engine._language_qa)
+        path = str(fixture_project)
+        assert not call(engine, "languageQa.inline", {"projectPath": "other", "chapter": "1"})["success"]
+        assert not call(engine, "languageQa.inline", {"projectPath": path, "chapter": 1})["success"]
+        response = call(engine, "languageQa.inline", {"projectPath": path, "chapter": "1"})
+        assert response["success"]
+        findings = response["result"]["findings"]
+        assert [f["originalText"] for f in findings] == ["அந்த காகம்"]
+    finally:
+        engine._language_qa.unbind()
 
 
 def test_real_dispatcher_auto_open_edit_and_project_guard(fixture_project):

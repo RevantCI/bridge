@@ -1,9 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
-  import type { LanguageQaFinding, LanguageQaStatus } from "../types/languageQa";
-  import { languageQaFindingsByVerse, verseKey } from "../stores";
-  import { INLINE_LANGUAGE_QA_MARKS } from "../utils/highlight";
+  import type { LanguageQaStatus } from "../types/languageQa";
 
   export let projectPath: string;
   export let onNavigate: (book: string, chapter: string, verse: string) => void;
@@ -24,22 +22,11 @@
     undetermined: "The language could not be determined. Only common checks are enabled.",
   };
 
-  // Collapsed used to fetch limit=0 (count only, no finding objects) since
-  // the panel itself only ever displayed the total. Now VerseList's inline
-  // double-underline needs real finding data regardless of whether the
-  // panel is open, so collapsed still fetches a real page -- just not the
-  // 50-per-page the panel's own Previous/Next pagination text assumes when
-  // expanded, which must stay exactly as before or that text goes wrong.
-  function updateInlineStore(next: LanguageQaStatus): void {
-    const byVerse: Record<string, LanguageQaFinding[]> = {};
-    for (const finding of next.findings) {
-      if (!(finding.rule in INLINE_LANGUAGE_QA_MARKS)) continue;
-      const key = verseKey(finding.chapter, finding.verse);
-      (byVerse[key] ??= []).push(finding);
-    }
-    languageQaFindingsByVerse.set(byVerse);
-  }
-
+  // The panel shows a list, so it pages. It does NOT feed the verse marks:
+  // those come from languageQaInline.ts's unpaged languageQa.inline poll. A
+  // page is at most 100 findings, so marks drawn from it vanished for every
+  // chapter past the first page and moved whenever the list was paged.
+  // Collapsed, the panel only shows the total, so it asks for no rows.
   async function refresh(): Promise<void> {
     if (disposed || busy) return;
     if (timer) clearTimeout(timer);
@@ -47,7 +34,7 @@
     const path = projectPath;
     busy = true;
     try {
-      const next = await bridge.languageQaStatus(path, offset, expanded ? 50 : 100);
+      const next = await bridge.languageQaStatus(path, offset, expanded ? 50 : 0);
       if (disposed || ticket !== sequence || path !== projectPath || next.projectPath !== path) return;
       if (status && next.generation !== status.generation && offset !== 0) {
         offset = 0;
@@ -56,7 +43,6 @@
         return;
       }
       status = next;
-      updateInlineStore(next);
       error = "";
     } catch (cause) {
       if (!disposed && ticket === sequence) {

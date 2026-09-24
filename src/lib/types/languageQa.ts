@@ -46,4 +46,22 @@ export interface LanguageQaStatus {
   error?: string;
   coverage: string;
   storage: string;
+  /** The engine's list of rules that carry an inline span (INLINE_RULES in
+   * language_qa.py) -- the one authority for which findings are drawn in the
+   * verse text. highlight.ts only maps these names to CSS classes. */
+  inlineRules?: string[];
+}
+
+/** languageQa.inline: every inline-rule finding for one chapter (or the whole
+ * book), unpaged. Separate from LanguageQaStatus's page so the verse marks
+ * never depend on which page the panel happens to be showing. */
+export interface LanguageQaInline {
+  projectPath: string;
+  book: string;
+  generation: number;
+  state: LanguageQaStatus["state"];
+  ruleVersion: string;
+  chapter: string | null;
+  inlineRules: string[];
+  findings: LanguageQaFinding[];
 }

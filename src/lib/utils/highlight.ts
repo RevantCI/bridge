@@ -14,15 +14,14 @@ export function categoryClass(category: FindingCategory): string {
   }
 }
 
-// Language QA rule -> CSS class, for the subset of rules that carry a span
-// and so can be underlined/highlighted inline. Every other Language QA rule
-// (wordlist-variant included) is a deliberate panel-only omission, not an
-// oversight -- see buildSegments' own comment below. Exported so
-// LanguageQaPanel's own inline-store filter (languageQaFindingsByVerse)
-// shares this one list rather than keeping a second, driftable copy --
-// that drift is exactly how tamil.vallinam-missing findings never reached
-// buildSegments at all on the first attempt at this feature, despite
-// buildSegments itself already handling the rule correctly.
+// Language QA rule -> CSS class, for the rules that carry a span and so can
+// be marked inline. WHICH rules are inline is decided by the engine
+// (INLINE_RULES in language_qa.py), which filters languageQa.inline
+// server-side; this map only names their classes. Its keys must equal that
+// list -- test_inline_rules_match_the_frontend_class_map (engine suite)
+// fails if the two drift. They drifted once already: a second hand-kept
+// copy of this list in LanguageQaPanel dropped every vallinam finding.
+// Every other Language QA rule (wordlist-variant included) is panel-only.
 export const INLINE_LANGUAGE_QA_MARKS: Record<string, string> = {
   "terminology.deprecated-form": "m-term",
   "tamil.vallinam-missing": "m-vallinam",

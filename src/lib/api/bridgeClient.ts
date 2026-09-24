@@ -1,4 +1,4 @@
-import type { LanguageQaStatus } from "../types/languageQa";
+import type { LanguageQaInline, LanguageQaStatus } from "../types/languageQa";
 import type {
   AIReviewChapterResponse,
   AIReviewJobSnapshot,
@@ -168,6 +168,7 @@ interface EngineEnvelope<T> {
 export type EngineMethod =
   | "languageQa.status"
   | "languageQa.pause"
+  | "languageQa.inline"
   | "ai.review.cancel"
   | "ai.review.listForChapter"
   | "ai.review.retry"
@@ -282,6 +283,12 @@ export const bridge = {
 
   languageQaPause(projectPath: string, paused: boolean): Promise<LanguageQaStatus> {
     return call("languageQa.pause", { projectPath, paused });
+  },
+
+  /** Every inline-rule finding for `chapter` (the whole book when omitted),
+   * unpaged -- what the verse marks are drawn from. */
+  languageQaInline(projectPath: string, chapter?: string): Promise<LanguageQaInline> {
+    return call("languageQa.inline", { projectPath, chapter });
   },
 
   ping(): Promise<{ pong: boolean }> {

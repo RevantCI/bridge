@@ -73,6 +73,12 @@ VALLINAM_TRIGGERS = frozenset({
     "என்னை", "உங்களை", "அவனை", "அதை", "எதை",
 })
 VALLINAM_INITIALS = frozenset("கசதப")
+# The rules whose findings are drawn inline in the verse text, as opposed to
+# listed only in the Language QA panel. The one authority for that choice:
+# languageQa.inline filters on it server-side and languageQa.status exposes it.
+# highlight.ts's INLINE_LANGUAGE_QA_MARKS only maps these names to CSS classes
+# and must have exactly these keys (test_inline_rules_match_the_frontend_class_map).
+INLINE_RULES = frozenset({"terminology.deprecated-form", "tamil.vallinam-missing"})
 WORD = regex.compile(r"\p{L}[\p{L}\p{M}]*")
 GRAPHEME = regex.compile(r"\X")
 SCRIPT_NAMES = ("TAMIL", "DEVANAGARI", "BENGALI", "TELUGU", "KANNADA",

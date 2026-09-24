@@ -311,6 +311,7 @@ class Methods:
     CHECKS_START = "checks.start"
     LANGUAGE_QA_STATUS = "languageQa.status"
     LANGUAGE_QA_PAUSE = "languageQa.pause"
+    LANGUAGE_QA_INLINE = "languageQa.inline"
     CHECKS_STATUS = "checks.status"
     CHECKS_CANCEL = "checks.cancel"
     CHECKS_RETRY = "checks.retry"
@@ -4064,7 +4065,7 @@ class BridgeEngine:
         try:
             m, p = request.method, request.params
 
-            if m in {Methods.LANGUAGE_QA_STATUS, Methods.LANGUAGE_QA_PAUSE}:
+            if m in {Methods.LANGUAGE_QA_STATUS, Methods.LANGUAGE_QA_PAUSE, Methods.LANGUAGE_QA_INLINE}:
                 self._require_project()
                 if p.get("projectPath") != str(self.project.path):
                     raise ProjectError("Language QA request belongs to a different project.")
@@ -4072,6 +4073,11 @@ class BridgeEngine:
                     if not isinstance(p.get("paused"), bool):
                         raise ProjectError("paused must be a boolean")
                     result = self._language_qa.pause(p["paused"])
+                elif m == Methods.LANGUAGE_QA_INLINE:
+                    chapter = p.get("chapter")
+                    if chapter is not None and not isinstance(chapter, str):
+                        raise ProjectError("chapter must be a string when given")
+                    result = self._language_qa.inline(chapter=chapter)
                 else:
                     result = self._language_qa.status(offset=p.get("offset", 0), limit=p.get("limit", 0))
                 return EngineResponse.ok(request.id, result=result)

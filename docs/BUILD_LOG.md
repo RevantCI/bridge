@@ -10803,3 +10803,77 @@ stays `"tamil.vallinam-missing"` regardless of which trigger fired.
 
 Desktop acceptance not yet run -- awaiting the maintainer testing the
 actual build, same as every rule so far.
+
+## 2026-09-24 — Language QA review fixes: inline coverage, footnoted verses, rollup isolation, offsets
+
+A review of the inline வல்லினம்/termbase work found four defects. They are
+fixed in order, one commit each. None of them changes a finding id, a rule,
+a trigger list, the CSS or the termbase format.
+
+### 1. Inline marks now cover the whole book, not the panel's first page
+
+**Defect.** `LanguageQaPanel.svelte` filled `languageQaFindingsByVerse` (the
+store `VerseList` reads for the double-underline and the yellow வல்லினம்
+highlight) from its own `languageQa.status` page. That page is `limit=100`
+(50 once expanded), ordered book → chapter → verse, and mixes in every rule.
+In a book with more than 100 Language QA findings, any inline finding past
+the first page got no mark and no right-click menu. It still showed in the
+panel once the panel was paged far enough. Chapter 1 looked fine; later
+chapters silently lost their marks.
+
+**Cause.** One store fed two consumers with different needs. The panel
+wants a bounded, paged list. The editor wants every inline finding for the
+chapter on screen. The panel's page was the only source of both.
+
+**Fix.**
+- Engine: a new `languageQa.inline` method (`Methods.LANGUAGE_QA_INLINE`,
+  project-guarded like every other `languageQa.*` method; `chapter` must be
+  a string when given). It returns every finding of an inline rule for one
+  chapter, or the whole book without a chapter, from the current summary.
+  It is unpaged. It stays bounded by the existing `MAX_VERSE_FINDINGS` and
+  `MAX_BOOK_FINDINGS`, which are unchanged. The inline rules are one engine
+  constant, `language_qa.INLINE_RULES`, and `languageQa.status` now reports
+  them as `inlineRules`. The idle-refresh probe `status()` already ran was
+  factored into `_refresh_if_due()`, so `inline()` runs it too.
+- Frontend: new `src/lib/languageQaInline.ts`. It polls `languageQa.inline`
+  for `$currentChapter` every 5 s and immediately on a chapter change. It
+  groups by exact `chapter:verse`, keeping verse bridges, and is the only
+  writer of `languageQaFindingsByVerse`. A sequence ticket means only the
+  newest request writes the store or schedules the next poll. An answer for
+  another project or an old chapter is discarded. A failed poll keeps the
+  last marks, and stopping the poller clears them. `App.svelte` starts it
+  when a project is open and stops it on a project change or teardown.
+- `LanguageQaPanel.svelte` no longer imports the store. While collapsed it
+  goes back to `limit=0` (count only).
+- `INLINE_LANGUAGE_QA_MARKS` in `highlight.ts` now only maps a rule to a CSS
+  class. `test_inline_rules_match_the_frontend_class_map` parses it out of
+  the TypeScript source and asserts its keys equal `INLINE_RULES`, so the
+  two cannot drift the way the panel's filter and `buildSegments`' did in
+  #173.
+
+**Verification.**
+- Engine (`test_language_qa.py`):
+  - A three-chapter project has 360 findings, 180 of them inline. Asking
+    for chapter 3 returns all 60 of chapter 3's inline findings, even though
+    they sit past offset 100. `status(offset=0, limit=100)` still returns a
+    100-item page.
+  - With no chapter, `inline()` returns the whole book and only inline rules.
+  - The class-map parity test above.
+  - Through the real dispatcher, the method refuses a wrong project path and
+    an integer chapter.
+- Frontend: `languageQaInline.test.ts` is new, with six tests.
+  - 150 findings reach the store, and `buildSegments` marks the 150th verse.
+  - Verse bridges are grouped exactly.
+  - A late answer for the previous chapter is discarded.
+  - A finding that moves verse on a later pass is tracked.
+  - An answer for another project is ignored.
+  - A failed poll keeps the marks, and stopping clears them and ends
+    polling.
+- `LanguageQaPanel.test.ts`:
+  - Collapsed now asserts `(path, 0, 0)`.
+  - The two tests that asserted the panel populates the store were replaced
+    by one that asserts it never writes the store while paging.
+- Gates: `npm run check` 0/0; `npx vitest run` 500 passed; `npm run build`
+  ok; engine `pytest -n auto` 1558 passed,
+  up from 1554 by exactly the four new tests.
+- Desktop acceptance not yet run.
