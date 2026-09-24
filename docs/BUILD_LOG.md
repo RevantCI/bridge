@@ -11827,3 +11827,137 @@ once.
   rebuilt.
 - **Desktop acceptance: not run.** Watch in particular for existing
   வல்லினம் ignores coming back once for re-check, which is expected.
+
+## 2026-09-24 — Layered-rules Phase 4.1: Language QA as a check-job stage, persisted
+
+This is Phase 4.1 of the layered-rules brief. Language QA stops being a
+side-car: its findings are produced by a stage of the ordinary check job,
+count in the progress rollup, and persist across reopen.
+
+### One scan, one cache, two callers
+
+**The scan.** `language_qa_jobs.scan_verse` is the pure per-verse scan,
+factored out of the old `_scan` loop. It returns a verse's raw findings
+(before decisions), its coverage notes, and its word counts for the
+wordlist audit. A pass then:
+1. reuses a verse's entry while its text hash and the chapter key are
+   unchanged. The chapter key covers `SCAN_CACHE_VERSION`, `RULE_VERSION`,
+   the detected language, the pack fingerprint (overrides included) and the
+   termbase;
+2. rescans the verses that changed;
+3. assembles the book, applying decisions and the book finding cap afresh
+   every time.
+
+**The persisted cache.**
+- It lives in the new workbench table `language_qa_cache`, one row per
+  chapter (**workbench v3 → v4**, forward block `_MIGRATION_V4`, plus a
+  v3→v4 test).
+- It does not use `check_cache`: every reader of that table loads all of a
+  book's rows, and 150 chapter payloads would ride along. See DECISIONS.md.
+- The manager keeps an in-memory mirror, read once per bind in one query.
+- Rescanned chapters are written in one transaction per pass. With more than
+  50 chapters (`FLUSH_CHAPTERS`) the write is chunked.
+- A cancelled pass still flushes what it computed, because each entry is
+  keyed by its own text.
+- `status.storage` now reads "Persisted in the project workbench."
+
+**What changes for decisions and edits.**
+- Decisions are no longer part of any cache key, so **a decision rescans
+  nothing**. Previously any Language QA decision rescanned the whole book
+  (`decisions_version`).
+- A live edit rescans **only the edited verse**, which is the brief's
+  verse-level live path. `invalidate()` no longer discards anything; it only
+  schedules a pass.
+
+**The job stage.**
+- `checks.start` accepts `languageQa`. `check_jobs._stages` adds a
+  "Language QA" stage after "QA".
+- The preflight runs `LanguageQaManager.run_pass`: the same scan and cache
+  as the background worker, on the job's thread, serialised with the worker
+  by a pass lock.
+- Even a chapter job passes the whole book, because the wordlist audit needs
+  every chapter. Unchanged verses come from the cache.
+- Each verse's share (`{findings, decided}`) goes into the job result under
+  **`languageQa`, not `findings`**, so everything that reads `findings` as
+  QaFinding dicts is unaffected.
+- `checks.status` gains a `languageQa` block (state, chapters, findings,
+  limitations).
+- The pass publishes a new generation, and the frontend nudges the status
+  channel when a job ends, so the marks redraw from the job's result.
+- The app's chapter and book jobs now request `["local", "greekroom",
+  "languageQa"]`.
+
+**Two departures from the brief, both recorded in DECISIONS.md.**
+- The stage does not hold `_checker_lock`. The dispatcher takes that lock
+  for `verse.runChecks`, and a save must not wait on a book pass.
+- `_run_verse_checks_for_project` does not run Language QA. It returns
+  `QaFinding`s, and a verse-level Language QA check is already the live
+  path.
+
+### Progress rollup
+
+- `_on_check_job_complete` now counts Language QA findings: open ones as
+  `open`, decided ones with their decision.
+- The Phase 1 skip in `decide_verse` is replaced, as the brief requires.
+  A Language QA decision now updates the rollup **when the rollup already
+  has that finding**, that is, once a job has reported it.
+- A decision on a finding no job has reported still adds nothing. Without
+  that guard, a decision alone would add a finding row, and a verse could
+  look reviewed on the strength of findings that were never counted. That
+  was the original bug.
+
+### Performance
+
+**Psalms full pass**, measured with the Phase 1 script on this machine:
+
+| When | Wall | Peak working set | Findings |
+|---|---|---|---|
+| Phase 3 | 2.2 s | 68 MB | 309 |
+| Phase 4.1, first try: one transaction per chapter | **5.3 s** | 73 MB | 309 |
+| Phase 4.1, one transaction per pass | 3.4 s | 74 MB | 309 |
+| Phase 4.1, compact word map (final) | **2.45 s** cold | 70.5 MB | 309 |
+| Phase 4.1, reopen (all from the cache) | **0.47 s** | 72 MB | 309 |
+
+**Two budget misses, both fixed before commit.**
+- **One fsync'd commit per chapter.** It more than doubled the pass, which
+  breaks the "no phase may double wall time" rule. The fix is one
+  transaction per pass.
+- **The payload.** It was 3.45 MB for Psalms, and 2.64 MB of that was the
+  wordlist's full first-seen location per word per verse. It is now
+  `word → [count, start, end]`, with the text sliced from the verse at
+  assembly: 1.18 MB, `SCAN_CACHE_VERSION` 2.
+
+**Known cost, not fixed.** Every cache write also appends a `change_log`
+row, as `check_cache` writes already do. A cache is regenerable, so that
+history is not needed, but the workbench has one write path. Candidate
+follow-up.
+
+**Latency gate** (`--cores 2`): passes. Language QA `verse.decide` 18.2 ms,
+`verse.get` 2.8 ms, `languageQa.status` 0.38 ms, `languageQa.inline`
+0.32 ms, `ping` 0.41 ms. The 400-verse background pass takes 15.6 s, against
+15.3 s recorded before.
+
+### Verification
+
+- **New engine tests.**
+  - A decision rescans nothing, yet takes effect. This replaces the
+    `decisions_version` test, whose premise is gone.
+  - Results persist across reopen with nothing rescanned, and a live edit
+    rescans exactly one verse.
+  - The stage runs in a book job:
+    - its findings sit under `languageQa`, and `findings` stays clean;
+    - `checks.status` has the block;
+    - the rollup holds the finding as `open`;
+    - an ignore moves the open count down by one;
+    - a re-run reports the finding as `decided`.
+  - A Language QA decision never marks a verse reviewed while another
+    finding is open.
+  - The job path and the live path produce identical finding ids, and the
+    job pass rescans nothing after a live pass.
+  - A job without the stage carries no `languageQa`.
+  - Workbench v3→v4 migration.
+- **Suites and gates.**
+  - `tests/service tests/jobs tests/persistence`: 1230 passed.
+  - `npm run check` 0/0; `npx vitest run` 540 passed.
+- **Not covered by a test:** the App's `beginChecks` list and the post-job
+  nudge. There is no App-level test harness.

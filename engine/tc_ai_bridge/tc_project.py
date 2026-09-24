@@ -2657,6 +2657,59 @@ class TranslationCoreProject:
         )
         return row_id
 
+    # -- persisted Language QA scan (workbench v4) ---------------------------
+    #
+    # One `language_qa_cache` row per chapter: every verse's raw Language QA
+    # result, before decisions, keyed by the verse's text hash under a chapter
+    # key (rule pack, termbase, detected language). Written by
+    # language_qa_jobs from its worker or from the check-job stage, one
+    # transaction per chapter. Derived and regenerable: a miss rescans.
+
+    def _language_qa_cache_row_id(self, chapter: str) -> str:
+        return natural_row_id(self.workbench_identity.project_id, self.book_id, 'language_qa_cache', chapter)
+
+    def load_language_qa_cache(self) -> dict[str, dict[str, Any]]:
+        """chapter -> {"key", "verses"}, for the whole book in one query."""
+        out: dict[str, dict[str, Any]] = {}
+        for payload in self.workbench.payloads(
+            'language_qa_cache', project_id=self.workbench_identity.project_id, book_id=self.book_id,
+        ):
+            chapter = str(payload.get('chapter') or '')
+            verses = payload.get('verses')
+            if chapter and isinstance(verses, dict):
+                out[chapter] = {'key': str(payload.get('key') or ''), 'verses': verses}
+        return out
+
+    def save_language_qa_chapters(self, chapters: dict[str, tuple[str, dict[str, Any]]]) -> None:
+        """chapter -> (key, verses), all in one transaction: a full first pass
+        over Psalms is 150 chapters, and one fsync'd commit each more than
+        doubled the pass (5.3 s against 2.2 s)."""
+        identity = self.workbench_identity
+        computed_at = self._timestamp()[0]
+        with self.workbench.batch() as batch:
+            for chapter, (key, verses) in chapters.items():
+                chapter_key = str(chapter)
+                batch.write(
+                    'language_qa_cache', self._language_qa_cache_row_id(chapter_key),
+                    project_id=identity.project_id, book_id=self.book_id,
+                    payload={'schemaVersion': 1, 'chapter': chapter_key, 'key': key,
+                             'computedAt': computed_at, 'verses': verses},
+                    actor_id=identity.actor_id, device_id=identity.device_id,
+                    extra_columns={'chapter': chapter_key},
+                )
+
+    def progress_finding_status(self, chapter: str | int, verse: str | int, finding_id: str) -> str | None:
+        """The rollup's status for one finding, or None when the rollup has no
+        row for it (no check job has reported it)."""
+        row = self.workbench.get(
+            'progress_findings', self._progress_finding_row_id(str(chapter), str(verse), str(finding_id)))
+        if row is None:
+            return None
+        try:
+            return str(json.loads(row['payload_json']).get('status') or '')
+        except (TypeError, ValueError, KeyError):
+            return None
+
     # -- per-chapter check-finding snapshots ---------------------------------
     #
     # The progress rollup below records only finding id -> status; the

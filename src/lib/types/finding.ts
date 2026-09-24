@@ -818,6 +818,21 @@ export interface CheckJobVerseResult {
   status: "succeeded" | "failed";
   findings: QaFinding[];
   error: string | null;
+  /** The Language QA stage's share of this verse (only when the job ran it).
+   * Kept apart from `findings`: these are not QaFindings. `decided` maps the
+   * id of each finding a decision hides to that decision. The marks are not
+   * drawn from here; the job's pass publishes a new Language QA generation,
+   * and the status channel redraws from it. */
+  languageQa?: { findings: import("./languageQa").LanguageQaFinding[]; decided: Record<string, string> };
+}
+
+/** checks.status's view of the Language QA stage, for the main progress bar. */
+export interface CheckJobLanguageQa {
+  state: string | null;
+  completedChapters: number;
+  totalChapters: number;
+  findings: number;
+  limitations: string[];
 }
 
 export interface CheckJobSnapshot {
@@ -839,6 +854,7 @@ export interface CheckJobSnapshot {
   error: string | null;
   createdAt: string;
   finishedAt: string | null;
+  languageQa?: CheckJobLanguageQa;
 }
 
 export interface AIReviewJobVerseResult {

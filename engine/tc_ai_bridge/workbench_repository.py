@@ -29,7 +29,7 @@ from typing import Any, Iterator
 import uuid
 
 
-WORKBENCH_SCHEMA_VERSION = 3
+WORKBENCH_SCHEMA_VERSION = 4
 WORKBENCH_SCHEMA_ID = "bridge-workbench-v1"
 
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -59,6 +59,7 @@ MUTABLE_TABLES: tuple[str, ...] = (
     "metrics_counters",
     "file_backups",
     "alignment_cross_verse_links",
+    "language_qa_cache",
 )
 
 
@@ -489,10 +490,37 @@ CREATE UNIQUE INDEX ux_alignment_cross_verse_links_pair
                                    target_chapter, target_verse, target_signature);
 """
 
+# v4 (#169, layered-rules Phase 4.1): the persisted Language QA scan. One row
+# per chapter holding every verse's raw findings (before decisions, which are
+# applied on every pass), keyed by the verse's text hash and a chapter key
+# over the rule pack, termbase and detected language. It survives reopen, and
+# the check-job stage and live editing share it. Not in `check_cache`, because
+# every reader of that table (`load_check_cache`: USFM, names, the QA report,
+# triage, analytics) loads all of a book's rows, and 150 chapter payloads would
+# ride along on each of those reads. `chapter` is nullable, as in v3, so the
+# generic per-table tests that write rows without lifted columns still pass.
+_MIGRATION_V4 = r"""
+CREATE TABLE language_qa_cache (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    book_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+    actor_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    chapter TEXT
+);
+CREATE UNIQUE INDEX ux_language_qa_cache_chapter
+    ON language_qa_cache(project_id, book_id, chapter);
+"""
+
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, _MIGRATION_V1),
     (2, _MIGRATION_V2),
     (3, _MIGRATION_V3),
+    (4, _MIGRATION_V4),
 )
 
 

@@ -112,6 +112,7 @@ from check_jobs import (
     CheckJobManager,
     CheckJobNotFound,
     CheckJobSpec,
+    LANGUAGE_QA_CHECK,
 )
 from ai_review_jobs import (
     AIReviewJobConflict,
@@ -3523,7 +3524,7 @@ class BridgeEngine:
             raise CheckJobError(f"Unknown chapter(s): {', '.join(unknown)}")
 
         selected_checks = tuple(dict.fromkeys(checks or ["local", "greekroom"]))
-        supported = {"local", "tN", "tW", "alignment", "usfm", "greekroom", "wildebeest"}
+        supported = {"local", "tN", "tW", "alignment", "usfm", "greekroom", "wildebeest", LANGUAGE_QA_CHECK}
         invalid = [name for name in selected_checks if name not in supported]
         if invalid:
             raise CheckJobError(f"Unknown check type(s): {', '.join(invalid)}")
@@ -3540,7 +3541,10 @@ class BridgeEngine:
     def _start_check_job_from_spec(
         self, spec: CheckJobSpec, project: TranslationCoreProject,
     ) -> dict[str, Any]:
-        def run_stage(chapter: str, verse: str, stage_checks: list[str]) -> list[dict[str, Any]]:
+        def run_stage(chapter: str, verse: str, stage_checks: list[str]) -> Any:
+            if stage_checks == [LANGUAGE_QA_CHECK]:
+                # The book pass ran in the preflight; this verse's share of it.
+                return self._language_qa.verse_results(chapter, verse)
             with self._checker_lock:
                 return [
                     finding.to_dict()
@@ -3550,8 +3554,20 @@ class BridgeEngine:
                 ]
 
         preflight = None
-        if any(name in spec.checks for name in ("local", "tN", "tW", "usfm", "names")):
+        if any(name in spec.checks for name in ("local", "tN", "tW", "usfm", "names", LANGUAGE_QA_CHECK)):
             def run_preflight(cancel_event: threading.Event) -> None:
+                if LANGUAGE_QA_CHECK in spec.checks:
+                    # The authoritative Language QA pass: the same scan and cache
+                    # as live editing, on this job's thread. The wordlist audit
+                    # needs the whole book, so even a chapter job scans the book;
+                    # unchanged verses come from the persisted cache. Serialised
+                    # with the background worker by Language QA's own pass lock,
+                    # not _checker_lock: the dispatcher takes _checker_lock for
+                    # verse.runChecks, and must not wait on a book pass.
+                    if self._language_qa.run_pass(cancel_event) is None and not cancel_event.is_set():
+                        raise CheckJobError("Language QA could not check this book.")
+                    if cancel_event.is_set():
+                        return
                 with self._checker_lock:
                     if any(name in spec.checks for name in ("local", "tN", "tW")):
                         self._ensure_resource_indexes(project)
@@ -3601,9 +3617,19 @@ class BridgeEngine:
                 findings = [
                     f for f in (result.get("findings") or []) if isinstance(f, dict) and f.get("id")
                 ]
-                by_chapter.setdefault(str(chapter), {})[str(verse)] = {
+                statuses = {
                     str(f["id"]): str(f.get("status", FindingStatus.OPEN.value)) for f in findings
                 }
+                # Language QA (Phase 4.1): an open finding counts as open; one a
+                # decision hides counts with that decision, so ignoring it moves
+                # the verse's open count down like any other decision.
+                language_qa = result.get("languageQa") or {}
+                for finding in language_qa.get("findings") or []:
+                    if isinstance(finding, dict) and finding.get("id"):
+                        statuses[str(finding["id"])] = FindingStatus.OPEN.value
+                for finding_id, decision in (language_qa.get("decided") or {}).items():
+                    statuses[str(finding_id)] = str(decision)
+                by_chapter.setdefault(str(chapter), {})[str(verse)] = statuses
                 snapshot_by_chapter.setdefault(str(chapter), {})[str(verse)] = findings
 
             now = project.timestamp_iso()
@@ -3627,7 +3653,19 @@ class BridgeEngine:
             pass
 
     def check_job_status(self, job_id: str = "") -> dict[str, Any]:
-        return self._check_jobs.status(job_id)
+        snapshot = self._check_jobs.status(job_id)
+        if LANGUAGE_QA_CHECK in snapshot.get("checks", []):
+            # The main progress bar's view of the Language QA stage; the panel
+            # keeps languageQa.status for its book-level lists.
+            summary = self._language_qa.status(limit=0)
+            snapshot["languageQa"] = {
+                "state": summary.get("state"),
+                "completedChapters": summary.get("completedChapters", 0),
+                "totalChapters": summary.get("totalChapters", 0),
+                "findings": summary.get("totalFindings", 0),
+                "limitations": list(summary.get("limitations") or [])[:20],
+            }
+        return snapshot
 
     def cancel_check_job(self, job_id: str = "") -> dict[str, Any]:
         return self._check_jobs.cancel(job_id)
@@ -3649,10 +3687,13 @@ class BridgeEngine:
 
         `issue` is what the caller knows about the finding, stored as the
         decision's payload. A Language QA finding (`issue.source ==
-        "languageQa"`) is a disposable text-only review candidate, not a
-        checked-and-reviewed QaFinding, so its decision is recorded and
-        audited but never counted in the review-progress rollup. The origin
-        comes only from `issue`, never from the finding id."""
+        "languageQa"`) counts in the review-progress rollup once a check job
+        has put it there (the Language QA stage, Phase 4.1), exactly like a
+        Greek Room finding. Until then its decision is recorded and audited
+        but not counted: a decision alone must not add a finding row, or a
+        verse whose Language QA findings were never checked could look
+        reviewed. The origin comes only from `issue`, never from the finding
+        id."""
         self._require_project()
         # A caller that names no source gets "unspecified": that records that
         # nobody said, and it is what lets Language QA tell a new non-Language-QA
@@ -3662,7 +3703,7 @@ class BridgeEngine:
         path = self.project.record_qa_decision(
             chapter, verse, issue_key=finding_id, decision=status, note=comment, issue=issue,
         )
-        if issue["source"] != LANGUAGE_QA_SOURCE:
+        if issue["source"] != LANGUAGE_QA_SOURCE or self._rollup_has_finding(chapter, verse, finding_id):
             self._apply_decision_to_progress(self.project, chapter, verse, finding_id, status)
         # Language QA reads this same decision store back inside its own scan
         # loop (language_qa_jobs.py) to suppress a decided terminology
@@ -3678,6 +3719,12 @@ class BridgeEngine:
         self._language_qa.invalidate(chapter)
         return {"chapter": chapter, "verse": verse, "findingId": finding_id,
                 "status": status, "recordedAt": str(path)}
+
+    def _rollup_has_finding(self, chapter: str, verse: str, finding_id: str) -> bool:
+        try:
+            return self.project.progress_finding_status(chapter, verse, finding_id) is not None
+        except Exception:
+            return False
 
     def _apply_decision_to_progress(
         self, project: TranslationCoreProject, chapter: str, verse: str,

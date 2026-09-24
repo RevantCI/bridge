@@ -539,7 +539,7 @@ def test_every_language_qa_finding_carries_its_source(tmp_path):
     assert all(f["source"] == "languageQa" for f in findings)
 
 
-def test_language_qa_decision_is_recorded_but_never_counted_in_review_progress(fixture_project):
+def test_language_qa_decision_is_not_counted_until_a_check_job_reported_the_finding(fixture_project):
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     try:
@@ -582,10 +582,84 @@ def test_other_decisions_still_update_review_progress(fixture_project, issue):
     assert rollup["totals"]["approvedFindingCount"] == 1
 
 
-def test_only_decisions_that_may_concern_language_qa_bust_other_chapters(fixture_project):
-    # decisions_version is part of every chapter's cache key. Before it was
-    # scoped, any decision anywhere (a Greek Room accept) forced a rescan of
-    # the whole book; decide_verse already invalidates its own chapter.
+# ---- Phase 4.1: Language QA as a check-job stage ----
+
+@pytest.fixture
+def staged_engine(fixture_project):
+    from tests.service.test_bridge_service import wait_for_job
+
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]
+    wait(engine._language_qa)
+
+    def run_job(checks, scope="book"):
+        started = call(engine, "checks.start", {"scope": scope, "checks": checks})
+        assert started["success"], started
+        return wait_for_job(engine, started["result"]["jobId"], timeout=30)
+
+    yield engine, run_job
+    engine._language_qa.unbind()
+
+
+def test_the_language_qa_stage_runs_in_a_book_job_and_counts_in_the_rollup(staged_engine):
+    engine, run_job = staged_engine
+    snapshot = run_job(["languageQa"])
+    assert snapshot["state"] == "succeeded", snapshot
+    result = snapshot["results"]["1:1"]
+    [lqa] = [f for f in result["languageQa"]["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert result["findings"] == []  # QaFinding readers see no Language QA dicts
+    assert snapshot["languageQa"]["state"] == "completed" and snapshot["languageQa"]["findings"] >= 1
+    rollup = engine.project.load_progress_rollup()
+    assert rollup["chapters"]["1"]["verses"]["1"]["findings"][lqa["id"]] == "open"
+    open_before = rollup["totals"]["findingCount"] - rollup["totals"]["approvedFindingCount"]
+    # Ignoring it now moves the open count down by one.
+    assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": lqa["id"],
+                                         "status": "ignored", "issue": issue_for(lqa)})["success"]
+    totals = engine.project.load_progress_rollup()["totals"]
+    assert totals["findingCount"] - totals["approvedFindingCount"] == open_before - 1
+    # A re-run keeps the decision: the hidden finding is counted as ignored.
+    rerun = run_job(["languageQa"])
+    assert lqa["id"] in rerun["results"]["1:1"]["languageQa"]["decided"]
+    assert engine.project.load_progress_rollup()["chapters"]["1"]["verses"]["1"]["findings"][lqa["id"]] == "ignored"
+
+
+def test_a_language_qa_decision_never_marks_a_verse_reviewed_while_other_findings_are_open(staged_engine):
+    engine, run_job = staged_engine
+    snapshot = run_job(["languageQa"])
+    lqa_ids = [f["id"] for f in snapshot["results"]["1:1"]["languageQa"]["findings"]]
+    engine.project.record_progress_decision("1", "1", "greek-room-open", "open", verse_count=1)
+    for finding_id in lqa_ids:
+        finding = next(f for f in snapshot["results"]["1:1"]["languageQa"]["findings"] if f["id"] == finding_id)
+        assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": finding_id,
+                                             "status": "ignored", "issue": issue_for(finding)})["success"]
+    assert engine.project.load_progress_rollup()["totals"]["reviewedVerseCount"] == 0
+    assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": "greek-room-open",
+                                         "status": "accepted"})["success"]
+    assert engine.project.load_progress_rollup()["totals"]["reviewedVerseCount"] >= 1
+
+
+def test_job_path_and_live_path_produce_identical_findings(staged_engine):
+    engine, run_job = staged_engine
+    live = {(f["chapter"], f["verse"], f["id"]) for f in wait(engine._language_qa)["findings"]}
+    snapshot = run_job(["languageQa"], scope="chapter")
+    job = {(r["chapter"], r["verse"], f["id"]) for r in snapshot["results"].values()
+           for f in r["languageQa"]["findings"]}
+    assert job == {item for item in live if item[0] == "1"}
+    # The job pass reused the cache the live pass wrote: nothing was rescanned.
+    assert engine._language_qa.status()["scannedVerses"] == 0
+
+
+def test_a_job_without_the_stage_carries_no_language_qa(staged_engine):
+    _, run_job = staged_engine
+    snapshot = run_job(["local"])
+    assert "languageQa" not in snapshot and all("languageQa" not in r for r in snapshot["results"].values())
+
+
+def test_a_decision_rescans_nothing_yet_takes_effect(fixture_project):
+    # Phase 4.1: decisions are applied when a pass assembles its results, not
+    # cached, so no decision -- Greek Room or Language QA -- rescans a verse.
     (fixture_project / "rut" / "2.json").write_text(
         json.dumps({"1": "அந்த காகம் பறந்தது."}, ensure_ascii=False), encoding="utf-8")
     engine = BridgeEngine()
@@ -593,29 +667,49 @@ def test_only_decisions_that_may_concern_language_qa_bust_other_chapters(fixture
     try:
         assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
         first = wait(engine._language_qa)
-        assert first["totalChapters"] == 2
+        assert first["totalChapters"] == 2 and first["scannedVerses"] > 0
         finding = next(f for f in first["findings"] if f["chapter"] == "2" and f["rule"] == "tamil.vallinam-missing")
 
-        # A Greek Room decision on chapter 1: chapter 2 is reused.
         assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": "greek-room-finding",
                                              "status": "accepted"})["success"]
         assert engine.project.qa_decisions_for_verse("1", "1")["greek-room-finding"]["issue"] == {
             "source": "unspecified"}
-        assert wait(engine._language_qa)["reusedChapters"] == 1
+        after_other = wait(engine._language_qa)
+        assert (after_other["reusedChapters"], after_other["scannedVerses"]) == (2, 0)
 
-        # A Language QA decision on chapter 2: chapter 1 is rescanned too.
         assert call(engine, "verse.decide", {"chapter": "2", "verse": "1", "findingId": finding["id"],
                                              "status": "ignored", "issue": issue_for(finding)})["success"]
-        assert wait(engine._language_qa)["reusedChapters"] == 0
+        after_ignore = wait(engine._language_qa)
+        assert (after_ignore["reusedChapters"], after_ignore["scannedVerses"]) == (2, 0)
+        assert finding["id"] not in {f["id"] for f in after_ignore["findings"]}
+    finally:
+        engine._language_qa.unbind()
 
-        # A legacy row (recorded before sources were stamped) is kept, not guessed away.
-        engine.project.record_qa_decision("2", "1", issue_key="legacy-row", decision="ignored")
-        engine._language_qa.invalidate("2")
-        assert wait(engine._language_qa)["reusedChapters"] == 0
-        engine.project.record_qa_decision("2", "1", issue_key="new-row", decision="ignored",
-                                          issue={"source": "unspecified"})
-        engine._language_qa.invalidate("2")
-        assert wait(engine._language_qa)["reusedChapters"] == 1
+
+def test_results_persist_across_reopen_and_a_live_edit_rescans_only_that_verse(fixture_project):
+    (fixture_project / "rut" / "2.json").write_text(json.dumps(
+        {"1": "அந்த காகம் பறந்தது.", "2": "இந்த பெண் வந்தாள்."}, ensure_ascii=False), encoding="utf-8")
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    try:
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        first = wait(engine._language_qa)
+        assert first["scannedVerses"] == first["checkedVerses"] + first["skippedVerses"]
+        assert engine.project.load_language_qa_cache().keys() == {"1", "2"}
+        # Reopen: a new manager, nothing in memory, every verse from the workbench.
+        engine._language_qa.unbind()
+        engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        reopened = wait(engine._language_qa)
+        assert reopened["scannedVerses"] == 0 and reopened["storage"] == "Persisted in the project workbench."
+        assert [f["id"] for f in reopened["findings"]] == [f["id"] for f in first["findings"]]
+        # A live edit rescans the edited verse only (chapter 1 has alignment
+        # data, so it is editable; chapter 2 here is text only).
+        assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]
+        edited = wait(engine._language_qa)
+        assert edited["scannedVerses"] == 1 and edited["reusedChapters"] == 1
+        assert [f["rule"] for f in edited["findings"] if (f["chapter"], f["verse"]) == ("1", "1")] == [
+            "tamil.vallinam-missing"]
     finally:
         engine._language_qa.unbind()
 

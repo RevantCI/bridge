@@ -27,6 +27,9 @@ MAX_BOOK_FINDINGS = 3000
 MAX_CHAPTERS = 1000
 MAX_CHAPTER_VERSES = 2000
 REFRESH_SECONDS = 15.0
+# Rescanned chapters are written in one workbench transaction per this many
+# (one fsync'd commit per chapter more than doubled a first Psalms pass).
+FLUSH_CHAPTERS = 50
 
 
 def _may_concern_language_qa(decision: dict[str, Any]) -> bool:
@@ -92,10 +95,13 @@ def decision_effect(finding: dict[str, Any], decision: dict[str, Any] | None) ->
 
 
 def apply_decisions(findings: list[dict[str, Any]], decisions: dict[str, dict[str, Any]],
-                    false_positives: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                    false_positives: list[dict[str, Any]],
+                    decided: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """The findings still shown after decisions. Every finding is handled
     the same way, whatever its rule. A suppressed "rejected" finding is kept
-    in `false_positives`, for the panel's own list."""
+    in `false_positives`, for the panel's own list. `decided`, when given,
+    collects finding id -> decision for every suppressed finding (the
+    progress rollup counts them as decided, not open)."""
     shown = []
     for finding in findings:
         decision = decisions.get(finding["id"])
@@ -103,9 +109,110 @@ def apply_decisions(findings: list[dict[str, Any]], decisions: dict[str, dict[st
         if effect == "suppress":
             if decision and decision.get("decision") == "rejected":
                 false_positives.append(finding)
+            if decided is not None and decision:
+                decided[finding["id"]] = str(decision.get("decision"))
             continue
         shown.append({**finding, "previouslyIgnored": True} if effect == "recheck" else finding)
     return shown
+
+
+# Bump when the shape of a cached verse entry changes: persisted entries from
+# an older build are then rescanned rather than misread.
+SCAN_CACHE_VERSION = 2  # 2: `words` holds [count, start, end]; `firstSeen` is gone
+
+
+def verse_hash(text: Any) -> str:
+    raw = text if isinstance(text, str) else json.dumps(text, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+def chapter_cache_key(language_pack: str, pack_fingerprint: str, raw_terms: Any) -> str:
+    """What a cached verse result depends on besides its own text."""
+    return hashlib.sha1(json.dumps(
+        [SCAN_CACHE_VERSION, RULE_VERSION, language_pack, pack_fingerprint, raw_terms],
+        sort_keys=True, ensure_ascii=False, default=str,
+    ).encode("utf-8")).hexdigest()
+
+
+def scan_verse(book: str, chapter: str, verse: str, text: Any, *, tamil: bool, pack: Any,
+               lists: dict[str, frozenset], term_index: Any) -> dict[str, Any]:
+    """Everything Language QA finds in one verse, before decisions. Pure: the
+    background worker (live editing) and the check-job stage both call this,
+    and its result is what the persisted cache holds, keyed by `hash`.
+
+    `words` feeds the book-level wordlist audit, compactly: word ->
+    [count, start, end] of its first occurrence in raw code points (the text
+    itself is sliced from the verse when a pass needs it; this map was 75% of
+    a book's persisted size when it held the full location). `limitations`
+    are per-verse coverage notes (a candidate crossing markup, the per-verse
+    finding limit)."""
+    entry: dict[str, Any] = {"hash": verse_hash(text)}
+    if not verse[:1].isdigit() or not isinstance(text, str):
+        entry["skipped"] = True
+        return entry
+    result = scan_text(text, book=book, chapter=chapter, verse=verse, tamil=tamil, pack=pack, lists=lists)
+    limitations = list(result["limitations"])
+    verse_findings: list[dict[str, Any]] = []
+    words: dict[str, list[int]] = {}
+    entry["textHash"] = result["textHash"]
+    if not result["checked"]:
+        entry.update(skipped=True, limitations=limitations)
+        return entry
+    if tamil:
+        # Same visible text scan_text read; every span below is translated
+        # back to raw code points, and one that would cross lifted markup is
+        # dropped, as scan_text does.
+        lifted, _ = lift_inline_usfm(text)
+        assert lifted is not None  # scan_text checked this verse
+        crossing = 0
+        for word, w_start, w_end in word_occurrences(lifted.visible):
+            span = lifted.raw_span(w_start, w_end)
+            if span is None:
+                continue  # a word split by markup is not one word
+            if word in words:
+                words[word][0] += 1
+            else:
+                words[word] = [1, span[0], span[1]]
+        term_occurrences: dict[tuple[str, str], int] = {}
+        for visible_match in terminology.find_deprecated_forms(lifted.visible, term_index):
+            span = lifted.raw_span(visible_match["start"], visible_match["end"])
+            if span is None:
+                crossing += 1
+                continue
+            match = {**visible_match, "start": span[0], "end": span[1],
+                     "matchedText": text[span[0]:span[1]]}
+            key = ("terminology.deprecated-form", match["matchedText"])
+            term_occurrences[key] = term_occurrences.get(key, 0) + 1
+            # Always advance the counter above, even when this specific
+            # occurrence ends up suppressed by a decision -- otherwise a later,
+            # undecided occurrence of the same word in the same verse would
+            # shift onto a different, unstable id once an earlier one is
+            # ignored.
+            finding_id = stable_finding_id(
+                book, chapter, verse, "terminology.deprecated-form",
+                match["matchedText"], term_occurrences[key])
+            preferred = ", ".join(match["preferredRenderings"]) or "no preferred form recorded yet"
+            note = f" {match['note']}" if match["note"] else ""
+            verse_findings.append({
+                "id": finding_id,
+                "book": book, "chapter": chapter, "verse": verse,
+                "rule": "terminology.deprecated-form", "severity": "high",
+                "start": match["start"], "end": match["end"],
+                "originalText": match["matchedText"],
+                "message": (f'"{match["matchedText"]}" is marked deprecated for '
+                           f'{match["conceptId"]}. Preferred form: {preferred}.{note} '
+                           f'Verify this occurrence.'),
+                "textHash": result["textHash"], "ruleVersion": RULE_VERSION,
+                "status": "review-needed",
+                **rule_fields("terminology.deprecated-form", [
+                    suggestion(match["suggestedReplacement"], "termbase",
+                               f'Preferred form for {match["conceptId"]}')
+                ] if match["suggestedReplacement"] else []),
+            })
+        if crossing:
+            limitations.append(f"{crossing} terminology {CROSSING_LIMITATION}")
+    entry.update(findings=verse_findings + result["findings"], limitations=limitations, words=words)
+    return entry
 
 
 class LanguageQaManager:
@@ -122,7 +229,18 @@ class LanguageQaManager:
         self._last_scan = 0.0
         self._debounce = debounce
         self._yield_seconds = yield_seconds
-        self._cache: dict[str, tuple[str, str, str, str, dict[str, Any]]] = {}
+        # chapter -> {"key", "verses": {verse: scan_verse() entry}}: the
+        # in-memory mirror of the project's persisted `language_qa_cache`,
+        # read once per bind (`_store` is the project's load/save pair).
+        self._cache: dict[str, dict[str, Any]] = {}
+        self._cache_loaded = False
+        self._store: tuple[Callable[[], Any], Callable[[str, str, dict[str, Any]], Any]] | None = None
+        # One pass at a time: the background worker and the check-job stage
+        # share the scan and the cache, never concurrently.
+        self._pass_lock = threading.Lock()
+        # "chapter:verse" -> {"findings", "decided"} from the last completed pass,
+        # for the check-job stage and the progress rollup.
+        self._by_verse: dict[str, dict[str, Any]] = {}
         self._source_signature: tuple[tuple[str, int, int], ...] | None = None
         self._paused_state: str | None = None
         self._terminology_loader: Callable[[], list[dict[str, Any]]] | None = None
@@ -147,7 +265,12 @@ class LanguageQaManager:
         declared = str(target.get("id") or "") if isinstance(target, dict) else ""
         with self._lock:
             self._context = (str(project.path), project.book_id, declared, project.book_dir)
-            self._cache.clear()
+            self._cache = {}
+            self._cache_loaded = False
+            self._by_verse = {}
+            loader = getattr(project, "load_language_qa_cache", None)
+            saver = getattr(project, "save_language_qa_chapters", None)
+            self._store = (loader, saver) if callable(loader) and callable(saver) else None
             self._source_signature = None
             self._paused_state = None
             self._terminology_loader = getattr(project, "terminology_rules", None)
@@ -164,7 +287,10 @@ class LanguageQaManager:
             self._context = None
             self._generation += 1
             self._wake.set()
-            self._cache.clear()
+            self._cache = {}
+            self._cache_loaded = False
+            self._by_verse = {}
+            self._store = None
             self._source_signature = None
             self._paused_state = None
             self._terminology_loader = None
@@ -172,25 +298,22 @@ class LanguageQaManager:
             self._summary = {"state": "idle", "findings": [], "limitations": []}
 
     def invalidate(self, chapter: str) -> None:
+        """Something in `chapter` changed (an edit, a decision): run a pass.
+        Nothing is discarded. The pass rescans only verses whose text hash
+        changed (a live edit rescans just the edited verse), and it applies
+        decisions afresh, so a decision rescans nothing."""
         with self._lock:
-            self._cache.pop(str(chapter), None)
             self._schedule()
 
     def invalidate_all(self) -> None:
-        """Discard every chapter's cached result, not just one.
-
-        For something book-wide that changed underneath Language QA rather
-        than one chapter's text -- a termbase rule added or edited through
-        Settings (#171). `_scan()` already recomputes `termbase_version`
-        fresh every pass and would eventually bust every chapter's cache
-        entry on its own the next time anything triggers a scan, but nothing
-        else does that on its own when only the termbase changed -- the
-        idle-refresh check only watches chapter file mtimes/sizes. Without
-        this, a rule added via terminology.record would sit invisible until
-        an unrelated edit happened to trigger a fresh pass.
-        """
+        """Something book-wide changed underneath Language QA -- a termbase
+        rule added or edited through Settings (#171) -- so run a pass. The
+        termbase is part of every chapter's cache key, so that pass rescans
+        what the change can affect. Nothing else would trigger one: the
+        idle-refresh check only watches chapter file mtimes/sizes, and without
+        this a rule added via terminology.record would sit invisible until an
+        unrelated edit happened to trigger a fresh pass."""
         with self._lock:
-            self._cache.clear()
             self._schedule()
 
     def pause(self, paused: bool) -> dict[str, Any]:
@@ -315,7 +438,8 @@ class LanguageQaManager:
                 "totalFindings": len(findings), "offset": offset,
                 "findings": findings[offset:offset + limit],
                 "coverage": "Enabled technical checks only; no grammar or publication certification.",
-                "storage": "Session results; automatically regenerated on reopen.",
+                "storage": ("Persisted in the project workbench." if self._store is not None
+                            else "Session results; regenerated on reopen."),
             })
             return copy.deepcopy(result)
 
@@ -375,8 +499,32 @@ class LanguageQaManager:
             raise ValueError("Chapter must contain a verse-keyed JSON object.")
         return data, signature, hashlib.sha256(raw).hexdigest()
 
-    def _scan(self, generation: int, context: tuple[str, str, str, Path]) -> dict[str, Any] | None:
+    def _scan(self, generation: int, context: tuple[str, str, str, Path], *,
+              cancelled: Callable[[], bool] | None = None, yielding: bool = True) -> dict[str, Any] | None:
+        """One book pass. `cancelled`/`yielding` let the check-job stage run the
+        same pass on its own thread without the background worker's pauses."""
+        with self._pass_lock:
+            pending: dict[str, tuple[str, dict[str, Any]]] = {}
+            try:
+                return self._scan_locked(generation, context, pending,
+                                         cancelled=cancelled, yielding=yielding)
+            finally:
+                # A cancelled pass still keeps what it computed: every entry is
+                # keyed by its own text hash, so it is valid for the next pass.
+                with self._lock:
+                    store = self._store if self._context == context else None
+                self._flush(store, pending, [])
+
+    def _scan_locked(self, generation: int, context: tuple[str, str, str, Path],
+                     pending: dict[str, tuple[str, dict[str, Any]]], *,
+                     cancelled: Callable[[], bool] | None, yielding: bool) -> dict[str, Any] | None:
         _, book, declared, directory = context
+
+        def proceed() -> bool:
+            if cancelled is not None:
+                return not cancelled()
+            return self._yield(generation) if yielding else not self._cancelled(generation)
+
         source_signature = self._chapter_signature(directory)
         candidates = (p for p in directory.glob("*.json") if p.stem.isdecimal())
         paths = sorted(itertools.islice(candidates, MAX_CHAPTERS + 1), key=lambda p: int(p.stem))
@@ -390,7 +538,7 @@ class LanguageQaManager:
         # Bounded sample across current target chapters, never original USFM.
         sample = ""
         for path in paths:
-            if not self._yield(generation):
+            if not proceed():
                 return None
             try:
                 data, _, _ = self._read(path)
@@ -409,6 +557,7 @@ class LanguageQaManager:
         with self._lock:
             terminology_loader = self._terminology_loader
             decisions_loader = self._decisions_loader
+            store = self._store
         try:
             raw_terms = terminology_loader() if terminology_loader else []
         except Exception as exc:
@@ -422,170 +571,108 @@ class LanguageQaManager:
             limitations.append(f"Decisions unavailable: {exc}")
         # Every QA decision by finding id. decision_effect() decides what each
         # one does to the finding it names; ids are content hashes, so a Greek
-        # Room decision can never name a Language QA finding.
+        # Room decision can never name a Language QA finding. Decisions are
+        # applied when a pass assembles its results, never cached, so a
+        # decision never forces a rescan.
         decisions = {
             str(row.get("issueKey", "")): row
             for row in raw_decisions if isinstance(row, dict)
         }
-        # A book-wide hash of the raw termbase and decisions, folded into the
-        # per-chapter cache key below -- a curated term or a review decision
-        # changing must invalidate every cached chapter's findings the same
-        # way an edited chapter would, even though the chapter's own text is
-        # untouched.
         # The rule pack, narrowed by this project's overrides (only narrowing is
-        # accepted; refusals become coverage notes). Its fingerprint joins the
-        # cache key, so an override takes effect on the next pass.
+        # accepted; refusals become coverage notes).
         rule_pack, pack_problems = project_rule_pack(context[0])
         limitations.extend(pack_problems)
         with self._lock:
-            if self._cancelled(generation):
+            if self._cancelled(generation) and cancelled is None:
                 return None
             self._summary["inlineRules"] = inline_rule_names(rule_pack)
-        termbase_version = hashlib.sha1(
-            json.dumps(raw_terms, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
-        ).hexdigest() + "|" + rule_pack.fingerprint()
-        # Only decisions that can be about a Language QA finding bust every
-        # chapter: those whose issue says "languageQa", plus legacy rows
-        # recorded before verse.decide stamped a source at all. A Greek Room
-        # decision (source "unspecified" or its own) cannot change a Language
-        # QA result, and its own chapter is invalidated by decide_verse anyway.
-        decisions_version = hashlib.sha1(json.dumps({
-            str(row.get("issueKey", "")): str(row.get("decision", ""))
-            for row in raw_decisions if isinstance(row, dict) and _may_concern_language_qa(row)
-        }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        tamil = detection["pack"] == "tamil"
+        # A verse's cached result is valid while its text hash and this chapter
+        # key are unchanged: the engine's rule version, the pack (fingerprint
+        # includes project overrides), the termbase, and the detected language.
+        key = chapter_cache_key(detection["pack"], rule_pack.fingerprint(), raw_terms)
+        cache = self._load_cache(store, limitations)
         findings: list[dict[str, Any]] = []
         false_positives: list[dict[str, Any]] = []
-        checked = skipped = reused = 0
-        cache: dict[str, tuple[str, str, str, str, dict[str, Any]]] = {}
+        by_verse: dict[str, dict[str, Any]] = {}
+        checked = skipped = reused = scanned_verses = 0
         book_counts: dict[str, int] = {}
         book_first_seen: dict[str, tuple[str, str, int, int, str, str]] = {}
+        completed = 0
         for completed, path in enumerate(paths):
-            if not self._yield(generation):
+            if not proceed():
                 return None
             with self._lock:
-                if self._cancelled(generation):
+                if cancelled is None and self._cancelled(generation):
                     return None
                 self._summary.update(state="running", language=detection,
                                      completedChapters=completed, totalChapters=len(paths))
-                cached = self._cache.get(path.stem)
+            chapter = path.stem
+            chapter_limitations: list[str] = []
             try:
-                # Hash bounded input even when metadata is unchanged: copying or
-                # restoring a file can preserve both its length and timestamp.
-                data, signature, digest = self._read(path)
-                if cached and cached[:4] == (digest, detection["pack"], termbase_version, decisions_version):
-                    chapter_result = cached[4]
-                    reused += 1
-                else:
-                    chapter_result = {"findings": [], "falsePositives": [], "limitations": [],
-                                      "checked": 0, "skipped": 0, "words": {}, "firstSeen": {}}
-                    if len(data) > MAX_CHAPTER_VERSES:
-                        chapter_result["limitations"].append("Chapter verse limit reached; remaining entries omitted.")
-                    for verse, text in itertools.islice(data.items(), MAX_CHAPTER_VERSES):
-                        if not self._yield(generation):
+                data, signature, _ = self._read(path)
+                cached = cache.get(chapter)
+                cached_verses = cached["verses"] if cached and cached.get("key") == key else {}
+                verses: dict[str, Any] = {}
+                fresh = 0
+                if len(data) > MAX_CHAPTER_VERSES:
+                    chapter_limitations.append("Chapter verse limit reached; remaining entries omitted.")
+                for verse, text in itertools.islice(data.items(), MAX_CHAPTER_VERSES):
+                    entry = cached_verses.get(verse)
+                    if entry is None or entry.get("hash") != verse_hash(text):
+                        if not proceed():
                             return None
-                        if not verse[:1].isdigit() or not isinstance(text, str):
-                            chapter_result["skipped"] += 1
-                            continue
-                        result = scan_text(text, book=book, chapter=path.stem, verse=verse,
-                                           tamil=detection["pack"] == "tamil", pack=rule_pack,
-                                           lists=HOUSE_STYLE_LISTS)
-                        verse_limitations = list(result["limitations"])
-                        verse_findings: list[dict[str, Any]] = []
-                        if not result["checked"]:
-                            chapter_result["skipped"] += 1
-                        else:
-                            chapter_result["checked"] += 1
-                            if detection["pack"] == "tamil":
-                                # Same visible text scan_text read; every span below is
-                                # translated back to raw code points, and one that would
-                                # cross lifted markup is dropped, as scan_text does.
-                                lifted, _ = lift_inline_usfm(text)
-                                assert lifted is not None  # scan_text checked this verse
-                                crossing = 0
-                                for word, w_start, w_end in word_occurrences(lifted.visible):
-                                    span = lifted.raw_span(w_start, w_end)
-                                    if span is None:
-                                        continue  # a word split by markup is not one word
-                                    chapter_result["words"][word] = chapter_result["words"].get(word, 0) + 1
-                                    chapter_result["firstSeen"].setdefault(word, (
-                                        path.stem, verse, *span, text[span[0]:span[1]], result["textHash"]))
-                                term_occurrences: dict[tuple[str, str], int] = {}
-                                for visible_match in terminology.find_deprecated_forms(lifted.visible, term_index):
-                                    span = lifted.raw_span(visible_match["start"], visible_match["end"])
-                                    if span is None:
-                                        crossing += 1
-                                        continue
-                                    match = {**visible_match, "start": span[0], "end": span[1],
-                                             "matchedText": text[span[0]:span[1]]}
-                                    key = ("terminology.deprecated-form", match["matchedText"])
-                                    term_occurrences[key] = term_occurrences.get(key, 0) + 1
-                                    # Always advance the counter above, even when this
-                                    # specific occurrence ends up suppressed below --
-                                    # otherwise a later, undecided occurrence of the
-                                    # same word in the same verse would shift onto a
-                                    # different, unstable id once an earlier one is
-                                    # ignored.
-                                    finding_id = stable_finding_id(
-                                        book, path.stem, verse, "terminology.deprecated-form",
-                                        match["matchedText"], term_occurrences[key])
-                                    preferred = ", ".join(match["preferredRenderings"]) or "no preferred form recorded yet"
-                                    note = f" {match['note']}" if match["note"] else ""
-                                    verse_findings.append({
-                                        "id": finding_id,
-                                        "book": book, "chapter": path.stem, "verse": verse,
-                                        "rule": "terminology.deprecated-form", "severity": "high",
-                                        "start": match["start"], "end": match["end"],
-                                        "originalText": match["matchedText"],
-                                        "message": (f'"{match["matchedText"]}" is marked deprecated for '
-                                                   f'{match["conceptId"]}. Preferred form: {preferred}.{note} '
-                                                   f'Verify this occurrence.'),
-                                        "textHash": result["textHash"], "ruleVersion": RULE_VERSION,
-                                        "status": "review-needed",
-                                        **rule_fields("terminology.deprecated-form", [
-                                            suggestion(match["suggestedReplacement"], "termbase",
-                                                       f'Preferred form for {match["conceptId"]}')
-                                        ] if match["suggestedReplacement"] else []),
-                                    })
-                                if crossing:
-                                    verse_limitations.append(f"{crossing} terminology {CROSSING_LIMITATION}")
-                        # A checked verse can still carry a limitation (a candidate
-                        # crossing markup, the per-verse finding limit): report it, and
-                        # keep the chapter out of the cache so it is retried.
-                        if verse_limitations and len(chapter_result["limitations"]) < 20:
-                            chapter_result["limitations"].extend(
-                                f"{verse}: {message}" for message in verse_limitations)
-                        # Decisions apply before the room slice, so a suppressed
-                        # finding never consumes budget it will never use.
-                        shown = apply_decisions(verse_findings + result["findings"], decisions,
-                                                chapter_result["falsePositives"])
-                        room = MAX_BOOK_FINDINGS - len(findings) - len(chapter_result["findings"])
-                        chapter_result["findings"].extend(shown[:max(0, room)])
-                        if len(shown) > room:
-                            chapter_result["limitations"].append("Book finding limit reached; remaining verses omitted.")
-                            break
-                    final = path.stat()
-                    if signature != (final.st_mtime_ns, final.st_size):
-                        raise ValueError("Chapter changed during checking; waiting for the next pass.")
-                # Even cached data is bounded by the current book's remaining room.
-                room = MAX_BOOK_FINDINGS - len(findings)
-                findings.extend(chapter_result["findings"][:room])
-                false_positives.extend(
-                    chapter_result.get("falsePositives", [])[:max(0, MAX_FALSE_POSITIVES - len(false_positives))])
-                checked += chapter_result["checked"]
-                skipped += chapter_result["skipped"]
-                for word, count in chapter_result["words"].items():
-                    book_counts[word] = book_counts.get(word, 0) + count
-                for word, location in chapter_result["firstSeen"].items():
-                    book_first_seen.setdefault(word, location)
-                limitations.extend(f"Chapter {path.stem}: {m}" for m in chapter_result["limitations"])
-                if chapter_result["skipped"] and not chapter_result["limitations"]:
-                    limitations.append(f"Chapter {path.stem}: non-verse or non-text entries omitted.")
-                # Retry limited/omitted chapters on subsequent passes; a preceding
-                # edit may have freed the book-wide result budget in the meantime.
-                if not chapter_result["limitations"]:
-                    cache[path.stem] = (digest, detection["pack"], termbase_version, decisions_version, chapter_result)
+                        entry = scan_verse(book, chapter, verse, text, tamil=tamil, pack=rule_pack,
+                                           lists=HOUSE_STYLE_LISTS, term_index=term_index)
+                        fresh += 1
+                    verses[verse] = entry
+                final = path.stat()
+                if signature != (final.st_mtime_ns, final.st_size):
+                    raise ValueError("Chapter changed during checking; waiting for the next pass.")
+                if fresh or set(verses) != set(cached_verses):
+                    cache[chapter] = {"key": key, "verses": verses}
+                    pending[chapter] = (key, verses)
+                    if len(pending) >= FLUSH_CHAPTERS:
+                        self._flush(store, pending, limitations)
+                else:
+                    reused += 1
+                scanned_verses += fresh
             except (OSError, ValueError, UnicodeError) as exc:
-                limitations.append(f"Chapter {path.stem}: {exc}")
+                limitations.append(f"Chapter {chapter}: {exc}")
+                continue
+            chapter_findings: list[dict[str, Any]] = []
+            chapter_skipped = 0
+            omitted = False
+            for verse, entry in verses.items():
+                if entry.get("limitations") and len(chapter_limitations) < 20:
+                    chapter_limitations.extend(f"{verse}: {message}" for message in entry["limitations"])
+                if entry.get("skipped"):
+                    chapter_skipped += 1
+                    continue
+                checked += 1
+                text = data.get(verse)
+                for word, (count, start, end) in entry.get("words", {}).items():
+                    book_counts[word] = book_counts.get(word, 0) + count
+                    if word not in book_first_seen and isinstance(text, str):
+                        book_first_seen[word] = (chapter, verse, start, end, text[start:end], entry["textHash"])
+                if omitted:
+                    continue
+                decided: dict[str, str] = {}
+                # Decisions apply before the room slice, so a suppressed
+                # finding never consumes budget it will never use.
+                shown = apply_decisions(entry.get("findings", []), decisions, false_positives, decided)
+                room = MAX_BOOK_FINDINGS - len(findings) - len(chapter_findings)
+                chapter_findings.extend(shown[:max(0, room)])
+                by_verse[f"{chapter}:{verse}"] = {"findings": shown[:max(0, room)], "decided": decided}
+                if len(shown) > room:
+                    chapter_limitations.append("Book finding limit reached; remaining verses omitted.")
+                    omitted = True
+            del false_positives[MAX_FALSE_POSITIVES:]
+            findings.extend(chapter_findings)
+            skipped += chapter_skipped
+            limitations.extend(f"Chapter {chapter}: {m}" for m in chapter_limitations)
+            if chapter_skipped and not chapter_limitations:
+                limitations.append(f"Chapter {chapter}: non-verse or non-text entries omitted.")
             if len(findings) >= MAX_BOOK_FINDINGS:
                 limitations.append("Book finding limit reached; additional findings/chapters may be omitted.")
                 truncated = True
@@ -602,25 +689,104 @@ class LanguageQaManager:
         elif len(book_counts) > MAX_WORDLIST_TERMS:
             limitations.append("Wordlist audit skipped: too many distinct words to compare.")
         else:
-            wordlist = apply_decisions(wordlist_findings(book, book_counts, book_first_seen),
-                                       decisions, false_positives)
+            for finding in wordlist_findings(book, book_counts, book_first_seen):
+                decided = {}
+                shown = apply_decisions([finding], decisions, false_positives, decided)
+                slot = by_verse.setdefault(f"{finding['chapter']}:{finding['verse']}",
+                                           {"findings": [], "decided": {}})
+                slot["decided"].update(decided)
+                if not shown:
+                    continue
+                if len(findings) >= MAX_BOOK_FINDINGS:
+                    limitations.append("Book finding limit reached; wordlist audit findings omitted.")
+                    break
+                findings.extend(shown)
+                slot["findings"].extend(shown)
             del false_positives[MAX_FALSE_POSITIVES:]
-            room = MAX_BOOK_FINDINGS - len(findings)
-            findings.extend(wordlist[:max(0, room)])
-            if len(wordlist) > room:
-                limitations.append("Book finding limit reached; wordlist audit findings omitted.")
+        self._flush(store, pending, limitations)
         with self._lock:
-            if self._cancelled(generation):
+            if cancelled is None and self._cancelled(generation):
                 return None
-            self._cache = cache
+            self._by_verse = by_verse
         return {"state": "completed", "language": detection, "findings": findings,
                 "falsePositives": false_positives, "inlineRules": inline_rule_names(rule_pack),
                 "rulePack": rule_pack.pack_version,
                 "recheckCount": sum(1 for f in findings if f.get("previouslyIgnored")),
                 "limitations": limitations, "incomplete": bool(limitations or skipped),
                 "checkedVerses": checked, "skippedVerses": skipped,
-                "reusedChapters": reused, "completedChapters": completed + 1,
+                "reusedChapters": reused, "scannedVerses": scanned_verses,
+                "completedChapters": completed + 1,
                 "totalChapters": len(paths), "_sourceSignature": source_signature}
+
+    def _load_cache(self, store: Any, limitations: list[str]) -> dict[str, dict[str, Any]]:
+        """The in-memory mirror of the persisted cache, read from the project
+        workbench once per bind."""
+        with self._lock:
+            if self._cache_loaded:
+                return self._cache
+        loaded: dict[str, dict[str, Any]] = {}
+        if store is not None:
+            try:
+                loaded = store[0]() or {}
+            except Exception as exc:
+                limitations.append(f"Saved Language QA results unavailable; rescanning: {exc}")
+        with self._lock:
+            if not self._cache_loaded:
+                self._cache = dict(loaded)
+                self._cache_loaded = True
+            return self._cache
+
+    @staticmethod
+    def _flush(store: Any, pending: dict[str, tuple[str, dict[str, Any]]], limitations: list[str]) -> None:
+        """Write the rescanned chapters, all in one transaction (at most
+        FLUSH_CHAPTERS). A failed write costs a rescan on the next reopen,
+        never a wrong result, so it is a coverage note only."""
+        if store is None or not pending:
+            pending.clear()
+            return
+        try:
+            store[1](dict(pending))
+        except Exception as exc:
+            if not any(m.startswith("Language QA results not saved") for m in limitations):
+                limitations.append(f"Language QA results not saved (they will be recomputed): {exc}")
+        pending.clear()
+
+    def run_pass(self, cancel_event: threading.Event | None = None) -> dict[str, Any] | None:
+        """The authoritative book pass, run by the check-job stage on the job's
+        own thread: the same scan and the same cache as the background worker,
+        serialised with it by the pass lock. Returns None when cancelled or when
+        nothing is bound. Publishes its result to the panel like a worker pass."""
+        with self._lock:
+            context = self._context
+            generation = self._generation
+            if context is not None and self._blocked_reason:
+                # Recovery must finish first; the stage then reports nothing.
+                return copy.deepcopy(self._summary)
+        if context is None:
+            return None
+        started = time.monotonic()
+        result = self._scan(generation, context, yielding=False, cancelled=lambda: (
+            (cancel_event is not None and cancel_event.is_set()) or self._context != context))
+        if result is None:
+            return None
+        source_signature = result.pop("_sourceSignature", None)
+        result["elapsedSeconds"] = round(time.monotonic() - started, 3)
+        with self._lock:
+            if self._context == context and generation == self._generation and not self._paused:
+                # Nothing changed while the job ran: this is the current result.
+                self._generation += 1
+                self._summary = result
+                if source_signature is not None:
+                    self._source_signature = source_signature
+                self._last_scan = time.monotonic()
+        return result
+
+    def verse_results(self, chapter: str, verse: str) -> dict[str, Any]:
+        """The last pass's findings for one verse: `findings` (open, after
+        decisions) and `decided` (finding id -> the decision that hides it)."""
+        with self._lock:
+            slot = self._by_verse.get(f"{chapter}:{verse}") or {"findings": [], "decided": {}}
+            return copy.deepcopy(slot)
 
     def _run(self) -> None:
         while True:

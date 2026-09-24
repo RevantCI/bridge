@@ -30,7 +30,7 @@
     aiCheckReviewsByVerse, diagnosticsOpen, engineLog, appendEngineLog, navigationStatus,
   } from "./lib/stores";
   import { editingChapter, editingVerse, editSaving } from "./lib/verseEditor";
-  import { startLanguageQaInline } from "./lib/languageQaInline";
+  import { nudgeLanguageQa, startLanguageQaInline } from "./lib/languageQaInline";
 
   let opened = false;
   let engineStatus: "checking" | "ready" | "error" = "checking";
@@ -714,6 +714,9 @@
     }
 
     const terminal = ["succeeded", "failed", "cancelled"].includes(snapshot.state);
+    // The job's Language QA pass published a new generation: redraw the marks
+    // now rather than at the channel's next idle tick.
+    if (terminal && snapshot.checks.includes("languageQa")) nudgeLanguageQa();
     if (terminal) {
       checkStatusByVerse.update((existing) => {
         const next = { ...existing };
@@ -788,7 +791,9 @@
 
   async function beginChecks(scope: "chapter" | "book", chapters: string[]): Promise<void> {
     if (activeJobId) return;
-    const snapshot = await bridge.startChecks(scope, chapters, ["local", "greekroom"]);
+    // Language QA is a stage of the same job (layered-rules Phase 4.1): its
+    // pass is the authoritative one and shares the live-edit path's cache.
+    const snapshot = await bridge.startChecks(scope, chapters, ["local", "greekroom", "languageQa"]);
     activeJobId = snapshot.jobId;
     const generation = ++monitorGeneration;
     markJobPending(snapshot);

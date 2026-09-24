@@ -196,4 +196,18 @@ deferred, not rejected; anything in the UI that assumes several users on one mac
 **Rules out:** deriving the name list from the adapter at scan time.
 **Revisit when:** Phase 6 builds the name pack from a curated source.
 
+## 2026-09-24 — The persisted Language QA scan is its own workbench table, holding results before decisions
+
+**Decision:** Language QA results persist in a new `language_qa_cache` table (workbench v4), one row per chapter. Each row holds every verse's raw findings keyed by the verse's text hash. Decisions are applied on every pass, never cached.
+**Because:** the brief named `check_cache`. But every reader of that table (`load_check_cache`: USFM, names, QA report, triage, analytics) loads all of a book's rows, and 150 chapter payloads would ride on each of those reads. Caching before decisions means a decision rescans nothing, and a live edit rescans only the edited verse.
+**Rules out:** storing Language QA sections in `check_cache`; decision state inside the cache key.
+**Revisit when:** `check_cache` gains per-section reads.
+
+## 2026-09-24 — The Language QA job stage runs outside `_checker_lock`
+
+**Decision:** The check-job stage runs the Language QA book pass on the job's thread in its preflight. It is serialised with the background worker by Language QA's own pass lock, not by `_checker_lock`.
+**Because:** the dispatcher takes `_checker_lock` for `verse.runChecks`, so holding it for a book pass would make a save wait seconds. This violates the performance contract. The brief asked for `_checker_lock`; the pass lock gives the same guarantee, one authoritative pass at a time, without that cost.
+**Rules out:** a second concurrent Language QA worker; blocking the dispatcher on Language QA.
+**Revisit when:** Language QA needs a resource that `_checker_lock` guards.
+
 <!-- New entries go above this line. -->

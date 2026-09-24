@@ -21,6 +21,7 @@ from tc_ai_bridge.workbench_repository import (
     WorkbenchRepository,
     _MIGRATION_V1,
     _MIGRATION_V2,
+    _MIGRATION_V3,
 )
 from tests.persistence.test_workbench_repository import _REQUIRED_EXTRA_COLUMNS, _write
 
@@ -188,7 +189,7 @@ def test_workbench_v1_to_v2_keeps_v1_rows_readable_and_the_log_immutable(tmp_pat
         conn.close()
 
     repo = WorkbenchRepository(path)
-    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 3
+    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 4
     assert json.loads(repo.get("check_cache", "c1")["payload_json"]) == {"v": 1}
     [event] = _events(repo)
     assert event["columns_json"] is None and event["event_id"] == "e1"
@@ -244,7 +245,7 @@ def test_workbench_v2_to_v3_adds_the_cross_verse_link_table_and_keeps_v2_data(tm
         conn.close()
 
     repo = WorkbenchRepository(path)
-    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 3
+    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 4
     assert json.loads(repo.get("alignment_history", "a1")["payload_json"]) == {"operation": "realign"}
     [event] = _events(repo)
     assert event["event_id"] == "e1" and json.loads(event["columns_json"]) == {"chapter": "1"}
@@ -261,3 +262,32 @@ def test_workbench_v2_to_v3_adds_the_cross_verse_link_table_and_keeps_v2_data(tm
     # The pair is unique per project/book: a second row for the same pair is refused.
     with pytest.raises(sqlite3.IntegrityError):
         _write(repo, "alignment_cross_verse_links", "l2", payload={"state": "active"}, extra_columns=lifted)
+
+
+def test_workbench_v3_to_v4_adds_the_language_qa_cache_one_row_per_chapter(tmp_path):
+    """v4 (#169 Phase 4.1) adds `language_qa_cache`: a v3 database comes up at
+    v4 with a backup, and the table is an ordinary mutable table whose
+    (project, book, chapter) is unique."""
+    path = tmp_path / "bridge-workbench.sqlite3"
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute(
+            "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, schema_id TEXT NOT NULL, applied_at TEXT NOT NULL)"
+        )
+        conn.executescript(
+            "BEGIN;\n" + _MIGRATION_V1
+            + "\nINSERT INTO schema_migrations(version,schema_id,applied_at) VALUES(1,'bridge-workbench-v1','t');\n"
+            + _MIGRATION_V2
+            + "\nINSERT INTO schema_migrations(version,schema_id,applied_at) VALUES(2,'bridge-workbench-v1','t');\n"
+            + _MIGRATION_V3
+            + "\nINSERT INTO schema_migrations(version,schema_id,applied_at) VALUES(3,'bridge-workbench-v1','t');\nCOMMIT;"
+        )
+    finally:
+        conn.close()
+    repo = WorkbenchRepository(path)
+    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 4
+    assert list((tmp_path / "backups").glob("pre-workbench-v4-*"))
+    _write(repo, "language_qa_cache", "c1", payload={"verses": {}}, extra_columns={"chapter": "1"})
+    assert repo.get("language_qa_cache", "c1")["chapter"] == "1"
+    with pytest.raises(sqlite3.IntegrityError):
+        _write(repo, "language_qa_cache", "c2", payload={"verses": {}}, extra_columns={"chapter": "1"})
