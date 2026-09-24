@@ -123,6 +123,31 @@
           {#if status.language} · {status.language.script.toLowerCase()} script{/if}
         </p>
         {#if status.language}<p>{detectionLabels[status.language.basis] ?? ""}</p>{/if}
+        {#if status.coverage?.inScope}
+          <!-- Always shown, so a clean result is never read as a review (Phase 7). -->
+          <div class="scope" aria-label="What Language QA checks">
+            <div>
+              <h3>Checks · <span lang="ta">சரிபார்ப்பவை</span></h3>
+              <ul>
+                {#each status.coverage.inScope as row (row.category)}
+                  <li>{row.label} · <span lang="ta">{row.labelTa}</span></li>
+                {/each}
+              </ul>
+            </div>
+            <div>
+              <h3>Does not check · <span lang="ta">சரிபார்க்காதவை</span></h3>
+              <ul>
+                {#each status.coverage.outOfScope as row (row.category)}
+                  <li title={row.reason}>
+                    {row.label} · <span lang="ta">{row.labelTa}</span>
+                    <span class="reason">{row.reason} <span lang="ta">{row.reasonTa}</span></span>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+            <p class="muted">Who checks these before publication: {status.coverage.handOff}</p>
+          </div>
+        {/if}
         <p>{status.language?.message ?? (status.state === "paused" ? "Checks paused. Resume when ready." : "Preparing language checks…")}</p>
         <p>
           {status.state} · {status.completedChapters ?? 0}/{status.totalChapters ?? 0} chapters
@@ -185,7 +210,7 @@
             <button on:click={() => turnPage(50)} disabled={busy || offset + 50 >= status.totalFindings}>Next</button>
           </div>
         {/if}
-        <p class="muted">{status.coverage} {status.storage}</p>
+        <p class="muted">{status.coverage?.summary ?? ""} {status.storage}</p>
       {/if}
     </section>
   {/if}
@@ -214,4 +239,11 @@
   .history-toggle { font-size: 11px; padding: 2px 6px; }
   .notice { font-weight: 600; }
   .muted { opacity: .75; }
+  .scope { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin: 8px 0; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+  .scope h3 { font-size: 12px; margin: 0 0 4px; }
+  .scope ul { margin: 0; padding-left: 16px; }
+  .scope li { padding: 2px 0; border: 0; }
+  .scope .reason { display: block; font-size: 11px; opacity: .75; }
+  .scope p { grid-column: 1 / -1; margin: 4px 0 0; }
+  @media (max-width: 480px) { .scope { grid-template-columns: 1fr; } }
 </style>

@@ -862,6 +862,24 @@ def test_status_rejects_an_unknown_view(vallinam_engine):
     assert not response["success"]
 
 
+def test_status_states_what_language_qa_does_and_does_not_check(vallinam_engine):
+    """Phase 7: the coverage block is structured, bilingual, and covers every
+    category, so the panel's in-scope list can never drift from the engine."""
+    engine, _, project = vallinam_engine
+    response = call(engine, "languageQa.status", {"projectPath": str(project)})
+    assert response["success"]
+    cover = response["result"]["coverage"]
+    assert [row["category"] for row in cover["inScope"]] == list(CATEGORIES)
+    assert {row["category"] for row in cover["outOfScope"]} >= {
+        "agreement", "meaning-shift", "omission-addition", "textual-basis"}
+    for row in cover["inScope"] + cover["outOfScope"]:
+        assert row["label"] and row["labelTa"]
+    for row in cover["outOfScope"]:
+        assert row["reason"] and row["reasonTa"]
+    assert not {row["category"] for row in cover["outOfScope"]} & set(CATEGORIES)
+    assert (REPO_ROOT / cover["handOff"]).is_file()
+
+
 # ---- Phase 1.4: decision history ----
 
 def test_history_lists_every_decision_on_a_finding_in_order(vallinam_engine):

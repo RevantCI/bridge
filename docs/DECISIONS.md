@@ -257,4 +257,11 @@ An entry may hide findings, add list members, reorder suggestions, or propose a 
 **Rules out:** deleting house style; a project-scope store outside the books (a lazy book misses an entry until it is accepted again, documented in LANGUAGE_QA_HOUSESTYLE.md).
 **Revisit when:** the team hub (TEAM_ARCHITECTURE §7) gives a project-level store.
 
+## 2026-09-24 — Language QA states its own boundary, permanently
+
+**Decision:** Every Language QA status carries a structured `coverage` from `language_qa.coverage()`: the categories it checks, and the ones it never checks (agreement, pronoun/number shifts, meaning shifts, omissions/additions, textual basis, theology). Each item is in Tamil and English, and the statement names a hand-off doc. The panel shows it whenever it is open, not behind a disclosure. The out-of-scope list is a permanent boundary of the offline engine (LANGUAGE_QA_PLAN LQA-3), not a backlog.
+**Because:** a clean text-only scan says nothing about meaning or agreement. The brief (Phase 7) requires the boundary to be visible, so a clean result is not taken for a review.
+**Rules out:** offline heuristics for the out-of-scope items; a "Coverage details" disclosure that hides the boundary; English-only wording for a Tamil team.
+**Revisit when:** a native reviewer has checked the Tamil strings (pending), or a project supplies its own hand-off procedure.
+
 <!-- New entries go above this line. -->

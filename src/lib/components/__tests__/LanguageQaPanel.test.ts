@@ -21,7 +21,14 @@ function snapshot(overrides: Partial<LanguageQaStatus> = {}): LanguageQaStatus {
     projectPath: "C:/project", book: "php", generation: 1, state: "completed",
     ruleVersion: "language-qa-1", totalFindings: 1, offset: 0,
     completedChapters: 1, totalChapters: 1, limitations: [],
-    coverage: "Technical checks; no grammar certification.", storage: "Session results.",
+    coverage: {
+      inScope: [{ category: "sandhi", label: "Sandhi", labelTa: "சந்திப் பிழைகள்" }],
+      outOfScope: [{ category: "agreement", label: "Agreement", labelTa: "திணை, பால், எண் இயைபு",
+        reason: "Checked in the Round 2 review.", reasonTa: "இரண்டாம் சுற்றில்." }],
+      handOff: "docs/LANGUAGE_QA_REVIEW_HANDOFF.md",
+      summary: "Technical checks; no grammar certification.",
+    },
+    storage: "Session results.",
     language: { declared: "tam", language: "tam", script: "TAMIL", basis: "metadata",
       pack: "tamil", message: "Tamil character rules available." },
     findings: [lqaFinding({ id: "f1", chapter: "2", verse: "3-4", rule: "unicode.corruption",
@@ -90,6 +97,22 @@ describe("Language QA", () => {
     await fireEvent.click(await screen.findByRole("button", { name: /Language QA · completed/ }));
     expect(screen.getByText(/Coverage incomplete/)).toBeTruthy();
     expect(screen.getByText(/not publication approval/)).toBeTruthy();
+  });
+
+  it("always states what it checks and what it does not, in Tamil and English", async () => {
+    publish({ totalFindings: 0, findings: [] });
+    statusCall.mockResolvedValue(snapshot({ totalFindings: 0, findings: [] }));
+    render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
+    await fireEvent.click(await screen.findByRole("button", { name: /Language QA · completed/ }));
+    const scope = screen.getByLabelText("What Language QA checks");
+    expect(scope.textContent).toContain("Sandhi");
+    expect(scope.textContent).toContain("சந்திப் பிழைகள்");
+    expect(scope.textContent).toContain("Does not check");
+    expect(scope.textContent).toContain("திணை, பால், எண் இயைபு");
+    expect(scope.textContent).toContain("Checked in the Round 2 review.");
+    expect(scope.textContent).toContain("docs/LANGUAGE_QA_REVIEW_HANDOFF.md");
+    // Not behind a disclosure: visible whether or not there are findings.
+    expect(scope.closest("details")).toBeNull();
   });
 
   it("pauses through the project-guarded endpoint", async () => {

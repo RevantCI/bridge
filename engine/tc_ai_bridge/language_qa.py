@@ -79,6 +79,57 @@ LAYERS = ("pattern", "lexicon", "housestyle", "integrity")
 CATEGORIES = ("typo", "sandhi", "word-joining", "punctuation", "unicode", "spacing", "termbase", "name")
 CONFIDENCES = ("high", "medium", "low")
 
+# What Language QA checks and what it never checks (layered-rules Phase 7).
+# Shown permanently in the panel, so a clean result cannot be read as a
+# review. The out-of-scope items need the source text, a reference or human
+# judgement, and must never be checked offline (LANGUAGE_QA_PLAN.md LQA-3).
+# The Tamil strings are pending native review (BUILD_LOG Phase 7).
+COVERAGE_HANDOFF = "docs/LANGUAGE_QA_REVIEW_HANDOFF.md"
+_IN_SCOPE_LABELS = {
+    "typo": ("Spelling and typing errors", "எழுத்துப் பிழைகள், தட்டச்சுப் பிழைகள்"),
+    "sandhi": ("Sandhi (வல்லினம் doubling)", "சந்திப் பிழைகள் (வல்லினம் மிகுதல்)"),
+    "word-joining": ("Words joined or split", "சொற்கள் சேர்ந்தும் பிரிந்தும் எழுதப்படுதல்"),
+    "punctuation": ("Punctuation", "நிறுத்தற்குறிகள்"),
+    "unicode": ("Unicode and encoding", "யூனிகோடு, குறியாக்கம்"),
+    "spacing": ("Spacing", "இடைவெளி"),
+    "termbase": ("Approved key terms", "அங்கீகரிக்கப்பட்ட முக்கியச் சொற்கள்"),
+    "name": ("Proper-name spelling", "பெயர்ச்சொல் எழுத்துக்கூட்டல்"),
+}
+_OUT_OF_SCOPE = (
+    ("agreement", "Agreement: திணை, பால், எண் (subject–verb, person, gender, number)",
+     "திணை, பால், எண் இயைபு (எழுவாய்–பயனிலை)",
+     "Needs grammatical judgement of the whole clause; checked in the Round 2 linguistic review.",
+     "முழு வாக்கியத்தின் இலக்கண மதிப்பீடு தேவை; இரண்டாம் சுற்று மொழியியல் மதிப்பாய்வில் சரிபார்க்கப்படும்."),
+    ("pronoun-number-shift", "Pronoun and number shifts against the source",
+     "மூலத்தோடு ஒப்பிடும்போது பதிலிடுபெயர், எண் மாற்றங்கள்",
+     "Needs the source text; checked by Round 2 review and the consultant.",
+     "மூல உரை தேவை; இரண்டாம் சுற்று மதிப்பாய்வும் ஆலோசகரும் சரிபார்ப்பர்."),
+    ("meaning-shift", "Meaning shifts", "பொருள் மாற்றங்கள்",
+     "Needs the source text and human judgement; checked by the consultant (Stage 7 shows candidates).",
+     "மூல உரையும் மனித மதிப்பீடும் தேவை; ஆலோசகர் சரிபார்ப்பார்."),
+    ("omission-addition", "Source words missed or added", "மூலச் சொற்கள் விடுபடுதல், சேர்க்கப்படுதல்",
+     "Needs the source text; checked by the consultant (Stage 8 shows candidates).",
+     "மூல உரை தேவை; ஆலோசகர் சரிபார்ப்பார்."),
+    ("textual-basis", "Textual-basis differences", "மூலபாட அடிப்படை வேறுபாடுகள்",
+     "Needs the source editions; checked in the consultant's textual-basis review.",
+     "மூலப் பதிப்புகள் தேவை; ஆலோசகரின் மூலபாட மதிப்பாய்வில் சரிபார்க்கப்படும்."),
+    ("theology", "Theological consistency", "இறையியல் ஒத்திசைவு",
+     "Needs human judgement; checked by the consultant with the termbase and tW.",
+     "மனித மதிப்பீடு தேவை; சொற்களஞ்சியம், tW உதவியுடன் ஆலோசகர் சரிபார்ப்பார்."),
+)
+
+
+def coverage() -> dict[str, Any]:
+    """The structured coverage statement every Language QA status carries."""
+    return {
+        "inScope": [{"category": c, "label": _IN_SCOPE_LABELS[c][0], "labelTa": _IN_SCOPE_LABELS[c][1]}
+                    for c in CATEGORIES],
+        "outOfScope": [{"category": c, "label": label, "labelTa": label_ta, "reason": reason, "reasonTa": reason_ta}
+                       for c, label, label_ta, reason, reason_ta in _OUT_OF_SCOPE],
+        "handOff": COVERAGE_HANDOFF,
+        "summary": "Enabled technical checks only; no grammar or publication certification.",
+    }
+
 RULES: dict[str, RuleMeta] = {
     "unicode.nfc": RuleMeta("common", "integrity", "unicode", "low"),
     "unicode.corruption": RuleMeta("common", "integrity", "unicode", "high"),

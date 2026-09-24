@@ -102,6 +102,16 @@ export interface LanguageQaHistory {
   entries: LanguageQaHistoryEntry[];
 }
 
+/** What Language QA checks and what it never checks (language_qa.coverage(),
+ * layered-rules Phase 7). The panel shows it permanently. */
+export interface LanguageQaCoverage {
+  inScope: { category: string; label: string; labelTa: string }[];
+  outOfScope: { category: string; label: string; labelTa: string; reason: string; reasonTa: string }[];
+  /** Repo path of the doc naming who checks each out-of-scope item. */
+  handOff: string;
+  summary: string;
+}
+
 export interface LanguageQaStatus {
   projectPath: string;
   /** The list this page came from; totalFindings counts that list. */
@@ -130,7 +140,7 @@ export interface LanguageQaStatus {
   incomplete?: boolean;
   limitations: string[];
   error?: string;
-  coverage: string;
+  coverage: LanguageQaCoverage;
   storage: string;
   /** The engine's list of rules that carry an inline span (INLINE_RULES in
    * language_qa.py) -- the one authority for which findings are drawn in the

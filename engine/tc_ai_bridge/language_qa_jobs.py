@@ -20,7 +20,7 @@ from .language_packs import default_pack, load_project_overrides, loaded_pack
 from .language_packs.lexicon import default_lexicon, lexicon_findings
 from .language_packs.loader import apply_overrides
 from .language_qa import (CROSSING_LIMITATION, FINDING_SOURCE, INLINE_RULES, MAX_VERSE_CHARS, MAX_WORDLIST_TERMS,
-                          inline_rule_names, rule_fields, suggestion,
+                          coverage, inline_rule_names, rule_fields, suggestion,
                           RULE_VERSION, detect_language, lift_inline_usfm, scan_text,
                           stable_finding_id, word_occurrences, wordlist_findings)
 
@@ -500,7 +500,7 @@ class LanguageQaManager:
                 "inlineRules": self._inline_rules(),
                 "totalFindings": len(findings), "offset": offset,
                 "findings": findings[offset:offset + limit],
-                "coverage": "Enabled technical checks only; no grammar or publication certification.",
+                "coverage": coverage(),
                 "storage": ("Persisted in the project workbench." if self._store is not None
                             else "Session results; regenerated on reopen."),
             })

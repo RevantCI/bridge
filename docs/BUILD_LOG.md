@@ -12567,3 +12567,51 @@ a Use of a finding decided again later is still listed.
 - **Not covered by a test:** proposals across 66 real books. Settings opens
   every materialized sibling's workbench to compute them, on the dispatcher.
   That is fine for a few books and unmeasured for a Bible.
+- **Full gates:**
+  - engine suite: 2230 passed;
+  - svelte-check: 0 errors, 0 warnings;
+  - Vitest: 554 passed;
+  - `npm run build`: ok;
+  - `cargo check`: ok, and `cargo test`: 10 passed.
+
+## 2026-09-24 — Layered-rules Phase 7: what Language QA does and does not check
+
+**What changed.** `languageQa.status` used to carry `coverage` as a single
+sentence. It now carries `language_qa.coverage()`, a structured statement
+with four fields:
+- `inScope`: one row per engine category (`CATEGORIES`), with an English and
+  a Tamil label;
+- `outOfScope`: agreement (திணை/பால்/எண்), pronoun and number shifts, meaning
+  shifts, omissions and additions, textual basis, and theology. Each row has
+  a label and a reason in both languages;
+- `handOff`: the path `docs/LANGUAGE_QA_REVIEW_HANDOFF.md`;
+- `summary`: the old sentence.
+
+**In the panel.** The open Language QA panel shows "Checks / சரிபார்ப்பவை"
+and "Does not check / சரிபார்க்காதவை" directly under the language line. The
+block is not behind a disclosure, and it is there whether or not the book
+has findings. A clean result can therefore not be read as a review.
+
+**Where the boundary is recorded.** `LANGUAGE_QA_PLAN.md` LQA-3 now records
+that these items must never be checked by the offline engine. A request to
+add one is an architecture question to raise, not a rule to write.
+
+**Tamil strings: pending native review.** The Tamil labels and reasons were
+written by an AI assistant. A native Tamil reviewer must check them before
+release. They live in one place, `_IN_SCOPE_LABELS` and `_OUT_OF_SCOPE` in
+`language_qa.py`.
+
+**The hand-off doc is a placeholder.** The project's own Round 2 procedure
+should be linked there. The doc path is shown as text, because the desktop
+app has no in-app doc viewer.
+
+**Verification.**
+- `test_status_states_what_language_qa_does_and_does_not_check` checks four
+  things:
+  - `inScope` equals `CATEGORIES`;
+  - the key out-of-scope items are present;
+  - every row is bilingual, and no category is both in and out of scope;
+  - the hand-off file exists.
+- A `LanguageQaPanel.test.ts` test checks that the block is visible with no
+  findings, holds both languages and the reason, and is not inside a
+  `<details>`.

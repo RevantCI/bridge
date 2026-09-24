@@ -33,7 +33,8 @@ function inline(findings: LanguageQaFinding[], overrides: Partial<LanguageQaInli
 function status(overrides: Partial<LanguageQaStatus> = {}): LanguageQaStatus {
   return {
     projectPath: "C:/project", book: "php", generation: 1, state: "completed", ruleVersion: "language-qa-7",
-    findings: [], totalFindings: 0, offset: 0, limitations: [], coverage: "", storage: "", ...overrides,
+    findings: [], totalFindings: 0, offset: 0, limitations: [],
+    coverage: { inScope: [], outOfScope: [], handOff: "", summary: "" }, storage: "", ...overrides,
   };
 }
 
