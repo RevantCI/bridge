@@ -43,8 +43,43 @@ LQA-1 results are disposable in-memory analysis, automatically regenerated on
 reopen. They are not review decisions, and no audit history is deleted. Durable
 review dispositions and cross-session caches belong to a later approved workbench
 migration. Preserved original USFM is not current edited Scripture: scan target
-chapter JSON. Inline USFM is conservatively excluded from this first text pass;
-the report discloses that omission. Dedicated USFM checks remain authoritative.
+chapter JSON. Dedicated USFM checks remain authoritative for the markup itself.
+
+### Coverage of verses with inline USFM (2026-09-24)
+
+Verses with inline USFM are scanned. Until 2026-09-24 any verse containing a
+backslash was skipped, which left every footnoted verse unchecked.
+`language_qa.lift_inline_usfm` now builds the text a reader sees:
+
+- `\f … \f*` and `\x … \x*` are removed with their contents. It uses the same
+  pattern and the same swallow-one-space rule as the frontend's
+  `parseVerseNotes`, and a shared test table in both suites keeps them in step.
+- Character markers (`\wj`, `\add`, `\nd`, `\qt`, `\w`, nested `\+…`, closers,
+  milestones) are removed and their content is kept.
+- Word attributes (`|lemma="…"`) are dropped.
+
+Every rule reads that visible text: the character rules, வல்லினம், the termbase
+and the wordlist counts. Every finding is reported in exact raw code points, so
+`originalText == verse[start:end]` and a suggested fix splices the raw verse
+unchanged.
+
+Remaining limitations, all reported rather than hidden:
+
+- **Crossing candidates.** A candidate whose span would cross lifted markup is
+  dropped, for example a வல்லினம் boundary with `\wj*` between the two words.
+  No single raw span can hold it without covering markup. The verse records
+  `N candidate(s) spanning inline USFM markup omitted.`
+- **Markup that cannot be lifted safely.** The verse is skipped, with its reason
+  named, when:
+  - paired markers are unbalanced (`usfm.marker_balance_issues`, for example
+    `Unbalanced \f: 1 open, 0 close; verse not checked.`);
+  - note markup such as `\ft` sits outside a complete note;
+  - a backslash is not a marker;
+  - word attributes (`|…`) are not closed by a marker. One local development
+    project does this, with a custom `\zsem-s |…"*` milestone closed by a bare
+    `*`; scanning it would treat its Greek and English glosses as Scripture.
+- **Note text is not checked.** Footnote and cross-reference contents are not
+  scanned by this pass.
 
 Budgets to verify: under 100 KiB new runtime source; no dependency change; bounded
 2 MiB chapter input, 20,000 code points per verse, 100 findings per verse, 3,000

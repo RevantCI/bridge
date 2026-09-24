@@ -25,6 +25,7 @@ import {
   aiCheckReviewsByVerse,
   selectedVerse,
   verseKey,
+  languageQaFindingsByVerse,
 } from "../../stores";
 import { alignmentOpen, alignmentKey } from "../../alignmentUi";
 import { editingChapter, editingVerse, editSaving, recheckingKey } from "../../verseEditor";
@@ -203,6 +204,36 @@ describe("VerseList footnote handling", () => {
     render(VerseList, { props: { onSelect: vi.fn() } });
     const marks = Array.from(document.querySelectorAll("mark")).map((m) => m.textContent);
     expect(marks).toContain(word);
+  });
+
+  it("applies a Language QA fix after a footnote at the raw offset, not the display one", async () => {
+    // Regression: the menu used to receive the display-shifted copy of the
+    // finding, so the fix spliced the raw verse at the wrong place and its
+    // own staleness guard refused it. Use must equal a manual raw splice.
+    const raw = "அவன் சொன்னான்\\f + \\ft குறிப்பு\\f* அந்த காகம் பறந்தது.";
+    const flagged = "அந்த காகம்";
+    const points = Array.from(raw);
+    const start = Array.from(raw.slice(0, raw.indexOf(flagged))).length;
+    const end = start + Array.from(flagged).length;
+    seed(raw);
+    languageQaFindingsByVerse.set({ "1:6": [{
+      id: "lqa-1", book: "php", chapter: "1", verse: "6", rule: "tamil.vallinam-missing",
+      severity: "medium", start, end, originalText: flagged, message: "Possible missing வல்லினம்.",
+      textHash: "h", ruleVersion: "language-qa-6", status: "review-needed",
+      suggestedReplacement: "அந்தக் காகம்",
+    }] });
+    try {
+      render(VerseList, { props: { onSelect: vi.fn() } });
+      const mark = document.querySelector("mark.m-vallinam") as HTMLElement;
+      expect(mark.textContent).toBe(flagged);
+      await fireEvent.contextMenu(mark);
+      await fireEvent.click(screen.getByRole("menuitem", { name: 'Use "அந்தக் காகம்"' }));
+      const manual = points.slice(0, start).join("") + "அந்தக் காகம்" + points.slice(end).join("");
+      expect(editVerse).toHaveBeenCalledWith("1", "6", manual);
+      expect(manual).toContain("\\f + \\ft குறிப்பு\\f* அந்தக் காகம் பறந்தது.");
+    } finally {
+      languageQaFindingsByVerse.set({});
+    }
   });
 
   it("offers exactly the two actions the review panel offers", async () => {

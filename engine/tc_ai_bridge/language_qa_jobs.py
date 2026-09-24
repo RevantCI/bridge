@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import terminology
-from .language_qa import (INLINE_RULES, MAX_WORDLIST_TERMS, RULE_VERSION, detect_language,
-                          scan_text, stable_finding_id, word_occurrences, wordlist_findings)
+from .language_qa import (CROSSING_LIMITATION, INLINE_RULES, MAX_VERSE_CHARS, MAX_WORDLIST_TERMS,
+                          RULE_VERSION, detect_language, lift_inline_usfm, scan_text,
+                          stable_finding_id, word_occurrences, wordlist_findings)
 
 MAX_CHAPTER_BYTES = 2 * 1024 * 1024
 MAX_BOOK_FINDINGS = 3000
@@ -121,7 +122,7 @@ class LanguageQaManager:
             generation = self._generation
         if resumable:
             # Nothing forced a real edit while paused. A content-limited
-            # chapter (e.g. inline USFM) never qualifies for _scan's cache,
+            # chapter (e.g. unbalanced inline USFM) never qualifies for _scan's cache,
             # so resuming unconditionally would redo that pass for the exact
             # same result — visible as the whole book restarting from zero.
             signature = self._chapter_signature(context[3])
@@ -290,8 +291,10 @@ class LanguageQaManager:
             try:
                 data, _, _ = self._read(path)
                 for verse, text in itertools.islice(data.items(), MAX_CHAPTER_VERSES):
-                    if isinstance(text, str) and "\\" not in text and verse[:1].isdigit():
-                        sample += text[:20_000 - len(sample)]
+                    if isinstance(text, str) and verse[:1].isdigit() and len(text) <= MAX_VERSE_CHARS:
+                        lifted, _ = lift_inline_usfm(text)
+                        if lifted is not None:
+                            sample += lifted.visible[:20_000 - len(sample)]
                     if len(sample) >= 20_000:
                         break
             except (OSError, ValueError, UnicodeError):
@@ -365,21 +368,33 @@ class LanguageQaManager:
                             continue
                         result = scan_text(text, book=book, chapter=path.stem, verse=verse,
                                            tamil=detection["pack"] == "tamil")
-                        if result["limitations"]:
+                        verse_limitations = list(result["limitations"])
+                        if not result["checked"]:
                             chapter_result["skipped"] += 1
-                            if len(chapter_result["limitations"]) < 20:
-                                chapter_result["limitations"].extend(
-                                    f"{verse}: {message}" for message in result["limitations"])
                         else:
                             chapter_result["checked"] += 1
                             if detection["pack"] == "tamil":
-                                for word, w_start, w_end in word_occurrences(text):
+                                # Same visible text scan_text read; every span below is
+                                # translated back to raw code points, and one that would
+                                # cross lifted markup is dropped, as scan_text does.
+                                lifted, _ = lift_inline_usfm(text)
+                                assert lifted is not None  # scan_text checked this verse
+                                crossing = 0
+                                for word, w_start, w_end in word_occurrences(lifted.visible):
+                                    span = lifted.raw_span(w_start, w_end)
+                                    if span is None:
+                                        continue  # a word split by markup is not one word
                                     chapter_result["words"][word] = chapter_result["words"].get(word, 0) + 1
                                     chapter_result["firstSeen"].setdefault(word, (
-                                        path.stem, verse, w_start, w_end,
-                                        text[w_start:w_end], result["textHash"]))
+                                        path.stem, verse, *span, text[span[0]:span[1]], result["textHash"]))
                                 term_occurrences: dict[tuple[str, str], int] = {}
-                                for match in terminology.find_deprecated_forms(text, term_index):
+                                for visible_match in terminology.find_deprecated_forms(lifted.visible, term_index):
+                                    span = lifted.raw_span(visible_match["start"], visible_match["end"])
+                                    if span is None:
+                                        crossing += 1
+                                        continue
+                                    match = {**visible_match, "start": span[0], "end": span[1],
+                                             "matchedText": text[span[0]:span[1]]}
                                     key = ("terminology.deprecated-form", match["matchedText"])
                                     term_occurrences[key] = term_occurrences.get(key, 0) + 1
                                     # Always advance the counter above, even when this
@@ -418,6 +433,14 @@ class LanguageQaManager:
                                         "status": "review-needed",
                                         "suggestedReplacement": match["suggestedReplacement"],
                                     })
+                                if crossing:
+                                    verse_limitations.append(f"{crossing} terminology {CROSSING_LIMITATION}")
+                        # A checked verse can still carry a limitation (a candidate
+                        # crossing markup, the per-verse finding limit): report it, and
+                        # keep the chapter out of the cache so it is retried.
+                        if verse_limitations and len(chapter_result["limitations"]) < 20:
+                            chapter_result["limitations"].extend(
+                                f"{verse}: {message}" for message in verse_limitations)
                         # Same "ignored" is sticky, "accepted" is not distinction as the
                         # terminology block above, scoped narrowly to this one rule --
                         # not a general suppression framework for every scan_text rule.

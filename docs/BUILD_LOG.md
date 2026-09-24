@@ -10877,3 +10877,128 @@ chapter on screen. The panel's page was the only source of both.
   ok; engine `pytest -n auto` 1558 passed,
   up from 1554 by exactly the four new tests.
 - Desktop acceptance not yet run.
+
+### 2 (and 4). Verses containing inline USFM are scanned, and a fix after a footnote lands on the right word
+
+**Defect 2.** `scan_text` returned early for any verse containing a
+backslash: "Inline USFM verse omitted from this text-only pass". Every
+footnoted or cross-referenced verse, and every `\wj` verse, got no Language
+QA at all. That meant no வல்லினம், no termbase and no character checks, and
+their words were missing from the book-wide wordlist.
+
+**Defect 4.** In `VerseList.svelte` the right-click menu received the
+*display* copy of each Language QA finding, whose offsets had been shifted
+onto the notes-lifted text for drawing. `applyLanguageQaSuggestedFix`
+splices the *raw* verse, so on a verse with a footnote before the flagged
+span it cut at the wrong place. Its own `originalText` guard then refused
+the fix as "stale". This could only be reached once defect 2 was fixed,
+which is why the two fixes are in one commit.
+
+**Cause.** The engine had no notion of visible text, so bailing out was the
+only way to keep spans exact over raw text. The frontend used one mapped
+list for two jobs with different coordinate systems: drawing needs display
+offsets, splicing needs raw ones.
+
+**Fix (engine, `language_qa.py`).**
+- New `lift_inline_usfm(raw)` returns `(LiftedVerse | None, reason)`.
+  `LiftedVerse` is the visible text built by deletion only, plus
+  `raw_index`, the raw offset of every kept code point. What it lifts:
+  - `\f … \f*` and `\x … \x*` with their contents. The pattern and the
+    swallow-one-space rule are the frontend's `parseVerseNotes`, pinned by
+    one shared table in `test_language_qa.py` and `usfmNotes.test.ts`. The
+    table also records one inherited quirk: `"a \f…\f*"` at the end of a
+    verse keeps its trailing space, exactly as the frontend does.
+  - Character markers, closers, nested `\+…` and milestones. Content is
+    kept, and an opener's one following space goes with the opener.
+  - `|…` attributes up to a closing marker.
+- `lift_inline_usfm` refuses the verse, with a named reason, when:
+  - markers are unbalanced (`usfm.marker_balance_issues`, e.g.
+    `Unbalanced \f: 1 open, 0 close; verse not checked.`);
+  - `\f`/`\x`-family markup sits outside a complete note (`\fig` is
+    exempt);
+  - a backslash is not a marker;
+  - an attribute bar survives lifting.
+- The last guard came from running the lifter read-only over the two local
+  Tamil projects. `ta_irv_phm_book`, a development import, carries a custom
+  `\zsem-s |x-content="δέσμιος…" x-note="…"*` milestone closed by a bare `*`.
+  Without the guard, 131 `unicode.nfc` and dozens of other "findings" came
+  from its Greek and English attribute text. With it, those verses are
+  refused by name.
+- `scan_text` keeps the length and surrogate guards on the raw text, lifts
+  the verse, then runs every rule on the visible text.
+  - `add()` translates each span through `raw_span()`. A span that would
+    cross lifted markup returns `None`. That candidate is dropped before any
+    id or occurrence number is assigned, and it is counted in the verse
+    limitation `N candidate(s) spanning inline USFM markup omitted.`
+  - Every finding's `start`/`end` is raw, and
+    `originalText == raw[start:end]`.
+  - The result gains `checked`, which is False only when the verse was not
+    scanned.
+  - A verse without markup lifts to itself, so its findings, ids and
+    offsets are unchanged (pinned by a test).
+
+**Fix (engine, `language_qa_jobs.py`).**
+- A verse is counted as skipped only when `checked` is False. Before, *any*
+  limitation, including the per-verse finding limit, made it skipped and
+  dropped its terminology and wordlist input. That no longer happens,
+  because a crossing drop would otherwise have silently removed the
+  termbase check from every footnoted verse. Such limitations are still
+  reported, still mark the pass incomplete, and still keep the chapter out
+  of the cache.
+- Terminology matching and the wordlist counts run on the same visible text
+  and are mapped back to raw. A terminology match that crosses markup is
+  dropped and counted. A word split by markup is not counted.
+- The language-detection sample uses visible text instead of skipping
+  marked verses.
+
+**Fix (frontend).** `VerseList.svelte` passes the store's raw findings to
+the menu and to `onMarkContextMenu`. Only `buildSegments` gets the display
+copies, now `displayLanguageQaFindings`. `applyLanguageQaSuggestedFix` and
+its staleness guard are unchanged.
+
+**Verification.**
+- Engine: 286 passed in `test_language_qa.py` plus `test_terminology.py`.
+  - The five tests that pinned the old bail-out now pin the new contract.
+    B2/B3/B4 inside `\wj` are found with raw offsets. The wordlist exclusion
+    test uses an unbalanced `\wj`. A `\wj` word is counted at raw offsets.
+  - New cases:
+    - a footnote after `அந்த பட்டணம்`, and a finding after a footnote at
+      its raw offset;
+    - `\wj அவனை கொன்றார்கள்`;
+    - a doubled space inside a footnote gives no finding, while a doubled
+      space inside `\wj` is found;
+    - an unbalanced `\f` is skipped with its named reason, as are note
+      markup outside a note, a stray backslash and the real unclosed
+      milestone shape;
+    - a crossing candidate is dropped and counted;
+    - `\w` and `\zaln` attributes are lifted;
+    - the shared swallow table;
+    - a plain verse is unchanged;
+    - through the manager, a footnoted verse is checked, not skipped, and
+      its வல்லினம் and termbase findings carry raw offsets.
+- Frontend:
+  - `VerseList.test.ts`: right-click Use on a vallinam mark after a
+    footnote calls `editVerse` with exactly the manual raw splice. This test
+    fails on the previous `VerseList.svelte`, where the fix was refused as
+    stale. It also checks the mark is drawn on the flagged words.
+  - `verseEditor.test.ts`: the fix on a footnoted verse keeps the note
+    byte-identical.
+  - `usfmNotes.test.ts`: the shared table.
+- Real data, read-only, scratch script:
+  - `ta_irvv_phm_book` (the IRV import): all 8 verses with notes are now
+    checked, every `originalText == raw[start:end]`, and no crossings.
+  - `ta_irv_phm_book`: 25 malformed-milestone verses refused by name, 1
+    checked.
+- Gates: `npm run check` 0/0; `npx vitest run` 503 passed; `npm run build`
+  ok; engine `pytest -n auto` 1573 passed.
+- Desktop acceptance not yet run.
+
+**Remaining limitation, documented in `LANGUAGE_QA_PLAN.md`.** A candidate
+that crosses markup cannot be reported. A வல்லினம் boundary between two
+`\w`-wrapped words is the common case, although translationCore imports
+normally flatten `\w`. Footnote text itself is not checked.
+
+**Observed, not changed.** `parseVerseNotes`' `mapOffset` indexes UTF-16
+code units while engine offsets are code points. The two agree for Tamil
+and every other BMP script, but would drift for astral-plane text on the
+display path. This is pre-existing and out of scope here.

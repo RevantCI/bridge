@@ -126,4 +126,20 @@ describe("applyLanguageQaSuggestedFix", () => {
     expect(editVerse).toHaveBeenCalledWith("1", "6", "அப்படிக் கூறினான் பின்னர்");
     expect(decideVerse).toHaveBeenCalledWith("1", "6", "vallinam-1", "accepted");
   });
+
+  it("splices a footnoted verse at the engine's raw offsets and keeps the note byte-identical", async () => {
+    // The engine scans the visible text but reports raw code-point offsets;
+    // the fix uses them as-is, with no remapping in either direction.
+    const raw = "அவன் சொன்னான்\\f + \\ft குறிப்பு\\f* அந்த காகம் பறந்தது.";
+    const flagged = "அந்த காகம்";
+    const start = Array.from(raw.slice(0, raw.indexOf(flagged))).length;
+    verseTexts.set({ [verseKey("1", "6")]: raw });
+    const result = await applyLanguageQaSuggestedFix(languageQaFinding({
+      id: "vallinam-2", rule: "tamil.vallinam-missing", start, end: start + Array.from(flagged).length,
+      originalText: flagged, suggestedReplacement: "அந்தக் காகம்",
+    }));
+    expect(result.ok).toBe(true);
+    expect(editVerse).toHaveBeenCalledWith(
+      "1", "6", "அவன் சொன்னான்\\f + \\ft குறிப்பு\\f* அந்தக் காகம் பறந்தது.");
+  });
 });

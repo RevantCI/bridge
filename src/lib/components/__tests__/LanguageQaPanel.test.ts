@@ -56,7 +56,7 @@ describe("Language QA", () => {
 
   it("shows incomplete coverage instead of claiming a clean publication", async () => {
     statusCall.mockResolvedValue(snapshot({ totalFindings: 0, findings: [], incomplete: true,
-      limitations: ["Inline USFM omitted."] }));
+      limitations: ["Chapter 1: 4: Unbalanced \\f: 1 open, 0 close; verse not checked."] }));
     render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
     await fireEvent.click(await screen.findByRole("button", { name: /Language QA · completed/ }));
     expect(screen.getByText(/Coverage incomplete/)).toBeTruthy();

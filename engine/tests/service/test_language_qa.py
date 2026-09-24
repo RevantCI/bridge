@@ -10,7 +10,7 @@ import pytest
 
 from tc_ai_bridge.language_qa import (
     INLINE_RULES, WORDLIST_COMMON_MIN, WORDLIST_MIN_LENGTH, WORDLIST_RARE_MAX, WORDLIST_RATIO_MIN,
-    detect_language, scan_text, stable_finding_id, text_hash, wordlist_findings,
+    detect_language, lift_inline_usfm, scan_text, stable_finding_id, text_hash, wordlist_findings,
 )
 from tc_ai_bridge.language_qa_jobs import LanguageQaManager, MAX_CHAPTER_BYTES, MAX_BOOK_FINDINGS
 from tests.service.test_bridge_service import fixture_project, call
@@ -62,8 +62,10 @@ def test_review_candidates_and_explicit_omissions():
     assert {"tamil.repeated-word", "tamil.mixed-word", "punctuation.repeated",
             "spacing.extra", "unicode.invisible", "unicode.private-use"} <= rules
     assert all(f["status"] == "review-needed" for f in result["findings"])
-    assert scan("\\wj அவர்\\wj*")["limitations"]
+    wj = scan("\\wj அவர்\\wj*")  # inline USFM is lifted and scanned, not omitted
+    assert wj["checked"] and not wj["limitations"]
     assert scan("அ" * 20_001)["limitations"]
+    assert not scan("அ" * 20_001)["checked"]
     assert len(scan("�" * 200)["findings"]) == 100
     assert scan("�" * 200)["limitations"]
     assert not scan("என்ன?! ... …", tamil=False)["findings"]
@@ -174,11 +176,14 @@ def test_vallinam_b2_trigger_at_end_of_verse_does_not_crash_or_flag(text):
     assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
 
 
-def test_vallinam_b2_ignores_inline_usfm():
-    # scan_text() abstains on the whole verse when raw USFM markers are
-    # present -- a genuine cross-verse boundary can never occur inside one
-    # scan_text() call, since it always receives exactly one verse's text.
-    assert scan("\\wj அப்படி கூறினான்\\wj*")["limitations"]
+def test_vallinam_b2_is_found_inside_inline_usfm():
+    # Inline USFM used to make scan_text() abstain on the whole verse. The
+    # markers are now lifted; the finding still carries raw offsets.
+    text = "\\wj அப்படி கூறினான்\\wj*"
+    [finding] = [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert finding["originalText"] == "அப்படி கூறினான்" == text[finding["start"]:finding["end"]]
+    assert finding["start"] == len("\\wj ")
+    assert finding["suggestedReplacement"] == "அப்படிக் கூறினான்"
 
 
 def test_vallinam_b2_matches_nfd_decomposed_trigger_text():
@@ -295,8 +300,10 @@ def test_vallinam_b3_trigger_at_end_of_verse_does_not_crash_or_flag(text):
     assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
 
 
-def test_vallinam_b3_ignores_inline_usfm():
-    assert scan("\\wj எனக்கு கொடு\\wj*")["limitations"]
+def test_vallinam_b3_is_found_inside_inline_usfm():
+    text = "\\wj எனக்கு கொடு\\wj*"
+    [finding] = [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert finding["originalText"] == "எனக்கு கொடு" == text[finding["start"]:finding["end"]]
 
 
 def test_vallinam_b3_matches_nfd_decomposed_trigger_text():
@@ -411,8 +418,10 @@ def test_vallinam_b4_trigger_at_end_of_verse_does_not_crash_or_flag(text):
     assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
 
 
-def test_vallinam_b4_ignores_inline_usfm():
-    assert scan("\\wj அவனை சீக்கிரமாக\\wj*")["limitations"]
+def test_vallinam_b4_is_found_inside_inline_usfm():
+    text = "\\wj அவனை சீக்கிரமாக\\wj*"
+    [finding] = [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert finding["originalText"] == "அவனை சீக்கிரமாக" == text[finding["start"]:finding["end"]]
 
 
 def test_vallinam_b4_matches_nfd_decomposed_trigger_text():
@@ -627,15 +636,28 @@ def test_wordlist_audit_end_to_end_via_manager(tmp_path):
 
 
 def test_wordlist_audit_excludes_words_from_verses_with_limitations(tmp_path):
-    # An inline-USFM verse ("\\" present) produces a verse-level limitation and
-    # must not contribute its words to the book-wide wordlist audit.
+    # A verse that is not checked (here: an unbalanced \wj) must not
+    # contribute its words to the book-wide wordlist audit.
     verses = {str(n): "தமிழ்" for n in range(1, 7)}  # 6 occurrences: satisfies WORDLIST_COMMON_MIN
-    verses["7"] = "\\wj தமிழ\\wj*"
+    verses["7"] = "\\wj தமிழ"
     project = project_at(tmp_path, verses=verses)
     manager = LanguageQaManager(debounce=0, yield_seconds=0)
     manager.bind(project)
     result = wait(manager)
     assert not [f for f in result["findings"] if f["rule"] == "tamil.wordlist-variant"]
+    assert any("7: Unbalanced \\wj: 1 open, 0 close; verse not checked." in m for m in result["limitations"])
+
+
+def test_wordlist_audit_counts_words_inside_balanced_inline_usfm_at_raw_offsets(tmp_path):
+    verses = {str(n): "தமிழ்" for n in range(1, 7)}
+    verses["7"] = "\\wj தமிழ\\wj*"
+    project = project_at(tmp_path, verses=verses)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    [variant] = [f for f in result["findings"] if f["rule"] == "tamil.wordlist-variant"]
+    assert variant["verse"] == "7"
+    assert variant["originalText"] == "தமிழ" == verses["7"][variant["start"]:variant["end"]]
 
 
 def test_wordlist_audit_skips_when_book_scan_is_truncated(tmp_path):
@@ -940,3 +962,127 @@ def test_escaped_json_surrogate_is_reported_without_breaking_utf8_protocol(tmp_p
     assert status["incomplete"]
     assert "U+D800" in status["limitations"][0]
     assert json.dumps(status, ensure_ascii=False).encode("utf-8")
+
+
+# ---- inline USFM: notes and character markers are lifted, spans stay raw ----
+
+def vallinam_in(text):
+    return [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+def test_footnoted_verse_is_scanned_before_the_note():
+    text = "அந்த பட்டணம்\\f + \\ft பட்டணம் என்பது ஊர்.\\f* அழகாக இருந்தது."
+    result = scan(text)
+    assert result["checked"] and not result["limitations"]
+    [finding] = vallinam_in(text)
+    assert (finding["start"], finding["end"]) == (0, len("அந்த பட்டணம்"))
+    assert finding["originalText"] == text[finding["start"]:finding["end"]] == "அந்த பட்டணம்"
+    assert finding["suggestedReplacement"] == "அந்தப் பட்டணம்"
+
+
+def test_footnoted_verse_is_scanned_after_the_note_at_raw_offsets():
+    text = "அவன் சொன்னான்\\f + \\ft குறிப்பு\\f* அந்த காகம் பறந்தது."
+    [finding] = vallinam_in(text)
+    assert finding["start"] == text.index("அந்த காகம்")
+    assert finding["originalText"] == text[finding["start"]:finding["end"]] == "அந்த காகம்"
+
+
+def test_words_of_jesus_marker_is_lifted():
+    text = "அவர்கள் \\wj அவனை கொன்றார்கள்\\wj* என்றார்."
+    [finding] = vallinam_in(text)
+    assert finding["originalText"] == text[finding["start"]:finding["end"]] == "அவனை கொன்றார்கள்"
+    assert finding["suggestedReplacement"] == "அவனைக் கொன்றார்கள்"
+
+
+def test_a_doubled_space_inside_a_footnote_is_not_a_finding():
+    # The note body is not Scripture text and is lifted with its contents;
+    # lifting it also swallows one adjacent space, so no doubled space is left.
+    text = "அவன் வந்தான் \\f + \\ft இரண்டு  இடைவெளி\\f* பின்பு போனான்."
+    result = scan(text)
+    assert result["checked"]
+    assert not [f for f in result["findings"] if f["rule"] == "spacing.extra"]
+
+
+def test_a_doubled_space_in_the_verse_itself_is_still_found_at_its_raw_offset():
+    text = "\\wj அவன்  வந்தான்\\wj*"
+    [finding] = [f for f in scan(text)["findings"] if f["rule"] == "spacing.extra"]
+    assert text[finding["start"]:finding["end"]] == "  "
+    assert finding["start"] == text.index("  ")
+
+
+def test_unbalanced_footnote_skips_the_verse_with_a_named_reason():
+    result = scan("அந்த காகம்\\f + \\ft முடிவில்லாத குறிப்பு")
+    assert not result["checked"] and not result["findings"]
+    assert result["limitations"] == ["Unbalanced \\f: 1 open, 0 close; verse not checked."]
+
+
+@pytest.mark.parametrize("text,reason", [
+    ("அந்த \\ft காகம்", "Footnote or cross-reference markup outside a complete"),
+    ("அந்த \\ காகம்", "Backslash that is not a USFM marker at code-point 5"),
+    # Shape found in a real local project: a milestone closed by a bare `*`.
+    ('\\zsem-s  |x-content="δέσμιος" x-note="gloss"*\\w அந்த|strong="G1"\\w* காகம்\\zsem-e*',
+     "Word attributes not closed by a USFM marker at code-point 9"),
+])
+def test_markup_that_cannot_be_lifted_safely_skips_the_verse(text, reason):
+    result = scan(text)
+    assert not result["checked"] and not result["findings"]
+    assert result["limitations"][0].startswith(reason)
+
+
+def test_a_candidate_crossing_a_marker_is_dropped_and_counted():
+    # Visible text reads "அந்த காகம்", but the raw span would contain \wj* --
+    # no raw span can hold that finding without covering markup.
+    result = scan("\\wj அந்த\\wj* காகம்")
+    assert result["checked"]
+    assert not vallinam_in("\\wj அந்த\\wj* காகம்")
+    assert result["limitations"] == ["1 candidate(s) spanning inline USFM markup omitted."]
+
+
+def test_word_attributes_are_not_visible_text():
+    lifted, reason = lift_inline_usfm('\\w அந்த|lemma="x"\\w* காகம்')
+    assert reason == "" and lifted.visible == "அந்த காகம்"
+    lifted, reason = lift_inline_usfm('அவன் \\zaln-s |x-strong="G1"\\*\\w வந்தான்|x-occurrence="1"\\w*\\zaln-e\\*.')
+    assert reason == "" and lifted.visible == "அவன் வந்தான்."
+
+
+def test_lifted_text_mirrors_the_frontend_note_swallow_rule():
+    # Same table as usfmNotes.test.ts "lifts notes exactly as the engine's
+    # lift_inline_usfm does". Change both or neither.
+    for raw, visible in [
+        ("a \\f + \\ft n\\f* b", "a b"),
+        ("a\\f + \\ft n\\f* b", "a b"),
+        # parseVerseNotes' first branch takes any note preceded by a space, so
+        # its end-of-verse branch never removes that space; mirrored as-is.
+        ("a \\f + \\ft n\\f*", "a "),
+        ("a\\f + \\ft n\\f*", "a"),
+        ("\\f + \\ft n\\f* b", "b"),
+        ("a \\x - \\xo 1.1 \\xt Gen 1.1\\x* b", "a b"),
+    ]:
+        lifted, _ = lift_inline_usfm(raw)
+        assert lifted.visible == visible, raw
+
+
+def test_verse_without_markup_is_unchanged_by_lifting():
+    # Same findings, same ids, same offsets as before lifting existed.
+    text = "அந்த காகம்  பறந்தது"
+    lifted, _ = lift_inline_usfm(text)
+    assert lifted.visible == text and lifted.raw_index == tuple(range(len(text)))
+    ids = [f["id"] for f in scan(text)["findings"]]
+    assert ids == [stable_finding_id("php", "2", "3-4", "spacing.extra", "  ", 1),
+                   stable_finding_id("php", "2", "3-4", "tamil.vallinam-missing", "அந்த காகம்", 1)]
+
+
+def test_footnoted_verse_through_the_manager_has_raw_offsets_and_terminology(tmp_path):
+    raw = "அவர் சொன்னார்\\f + \\ft குறிப்பு\\f* அந்த காகம் கடவுள் ஆவார்."
+    terms = [{"conceptId": "god", "status": "approved", "approvedRenderings": ["இறைவன்"],
+              "rejectedRenderings": ["கடவுள்"], "note": ""}]
+    project = project_at(tmp_path, verses={"1": raw}, terminology=terms)
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project)
+    result = wait(manager)
+    assert result["checkedVerses"] == 1 and result["skippedVerses"] == 0
+    by_rule = {f["rule"]: f for f in result["findings"]}
+    for rule, flagged in (("tamil.vallinam-missing", "அந்த காகம்"), ("terminology.deprecated-form", "கடவுள்")):
+        finding = by_rule[rule]
+        assert finding["start"] == raw.index(flagged)
+        assert finding["originalText"] == raw[finding["start"]:finding["end"]] == flagged

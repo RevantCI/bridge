@@ -433,10 +433,13 @@
     );
   }
 
-  /** Same reasoning as remapFindings above -- Language QA's start/end are
-   * also raw-verse code-point offsets, so they shift the same way once
-   * footnote/xref markers are lifted out of the rendered text. */
-  function remapLanguageQaFindings(findings: LanguageQaFinding[], parsed: ParsedVerse): LanguageQaFinding[] {
+  /** Display only. Language QA's start/end are raw-verse code-point offsets,
+   * so to draw a mark over the rendered text (notes lifted out) they shift
+   * the same way remapFindings' do. These copies go to buildSegments and
+   * nowhere else: the right-click menu and applyLanguageQaSuggestedFix get the
+   * store's raw findings, because the fix splices the raw verse. Handing them
+   * these shifted offsets put the fix before a footnote in the wrong place. */
+  function displayLanguageQaFindings(findings: LanguageQaFinding[], parsed: ParsedVerse): LanguageQaFinding[] {
     return findings.map((finding) => ({
       ...finding, start: parsed.mapOffset(finding.start), end: parsed.mapOffset(finding.end),
     }));
@@ -560,8 +563,8 @@
     {@const highlightFindings = findings.filter((f) => f.status !== "ignored" && f.status !== "accepted")}
     {@const parsed = parseVerseNotes($verseTexts[key] ?? "")}
     {@const remapped = remapFindings(highlightFindings, parsed)}
-    {@const langFindings = remapLanguageQaFindings($languageQaFindingsByVerse[key] ?? [], parsed)}
-    {@const segments = buildSegments(parsed.clean, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [], langFindings)}
+    {@const langFindings = $languageQaFindingsByVerse[key] ?? []}
+    {@const segments = buildSegments(parsed.clean, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [], displayLanguageQaFindings(langFindings, parsed))}
     {@const menuFindingIds = markedFindingIds(remapped, parsed.clean.length)}
     {@const activeFindingId = menuFindingIds[activeIndexFor(key, menuFindingIds.length)]}
     {@const isEditingThis = $editingChapter === $currentChapter && $editingVerse === v}
