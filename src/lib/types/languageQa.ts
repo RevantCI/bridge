@@ -151,3 +151,16 @@ export interface LanguageQaInline {
   inlineRules: string[];
   findings: LanguageQaFinding[];
 }
+
+/** languageQa.verse: every Language QA finding of one verse from the last
+ * pass, inline or not -- what the review panel lists (layered-rules 4.3).
+ * `hidden` are the ones a decision hides, each with that `decision`. */
+export interface LanguageQaVerse {
+  projectPath: string;
+  generation: number;
+  state: LanguageQaStatus["state"];
+  chapter: string;
+  verse: string;
+  findings: LanguageQaFinding[];
+  hidden: Array<LanguageQaFinding & { decision: string }>;
+}

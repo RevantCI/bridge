@@ -33,6 +33,9 @@
   // Terminology pane.
   let langQaContextMenu: { finding: LanguageQaFinding; verse: string; x: number; y: number } | null = null;
   let langQaContextBusy = false;
+  // A span carrying findings from more than one source (Greek Room/native and
+  // Language QA): one menu with a section per finding (layered-rules 4.3).
+  let mixedMenu: { verse: string; qa: QaFinding[]; lqa: LanguageQaFinding[]; x: number; y: number } | null = null;
   // The general verse right-click menu (issue #69) -- a separate menu from
   // contextMenu above, which only ever opens on a finding span. The two
   // never open at once: a right-click on a mark stops propagation before it
@@ -63,22 +66,26 @@
    * its "Accept translation as correct" means the opposite of "Accept finding"
    * here — see the hints, and USER_MANUAL.md §6.4.
    */
-  $: contextActions = contextMenu ? [
-    {
-      id: "accept",
-      label: "Accept finding",
-      disabled: contextBusy,
-      title: hasProposedFix(contextMenu.finding)
-        ? "Replace the highlighted words with the proposed correction, re-check the verse, and file this finding as accepted."
-        : "File this finding as accepted. This check proposed no correction, so the verse text is left alone.",
-    },
-    {
-      id: "ignore",
-      label: "Ignore",
-      disabled: contextBusy,
-      title: "Leave the verse as it is and move this finding to Ignored in the review panel.",
-    },
-  ] : [];
+  $: contextActions = contextMenu ? findingActionsFor(contextMenu.finding, contextBusy) : [];
+
+  function findingActionsFor(finding: QaFinding, busy = contextBusy) {
+    return [
+      {
+        id: "accept",
+        label: "Accept finding",
+        disabled: busy,
+        title: hasProposedFix(finding)
+          ? "Replace the highlighted words with the proposed correction, re-check the verse, and file this finding as accepted."
+          : "File this finding as accepted. This check proposed no correction, so the verse text is left alone.",
+      },
+      {
+        id: "ignore",
+        label: "Ignore",
+        disabled: busy,
+        title: "Leave the verse as it is and move this finding to Ignored in the review panel.",
+      },
+    ];
+  }
 
   /**
    * The inline Language QA context menu: one "Use" per ranked suggestion (at
@@ -273,10 +280,58 @@
     langFindings: LanguageQaFinding[],
     verse: string,
   ): void {
-    if (findingIds.some((id) => findings.some((f) => f.id === id))) {
+    const qa = findingIds.map((id) => findings.find((f) => f.id === id)).filter((f): f is QaFinding => Boolean(f));
+    const lqa = findingIds.map((id) => langFindings.find((f) => f.id === id))
+      .filter((f): f is LanguageQaFinding => Boolean(f));
+    if (qa.length > 0 && lqa.length > 0) {
+      // Several sources on one span (layered-rules Phase 4.3): one section per
+      // finding, each with its own actions, rather than the first one winning.
+      event.preventDefault();
+      event.stopPropagation();
+      onSelect(verse);
+      mixedMenu = { verse, qa, lqa, x: event.clientX, y: event.clientY };
+    } else if (qa.length > 0) {
       openFindingMenu(event, findingIds, findings, verse);
     } else {
       openLangQaFindingMenu(event, findingIds, langFindings, verse);
+    }
+  }
+
+  const shortText = (text: string, limit = 48): string =>
+    text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+
+  /** One submenu per finding: the Greek Room/native actions or the Language QA
+   * actions, exactly as their own menus offer them, with ids prefixed by the
+   * finding so the action is routed back to the right handler. */
+  $: mixedMenuActions = mixedMenu ? [
+    ...mixedMenu.qa.map((finding) => ({
+      id: `qa:${finding.id}`,
+      label: `${finding.engine || "Check"}: ${shortText(finding.explanation || finding.check_type)}`,
+      submenu: findingActionsFor(finding).map((a) => ({ ...a, id: `qa:${finding.id}:${a.id}` })),
+    })),
+    ...mixedMenu.lqa.map((finding) => ({
+      id: `lqa:${finding.id}`,
+      label: `Language QA: ${shortText(`${finding.originalText} — ${finding.message}`)}`,
+      submenu: buildLangQaActions(finding).map((a) => ({ ...a, id: `lqa:${finding.id}:${a.id}` })),
+    })),
+  ] : [];
+
+  function onMixedMenuAction(event: CustomEvent<{ id: string }>): void {
+    if (!mixedMenu) return;
+    const { verse, qa, lqa, x, y } = mixedMenu;
+    const [source, findingId, ...rest] = event.detail.id.split(":");
+    const action = rest.join(":");
+    mixedMenu = null;
+    if (source === "qa") {
+      const finding = qa.find((f) => f.id === findingId);
+      if (!finding) return;
+      contextMenu = { finding, verse, x, y };
+      void onContextAction(new CustomEvent("action", { detail: { id: action } }));
+    } else if (source === "lqa") {
+      const finding = lqa.find((f) => f.id === findingId);
+      if (!finding) return;
+      langQaContextMenu = { finding, verse, x, y };
+      onLangQaContextAction(new CustomEvent("action", { detail: { id: action } }));
     }
   }
 
@@ -335,10 +390,21 @@
    * keyboard walks the marks a reviewer can see, in the order their
    * superscript numbers run.
    */
-  function markedFindingIds(findings: QaFinding[], textLength: number): string[] {
-    return findings
-      .filter((f) => f.start_offset !== null && f.end_offset !== null && f.end_offset <= textLength)
-      .sort((a, b) => (a.start_offset! - b.start_offset!) || a.id.localeCompare(b.id))
+  // The row's ✓ also counts drawn Language QA marks as open (layered-rules
+  // 4.3): a verse with a mark on it is not shown as clean.
+  function markedFindingIds(
+    findings: QaFinding[], textLength: number, langDisplay: LanguageQaFinding[] = [],
+  ): string[] {
+    // Language QA marks are walked too (layered-rules 4.3), by their display
+    // offsets, in one reading order with the other findings.
+    const spans = [
+      ...findings
+        .filter((f) => f.start_offset !== null && f.end_offset !== null && f.end_offset <= textLength)
+        .map((f) => ({ id: f.id, start: f.start_offset! })),
+      ...langDisplay.filter((f) => f.end <= textLength).map((f) => ({ id: f.id, start: f.start })),
+    ];
+    return spans
+      .sort((a, b) => (a.start - b.start) || a.id.localeCompare(b.id))
       .map((f) => f.id);
   }
 
@@ -369,6 +435,7 @@
     key: string,
     findingIds: string[],
     findings: QaFinding[],
+    langFindings: LanguageQaFinding[] = [],
   ): void {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -397,14 +464,17 @@
     if (!isMenuKey) return;
     event.preventDefault();
     const finding = findings.find((item) => item.id === findingIds[index]);
-    if (!finding) return;
+    // The raw store copy, not the display one: the fix splices the raw verse.
+    const langFinding = finding ? undefined : langFindings.find((item) => item.id === findingIds[index]);
+    if (!finding && !langFinding) return;
     onSelect(verse);
     activeFindingVerseKey = key;
     activeFindingIndex = index;
     const row = event.currentTarget as HTMLElement;
     const anchor = row.querySelector<HTMLElement>(`[data-finding-ids~="${findingIds[index]}"]`) ?? row;
     const rect = anchor.getBoundingClientRect();
-    contextMenu = { finding, verse, x: rect.left, y: rect.bottom };
+    if (finding) contextMenu = { finding, verse, x: rect.left, y: rect.bottom };
+    else if (langFinding) langQaContextMenu = { finding: langFinding, verse, x: rect.left, y: rect.bottom };
   }
 
   async function onContextAction(event: CustomEvent<{ id: string }>): Promise<void> {
@@ -591,13 +661,14 @@
     {@const findings = $findingsByVerse[key] ?? []}
     {@const checkStatus = $checkStatusByVerse[key]}
     {@const alignmentStatus = $alignmentStatusByVerse[key] ?? "untouched"}
-    {@const openCount = findings.filter((f) => f.status === "open").length}
+    {@const langFindings = $languageQaFindingsByVerse[key] ?? []}
+    {@const openCount = findings.filter((f) => f.status === "open").length + langFindings.length}
     {@const highlightFindings = findings.filter((f) => f.status !== "ignored" && f.status !== "accepted")}
     {@const parsed = parseVerseNotes($verseTexts[key] ?? "")}
     {@const remapped = remapFindings(highlightFindings, parsed)}
-    {@const langFindings = $languageQaFindingsByVerse[key] ?? []}
-    {@const segments = buildSegments(parsed.clean, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [], displayLanguageQaFindings(langFindings, parsed))}
-    {@const menuFindingIds = markedFindingIds(remapped, parsed.clean.length)}
+    {@const langDisplay = displayLanguageQaFindings(langFindings, parsed)}
+    {@const segments = buildSegments(parsed.clean, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [], langDisplay)}
+    {@const menuFindingIds = markedFindingIds(remapped, parsed.clean.length, langDisplay)}
     {@const activeFindingId = menuFindingIds[activeIndexFor(key, menuFindingIds.length)]}
     {@const isEditingThis = $editingChapter === $currentChapter && $editingVerse === v}
     <div
@@ -615,7 +686,7 @@
       aria-keyshortcuts="Shift+F10"
       on:click={(event) => selectFromRow(v, event)}
       on:dblclick={() => beginEditFromList(v)}
-      on:keydown={(e) => onVerseKeydown(e, v, key, menuFindingIds, findings)}
+      on:keydown={(e) => onVerseKeydown(e, v, key, menuFindingIds, findings, langFindings)}
       on:contextmenu={(e) => openVerseMenu(e, v)}
     >
       <div class="vnum">
@@ -719,6 +790,17 @@
     actions={verseMenuActions}
     on:action={onVerseContextAction}
     on:close={() => (verseMenu = null)}
+  />
+{/if}
+
+{#if mixedMenu}
+  <FindingContextMenu
+    x={mixedMenu.x}
+    y={mixedMenu.y}
+    findingLabel="Findings on this text"
+    actions={mixedMenuActions}
+    on:action={onMixedMenuAction}
+    on:close={() => (mixedMenu = null)}
   />
 {/if}
 

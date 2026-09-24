@@ -9,10 +9,11 @@ import type { LanguageQaDecisionIssue, LanguageQaFinding, LanguageQaSuggestion }
 export type LanguageQaDecision = "accepted" | "ignored" | "rejected";
 
 /** What the reviewer saw and chose, recorded in the decision payload. `source`
- * is always "languageQa", whatever the finding object carries: that is what
- * keeps the decision out of the review-progress rollup (decide_verse). The
- * pack version and rule revision are what let a later rule change expire an
- * "ignored" (language_qa_jobs.decision_effect). */
+ * is always "languageQa", whatever the finding object carries: decide_verse
+ * counts it in the review-progress rollup only once a check job's Language QA
+ * stage has reported that finding (layered-rules 4.1). The pack version and
+ * rule revision are what let a later rule change expire an "ignored"
+ * (language_qa_jobs.decision_effect). */
 export function languageQaDecisionIssue(
   finding: LanguageQaFinding,
   chosen: LanguageQaSuggestion | null = null,

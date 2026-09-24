@@ -651,6 +651,22 @@ def test_job_path_and_live_path_produce_identical_findings(staged_engine):
     assert engine._language_qa.status()["scannedVerses"] == 0
 
 
+def test_language_qa_verse_lists_one_verses_findings_open_and_decided(staged_engine):
+    engine, _ = staged_engine
+    project = str(engine.project.path)
+    first = call(engine, "languageQa.verse", {"projectPath": project, "chapter": "1", "verse": "1"})["result"]
+    [lqa] = [f for f in first["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert first["state"] == "completed" and first["hidden"] == []
+    assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": lqa["id"],
+                                         "status": "rejected", "issue": issue_for(lqa)})["success"]
+    wait(engine._language_qa)
+    after = call(engine, "languageQa.verse", {"projectPath": project, "chapter": "1", "verse": "1"})["result"]
+    assert lqa["id"] not in {f["id"] for f in after["findings"]}
+    assert [(f["id"], f["decision"]) for f in after["hidden"]] == [(lqa["id"], "rejected")]
+    assert not call(engine, "languageQa.verse", {"projectPath": "elsewhere", "chapter": "1", "verse": "1"})["success"]
+    assert not call(engine, "languageQa.verse", {"projectPath": project, "chapter": 1, "verse": "1"})["success"]
+
+
 def test_a_job_without_the_stage_carries_no_language_qa(staged_engine):
     _, run_job = staged_engine
     snapshot = run_job(["local"])

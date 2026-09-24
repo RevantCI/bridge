@@ -315,6 +315,7 @@ class Methods:
     LANGUAGE_QA_PAUSE = "languageQa.pause"
     LANGUAGE_QA_INLINE = "languageQa.inline"
     LANGUAGE_QA_HISTORY = "languageQa.history"
+    LANGUAGE_QA_VERSE = "languageQa.verse"
     CHECKS_STATUS = "checks.status"
     CHECKS_CANCEL = "checks.cancel"
     CHECKS_RETRY = "checks.retry"
@@ -4154,7 +4155,7 @@ class BridgeEngine:
             m, p = request.method, request.params
 
             if m in {Methods.LANGUAGE_QA_STATUS, Methods.LANGUAGE_QA_PAUSE, Methods.LANGUAGE_QA_INLINE,
-                     Methods.LANGUAGE_QA_HISTORY}:
+                     Methods.LANGUAGE_QA_HISTORY, Methods.LANGUAGE_QA_VERSE}:
                 self._require_project()
                 if p.get("projectPath") != str(self.project.path):
                     raise ProjectError("Language QA request belongs to a different project.")
@@ -4167,6 +4168,11 @@ class BridgeEngine:
                     if chapter is not None and not isinstance(chapter, str):
                         raise ProjectError("chapter must be a string when given")
                     result = self._language_qa.inline(chapter=chapter)
+                elif m == Methods.LANGUAGE_QA_VERSE:
+                    chapter, verse = p.get("chapter"), p.get("verse")
+                    if not isinstance(chapter, str) or not isinstance(verse, str):
+                        raise ProjectError("chapter and verse must be strings")
+                    result = self._language_qa.verse(chapter, verse)
                 elif m == Methods.LANGUAGE_QA_HISTORY:
                     chapter, verse, finding_id = p.get("chapter"), p.get("verse"), p.get("findingId")
                     if not isinstance(chapter, str) or not isinstance(verse, str):

@@ -830,6 +830,16 @@ class LanguageQaManager:
                 self._last_scan = time.monotonic()
         return result
 
+    def verse(self, chapter: str, verse: str) -> dict[str, Any]:
+        """languageQa.verse: one verse's findings from the last completed pass,
+        inline or not, for the review panel (layered-rules 4.3)."""
+        slot = self.verse_results(chapter, verse)
+        with self._lock:
+            return {"projectPath": self._context[0] if self._context else "",
+                    "generation": self._generation, "state": self._summary.get("state", "idle"),
+                    "chapter": chapter, "verse": verse,
+                    "findings": slot["findings"], "hidden": slot.get("hidden", [])}
+
     def verse_results(self, chapter: str, verse: str) -> dict[str, Any]:
         """The last pass's findings for one verse: `findings` (open, after
         decisions) and `decided` (finding id -> the decision that hides it)."""

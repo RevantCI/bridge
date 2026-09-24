@@ -1,5 +1,5 @@
 import type {
-  LanguageQaDecisionIssue, LanguageQaHistory, LanguageQaInline, LanguageQaStatus, LanguageQaView,
+  LanguageQaDecisionIssue, LanguageQaHistory, LanguageQaInline, LanguageQaStatus, LanguageQaVerse, LanguageQaView,
 } from "../types/languageQa";
 import type {
   AIReviewChapterResponse,
@@ -172,6 +172,7 @@ export type EngineMethod =
   | "languageQa.pause"
   | "languageQa.inline"
   | "languageQa.history"
+  | "languageQa.verse"
   | "ai.review.cancel"
   | "ai.review.listForChapter"
   | "ai.review.retry"
@@ -304,6 +305,11 @@ export const bridge = {
    * unpaged -- what the verse marks are drawn from. */
   languageQaInline(projectPath: string, chapter?: string): Promise<LanguageQaInline> {
     return call("languageQa.inline", { projectPath, chapter });
+  },
+
+  /** Every Language QA finding of one verse, inline or not, for the review panel. */
+  languageQaVerse(projectPath: string, chapter: string, verse: string): Promise<LanguageQaVerse> {
+    return call("languageQa.verse", { projectPath, chapter, verse });
   },
 
   ping(): Promise<{ pong: boolean }> {

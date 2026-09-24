@@ -736,3 +736,42 @@ describe("VerseList verse context menu (issue #69)", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 });
+
+
+describe("VerseList one review surface (layered-rules 4.3)", () => {
+  const text = "அந்த காகம் பறந்தது.";
+  const flaggedEnd = Array.from("அந்த காகம்").length;
+
+  afterEach(() => languageQaFindingsByVerse.set({}));
+
+  it("offers every finding on a span carried by two sources, each with its own actions", async () => {
+    seed(text, [finding({ id: "gr-1", start_offset: 0, end_offset: flaggedEnd, engine: "wildebeest",
+      explanation: "Mixed script" })]);
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding({ id: "lqa-9" })] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector('[data-finding-ids~="lqa-9"]') as HTMLElement);
+    expect(screen.getByRole("menu", { name: "Findings on this text" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^wildebeest: Mixed script/ })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("menuitem", { name: /^Language QA: அந்த காகம்/ }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Ignore this occurrence" }));
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "lqa-9", "ignored", undefined,
+      expect.objectContaining({ source: "languageQa" }));
+  });
+
+  it("walks Language QA marks with the keyboard and opens their menu", async () => {
+    seed(text);
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding({ id: "lqa-k" })] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.keyDown(verseRow(), { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: 'Use "அந்தக் காகம்"' })).toBeInTheDocument();
+  });
+
+  it("does not show a verse as clean while a Language QA mark is drawn on it", () => {
+    seed(text);
+    checkStatusByVerse.set({ "1:6": "succeeded" });
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding()] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(verseRow().classList.contains("approved")).toBe(false);
+    expect(verseRow().querySelector(".vnum")?.textContent).not.toContain("✓");
+  });
+});

@@ -12043,3 +12043,59 @@ of the report, it reads persisted state only and never scans.
     needs AI review fixtures that no test here builds.
   - The HTML section was checked only by the report tests building without
     error. Nobody has looked at it rendered.
+
+## 2026-09-24 — Layered-rules Phase 4.3: one review surface
+
+This is Phase 4.3 of the layered-rules brief: a Language QA finding can be
+acted on where every other finding is.
+
+- **ReviewPanel: a "Language QA" tab.** It lists the selected verse's
+  Language QA findings, inline or panel-only, from a new RPC,
+  `languageQa.verse`.
+  - That RPC returns one verse's share of the last completed pass: open
+    findings, and `hidden` ones with the decision that hides them.
+  - Each finding offers **Use "…"** for each ranked suggestion,
+    **Ignore** and **False positive**. Use goes through
+    `applyLanguageQaSuggestedFix`; Ignore and False positive go through
+    `decideLanguageQaFindingOptimistically`, so a decision from either
+    surface is the same `verse.decide` call with the same `issue` payload.
+  - A finding leaves the list the moment its button is clicked, and comes
+    back only if recording fails.
+  - A "Decided (n)" section lists the hidden ones.
+  - The tab refetches when the verse changes and when a new **completed**
+    generation lands on the status channel, never on every tick.
+  - `LanguageQaPanel` keeps the book-level lists and is no longer the only
+    place a panel-only finding can be acted on.
+- **A span with findings from two sources.** A right-click now opens one
+  menu with a section per finding (for example "wildebeest: Mixed script",
+  or "Language QA: அந்த காகம் — …"). Each section's submenu holds that
+  finding's own actions. Before this, the QaFinding won and the Language QA
+  finding on the same words could not be reached. A span with only one
+  source keeps its old menu.
+- **Keyboard.** Left/Right now walk Language QA marks too, in reading order
+  with the other findings by display offset. Shift+F10 opens the Language
+  QA menu on the store's raw finding (not the display copy), because the
+  fix splices the raw verse.
+- **✓ indicator.** A drawn Language QA mark counts as open, so a verse is not
+  shown as clean while one is on it.
+- The `highlight.ts` "first-match-wins" comment the brief names had already
+  been corrected in Phase 1. The stale comment in `findingActions.ts`
+  ("keeps the decision out of the rollup") is corrected for Phase 4.1.
+
+### Verification
+
+- **Engine.** `languageQa.verse` lists a verse's open findings. After a
+  false-positive decision, the finding moves to `hidden` with `rejected`.
+  The RPC refuses another project's path and a non-string chapter.
+- **Frontend.**
+  - New `ReviewPanelLanguageQa.test.ts` (3 tests):
+    - a panel-only finding is listed, and Ignore removes it before the
+      engine answers, sending the Language QA issue;
+    - the tab refetches only on a new completed generation;
+    - a failed decision puts the finding back and shows the error.
+  - VerseList (3 new tests): the mixed-source menu reaches the Language QA
+    action; Shift+F10 opens a Language QA mark's menu; no ✓ while a mark is
+    drawn.
+  - `npm run check` 0/0; `npx vitest run` 546 passed; `npm run build` ok.
+- **Not verified:** how the new tab and the mixed menu look at 1366×768.
+  jsdom does not lay out, so that needs the desktop app.
