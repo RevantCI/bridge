@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import terminology
+from .housestyle import house_style, name_findings, preferences_from
 from .language_packs import default_pack, load_project_overrides, loaded_pack
 from .language_packs.lexicon import default_lexicon, lexicon_findings
 from .language_packs.loader import apply_overrides
@@ -173,10 +174,10 @@ def verse_hash(text: Any) -> str:
     return hashlib.sha256(raw.encode("utf-8", errors="surrogatepass")).hexdigest()
 
 
-def chapter_cache_key(language_pack: str, pack_fingerprint: str, raw_terms: Any) -> str:
+def chapter_cache_key(language_pack: str, pack_fingerprint: str, raw_terms: Any, lists_fingerprint: str = "") -> str:
     """What a cached verse result depends on besides its own text."""
     return hashlib.sha1(json.dumps(
-        [SCAN_CACHE_VERSION, RULE_VERSION, language_pack, pack_fingerprint, raw_terms],
+        [SCAN_CACHE_VERSION, RULE_VERSION, language_pack, pack_fingerprint, raw_terms, lists_fingerprint],
         sort_keys=True, ensure_ascii=False, default=str,
     ).encode("utf-8")).hexdigest()
 
@@ -297,6 +298,7 @@ class LanguageQaManager:
         self._paused_state: str | None = None
         self._terminology_loader: Callable[[], list[dict[str, Any]]] | None = None
         self._decisions_loader: Callable[[], list[dict[str, Any]]] | None = None
+        self._housestyle_loader: Callable[[], list[dict[str, Any]]] | None = None
         self._summary: dict[str, Any] = {"state": "idle", "findings": [], "limitations": []}
 
     def touch(self) -> None:
@@ -329,6 +331,7 @@ class LanguageQaManager:
             self._paused_state = None
             self._terminology_loader = getattr(project, "terminology_rules", None)
             self._decisions_loader = getattr(project, "project_qa_decisions", None)
+            self._housestyle_loader = getattr(project, "housestyle_entries", None)
             self._paused = bool(blocked_reason)
             self._blocked_reason = blocked_reason
             if autostart:
@@ -354,6 +357,7 @@ class LanguageQaManager:
             self._paused_state = None
             self._terminology_loader = None
             self._decisions_loader = None
+            self._housestyle_loader = None
             self._summary = {"state": "idle", "findings": [], "limitations": []}
 
     def invalidate(self, chapter: str) -> None:
@@ -637,6 +641,38 @@ class LanguageQaManager:
             str(row.get("issueKey", "")): row
             for row in raw_decisions if isinstance(row, dict)
         }
+        # House style (Phase 6): word and rule entries hide findings and
+        # learned preferences rank suggestions, both at assembly like
+        # decisions; the lists feed the pack's abstains inside the verse scan,
+        # so they join the cache key.
+        with self._lock:
+            housestyle_loader = self._housestyle_loader
+        try:
+            style = house_style(housestyle_loader() if housestyle_loader else [],
+                                preferences_from(raw_decisions))
+        except Exception as exc:
+            style = house_style([])
+            limitations.append(f"House style unavailable: {exc}")
+        lists = {**HOUSE_STYLE_LISTS, **style.lists}
+        suppressed_by_rule: dict[str, int] = {}
+
+        def settle(raw: list[dict[str, Any]], decided: dict[str, str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            """(shown, hidden) for one verse's raw findings: decisions first,
+            then house style. A house-style hide counts as decided for the
+            rollup, and is listed with houseStyleSuppressed for the reports."""
+            shown = apply_decisions(raw, decisions, false_positives, decided)
+            kept, by_style = [], []
+            for finding in shown:
+                if style.suppresses(finding):
+                    by_style.append({**finding, "decision": "housestyle", "houseStyleSuppressed": True})
+                    decided[finding["id"]] = "ignored"
+                    rule_id = str(finding.get("ruleId") or "")
+                    suppressed_by_rule[rule_id] = suppressed_by_rule.get(rule_id, 0) + 1
+                else:
+                    kept.append(style.rank(finding))
+            return kept, _hidden(raw, {k: v for k, v in decided.items()
+                                       if k not in {f["id"] for f in by_style}}) + by_style
+
         # The rule pack, narrowed by this project's overrides (only narrowing is
         # accepted; refusals become coverage notes).
         rule_pack, pack_problems = project_rule_pack(context[0])
@@ -649,7 +685,7 @@ class LanguageQaManager:
         # A verse's cached result is valid while its text hash and this chapter
         # key are unchanged: the engine's rule version, the pack (fingerprint
         # includes project overrides), the termbase, and the detected language.
-        key = chapter_cache_key(detection["pack"], rule_pack.fingerprint(), raw_terms)
+        key = chapter_cache_key(detection["pack"], rule_pack.fingerprint(), raw_terms, style.list_fingerprint())
         cache = self._load_cache(store, limitations)
         findings: list[dict[str, Any]] = []
         false_positives: list[dict[str, Any]] = []
@@ -682,7 +718,7 @@ class LanguageQaManager:
                         if not proceed():
                             return None
                         entry = scan_verse(book, chapter, verse, text, tamil=tamil, pack=rule_pack,
-                                           lists=HOUSE_STYLE_LISTS, term_index=term_index)
+                                           lists=lists, term_index=term_index)
                         fresh += 1
                     verses[verse] = entry
                 final = path.stat()
@@ -719,12 +755,11 @@ class LanguageQaManager:
                 decided: dict[str, str] = {}
                 # Decisions apply before the room slice, so a suppressed
                 # finding never consumes budget it will never use.
-                shown = apply_decisions(entry.get("findings", []), decisions, false_positives, decided)
+                shown, hidden = settle(entry.get("findings", []), decided)
                 room = MAX_BOOK_FINDINGS - len(findings) - len(chapter_findings)
                 chapter_findings.extend(shown[:max(0, room)])
                 by_verse[f"{chapter}:{verse}"] = {
-                    "findings": shown[:max(0, room)], "decided": decided,
-                    "hidden": _hidden(entry.get("findings", []), decided)}
+                    "findings": shown[:max(0, room)], "decided": decided, "hidden": hidden}
                 if len(shown) > room:
                     chapter_limitations.append("Book finding limit reached; remaining verses omitted.")
                     omitted = True
@@ -757,13 +792,17 @@ class LanguageQaManager:
             audit = (lexicon_findings(book, book_counts, book_first_seen, lexicon, rule_fields=rule_fields,
                                       suggestion=suggestion, rule_version=RULE_VERSION)
                      if lexicon is not None else wordlist_findings(book, book_counts, book_first_seen))
+            if tamil:
+                audit += name_findings(book, book_counts, book_first_seen,
+                                       style.lists.get("housestyle.properNouns", frozenset()),
+                                       rule_fields=rule_fields, suggestion=suggestion, rule_version=RULE_VERSION)
             for finding in audit:
                 decided = {}
-                shown = apply_decisions([finding], decisions, false_positives, decided)
+                shown, hidden = settle([finding], decided)
                 slot = by_verse.setdefault(f"{finding['chapter']}:{finding['verse']}",
                                            {"findings": [], "decided": {}, "hidden": []})
                 slot["decided"].update(decided)
-                slot["hidden"].extend(_hidden([finding], decided))
+                slot["hidden"].extend(hidden)
                 if not shown:
                     continue
                 if len(findings) >= MAX_BOOK_FINDINGS:
@@ -781,6 +820,7 @@ class LanguageQaManager:
                 "falsePositives": false_positives, "inlineRules": inline_rule_names(rule_pack),
                 "rulePack": rule_pack.pack_version,
                 "recheckCount": sum(1 for f in findings if f.get("previouslyIgnored")),
+                "houseStyleSuppressed": suppressed_by_rule,
                 "limitations": limitations, "incomplete": bool(limitations or skipped),
                 "checkedVerses": checked, "skippedVerses": skipped,
                 "reusedChapters": reused, "scannedVerses": scanned_verses,

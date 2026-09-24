@@ -96,6 +96,8 @@ RULES: dict[str, RuleMeta] = {
     # The corpus lexicon (layered-rules Phase 5; language_packs/lexicon.py).
     "lexicon.rare-near-common": RuleMeta("ta-irv", "lexicon", "typo", "medium"),
     "lexicon.known-misspelling": RuleMeta("ta-irv", "lexicon", "typo", "high"),
+    # The project's approved proper nouns (house style, Phase 6.2).
+    "name.minority-spelling": RuleMeta("project", "housestyle", "name", "medium"),
     "terminology.deprecated-form": RuleMeta("project", "housestyle", "termbase", "high"),
 }
 # The version of the rules above, which live in code. A pack rule's findings

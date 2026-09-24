@@ -238,4 +238,23 @@ deferred, not rejected; anything in the UI that assumes several users on one mac
 **Rules out:** automatic lexicon growth; a decision silently becoming a `known-misspelling` pair.
 **Revisit when:** not planned. House-style learning (Phase 6) narrows and ranks, and it is a separate mechanism.
 
+## 2026-09-24 — House style is learned from decisions, and may only narrow or rank
+
+**Decision:** The project's house style is derived from translator decisions by a visible, deterministic learner (`housestyle.py`).
+- Three ignores of one (rule, word) in a book, with no Use since, create a learned `word-in-book` entry at once, with its evidence and an Undo.
+- Project scope and rule disabling are only ever *proposed*.
+- Three Uses of one suggestion rank it first.
+
+An entry may hide findings, add list members, reorder suggestions, or propose a disable. It may never add or widen a match, change a severity, or make a rule inline.
+**Because:** the maintainer asked that "the system will learn from its mistake" (2026-09-24). The brief and §31 require that learning improve ranking and never become an unconditional rule.
+**Rules out:** hidden models; auto-applied project-wide changes; learning that widens what is flagged; silently raising a rule's benchmark precision (house-style hides are reported separately).
+**Revisit when:** a team role model decides who may accept project-wide proposals.
+
+## 2026-09-24 — House-style scopes, thresholds and storage
+
+**Decision:** There are four scopes: `word-in-book`, `word-in-project`, `rule-in-book` and `rule-in-project`. The thresholds are 3 ignores to learn, 2 books to propose project scope, 20 decisions at an 80% ignore rate to propose a rule disable, and 3 Uses for a preference. Entries are `human_decisions` rows of kind `housestyle`. That kind needed workbench v5, a table rebuild to widen the kind CHECK constraint, with a data-preservation test. A project scope is written into every materialized book. Remove and Undo write a new state and never delete. An undone pair is never re-learned.
+**Because:** the brief's thresholds. Per-book rows keep every scan reading only its own workbench. A second table would duplicate the decision machinery (sync, change_log, history) the decisions table already has.
+**Rules out:** deleting house style; a project-scope store outside the books (a lazy book misses an entry until it is accepted again, documented in LANGUAGE_QA_HOUSESTYLE.md).
+**Revisit when:** the team hub (TEAM_ARCHITECTURE §7) gives a project-level store.
+
 <!-- New entries go above this line. -->

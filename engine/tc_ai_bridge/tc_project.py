@@ -1708,6 +1708,27 @@ class TranslationCoreProject:
             decision='human_approved', payload=data,
         )
 
+    # -- house style (layered-rules 6.2-6.4; human_decisions kind 'housestyle', v5)
+
+    def housestyle_entries(self) -> list[dict[str, Any]]:
+        return self._human_decision_payloads(kind='housestyle')
+
+    def record_housestyle_entry(self, entry: dict[str, Any], *, username: str = 'Bridge Reviewer') -> dict[str, Any]:
+        """Upsert one house-style entry (housestyle.validate_entry). The same
+        key is the same row: Remove and Undo write a new state onto it, and
+        change_log keeps every earlier one -- nothing is deleted."""
+        from .housestyle import validate_entry
+        try:
+            data = validate_entry(entry)
+        except ValueError as exc:
+            raise ProjectError(str(exc)) from exc
+        iso, _ = self._timestamp()
+        data.update({'bookId': self.book_id, 'username': username, 'modifiedTimestamp': iso,
+                     'app': 'translationCore AI Bridge', 'schemaVersion': 1})
+        self._record_human_decision_row(kind='housestyle', chapter='', verse='', key=data['key'],
+                                        decision=data['state'], payload=data)
+        return data
+
     def project_decisions(self) -> list[dict[str, Any]]:
         return self._human_decision_payloads(kind='check')
 
@@ -2623,6 +2644,42 @@ class TranslationCoreProject:
                 })
         entries.sort(key=lambda entry: entry['seq'])
         return entries
+
+    LEDGER_COLUMNS = ('chapter', 'verse', 'ruleId', 'original', 'replacement', 'timestamp', 'user', 'kind')
+
+    def language_qa_change_ledger(self) -> list[dict[str, str]]:
+        """Every Scripture change applied through a Language QA Use, and every
+        export made over the publication gate, from change_log (layered-rules
+        6.5). A Use is recorded as an 'accepted' Language QA decision right
+        after the verse edit it applied; each accepted image in a decision
+        row's history is one change, even when the same finding id was later
+        decided again."""
+        identity = self.workbench_identity
+        rows: list[dict[str, str]] = []
+        for row in self.workbench.rows('human_decisions', project_id=identity.project_id, book_id=self.book_id,
+                                       equals={'kind': 'qa'}):
+            current = json.loads(row.get('payload_json') or '{}')
+            source = (current.get('issue') or {}).get('source')
+            if source not in ('languageQa', 'export'):
+                continue
+            for event in self.workbench.events_for_row('human_decisions', row['id'], project_id=identity.project_id):
+                payload = json.loads(event.get('payload_json') or '{}')
+                issue = payload.get('issue') or {}
+                if source == 'languageQa' and payload.get('decision') == 'accepted':
+                    rows.append({'chapter': str(payload.get('chapter', '')), 'verse': str(payload.get('verse', '')),
+                                 'ruleId': str(issue.get('ruleId') or issue.get('rule') or ''),
+                                 'original': str(issue.get('originalText') or ''),
+                                 'replacement': str(issue.get('chosenSuggestion') or issue.get('suggestedReplacement') or ''),
+                                 'timestamp': str(event.get('created_at') or ''), 'user': str(event.get('actor_id') or ''),
+                                 'kind': 'use'})
+                elif source == 'export' and payload.get('issueKey') == 'export.override':
+                    rows.append({'chapter': '', 'verse': '', 'ruleId': 'export.override',
+                                 'original': f"{len(issue.get('openItems') or [])} open blocking item(s)",
+                                 'replacement': str(issue.get('outputPath') or ''),
+                                 'timestamp': str(event.get('created_at') or ''), 'user': str(event.get('actor_id') or ''),
+                                 'kind': 'export-override'})
+        rows.sort(key=lambda r: r['timestamp'])
+        return rows
 
     def timestamp_iso(self) -> str:
         """Public wrapper so bridge_service can stamp a rollup entry with the

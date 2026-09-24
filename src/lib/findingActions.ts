@@ -1,5 +1,6 @@
 import { bridge } from "./api/bridgeClient";
 import { nudgeLanguageQa } from "./languageQaInline";
+import { noticeLearned } from "./houseStyleUi";
 import { findingsByVerse, languageQaFindingsByVerse, verseKey } from "./stores";
 import type { FindingStatus } from "./types/finding";
 import type { LanguageQaDecisionIssue, LanguageQaFinding, LanguageQaSuggestion } from "./types/languageQa";
@@ -47,6 +48,7 @@ export function decideLanguageQaFinding(
   return bridge.decideVerse(finding.chapter, finding.verse, finding.id, status, undefined,
     languageQaDecisionIssue(finding, chosen)).then((result) => {
     nudgeLanguageQa();  // the decision started a new pass
+    noticeLearned(result);  // the learner may have just learned house style from it
     return result;
   });
 }

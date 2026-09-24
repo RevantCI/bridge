@@ -230,8 +230,11 @@ def book_verses(sfm: Path) -> tuple[str, dict[str, dict[str, str]]]:
 
 
 def scan_book(book: str, chapters: dict[str, dict[str, str]], *,
-              terminology: list[dict[str, Any]] | None = None, timeout: float = 600.0) -> dict[str, Any]:
-    """Scan with the app's own LanguageQaManager over temporary chapter JSON."""
+              terminology: list[dict[str, Any]] | None = None,
+              housestyle: list[dict[str, Any]] | None = None, timeout: float = 600.0) -> dict[str, Any]:
+    """Scan with the app's own LanguageQaManager over temporary chapter JSON.
+    `housestyle` (a project's entries, --housestyle) is applied as in the app;
+    what it hides is reported per rule, never counted as a false positive."""
     with tempfile.TemporaryDirectory(prefix="lqa-bench-") as tmp:
         root = Path(tmp)
         folder = root / book
@@ -240,7 +243,8 @@ def scan_book(book: str, chapters: dict[str, dict[str, str]], *,
             (folder / f"{chapter}.json").write_text(json.dumps(verses, ensure_ascii=False), encoding="utf-8")
         project = SimpleNamespace(path=root, book_id=book, book_dir=folder,
                                   manifest={"target_language": {"id": "tam"}},
-                                  terminology_rules=lambda: list(terminology or []))
+                                  terminology_rules=lambda: list(terminology or []),
+                                  housestyle_entries=lambda: list(housestyle or []))
         manager = LanguageQaManager(debounce=0, yield_seconds=0)
         started = time.perf_counter()
         manager.bind(project)
@@ -256,7 +260,8 @@ def scan_book(book: str, chapters: dict[str, dict[str, str]], *,
         finally:
             manager.unbind()
     return {"book": book, "wall": time.perf_counter() - started, "findings": findings,
-            "limitations": status.get("limitations", []), "checkedVerses": status.get("checkedVerses", 0)}
+            "limitations": status.get("limitations", []), "checkedVerses": status.get("checkedVerses", 0),
+            "houseStyleSuppressed": dict(status.get("houseStyleSuppressed") or {})}
 
 
 def _overlaps(a: str, b: str) -> bool:
@@ -341,12 +346,20 @@ def score(rows: list[ReviewRow], scans: dict[str, dict[str, Any]],
     from .language_packs import default_pack
     pack = default_pack()
     rules_out = {}
+    # Findings a project's house style hid (--housestyle): reported, not scored,
+    # so a learned entry can never raise a rule's precision silently.
+    suppressed: Counter = Counter()
+    for scan in scans.values():
+        suppressed.update(scan.get("houseStyleSuppressed") or {})
+    for rule_id in suppressed:
+        per_rule.setdefault(rule_id, Counter())
     for rule_id, stats in sorted(per_rule.items()):
         pack_rule = pack.by_id(rule_id.split("/", 1)[1]) if rule_id.startswith(f"{pack.name}/") else None
         rules_out[rule_id] = {
             **{key: stats.get(key, 0) for key in rule_keys},
             "inline": bool(stats.get("inline")),
             "signOff": pack_rule.sign_off if pack_rule is not None else None,
+            "suppressedByHouseStyle": suppressed.get(rule_id, 0),
             "precision_strict": ratio(stats["tp_strict"], stats["tp_strict"] + stats["fp_strict"]),
             "precision_lenient": ratio(stats["tp_lenient"], stats["tp_lenient"] + stats["fp_lenient"]),
         }
@@ -391,6 +404,10 @@ def markdown_tables(result: dict[str, Any]) -> str:
         lines.append(f"| `{rule_id}` | {'yes' if s['inline'] else 'no'} | {s.get('findings', 0)} | {s.get('tp_strict', 0)} "
                      f"| {s.get('fp_strict', 0)} | {s.get('fp_house_form', 0)} | {_pct(s['precision_strict'])} "
                      f"| {_pct(s['precision_lenient'])} | {s.get('matched_maybe', 0)} | {s.get('matched_negative', 0)} |")
+    suppressed = {r: s["suppressedByHouseStyle"] for r, s in result["rules"].items() if s.get("suppressedByHouseStyle")}
+    if suppressed:
+        lines += ["", "Suppressed by house style (--housestyle; not counted above): "
+                  + ", ".join(f"`{r}` ({n})" for r, n in suppressed.items())]
     lines += [
         "",
         "Per review bucket (recall counts only rows whose Original Tamil is found in the scanned verse):",

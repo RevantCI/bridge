@@ -3,6 +3,7 @@
   import { bridge, type EngineInfo } from "../api/bridgeClient";
   import { manualOverrideMode, navigationStatus, project, reviewerMode } from "../stores";
   import type { NavigationSyncState, SettingsData, TerminologyRule } from "../types/finding";
+  import type { HouseStyleEntry, HouseStyleListResponse, HouseStyleProposal } from "../types/houseStyle";
 
   type Pane = "ai" | "quality" | "connections" | "resources" | "terminology" | "security";
 
@@ -167,6 +168,70 @@
     }
   }
 
+  // -- house style (layered-rules 6.2-6.4) --
+  let houseStyle: HouseStyleListResponse | null = null;
+  let houseStyleMessage = "";
+  let houseStyleBusy = false;
+  let newProperNoun = "";
+  let nameSuggestions: Array<{ word: string; count: number; variants: string[] }> = [];
+
+  async function approveName(word: string): Promise<void> {
+    await houseStyleAct(() => bridge.housestyleRecord({ scope: "word-in-book", list: "properNouns", word,
+                                                         provenance: "curated" }));
+    nameSuggestions = nameSuggestions.filter((s) => s.word !== word);
+  }
+
+  async function houseStyleAct(fn: () => Promise<HouseStyleListResponse | null | void>, done = ""): Promise<void> {
+    if (houseStyleBusy) return;
+    houseStyleBusy = true;
+    houseStyleMessage = "";
+    try {
+      const result = await fn();
+      if (result) houseStyle = result;
+      if (done) houseStyleMessage = done;
+    } catch (e) {
+      houseStyleMessage = e instanceof Error ? e.message : String(e);
+    } finally {
+      houseStyleBusy = false;
+    }
+  }
+
+  const acceptProposal = (p: HouseStyleProposal) => houseStyleAct(() => bridge.housestyleRecord({
+    scope: p.scope, ruleId: p.ruleId, word: p.word, provenance: "learned", state: "active" }), "Applied to every book.");
+  // Dismissing records the proposal as removed, so it is not proposed again.
+  const dismissProposal = (p: HouseStyleProposal) => houseStyleAct(() => bridge.housestyleRecord({
+    scope: p.scope, ruleId: p.ruleId, word: p.word, provenance: "learned", state: "removed" }));
+
+  async function addProperNoun(): Promise<void> {
+    const word = newProperNoun.trim();
+    if (!word) return;
+    await houseStyleAct(() => bridge.housestyleRecord({ scope: "word-in-book", list: "properNouns", word,
+                                                         provenance: "curated" }));
+    if (!houseStyleMessage) newProperNoun = "";
+  }
+
+  async function exportHouseStyle(): Promise<void> {
+    const path = await bridge.pickSavePath(`${$project?.bookId ?? "book"}-house-style.json`);
+    if (path) await houseStyleAct(async () => {
+      const result = await bridge.housestyleExport(path);
+      houseStyleMessage = `Exported ${result.count} entr${result.count === 1 ? "y" : "ies"}.`;
+    });
+  }
+
+  async function importHouseStyle(): Promise<void> {
+    const path = await bridge.pickJsonFile();
+    if (path) await houseStyleAct(async () => {
+      const result = await bridge.housestyleImport(path);
+      houseStyleMessage = `Imported ${result.imported}; confirm each to make it yours.`;
+      return result;
+    });
+  }
+
+  function describeEntry(e: HouseStyleEntry): string {
+    if (e.list) return `proper noun “${e.word}”`;
+    return e.scope.startsWith("word") ? `“${e.word}” for ${e.ruleId}` : `${e.ruleId} off`;
+  }
+
   async function loadTerminology(): Promise<void> {
     if (terminologyLoading) return;
     terminologyLoading = true;
@@ -174,6 +239,8 @@
       const result = await bridge.terminologyList();
       terminologyRules = result.rules;
       terminologyLoaded = true;
+      houseStyle = await bridge.housestyleList().catch(() => null);
+      nameSuggestions = (await bridge.housestyleNameSuggestions().catch(() => null))?.suggestions ?? [];
     } catch (e) {
       terminologyMessage = e instanceof Error ? e.message : String(e);
     } finally {
@@ -435,6 +502,52 @@
             {#if editingConcept}<button class="btn" on:click={resetTerminologyForm} disabled={terminologySaving}>Cancel</button>{/if}
             {#if terminologyMessage}<span class="save-msg">{terminologyMessage}</span>{/if}
           </div>
+          <h3 class="sub">House style</h3>
+          <p class="desc">What this project has decided is not a problem. Learned entries come from your Ignores ({houseStyle?.thresholds.learnIgnores ?? 3} of the same word, none Used); every entry only hides or ranks, never adds a check.</p>
+          {#if houseStyle}
+            {#each houseStyle.proposals as p (p.scope + p.ruleId + p.word)}
+              <div class="kv hs-proposal">
+                <span>Suggested</span>
+                <span>{p.scope === "rule-in-project" ? `${p.ruleId} off in every book` : `“${p.word}” for ${p.ruleId} in every book`} — {p.reason}
+                  <button class="btn link" on:click={() => acceptProposal(p)} disabled={houseStyleBusy}>Accept</button>
+                  <button class="btn link" on:click={() => dismissProposal(p)} disabled={houseStyleBusy}>Dismiss</button>
+                </span>
+              </div>
+            {/each}
+            {#each houseStyle.entries.filter((e) => e.state === "active") as e (e.key)}
+              <div class="kv hs-entry">
+                <span><span class="badge {e.provenance}">{e.imported ? "imported" : e.provenance}</span></span>
+                <span>{describeEntry(e)} · {e.scope.replace("-in-", " in ")} · {e.evidence.length} evidence
+                  {#if e.imported}<button class="btn link" on:click={() => houseStyleAct(() => bridge.housestyleSetState(e.key, "active"))} disabled={houseStyleBusy}>Confirm</button>{/if}
+                  <button class="btn link" on:click={() => houseStyleAct(() => bridge.housestyleSetState(e.key, "removed"))} disabled={houseStyleBusy}>Remove</button>
+                </span>
+              </div>
+            {:else}
+              <p class="muted">No house style recorded yet.</p>
+            {/each}
+          {/if}
+          {#if nameSuggestions.length}
+            <details class="name-suggestions">
+              <summary>Suggested names from the names check ({nameSuggestions.length})</summary>
+              {#each nameSuggestions.slice(0, 30) as s (s.word)}
+                <div class="kv">
+                  <span>{s.word}</span>
+                  <span>{s.count}× · also spelt {s.variants.join(", ")}
+                    <button class="btn link" on:click={() => approveName(s.word)} disabled={houseStyleBusy}>Approve</button></span>
+                </div>
+              {/each}
+            </details>
+          {/if}
+          <div class="field">
+            <label for="hsProperNoun">Add a proper noun (never a வல்லினம் target)</label>
+            <input id="hsProperNoun" type="text" bind:value={newProperNoun} placeholder="e.g. மோவாப்" />
+          </div>
+          <div class="save-row">
+            <button class="btn" on:click={addProperNoun} disabled={houseStyleBusy || !newProperNoun.trim()}>Add name</button>
+            <button class="btn" on:click={exportHouseStyle} disabled={houseStyleBusy}>Export…</button>
+            <button class="btn" on:click={importHouseStyle} disabled={houseStyleBusy}>Import…</button>
+            {#if houseStyleMessage}<span class="save-msg">{houseStyleMessage}</span>{/if}
+          </div>
           {#if terminologyConflict}
             <div class="term-conflict" role="alertdialog" aria-label="Replace existing terminology rule">
               <p>
@@ -496,6 +609,9 @@
   .check { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-xs); color: var(--text-2); margin: -4px 0 12px; }
   .btn.link { border: none; background: none; padding: 0 0 0 6px; text-decoration: underline; cursor: pointer; font-size: var(--fs-xs); }
   .term-rule small { color: var(--text-3); }
+  .badge { font-size: var(--fs-2xs); padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); }
+  .badge.learned { border-color: var(--accent); color: var(--accent); }
+  .badge.curated { border-color: var(--success); color: var(--success); }
   .kv { display: flex; justify-content: space-between; font-size: var(--fs-sm); padding: 6px 0; border-bottom: 1px dashed var(--border); }
   .kv .on { color: var(--success); font-weight: 700; }
   .resource-note { font-size: var(--fs-2xs); line-height: 1.45; color: var(--text-3); margin-top: 10px; overflow-wrap: anywhere; }

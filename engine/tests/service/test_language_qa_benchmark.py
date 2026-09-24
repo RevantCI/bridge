@@ -189,6 +189,21 @@ def test_labelled_examples_quote_their_verse(benchmark):
     assert positive["origin"].startswith("RUT 1:1")
 
 
+def test_house_style_suppressions_are_reported_not_scored(tmp_path):
+    """--housestyle: a word the project's house style hides is not a false
+    positive (nor a true one); it is listed per rule, so a learned entry can
+    never raise a rule's precision silently."""
+    irv, reviews = write_inputs(tmp_path, review_rows())
+    rows = bench.load_review_rows([reviews / "RUT_Round2_Proofreading_Issues.csv"])
+    book, chapters = bench.book_verses(irv / "08RUTIRVTam.SFM")
+    style = [{"scope": "word-in-book", "ruleId": "ta-irv/sandhi.vallinam.demonstrative",
+              "word": "அந்த பெண்", "state": "active"}]
+    result = bench.score(rows, {book: bench.scan_book(book, chapters, housestyle=style)}, {book: chapters})
+    rule = result["rules"]["ta-irv/sandhi.vallinam.demonstrative"]
+    assert rule["suppressedByHouseStyle"] == 1 and rule["findings"] == 4  # 1:2's FP is hidden, not scored
+    assert "Suppressed by house style" in bench.markdown_tables(result)
+
+
 @pytest.mark.subprocess
 def test_cli_gate_exit_code_and_outputs(tmp_path):
     irv, reviews = write_inputs(tmp_path, review_rows())

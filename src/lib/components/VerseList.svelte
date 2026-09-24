@@ -10,6 +10,8 @@
   import { decideLanguageQaFindingOptimistically, decideLocalFinding } from "../findingActions";
   import { codePointToUtf16 } from "../utils/codePoints";
   import LanguageQaHistoryPopup from "./LanguageQaHistoryPopup.svelte";
+  import { IGNORE_SCOPES, houseStyleNotice, recordScopedIgnore, undoLearned } from "../houseStyleUi";
+  import type { HouseStyleScope } from "../types/houseStyle";
   import type { QaFinding } from "../types/finding";
   import type { LanguageQaFinding, LanguageQaSuggestion } from "../types/languageQa";
   import {
@@ -120,6 +122,15 @@
         separatorBefore: true,
         disabled: langQaContextBusy,
         title: "Leave the verse as it is and record this occurrence as ignored.",
+      },
+      {
+        id: "ignore-scope",
+        label: "Ignore more widely",
+        disabled: langQaContextBusy,
+        title: "Record this as the project's house style (Settings → Terminology → House style, where it can be removed).",
+        submenu: IGNORE_SCOPES.filter((s) => s.scope !== "occurrence").map((s) => ({
+          id: `ignore-scope:${s.scope}`, label: s.label, title: s.title, disabled: langQaContextBusy,
+        })),
       },
       {
         id: "false-positive",
@@ -357,6 +368,25 @@
       }).finally(() => { langQaContextBusy = false; });
     } else if (id === "edit") {
       void editWithSelection(finding, verse);
+    } else if (id.startsWith("ignore-scope:")) {
+      // House style: the occurrence is ignored at once, and the scope is
+      // recorded as an explicit house-style entry the next pass applies.
+      const scope = id.slice("ignore-scope:".length) as HouseStyleScope;
+      contextNotice = `Ignored: ${IGNORE_SCOPES.find((s) => s.scope === scope)?.label.toLowerCase() ?? scope}.`;
+      contextNoticeError = false;
+      void decideLanguageQaFindingOptimistically(finding, "ignored").then(async (error) => {
+        if (error) {
+          contextNotice = error;
+          contextNoticeError = true;
+          return;
+        }
+        try {
+          await recordScopedIgnore(finding, scope);
+        } catch (e) {
+          contextNotice = e instanceof Error ? e.message : String(e);
+          contextNoticeError = true;
+        }
+      });
     } else if (id === "ignore" || id === "false-positive") {
       contextNotice = id === "ignore" ? "Occurrence ignored." : "Marked as a false positive.";
       contextNoticeError = false;
@@ -771,6 +801,16 @@
   <p class="context-notice" class:error={contextNoticeError} role="status">{contextNotice}</p>
 {/if}
 
+{#if $houseStyleNotice}
+  <!-- The learner (layered-rules 6.4): shown for the session; Undo supersedes it. -->
+  <p class="context-notice house-style" role="status">
+    Learned: “{$houseStyleNotice.word}” is house style for {$houseStyleNotice.ruleId} in this book
+    ({$houseStyleNotice.evidence.length} ignores).
+    <button type="button" class="notice-undo" on:click={() => $houseStyleNotice && void undoLearned($houseStyleNotice)}>Undo</button>
+    <button type="button" class="notice-undo" on:click={() => houseStyleNotice.set(null)} aria-label="Dismiss">✕</button>
+  </p>
+{/if}
+
 {#if contextMenu}
   <FindingContextMenu
     x={contextMenu.x}
@@ -895,6 +935,9 @@
     color: var(--success); font-size: var(--fs-sm); box-shadow: 0 4px 14px rgba(15, 23, 42, .18);
   }
   .context-notice.error { background: var(--danger-bg, #fef2f2); color: var(--danger, #b91c1c); }
+  /* Above the ordinary notice, so both can show at once. */
+  .context-notice.house-style { bottom: 72px; background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .notice-undo { margin-left: 8px; border: none; background: none; color: var(--accent); cursor: pointer; font-size: var(--fs-sm); text-decoration: underline; }
   /* The row being edited is still .active, which paints its own border --
      nested inside the textarea's it read as a double outline. The
      textarea is the only box while editing. Equal specificity to

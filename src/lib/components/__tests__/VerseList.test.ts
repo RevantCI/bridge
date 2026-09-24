@@ -2,7 +2,9 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { get } from "svelte/store";
 
-const { decideVerse, editVerse, runVerseChecks, languageQaHistory } = vi.hoisted(() => ({
+const { decideVerse, editVerse, runVerseChecks, languageQaHistory, housestyleRecord, housestyleSetState } = vi.hoisted(() => ({
+  housestyleRecord: vi.fn(),
+  housestyleSetState: vi.fn(),
   decideVerse: vi.fn(),
   editVerse: vi.fn(),
   runVerseChecks: vi.fn(),
@@ -10,7 +12,7 @@ const { decideVerse, editVerse, runVerseChecks, languageQaHistory } = vi.hoisted
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
-  bridge: { decideVerse, editVerse, runVerseChecks, languageQaHistory },
+  bridge: { decideVerse, editVerse, runVerseChecks, languageQaHistory, housestyleRecord, housestyleSetState },
 }));
 import { lqaFinding } from "./languageQaFixture";
 import type { LanguageQaSuggestion } from "../../types/languageQa";
@@ -272,14 +274,14 @@ describe("VerseList footnote handling", () => {
 
     it("offers no Use item when the finding has no suggestion", async () => {
       expect((await openMenu({ suggestions: [] })).map(([label]) => label))
-        .toEqual(["Edit…", "Ignore this occurrence", "Mark as false positive"]);
+        .toEqual(["Edit…", "Ignore this occurrence", "Ignore more widely▸", "Mark as false positive"]);
     });
 
     it("offers one Use item, with the rationale as its tooltip", async () => {
       const items = await openMenu();
       expect(items[0]).toEqual(['Use "அந்தக் காகம்"', "test rationale"]);
       expect(items.map(([label]) => label)).toEqual(
-        ['Use "அந்தக் காகம்"', "Edit…", "Ignore this occurrence", "Mark as false positive"]);
+        ['Use "அந்தக் காகம்"', "Edit…", "Ignore this occurrence", "Ignore more widely▸", "Mark as false positive"]);
     });
 
     it("offers up to five ranked Use items, and Use applies the one chosen and records its rank", async () => {
@@ -773,5 +775,40 @@ describe("VerseList one review surface (layered-rules 4.3)", () => {
     render(VerseList, { props: { onSelect: vi.fn() } });
     expect(verseRow().classList.contains("approved")).toBe(false);
     expect(verseRow().querySelector(".vnum")?.textContent).not.toContain("✓");
+  });
+});
+
+
+describe("VerseList house style (layered-rules 6.3/6.4)", () => {
+  afterEach(() => languageQaFindingsByVerse.set({}));
+
+  it("records a scoped Ignore as house style after ignoring the occurrence", async () => {
+    seed("அந்த காகம் பறந்தது.");
+    housestyleRecord.mockResolvedValue({ entries: [], proposals: [], thresholds: {}, entry: {} });
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding({ id: "lqa-s" })] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector("mark.m-lqa-sandhi") as HTMLElement);
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Ignore more widely" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "This word in this book" }));
+    await waitFor(() => expect(housestyleRecord).toHaveBeenCalledWith({
+      scope: "word-in-book", ruleId: "ta-irv/tamil.vallinam-missing", word: "அந்த காகம்", provenance: "explicit",
+      evidence: [{ chapter: "1", verse: "6", decisionId: "lqa-s" }] }));
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "lqa-s", "ignored", undefined, expect.anything());
+  });
+
+  it("shows what the learner learned from an Ignore, with Undo", async () => {
+    seed("அந்த காகம் பறந்தது.");
+    const learned = { key: "k-learned", word: "அந்த காகம்", ruleId: "ta-irv/tamil.vallinam-missing",
+                      evidence: [{}, {}, {}] };
+    decideVerse.mockResolvedValue({ houseStyle: { learned } });
+    housestyleSetState.mockResolvedValue({ entries: [], proposals: [], thresholds: {}, entry: learned });
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding({ id: "lqa-l" })] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector("mark.m-lqa-sandhi") as HTMLElement);
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Ignore this occurrence" }));
+    expect(await screen.findByText(/Learned: “அந்த காகம்” is house style/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(housestyleSetState).toHaveBeenCalledWith("k-learned", "undone");
+    expect(screen.queryByText(/Learned:/)).toBeNull();
   });
 });

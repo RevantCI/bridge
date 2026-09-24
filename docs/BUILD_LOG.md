@@ -12432,3 +12432,138 @@ is no migration and no data change.
 - **Frontend.** `SettingsModal.test.ts` (17 tests): editing shows the v3
   fields and saves them with `overwrite`. Three existing expectations were
   updated for the new fifth argument.
+
+## 2026-09-24 — Layered-rules Phases 6.2–6.5: house style as data, the learner, the name pack, the export ledger
+
+The design is in `docs/LANGUAGE_QA_HOUSESTYLE.md` and the two DECISIONS.md
+entries of this date.
+
+### Storage: workbench v4 → v5
+
+House-style entries are `human_decisions` rows of a new kind, `housestyle`.
+
+**The migration.** `kind` carried a CHECK constraint, which SQLite cannot
+alter, so `_MIGRATION_V5` rebuilds the table:
+- the widened CHECK is on a new table;
+- every row is copied with its columns named;
+- the old table is dropped and the new one renamed;
+- the one index is recreated.
+
+It gets a **data-preservation test** (v4→v5), because a rebuild is exactly
+what a reader should not take on trust. The test checks:
+- every column and revision of a planted row survives;
+- the natural unique key still holds;
+- `housestyle` is writable;
+- an unknown kind is still refused.
+
+`tc_project.record_housestyle_entry` writes the entry;
+`housestyle_entries` reads them. Remove, Undo and confirm-imported write a
+new state onto the same row, with no delete, and change_log keeps each
+state.
+
+### Applying it (`housestyle.house_style`, in `_scan`)
+
+**At assembly** (like decisions), so no change rescans:
+- word entries hide the rule's findings on that text;
+- rule entries hide the rule;
+- a learned preference ranks a suggestion first, never adding one.
+
+A hidden finding goes to the verse's `hidden` list with
+`houseStyleSuppressed`, and counts as decided in the rollup. The status
+carries `houseStyleSuppressed` per rule.
+
+**The lists** (`housestyle.properNouns`) feed the pack's proper-noun abstain
+inside the verse scan. So the lists' fingerprint joins the chapter cache
+key, and a change to them rescans.
+
+### The learner (`HouseStyleLearner`)
+
+**Incremental.** Each Language QA `verse.decide` recomputes only its (rule,
+word) pair. The pair map is built once per book from its decisions and
+forgotten on `project.open`.
+
+**Learning.** 3 ignores or false positives with no Use since create a
+learned `word-in-book` entry at once. The decision's answer carries
+`houseStyle.learned`, and the verse list shows "Learned: … — Undo". An undone
+or removed pair is never learned again.
+
+**Proposals** (`project_proposals`). These are computed when Settings opens
+and in the collection run's final stage, which now reports real proposals
+instead of "not built yet":
+- word-in-project, once a pair is learned in 2 books;
+- rule-in-project, at 20 or more decisions with 80% or more ignored.
+
+**Preferences** (`preferences_from`) come from 3 Uses of the same
+suggestion.
+
+### RPCs and UI
+
+**RPCs.** `housestyle.list`, `housestyle.record` (a project scope is written
+to every materialized book), `housestyle.setState`,
+`housestyle.nameSuggestions`, `housestyle.export`, `housestyle.import`.
+
+**UI.**
+- Verse menu: a new **Ignore more widely ▸** submenu offers the four scopes.
+  The occurrence is ignored at once, and the explicit entry is recorded
+  after.
+- Settings → Terminology → **House style**:
+  - entries with a provenance badge (or "imported"), scope, evidence count,
+    Remove and Confirm;
+  - proposals with Accept and Dismiss (Dismiss records `removed`, so it is
+    not proposed again);
+  - "Add a proper noun";
+  - suggested names from the names check, each approved one by one;
+  - Export… and Import….
+- **A new Tauri command, `pick_json_file`**, for Import. `cargo check`
+  passes.
+
+### The name pack (6.2)
+
+- The approved `properNouns` list is **curated**. Names are added in
+  Settings, or approved from the names check's **cached** majority spellings
+  (`name_suggestions` reads `check_cache` and never runs the adapter). The
+  Phase 3 finding stands: those majority forms include common words, so
+  none is added unreviewed.
+- The list abstains the வல்லினம் rules.
+- A new rule, `project/name.minority-spelling` (category name, housestyle,
+  medium, panel-only), flags a word at most twice in the book that is within
+  distance 1.0 of an approved name, and suggests that name.
+
+### The benchmark (`--housestyle`)
+
+`scripts/language_qa_benchmark.py --housestyle <project>` applies a
+project's style.
+- Hidden findings are reported per rule, and never counted as a true or
+  false positive.
+- The project's false-positive marks are exported as reviewer-labelled
+  negatives, `benchmark/results/<date>-reviewer-negatives.jsonl`.
+
+### The export ledger (6.5)
+
+Both exports now write `<book>.language-qa-changes.csv` beside the file. It
+lists each Language QA Use (chapter, verse, rule, original, replacement, time,
+actor) and each export made over the gate. It is built from change_log, so
+a Use of a finding decided again later is still listed.
+
+### Verification
+
+- **Engine.**
+  - `test_housestyle.py` (13 tests): validation; application;
+    preferences; the thresholds at their boundaries (2 vs 3 ignores, a Use
+    resetting the streak, a false positive counting, 1 vs 2 books, 19 vs 20
+    decisions, 0.75 vs 0.80, 2 vs 3 Uses); undone never re-learned; the
+    scoped ignore through the engine; the learner through `verse.decide`
+    with Undo; export/import marking entries imported until confirmed; the
+    ledger; the name pack.
+  - `test_language_qa_benchmark.py`: suppressions are reported, not scored.
+  - Workbench v4→v5 test.
+  - `test_collection_jobs.py`: propagation proposals.
+  - `test_qa_report.py`: the ledger records an export override.
+- **Frontend.**
+  - `SettingsModal.test.ts` (19 tests): house style shows provenance and
+    evidence; Accept, Remove, curated name.
+  - `VerseList.test.ts` (59 tests): the scoped Ignore records house style;
+    the learned notice's Undo.
+- **Not covered by a test:** proposals across 66 real books. Settings opens
+  every materialized sibling's workbench to compute them, on the dispatcher.
+  That is fine for a few books and unmeasured for a Bible.

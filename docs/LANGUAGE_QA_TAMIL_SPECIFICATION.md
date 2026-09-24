@@ -66,7 +66,7 @@ A verse does not move on while obvious Tamil errors remain.
 | 7 | Tamil syntax | Clause relationships, modifier attachment, subject and object reversal. | Not checked | | Proofreader |
 | 8 | Sentence completeness | Incomplete sentences, unfinished quotations, clauses split across verses, duplicated clauses. | Assisted | Stage 8 source coverage shows omitted source content. It does not judge Tamil completeness. | Proofreader |
 | 9 | Tamil punctuation | Duplicate punctuation, spacing around punctuation, unbalanced pairs, punctuation near notes and markers. | Partial | `common/punctuation.repeated`, `common/punctuation.space-before`, `ta-irv/integrity.space-before-note-end`. Unbalanced pairs and punctuation policy (comma versus full stop) are **not checked**. | Proofreader |
-| 10 | Register and written Tamil | Deliberate, consistent register; accidental colloquial, regional or English-influenced forms. | Not checked | House-style learner: **Planned (P6)**. It learns from the project's own decisions and does not judge register. | Translator |
+| 10 | Register and written Tamil | Deliberate, consistent register; accidental colloquial, regional or English-influenced forms. | Not checked | The house-style learner (`housestyle.py`) records what this project has decided is not a problem. It does not judge register. | Translator |
 
 ## Gate 2: Meaning and translation quality
 
@@ -86,8 +86,8 @@ A verse does not move on while obvious Tamil errors remain.
 
 | # | Item | What it covers | Status | Bridge rule / evidence | Owner |
 |---|---|---|---|---|---|
-| 20 | Biblical key terms | One rendering per key term, or deliberate variation. | Partial | `terminology.deprecated-form` (termbase, inline); tW resources shown. Termbase v3: **Planned (P6)** | Consultant |
-| 21 | Proper names | Consistent spelling of names across books; names with suffixes. | Partial | `names.spelling_similarity` (names adapter). Name pack and `housestyle.properNouns`: **Planned (P6)**. The vallinam rules already abstain on that list once it has entries. | Translator |
+| 20 | Biblical key terms | One rendering per key term, or deliberate variation. | Partial | `terminology.deprecated-form` (termbase v3: listed inflected forms, and case endings in prefix mode at medium confidence); tW resources shown | Consultant |
+| 21 | Proper names | Consistent spelling of names across books; names with suffixes. | Partial | `names.spelling_similarity` (names adapter); `project/name.minority-spelling` against the approved `housestyle.properNouns` list, which the vallinam rules abstain on | Translator |
 | 22 | Parallel passages | Synoptic and quoted passages rendered consistently. | Not checked | | Consultant |
 | 23 | Textual-basis review | Which source text and which variants the translation follows. | Not checked | | Consultant |
 | 24 | Numbers, money, weights and measures | Consistent numerals and units, and the numeral policy. | Not checked | `ta-irv/integrity.digits-in-text` exists but is **disabled**: digits are an IRV house form (Pass 3 §5). | Translator |
@@ -133,13 +133,13 @@ Bridge has no typesetting engine. Every item in this gate is proofed on the PDF.
 |---|---|---|---|---|---|
 | 48 | Run every automated check | All checks run and clean, or every finding decided. | Planned (P4) | Language QA as a check-framework stage, the collection runner and the publication gate | Publisher |
 | 49 | Whole-Bible wordlist audit | Every word form reviewed across the Bible. | Partial | `ta-irv/lexicon.rare-near-common` compares each book against the whole-corpus lexicon (`lexicon.json`) | Proofreader |
-| 50 | Whole-Bible glossary audit | Glossary terms used consistently. | Planned (P6) | Termbase v3 | Consultant |
-| 51 | Whole-Bible proper-name audit | One spelling per name across all books. | Partial | `names.spelling_similarity`; name pack **Planned (P6)** | Translator |
+| 50 | Whole-Bible glossary audit | Glossary terms used consistently. | Partial | Termbase v3; the collection QA run's termbase coverage report (approved renderings never used, rejected ones still present, per book) | Consultant |
+| 51 | Whole-Bible proper-name audit | One spelling per name across all books. | Partial | `names.spelling_similarity`; the collection run's cross-book names stage; `project/name.minority-spelling` | Translator |
 | 52 | Final blind proofread | A fresh reader who has not seen earlier rounds. | Not checked | | Proofreader |
 | 53 | Final consultant sign-off | The consultant's approval. | Not checked | | Consultant |
 | 54 | Final community read-through | A community reading before release. | Not checked | | Translator |
-| 55 | Regression check after every late correction | A late fix introduces no new error. | Partial | Language QA re-checks an edited verse at once. Stage 9B.3 re-runs affected analysis after a correction. The exception queue and export ledger are **Planned (P4, P6)**. | Publisher |
-| 56 | Source and version provenance | Which source files and which version were published. | Checked | `.bridge/import.json` SHA-256 provenance; `ruleVersion`/`packVersion` on every finding; export ledger **Planned (P6)** | Publisher |
+| 55 | Regression check after every late correction | A late fix introduces no new error. | Partial | Language QA re-checks an edited verse at once. Stage 9B.3 re-runs affected analysis after a correction. The exception queue lists open high findings, and the export ledger lists every Language QA change. | Publisher |
+| 56 | Source and version provenance | Which source files and which version were published. | Checked | `.bridge/import.json` SHA-256 provenance; `ruleVersion`/`packVersion` on every finding; the export ledger (`<book>.language-qa-changes.csv`) | Publisher |
 
 ## Finding fields
 

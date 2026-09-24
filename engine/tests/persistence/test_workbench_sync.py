@@ -189,7 +189,7 @@ def test_workbench_v1_to_v2_keeps_v1_rows_readable_and_the_log_immutable(tmp_pat
         conn.close()
 
     repo = WorkbenchRepository(path)
-    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 4
+    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 5
     assert json.loads(repo.get("check_cache", "c1")["payload_json"]) == {"v": 1}
     [event] = _events(repo)
     assert event["columns_json"] is None and event["event_id"] == "e1"
@@ -245,7 +245,7 @@ def test_workbench_v2_to_v3_adds_the_cross_verse_link_table_and_keeps_v2_data(tm
         conn.close()
 
     repo = WorkbenchRepository(path)
-    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 4
+    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 5
     assert json.loads(repo.get("alignment_history", "a1")["payload_json"]) == {"operation": "realign"}
     [event] = _events(repo)
     assert event["event_id"] == "e1" and json.loads(event["columns_json"]) == {"chapter": "1"}
@@ -285,9 +285,49 @@ def test_workbench_v3_to_v4_adds_the_language_qa_cache_one_row_per_chapter(tmp_p
     finally:
         conn.close()
     repo = WorkbenchRepository(path)
-    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 4
+    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 5
     assert list((tmp_path / "backups").glob("pre-workbench-v4-*"))
     _write(repo, "language_qa_cache", "c1", payload={"verses": {}}, extra_columns={"chapter": "1"})
     assert repo.get("language_qa_cache", "c1")["chapter"] == "1"
     with pytest.raises(sqlite3.IntegrityError):
         _write(repo, "language_qa_cache", "c2", payload={"verses": {}}, extra_columns={"chapter": "1"})
+
+
+def test_workbench_v4_to_v5_rebuilds_human_decisions_keeping_every_row_and_allows_housestyle(tmp_path):
+    """v5 (#169 Phase 6.3) rebuilds `human_decisions` to widen its kind CHECK.
+    A rebuild is exactly what a reader should not take on trust: every row,
+    column and revision must survive, the unique key must still hold, and the
+    new kind must be writable while an unknown one is still refused."""
+    from tc_ai_bridge.workbench_repository import _MIGRATION_V4
+    path = tmp_path / "bridge-workbench.sqlite3"
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.execute("CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, schema_id TEXT NOT NULL, applied_at TEXT NOT NULL)")
+        script = "BEGIN;\n"
+        for version, block in enumerate((_MIGRATION_V1, _MIGRATION_V2, _MIGRATION_V3, _MIGRATION_V4), start=1):
+            script += block + f"\nINSERT INTO schema_migrations(version,schema_id,applied_at) VALUES({version},'bridge-workbench-v1','t');\n"
+        conn.executescript(script + "COMMIT;")
+        conn.execute(
+            "INSERT INTO human_decisions(id,project_id,book_id,revision,actor_id,device_id,created_at,updated_at,"
+            "payload_json,kind,chapter,verse,key,decision) VALUES('d1','proj-1','rut',3,'human','dev-1','c','u',"
+            "'{\"decision\":\"ignored\"}','qa','1','2','finding-1','ignored')")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO human_decisions(id,project_id,book_id,actor_id,device_id,created_at,updated_at,"
+                "payload_json,kind,key) VALUES('d2','proj-1','rut','h','d','c','u','{}','housestyle','k')")
+        conn.commit()
+    finally:
+        conn.close()
+    repo = WorkbenchRepository(path)
+    assert repo.schema_version() == WORKBENCH_SCHEMA_VERSION == 5
+    assert list((tmp_path / "backups").glob("pre-workbench-v5-*"))
+    row = repo.get("human_decisions", "d1")
+    assert (row["revision"], row["kind"], row["chapter"], row["verse"], row["key"], row["decision"],
+            row["created_at"], row["updated_at"]) == (3, "qa", "1", "2", "finding-1", "ignored", "c", "u")
+    assert json.loads(row["payload_json"]) == {"decision": "ignored"}
+    _write(repo, "human_decisions", "h5", extra_columns={"kind": "housestyle", "key": "word-in-book|r|w"})
+    assert repo.get("human_decisions", "h5")["kind"] == "housestyle"
+    with pytest.raises(sqlite3.IntegrityError):
+        _write(repo, "human_decisions", "h6", extra_columns={"kind": "nonsense", "key": "k"})
+    with pytest.raises(sqlite3.IntegrityError):  # the unique natural key survived the rebuild
+        _write(repo, "human_decisions", "h7", extra_columns={"kind": "qa", "chapter": "1", "verse": "2", "key": "finding-1"})

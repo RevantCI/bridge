@@ -50,6 +50,10 @@ from tc_ai_bridge.project_import import (
     record_collection_qa_run,
 )
 from collection_jobs import CollectionJobConflict, CollectionJobError, CollectionJobManager, CollectionJobSpec
+from tc_ai_bridge.housestyle import (
+    LEARN_IGNORES, PREFER_USES, PROPOSE_PROJECT_BOOKS, PROPOSE_RULE_DECISIONS, PROPOSE_RULE_IGNORE_RATE,
+    HouseStyleLearner, name_suggestions, project_proposals,
+)
 from tc_ai_bridge.original_language_resources import resource_inventory
 from tc_ai_bridge.lexicon_resources import lexicon_entry_for_strong, HEBREW_PREFIX_LABELS
 from tc_ai_bridge.morphology_codes import decode_morph
@@ -332,6 +336,12 @@ class Methods:
     CHAPTER_VERSE_DATA = "chapter.verseData"
 
     CHECKS_START = "checks.start"
+    HOUSESTYLE_LIST = "housestyle.list"
+    HOUSESTYLE_NAME_SUGGESTIONS = "housestyle.nameSuggestions"
+    HOUSESTYLE_RECORD = "housestyle.record"
+    HOUSESTYLE_SET_STATE = "housestyle.setState"
+    HOUSESTYLE_EXPORT = "housestyle.export"
+    HOUSESTYLE_IMPORT = "housestyle.import"
     COLLECTION_RUN_CHECKS = "collection.runChecks"
     COLLECTION_QA_STATUS = "collection.qaStatus"
     COLLECTION_PAUSE_CHECKS = "collection.pauseChecks"
@@ -537,6 +547,7 @@ class BridgeEngine:
         self._import_lock = threading.Lock()
         self._check_jobs = CheckJobManager()
         self._collection_jobs = CollectionJobManager()
+        self._housestyle_learner = HouseStyleLearner()
         self._language_qa = LanguageQaManager()
         self._ai_review_jobs = AIReviewJobManager()
         self._analysis_jobs = AnalysisJobManager()
@@ -732,6 +743,9 @@ class BridgeEngine:
         )
         _trace(f"project.open {candidate.book_id} {timer.summary()}{runtime_phases}")
         self._language_qa.bind(candidate)
+        # Rebuilt from the book's decisions on first use: anything recorded
+        # while the book was closed (an import, another device) is picked up.
+        self._housestyle_learner.forget(str(candidate.path))
         return info
 
     def list_projects(self) -> dict[str, Any]:
@@ -3718,10 +3732,9 @@ class BridgeEngine:
         once after every book: a termbase coverage report and cross-book name
         consistency. Reports only; nothing here writes Scripture."""
         stage: dict[str, Any] = {"completedAt": None, "termbaseCoverage": [], "crossBookNames": None,
-                                 "houseStylePropagation": {
-                                     "available": False,
-                                     "reason": "House-style learning is layered-rules Phase 6; not built yet."}}
+                                 "houseStylePropagation": None}
         texts: dict[str, dict[str, str]] = {}
+        styles: list[tuple[str, list[dict[str, Any]], list[dict[str, Any]]]] = []
         for book in books:
             if cancel_event.is_set():
                 return {**stage, "cancelled": True}
@@ -3729,6 +3742,12 @@ class BridgeEngine:
             texts[book["bookId"]] = self._book_verse_text_map(project)
             stage["termbaseCoverage"].append(_termbase_coverage(book["bookId"], project.terminology_rules(),
                                                                 texts[book["bookId"]]))
+            styles.append((book["bookId"], project.housestyle_entries(), project.project_qa_decisions()))
+        # House-style propagation (6.4): proposals only, never applied here.
+        proposals = project_proposals(styles)
+        stage["houseStylePropagation"] = {
+            "available": True, "proposals": proposals,
+            "reason": f"{len(proposals)} proposal(s); accept or dismiss them in Settings → Terminology → House style."}
         if not cancel_event.is_set() and len(texts) > 1:
             stage["crossBookNames"] = self._cross_book_names(texts)
         stage["completedAt"] = datetime.now(timezone.utc).isoformat()
@@ -3929,9 +3948,124 @@ class BridgeEngine:
         # edit_verse already does below -- invalidate() is a no-op if
         # Language QA isn't bound to a project, and debounces if several
         # decisions land in a burst.
+        learned = self._learn_house_style(chapter, verse, finding_id, status, issue)
         self._language_qa.invalidate(chapter)
-        return {"chapter": chapter, "verse": verse, "findingId": finding_id,
-                "status": status, "recordedAt": str(path)}
+        result = {"chapter": chapter, "verse": verse, "findingId": finding_id,
+                  "status": status, "recordedAt": str(path)}
+        if learned is not None:
+            result["houseStyle"] = {"learned": learned}
+        return result
+
+    # -- house style (layered-rules 6.2-6.4) ---------------------------------
+
+    def _learn_house_style(self, chapter: str, verse: str, finding_id: str, status: str,
+                           issue: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """The learner's one incremental step (HouseStyleLearner.observe):
+        only the (rule, word) pair this decision touched is recomputed. A
+        pair that reaches the threshold becomes a learned word-in-book entry
+        at once, reported back so the UI can offer Undo. Best-effort: a
+        learning failure never fails the decision itself."""
+        if issue.get("source") != LANGUAGE_QA_SOURCE:
+            return None
+        try:
+            row = {"chapter": str(chapter), "verse": str(verse), "issueKey": finding_id, "decision": status,
+                   "issue": issue, "modifiedTimestamp": datetime.now(timezone.utc).isoformat()}
+            entry = self._housestyle_learner.observe(
+                str(self.project.path), self.project.project_qa_decisions, row, self.project.housestyle_entries())
+            if entry is None:
+                return None
+            return self.project.record_housestyle_entry(
+                entry, username=self.settings.reviewer_name or "Bridge Reviewer")
+        except Exception:
+            return None
+
+    def _collection_book_projects(self) -> list[TranslationCoreProject]:
+        """The open book and every materialized sibling (a lazy one has no
+        workbench yet). A project-scope house-style entry is written to each."""
+        self._require_project()
+        projects = [self.project]
+        for entry in collection_projects(str(self.project.path)):
+            path = Path(str(entry.get("path") or ""))
+            if entry.get("lazy") or not path.is_dir() or path.resolve() == Path(self.project.path).resolve():
+                continue
+            try:
+                projects.append(TranslationCoreProject(path, workspace=self.workspace))
+            except Exception:
+                continue
+        return projects
+
+    def housestyle_list(self) -> dict[str, Any]:
+        self._require_project()
+        books = []
+        for project in self._collection_book_projects():
+            try:
+                books.append((project.book_id, project.housestyle_entries(), project.project_qa_decisions()))
+            except Exception:
+                continue
+        return {"entries": self.project.housestyle_entries(), "proposals": project_proposals(books),
+                "thresholds": {"learnIgnores": LEARN_IGNORES, "proposeProjectBooks": PROPOSE_PROJECT_BOOKS,
+                               "proposeRuleDecisions": PROPOSE_RULE_DECISIONS,
+                               "proposeRuleIgnoreRate": PROPOSE_RULE_IGNORE_RATE, "preferUses": PREFER_USES}}
+
+    def housestyle_name_suggestions(self) -> dict[str, Any]:
+        """Candidates for the approved proper-noun list: the names check's
+        cached majority spellings (it is not run here), minus those approved."""
+        self._require_project()
+        approved = frozenset(e.get("word") for e in self.project.housestyle_entries()
+                             if e.get("list") == "properNouns" and e.get("state") == "active")
+        cached = (self.project.load_check_cache().get("names") or {}).get("findings") or []
+        return {"suggestions": name_suggestions(cached, approved), "checked": bool(cached)}
+
+    def housestyle_record(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Record an entry: explicit (a scoped Ignore), curated (Settings), or
+        an accepted/dismissed proposal. A project scope is written to every
+        materialized book of the collection."""
+        self._require_project()
+        username = self.settings.reviewer_name or "Bridge Reviewer"
+        targets = (self._collection_book_projects() if str(entry.get("scope", "")).endswith("project")
+                   else [self.project])
+        recorded = [project.record_housestyle_entry(entry, username=username) for project in targets]
+        self._language_qa.invalidate_all()
+        return {"entry": recorded[0], "books": [p.book_id for p in targets], **self.housestyle_list()}
+
+    def housestyle_set_state(self, key: str, state: str) -> dict[str, Any]:
+        """Remove, Undo, or confirm (an imported entry): a new state on the
+        same row, never a delete."""
+        self._require_project()
+        current = next((e for e in self.project.housestyle_entries() if e.get("key") == key), None)
+        if current is None:
+            raise ProjectError(f"No house-style entry {key!r}.")
+        entry = {**current, "state": state}
+        if state == "active":
+            entry["imported"] = False  # a local decision confirms an imported entry
+        return self.housestyle_record(entry)
+
+    def housestyle_export(self, output_path: str) -> dict[str, Any]:
+        self._require_project()
+        entries = [e for e in self.project.housestyle_entries() if e.get("state") == "active"]
+        Path(output_path).write_text(json.dumps({"schemaVersion": 1, "bookId": self.project.book_id,
+                                                 "entries": entries}, ensure_ascii=False, indent=1),
+                                     encoding="utf-8")
+        return {"written": True, "path": output_path, "count": len(entries)}
+
+    def housestyle_import(self, input_path: str) -> dict[str, Any]:
+        """Carry a book's learned style into this one. Imported entries keep
+        their provenance and evidence, and show as imported until confirmed."""
+        self._require_project()
+        try:
+            data = json.loads(Path(input_path).read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as exc:
+            raise ProjectError(f"Cannot read house style from {input_path}: {exc}") from exc
+        count = 0
+        username = self.settings.reviewer_name or "Bridge Reviewer"
+        existing = {e.get("key") for e in self.project.housestyle_entries()}
+        for entry in data.get("entries") or []:
+            if not isinstance(entry, dict) or entry.get("key") in existing:
+                continue
+            self.project.record_housestyle_entry({**entry, "imported": True, "state": "active"}, username=username)
+            count += 1
+        self._language_qa.invalidate_all()
+        return {"imported": count, **self.housestyle_list()}
 
     def _rollup_has_finding(self, chapter: str, verse: str, finding_id: str) -> bool:
         try:
@@ -4168,6 +4302,19 @@ class BridgeEngine:
         )
         return None, gate
 
+    def _write_export_ledger(self, output_path: str) -> str:
+        """`<book>.language-qa-changes.csv` beside the export (layered-rules
+        6.5): every Scripture change a Language QA Use applied, and every
+        export made over the publication gate. UTF-8 with a BOM, like the
+        other CSVs, so Excel opens Tamil as text."""
+        import csv
+        ledger = Path(output_path).with_name(f"{self.project.book_id}.language-qa-changes.csv")
+        with ledger.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(TranslationCoreProject.LEDGER_COLUMNS))
+            writer.writeheader()
+            writer.writerows(self.project.language_qa_change_ledger())
+        return str(ledger)
+
     def export_non_aligned(self, output_path: str, override: bool = False) -> dict[str, Any]:
         """Write current verse text as non-aligned, re-importable USFM."""
         self._require_project()
@@ -4189,6 +4336,7 @@ class BridgeEngine:
                     lines.append(f"\\v {verse} {text}")
             content = "\n".join(lines) + "\n"
         Path(output_path).write_text(content, encoding="utf-8")
+        ledger = self._write_export_ledger(output_path)
         return {
             "written": True, "path": output_path,
             "bookId": summary.book_id, "chapters": len(self.project.chapters()),
@@ -4198,7 +4346,7 @@ class BridgeEngine:
                 if fidelity == "source-preserving"
                 else "No source USFM was available; generated id/chapter/verse markers only."
             ),
-            "gate": gate, "overridden": bool(gate and gate["blocking"]),
+            "gate": gate, "overridden": bool(gate and gate["blocking"]), "ledgerPath": ledger,
         }
 
     def export_aligned(self, output_path: str, override: bool = False) -> dict[str, Any]:
@@ -4213,8 +4361,9 @@ class BridgeEngine:
         if refusal is not None:
             return refusal
         if Path(output_path).suffix.lower() == ".json":
-            return {**self._export_alignment_json(output_path),
-                    "gate": gate, "overridden": bool(gate and gate["blocking"])}
+            result = self._export_alignment_json(output_path)
+            return {**result, "gate": gate, "overridden": bool(gate and gate["blocking"]),
+                    "ledgerPath": self._write_export_ledger(output_path)}
         summary = self.project.summary
         book = summary.book_id
 
@@ -4249,12 +4398,13 @@ class BridgeEngine:
             insert_at = id_line.end() if id_line else 0
             content = content[:insert_at] + "\\usfm 3.0\n" + content[insert_at:]
         Path(output_path).write_text(content, encoding="utf-8")
+        ledger = self._write_export_ledger(output_path)
         status = self.alignment_status()
         return {
             "written": True, "path": output_path, "bookId": book,
             "chapters": len(self.project.chapters()), "format": "usfm3-aligned",
             "fidelity": fidelity, "alignmentStatus": status["counts"],
-            "gate": gate, "overridden": bool(gate and gate["blocking"]),
+            "gate": gate, "overridden": bool(gate and gate["blocking"]), "ledgerPath": ledger,
         }
 
     def _export_alignment_json(self, output_path: str) -> dict[str, Any]:
@@ -4480,6 +4630,21 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result={"verses": self.chapter_verses(p["chapter"])})
             if m == Methods.CHAPTER_VERSE_DATA:
                 return EngineResponse.ok(request.id, result=self.get_chapter_verse_data(p["chapter"]))
+            if m == Methods.HOUSESTYLE_LIST:
+                return EngineResponse.ok(request.id, result=self.housestyle_list())
+            if m == Methods.HOUSESTYLE_NAME_SUGGESTIONS:
+                return EngineResponse.ok(request.id, result=self.housestyle_name_suggestions())
+            if m == Methods.HOUSESTYLE_RECORD:
+                if not isinstance(p.get("entry"), dict):
+                    raise ProjectError("entry must be an object")
+                return EngineResponse.ok(request.id, result=self.housestyle_record(p["entry"]))
+            if m == Methods.HOUSESTYLE_SET_STATE:
+                return EngineResponse.ok(request.id, result=self.housestyle_set_state(
+                    str(p.get("key") or ""), str(p.get("state") or "")))
+            if m == Methods.HOUSESTYLE_EXPORT:
+                return EngineResponse.ok(request.id, result=self.housestyle_export(str(p["outputPath"])))
+            if m == Methods.HOUSESTYLE_IMPORT:
+                return EngineResponse.ok(request.id, result=self.housestyle_import(str(p["inputPath"])))
             if m == Methods.COLLECTION_RUN_CHECKS:
                 checks = p.get("checks")
                 if checks is not None and not (isinstance(checks, list) and all(isinstance(c, str) for c in checks)):

@@ -69,7 +69,28 @@ def main() -> int:
     parser.add_argument("--write-baseline", action="store_true")
     parser.add_argument("--update-doc", action="store_true")
     parser.add_argument("--write-labelled", action="store_true")
+    parser.add_argument("--housestyle", type=Path,
+                        help="a project whose house style is applied; what it hides is reported, not scored, "
+                             "and its false-positive marks are exported as reviewer-labelled negatives")
     args = parser.parse_args()
+
+    housestyle: list = []
+    if args.housestyle:
+        from tc_ai_bridge.tc_project import TranslationCoreProject
+        styled = TranslationCoreProject(args.housestyle)
+        housestyle = styled.housestyle_entries()
+        negatives = [
+            {"book": styled.book_id, "chapter": d.get("chapter"), "verse": d.get("verse"),
+             "ruleId": (d.get("issue") or {}).get("ruleId"), "originalText": (d.get("issue") or {}).get("originalText"),
+             "decidedAt": d.get("modifiedTimestamp")}
+            for d in styled.project_qa_decisions()
+            if d.get("decision") == "rejected" and (d.get("issue") or {}).get("source") == "languageQa"
+        ]
+        args.out_dir.mkdir(parents=True, exist_ok=True)
+        negatives_path = args.out_dir / f"{dt.date.today().isoformat()}-reviewer-negatives.jsonl"
+        negatives_path.write_text("".join(json.dumps(n, ensure_ascii=False) + "\n" for n in negatives), encoding="utf-8")
+        print(f"house style: {len(housestyle)} entries; {len(negatives)} reviewer-labelled negatives -> "
+              f"{negatives_path}", file=sys.stderr)
 
     rows = bench.load_review_rows(review_files(args.reviews))
     wanted = {b.lower() for b in args.books} if args.books else None
@@ -82,7 +103,7 @@ def main() -> int:
             continue
         _, chapters = bench.book_verses(sfms[book])
         verses[book] = chapters
-        scans[book] = bench.scan_book(book, chapters)
+        scans[book] = bench.scan_book(book, chapters, housestyle=housestyle)
         print(f"scanned {book.upper()}: {scans[book]['checkedVerses']} verses, "
               f"{len(scans[book]['findings'])} findings, {scans[book]['wall']:.2f}s", file=sys.stderr)
     result = bench.score(rows, scans, verses)

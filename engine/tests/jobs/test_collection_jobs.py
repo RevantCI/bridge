@@ -170,7 +170,7 @@ def test_a_collection_run_checks_every_book_records_qa_runs_and_resumes(three_bo
         assert str(engine.project.path) == str(three_book_collection)
         stage = first["finalStage"]
         assert [c["bookId"] for c in stage["termbaseCoverage"]] == ["rut", "gen", "exo"]
-        assert stage["houseStylePropagation"]["available"] is False
+        assert stage["houseStylePropagation"]["available"] is True and stage["houseStylePropagation"]["proposals"] == []
         # A second run skips every unchanged book; an edited one runs again.
         (three_book_collection.parent / "gen" / "gen" / "1.json").write_text(
             json.dumps({"1": "இந்தப் பெண் வந்தாள்."}, ensure_ascii=False), encoding="utf-8")

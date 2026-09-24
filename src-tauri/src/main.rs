@@ -27,6 +27,7 @@ fn main() {
             commands::engine_log_recent,
             commands::pick_project_folder,
             commands::pick_import_file,
+            commands::pick_json_file,
             commands::pick_save_path,
         ])
         .build(tauri::generate_context!())

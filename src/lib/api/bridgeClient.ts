@@ -2,6 +2,9 @@ import type {
   LanguageQaDecisionIssue, LanguageQaHistory, LanguageQaInline, LanguageQaStatus, LanguageQaVerse, LanguageQaView,
 } from "../types/languageQa";
 import type { CollectionQaSnapshot } from "../types/collectionQa";
+import type {
+  HouseStyleEntry, HouseStyleEntryInput, HouseStyleListResponse,
+} from "../types/houseStyle";
 
 /** One thing that blocks an export (reporting.publication_gate, layered-rules 4.5). */
 export interface ExportGateItem {
@@ -192,6 +195,12 @@ export type EngineMethod =
   | "languageQa.inline"
   | "languageQa.history"
   | "languageQa.verse"
+  | "housestyle.list"
+  | "housestyle.nameSuggestions"
+  | "housestyle.record"
+  | "housestyle.setState"
+  | "housestyle.export"
+  | "housestyle.import"
   | "collection.runChecks"
   | "collection.qaStatus"
   | "collection.pauseChecks"
@@ -740,6 +749,30 @@ export const bridge = {
     extra: { allowedAlternatives?: string[]; inflectedForms?: Record<string, string[]>; matchMode?: "exact" | "prefix" } = {},
   ): Promise<{ rules: TerminologyRule[]; conflict?: TerminologyRule }> {
     return call("terminology.record", { conceptId, approvedRenderings, rejectedRenderings, overwrite, ...extra });
+  },
+
+  async pickJsonFile(): Promise<string | null> {
+    return invoke<string | null>("pick_json_file");
+  },
+
+  // -- house style (layered-rules 6.3/6.4) --
+  housestyleList(): Promise<HouseStyleListResponse> {
+    return call("housestyle.list", {});
+  },
+  housestyleNameSuggestions(): Promise<{ suggestions: Array<{ word: string; count: number; variants: string[] }>; checked: boolean }> {
+    return call("housestyle.nameSuggestions", {});
+  },
+  housestyleRecord(entry: HouseStyleEntryInput): Promise<HouseStyleListResponse & { entry: HouseStyleEntry }> {
+    return call("housestyle.record", { entry });
+  },
+  housestyleSetState(key: string, state: "active" | "removed" | "undone"): Promise<HouseStyleListResponse & { entry: HouseStyleEntry }> {
+    return call("housestyle.setState", { key, state });
+  },
+  housestyleExport(outputPath: string): Promise<{ written: boolean; path: string; count: number }> {
+    return call("housestyle.export", { outputPath });
+  },
+  housestyleImport(inputPath: string): Promise<HouseStyleListResponse & { imported: number }> {
+    return call("housestyle.import", { inputPath });
   },
 
   pickSavePath(defaultName: string): Promise<string | null> {

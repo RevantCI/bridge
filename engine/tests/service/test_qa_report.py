@@ -243,6 +243,9 @@ def test_export_is_blocked_by_the_publication_gate_until_overridden_and_the_over
     [override] = [d for d in engine.project.project_qa_decisions() if d.get("issueKey") == "export.override"]
     assert override["issue"]["source"] == "export" and override["issue"]["counts"]["languageQa"] == 1
     assert override["issue"]["openItems"][0]["summary"].endswith("தேவன்")
+    # The export ledger (6.5) records the override beside the export.
+    ledger = (tmp_path / "rut.language-qa-changes.csv").read_text(encoding="utf-8-sig")
+    assert "export-override" in ledger and "1 open blocking item(s)" in ledger
     # The report's gate names the same items: one definition.
     from tc_ai_bridge.reporting import ReportService
     assert ReportService(engine.project).build_book_report()["publicationGate"]["exportBlocking"]["items"] == \

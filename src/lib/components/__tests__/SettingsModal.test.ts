@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 
-const { getSettings, getNavigationStatus, setSettings, engineInfo, terminologyList, terminologyRecord } = vi.hoisted(() => ({
+const { getSettings, getNavigationStatus, setSettings, engineInfo, terminologyList, terminologyRecord, housestyleList, housestyleRecord, housestyleSetState, housestyleNameSuggestions } = vi.hoisted(() => ({
+  housestyleNameSuggestions: vi.fn(),
+  housestyleList: vi.fn(),
+  housestyleRecord: vi.fn(),
+  housestyleSetState: vi.fn(),
   getSettings: vi.fn(),
   getNavigationStatus: vi.fn(),
   setSettings: vi.fn(),
@@ -18,6 +22,10 @@ vi.mock("../../api/bridgeClient", () => ({
     engineInfo,
     terminologyList,
     terminologyRecord,
+    housestyleList,
+    housestyleRecord,
+    housestyleSetState,
+    housestyleNameSuggestions,
   },
 }));
 
@@ -245,6 +253,8 @@ describe("SettingsModal terminology (#171)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     project.set(null);
+    housestyleList.mockResolvedValue({ entries: [], proposals: [], thresholds: { learnIgnores: 3 } });
+    housestyleNameSuggestions.mockResolvedValue({ suggestions: [], checked: false });
     engineInfo.mockResolvedValue({
       bridgeVersion: "0.9.6", companionSchemaVersion: 14, projectOpen: true, greekRoom: {},
     });
@@ -369,6 +379,43 @@ describe("SettingsModal terminology (#171)", () => {
       { allowedAlternatives: ["கடவுள்"], inflectedForms: { "தேவன்": ["தேவனே"] }, matchMode: "prefix" },
     ));
     expect(await screen.findByText(/also with case endings/)).toBeInTheDocument();
+  });
+
+  it("lists house style with provenance and evidence, and removes, accepts and dismisses (layered-rules 6.3/6.4)", async () => {
+    const learned = {
+      scope: "word-in-book", ruleId: "ta-irv/sandhi.vallinam.demonstrative", word: "அந்த தேசம்", list: "",
+      provenance: "learned", state: "active", imported: false, key: "k1", modifiedTimestamp: "t",
+      evidence: [{ chapter: "1", verse: "1", decisionId: "a" }, { chapter: "1", verse: "2", decisionId: "b" },
+                 { chapter: "1", verse: "3", decisionId: "c" }],
+    };
+    const proposal = { scope: "word-in-project", ruleId: learned.ruleId, word: learned.word, reason: "learned as house style in 2 books" };
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    housestyleList.mockResolvedValue({ entries: [learned], proposals: [proposal], thresholds: { learnIgnores: 3 } });
+    housestyleSetState.mockResolvedValue({ entries: [{ ...learned, state: "removed" }], proposals: [], thresholds: {}, entry: learned });
+    housestyleRecord.mockResolvedValue({ entries: [learned], proposals: [], thresholds: {}, entry: learned });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+
+    expect(await screen.findByText(/“அந்த தேசம்” for ta-irv\/sandhi.vallinam.demonstrative · word in book · 3 evidence/)).toBeInTheDocument();
+    expect(screen.getByText("learned")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(housestyleRecord).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "word-in-project", word: "அந்த தேசம்", state: "active" })));
+    await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(housestyleSetState).toHaveBeenCalledWith("k1", "removed"));
+    expect(await screen.findByText(/No house style recorded yet/)).toBeInTheDocument();
+  });
+
+  it("adds a curated proper noun to the house-style list", async () => {
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    housestyleRecord.mockResolvedValue({ entries: [], proposals: [], thresholds: {}, entry: {} });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    await screen.findByText(/No terminology rules recorded/);
+    await fireEvent.input(screen.getByLabelText(/Add a proper noun/), { target: { value: "மோவாப்" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add name" }));
+    await waitFor(() => expect(housestyleRecord).toHaveBeenCalledWith(
+      { scope: "word-in-book", list: "properNouns", word: "மோவாப்", provenance: "curated" }));
   });
 
   it("shows the RPC's validation error instead of silently doing nothing", async () => {

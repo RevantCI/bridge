@@ -1,0 +1,111 @@
+# Language QA house style
+
+House style is what a project has decided is **not** a problem, recorded as
+data (layered-rules Phase 6). No algorithm can know it in advance. Examples:
+
+- IRV writes `அந்த தேசம்` bare.
+- `மோவாப்` is a name, so it is never a வல்லினம் target.
+- A team may not want the clitic rule at all.
+
+So Bridge learns house style from what translators decide, shows why each
+entry exists, and lets anyone remove an entry.
+
+The code is `engine/tc_ai_bridge/housestyle.py`. The decisions behind the
+design are in `docs/DECISIONS.md`.
+
+## An entry
+
+An entry is a `human_decisions` row of kind `housestyle` (workbench schema
+v5):
+
+| Field | Values |
+|---|---|
+| `scope` | `word-in-book`, `word-in-project`, `rule-in-book`, `rule-in-project` |
+| `ruleId` | the finding's pack-qualified rule id, e.g. `ta-irv/sandhi.vallinam.demonstrative` |
+| `word` | the flagged text (NFC), for a word scope |
+| `list` | `properNouns` for an approved name (Phase 6.2), which carries no rule |
+| `provenance` | `curated` (added in Settings), `explicit` (a scoped Ignore), `learned` (the learner) |
+| `state` | `active`, `removed`, `undone` |
+| `evidence` | the decisions it came from: `{chapter, verse, decisionId}` |
+| `imported` | true until a local decision confirms an entry imported from another book |
+
+**What an entry does:**
+- A **word** entry with a rule hides that rule's findings whose text is that
+  word.
+- A **rule** entry hides the rule for the book.
+- A **list** entry adds the word to `housestyle.properNouns`, which the
+  வல்லினம் rules' proper-noun abstain reads (Phase 3). It also drives
+  `name.minority-spelling`.
+- A **learned preference** ranks a suggestion first (see below).
+
+**What an entry may never do:** add or widen a match pattern, change a
+severity, or draw a rule inline. That is the §31 line, "learning improves
+ranking, never becomes an unconditional rule", applied to house style.
+
+**A project scope** is written to every materialized book of the collection.
+A book still lazy when the entry is made does not get it. Accept the
+proposal again after opening that book.
+
+**Remove and Undo** write a new `state` onto the same row. `change_log`
+keeps every earlier state, and nothing is ever deleted. A pair that has
+been undone or removed is never learned again. Recording it explicitly
+still works.
+
+**Where it is applied.** House style is applied when a pass assembles its
+results, as decisions are, so changing it rescans nothing. The exception is
+the proper-noun list: it feeds an abstain inside the verse scan, so it is
+part of the per-chapter cache key, and changing it rescans what it can
+affect.
+
+A hidden finding still appears in the reports, as resolved and with
+`houseStyleSuppressed`. The status reports `houseStyleSuppressed` per rule.
+
+## The learner
+
+The learner is a deterministic, visible aggregation over the book's
+Language QA decisions. It is incremental: each decision recomputes only the
+(rule, word) pair it touched.
+
+| Constant | Value | What happens |
+|---|---|---|
+| `LEARN_IGNORES` | 3 | The same (rule, word) is ignored 3 times in a book with **no Use since**. A `word-in-book` entry is created **at once**, `provenance: learned`, with the three decisions as evidence. The UI shows "Learned: … — Undo". A false positive counts as an ignore. A Use resets the streak. |
+| `PROPOSE_PROJECT_BOOKS` | 2 | The same pair is learned in 2 books. `word-in-project` is **proposed** in Settings (Accept or Dismiss). It is never applied automatically. |
+| `PROPOSE_RULE_DECISIONS` | 20 | A rule has at least 20 decisions in the project… |
+| `PROPOSE_RULE_IGNORE_RATE` | 0.8 | …and at least 80% of them are ignores. Disabling it project-wide (`rule-in-project`) is **proposed**, never applied automatically. |
+| `PREFER_USES` | 3 | The same suggestion is Used 3 times for a word. That suggestion is ranked first for that word (`source: "housestyle"`). This is ranking only: it never adds a suggestion or changes a match. |
+
+Proposals are computed when Settings opens, and again in the final stage of
+a collection QA run. Dismissing a proposal records it as `removed`, so it is
+not proposed again.
+
+## The benchmark
+
+`scripts/language_qa_benchmark.py --housestyle <project>` applies that
+project's house style. What it hides is reported per rule as "suppressed by
+house style (n)" and is **not counted** as a true or a false positive, so a
+learned entry can never raise a rule's precision silently.
+
+The option also exports the project's false-positive marks as
+reviewer-labelled negatives
+(`benchmark/results/<date>-reviewer-negatives.jsonl`). This fills the
+benchmark's reserved "negative" class.
+
+## Moving style between books
+
+`housestyle.export` writes a book's active entries as JSON (Settings →
+House style → Export…). `housestyle.import` reads such a file into another
+book (Import…).
+
+Imported entries keep their provenance and evidence, and show as
+**imported** until someone confirms each one.
+
+## The export ledger (6.5)
+
+`export.aligned` and `export.nonAligned` also write
+`<book>.language-qa-changes.csv` beside the export. It lists:
+- every Scripture change a Language QA **Use** applied (chapter, verse,
+  rule, original, replacement, time, user);
+- every export made **over** the publication gate (`export.override`).
+
+It is built from `change_log`, so a Use of a finding that was later decided
+again is still listed.
