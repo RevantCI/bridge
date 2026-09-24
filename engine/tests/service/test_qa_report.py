@@ -17,7 +17,7 @@ import pytest
 from bridge_service import BridgeEngine, _stable_finding_id
 from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity
 from tc_ai_bridge.qa_report import (
-    CATEGORY_AI_REVIEW, CATEGORY_ALIGNMENT, CATEGORY_GREEK_ROOM, CATEGORY_TN, CATEGORY_TW,
+    CATEGORY_AI_REVIEW, CATEGORY_ALIGNMENT, CATEGORY_GREEK_ROOM, CATEGORY_LANGUAGE_QA, CATEGORY_TN, CATEGORY_TW,
     stable_finding_id, summarize_rows, write_report_rows,
 )
 
@@ -140,9 +140,93 @@ def test_check_job_leaves_a_finding_snapshot_the_report_reads(fixture_project, m
             CATEGORY_TW: {"total": 0, "resolved": 0, "unresolved": 0},
             CATEGORY_ALIGNMENT: {"total": 0, "resolved": 0, "unresolved": 0},
             CATEGORY_AI_REVIEW: {"total": 0, "resolved": 0, "unresolved": 0},
+            CATEGORY_LANGUAGE_QA: {"total": 0, "resolved": 0, "unresolved": 0},
         },
         "openBySeverity": {}, "byFixedBy": {"human": 1, "machine": 0, "unresolved": 0},
     }
+
+
+# ---- Phase 4.2: Language QA in the report, the exception queue and the gate ----
+
+def _language_qa_job(engine):
+    """A book job with the Language QA stage over a verse with a vallinam finding."""
+    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]
+    started = call(engine, "checks.start", {"scope": "book", "checks": ["languageQa"]})["result"]
+    assert wait_for_job(engine, started["jobId"], timeout=30)["state"] == "succeeded"
+
+
+@pytest.fixture
+def lqa_engine(fixture_project):
+    from tc_ai_bridge.language_qa_jobs import LanguageQaManager
+    engine = BridgeEngine()
+    engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
+    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    yield engine
+    engine._language_qa.unbind()
+
+
+def test_language_qa_rows_carry_their_rule_columns_and_follow_decisions(lqa_engine, tmp_path):
+    engine = lqa_engine
+    _language_qa_job(engine)
+    _, report = generate(engine)
+    rows = [r for r in report["rows"] if r["category"] == CATEGORY_LANGUAGE_QA]
+    [row] = [r for r in rows if r["ruleId"] == "ta-irv/sandhi.vallinam.demonstrative"]
+    assert (row["languageQaCategory"], row["layer"], row["confidence"]) == ("sandhi", "pattern", "medium")
+    assert row["packVersion"] == "ta-irv@1.0.0" and row["suggestions"] == "அந்தக் காகம்"
+    assert row["issue"] == "அந்த காகம்" and row["resolution"] == "unresolved"
+    book = report["books"][0]["checks"]["languageQa"]
+    assert book["state"] == "partial" and book["open"] == len(rows) and book["byCategory"]["sandhi"]["open"] == 1
+    # The CSV carries the Language QA columns.
+    out = tmp_path / "report.csv"
+    write_report_rows(out, "csv", rows)
+    header = out.read_text(encoding="utf-8-sig").splitlines()[0]
+    for column in ("ruleId", "packVersion", "layer", "confidence", "suggestions", "houseStyleSuppressed"):
+        assert column in header
+    # An ignore through verse.decide resolves the row without a new job.
+    finding_id = row["id"].split(":", 2)[2]
+    issue = {"source": "languageQa", "rule": "tamil.vallinam-missing"}
+    assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": finding_id,
+                                         "status": "ignored", "issue": issue})["success"]
+    _, report = generate(engine)
+    [row] = [r for r in report["rows"] if r["id"].endswith(finding_id)]
+    assert (row["status"], row["resolution"]) == ("ignored", "resolved")
+
+
+def test_a_high_high_language_qa_finding_blocks_the_gate_and_joins_the_exception_queue(lqa_engine):
+    from tc_ai_bridge.analytics import exception_first_queue
+    from tc_ai_bridge.reporting import ReportService
+    engine = lqa_engine
+    engine.project.record_terminology_rule("god", ["இறைவன்"], rejected_renderings=["தேவன்"])
+    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "தேவன் பேசினார்."})["success"]
+    started = call(engine, "checks.start", {"scope": "book", "checks": ["languageQa"]})["result"]
+    assert wait_for_job(engine, started["jobId"], timeout=30)["state"] == "succeeded"
+    # terminology.deprecated-form is severity high, confidence high.
+    report = ReportService(engine.project).build_book_report()
+    gate = report["publicationGate"]
+    assert gate["languageQaBlocking"] == 1 and gate["readyForHumanPublicationSignoff"] is False
+    assert report["languageQa"]["blockingFindings"][0]["originalText"] == "தேவன்"
+    [row] = [r for r in exception_first_queue(engine.project) if (r["chapter"], r["verse"]) == ("1", "1")]
+    assert row["languageQa"] == 1 and row["languageQaFindings"][0]["ruleId"].endswith("terminology.deprecated-form")
+
+
+def test_many_open_medium_findings_add_an_advisory_line_that_never_blocks():
+    from tc_ai_bridge.reporting import ReportService
+    gate = ReportService._publication_gate({}, [], [], [], {"blocking": 0, "medium": 51}, 50)
+    assert gate["readyForHumanPublicationSignoff"] is True
+    assert gate["advisories"] == ["51 open medium Language QA findings (more than 50)."]
+    assert ReportService._publication_gate({}, [], [], [], {"blocking": 0, "medium": 50}, 50)["advisories"] == []
+    assert ReportService._publication_gate({}, [], [], [], {"blocking": 1, "medium": 0}, 50)[
+        "readyForHumanPublicationSignoff"] is False
+
+
+def test_a_job_without_the_stage_keeps_the_previous_language_qa_snapshot(lqa_engine):
+    engine = lqa_engine
+    _language_qa_job(engine)
+    before = engine.project.language_qa_snapshots()
+    assert before
+    started = call(engine, "checks.start", {"scope": "book", "checks": ["local"]})["result"]
+    assert wait_for_job(engine, started["jobId"], timeout=30)["state"] == "succeeded"
+    assert engine.project.language_qa_snapshots() == before
 
 
 def test_report_lists_lazy_and_missing_siblings_without_materializing_them(tmp_path, fixture_project):

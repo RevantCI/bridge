@@ -7,6 +7,8 @@ export function reportRow(overrides: Partial<ReportRow> = {}): ReportRow {
     issue: "Mixed script", explanation: "Latin character inside Tamil text.", aiProposal: "",
     aiVerdict: "", status: "open", resolution: "unresolved", result: "fail", fixedBy: "",
     fixedByDetail: "", decidedAt: "", note: "", selection: "", triageHash: "",
+    languageQaCategory: "", ruleId: "", packVersion: "", layer: "", confidence: "", suggestions: "",
+    houseStyleSuppressed: "",
     ...overrides,
   };
   // Mirror what qa_report._add_finding_rows actually stamps: a triage hash on

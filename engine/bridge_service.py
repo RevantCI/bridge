@@ -94,7 +94,7 @@ from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_gaps
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
 from tc_ai_bridge import cross_verse_proposals, cross_verse_ai_proposals
-from tc_ai_bridge.reporting import ReportService
+from tc_ai_bridge.reporting import LANGUAGE_QA_MEDIUM_ADVISORY, ReportService
 from tc_ai_bridge.qa_report import (
     aggregate_qa_report,
     build_book_qa_report,
@@ -987,7 +987,16 @@ class BridgeEngine:
         AIReviewJobManager's own pattern), not inline in this handler.
         """
         self._require_project()
-        return ReportService(self.project).build_book_report()
+        return ReportService(self.project, **self._report_options()).build_book_report()
+
+    def _report_options(self) -> dict[str, Any]:
+        """The publication gate's Language QA advisory threshold: open medium
+        findings above it add an advisory line (default 50)."""
+        try:
+            value = int(self.settings.data.get("language_qa_medium_advisory", LANGUAGE_QA_MEDIUM_ADVISORY))
+        except (AttributeError, TypeError, ValueError):
+            value = LANGUAGE_QA_MEDIUM_ADVISORY
+        return {"language_qa_medium_advisory": value}
 
     def _materialized_collection_books(self) -> list[ReportBook]:
         """Every book in the currently open collection whose directory exists,
@@ -1027,7 +1036,7 @@ class BridgeEngine:
         for book in books:
             materialize_lazy_project(book.path)
             reports.append(ReportService(
-                TranslationCoreProject(book.path, workspace=self.workspace)
+                TranslationCoreProject(book.path, workspace=self.workspace), **self._report_options(),
             ).build_book_report())
         return ReportService.build_collection_report(reports)
 
@@ -3609,6 +3618,9 @@ class BridgeEngine:
             # dashboard reads, and the findings themselves for the project QA
             # report (qa_report.py), which has nothing else to read them from.
             snapshot_by_chapter: dict[str, dict[str, list[dict[str, Any]]]] = {}
+            # The Language QA stage's findings, open and decided, for the
+            # reports (qa_report, reporting, the exception queue).
+            language_qa_by_chapter: dict[str, dict[str, list[dict[str, Any]]]] = {}
             for result in job.results.values():
                 chapter = result.get("chapter")
                 verse = result.get("verse")
@@ -3631,6 +3643,9 @@ class BridgeEngine:
                     statuses[str(finding_id)] = str(decision)
                 by_chapter.setdefault(str(chapter), {})[str(verse)] = statuses
                 snapshot_by_chapter.setdefault(str(chapter), {})[str(verse)] = findings
+                if LANGUAGE_QA_CHECK in job.spec.checks:
+                    language_qa_by_chapter.setdefault(str(chapter), {})[str(verse)] = [
+                        *(language_qa.get("findings") or []), *(language_qa.get("hidden") or [])]
 
             now = project.timestamp_iso()
             project.replace_progress_chapters({
@@ -3648,7 +3663,9 @@ class BridgeEngine:
             # Written after the rollup so a crash between the two leaves the
             # rollup -- what the dashboard reads -- intact.
             for chapter, verses_map in snapshot_by_chapter.items():
-                project.save_check_findings_snapshot(chapter, verses_map)
+                project.save_check_findings_snapshot(
+                    chapter, verses_map,
+                    language_qa=language_qa_by_chapter.get(chapter, {}) if LANGUAGE_QA_CHECK in job.spec.checks else None)
         except Exception:
             pass
 

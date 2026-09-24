@@ -66,6 +66,7 @@
     greekRoom: "var(--gr)",
     alignment: "var(--align)",
     aiReview: "var(--ai)",
+    languageQa: "var(--lqa)",
   };
   const RESOLVED_COLOR = "var(--success)";
   const UNRESOLVED_COLOR = "var(--danger)";
@@ -697,6 +698,7 @@
   .fill.translationWords { background: var(--tw); }
   .fill.alignment { background: var(--align); }
   .fill.aiReview { background: var(--ai); }
+  .fill.languageQa { background: var(--lqa); }
   .pill { font-size: var(--fs-3xs); font-weight: 700; padding: 2px 7px; border-radius: 999px; flex-shrink: 0; }
   .pill.open { background: var(--danger-bg); color: var(--danger); }
 

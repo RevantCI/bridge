@@ -11961,3 +11961,85 @@ follow-up.
   - `npm run check` 0/0; `npx vitest run` 540 passed.
 - **Not covered by a test:** the App's `beginChecks` list and the post-job
   nudge. There is no App-level test harness.
+
+## 2026-09-24 — Layered-rules Phase 4.2: Language QA in the reports, the exception queue and the publication gate
+
+This is Phase 4.2 of the layered-rules brief.
+
+### One reader
+
+**What a job leaves behind.**
+- A job with the Language QA stage leaves each chapter's Language QA
+  findings beside its QaFinding snapshot, in
+  `check_findings.payload.languageQa`.
+- This includes the findings decisions hide, each carrying its `decision`.
+  The stage now returns them as `hidden`.
+- A job without the stage keeps the chapter's previous Language QA share
+  rather than erasing it.
+
+**`language_qa_jobs.reported_language_qa(project)`** is the one reader of
+that snapshot. It gives each finding its current status: the rollup's
+status first (a decision made since the job updates it), then the decision
+that hid it, then `open`. The QA report, the exception queue and the
+publication gate all read through it, so they cannot disagree. Like the rest
+of the report, it reads persisted state only and never scans.
+
+### Where it shows up
+
+**QA report** (`qa_report.py`).
+- A new category, `languageQa`, and a `languageQa` block in each book's
+  `checks`: open, resolved, blocking and open-medium counts, plus
+  `byCategory` sub-rows (typo, sandhi, ...).
+- The block is advisory, like AI review. It is not a scored family, so the
+  collection's pass/fail totals are unchanged.
+- Rows gain these columns, empty on non-Language-QA rows:
+  `languageQaCategory`, `ruleId`, `packVersion`, `layer`, `confidence`,
+  `suggestions` (joined with ` | `), and `houseStyleSuppressed`. The last is
+  always empty until Phase 6.
+- The CSV/TSV defaults and the report screen's export columns include them.
+
+**Exception queue** (`analytics.py`).
+- A verse with an open Language QA finding of severity high **or**
+  confidence high enters the queue.
+- The row carries `languageQa` (the count) and `languageQaFindings`.
+- Ranking is `(-critical, -high, -languageQa, -invalidChecks, ...)`. The
+  brief says "after AI critical issues, before tN/tW invalid checks";
+  placing it after `high` as well keeps AI high issues above it.
+
+**Publication gate** (`reporting.py`).
+- Open Language QA findings with severity high **and** confidence high are
+  a blocking input (`languageQaBlocking`). Today that is
+  `terminology.deprecated-form` and nothing else.
+- More than N open medium findings adds an advisory line (`advisories`) and
+  never blocks. N comes from the `language_qa_medium_advisory` setting and
+  defaults to 50. There is no Settings UI for it yet.
+- The gate stays labelled advisory.
+- The book report gains `languageQa`: totals, by category, and the blocking
+  findings.
+- The HTML report gains a Language QA section.
+- `ReportService.export` also writes `<book>_translation_qa_report_language_qa.csv`.
+- `collection.report` sums the Language QA totals and lists them per book.
+
+**Frontend.**
+- `ReportCategory` gains `languageQa`, with a label, a long label, a colour
+  (`--lqa`) and a place in the legend order.
+- `ReportRow` and `BookChecks` are typed for the new fields.
+
+### Verification
+
+- **Engine** (`test_qa_report.py`):
+  - Language QA rows carry the rule columns and the CSV header;
+  - an ignore through `verse.decide` resolves the row with no new job;
+  - a termbase finding (high/high) blocks the gate and enters the exception
+    queue;
+  - the advisory line appears at 51 open medium findings, not at 50, and
+    never blocks;
+  - a job without the stage keeps the previous snapshot.
+- **Frontend.** `reportStats` legend order includes `languageQa`.
+  `npm run check` 0/0, report tests pass, `npm run build` ok.
+- **Not covered by a test:**
+  - The exception queue's ranking position for Language QA was verified by
+    reading the code only. A queue with AI high issues and invalid checks
+    needs AI review fixtures that no test here builds.
+  - The HTML section was checked only by the report tests building without
+    error. Nobody has looked at it rendered.

@@ -71,6 +71,7 @@
      happens to carry -- they are separate meanings, not one shared token. */
   --pass:#15A34A; --pass-bg:#E6F7EC;
   --ai:#7C3AED; --ai-bg:#F1EAFE;
+  --lqa:#0369A1; /* Language QA's category colour in the report charts */
   --success:#16A34A; --success-bg:#EAF7EE;
   --warning:#D97706; --warning-bg:#FEF3E1;
   --danger:#DC2626; --danger-bg:#FCEBEB;

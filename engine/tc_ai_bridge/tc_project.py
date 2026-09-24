@@ -2725,23 +2725,55 @@ class TranslationCoreProject:
     def _check_findings_row_id(self, chapter: str) -> str:
         return natural_row_id(self.workbench_identity.project_id, self.book_id, 'check_findings', chapter)
 
-    def save_check_findings_snapshot(self, chapter: str | int, verses: dict[str, list[dict[str, Any]]]) -> str:
+    def save_check_findings_snapshot(self, chapter: str | int, verses: dict[str, list[dict[str, Any]]],
+                                     language_qa: dict[str, list[dict[str, Any]]] | None = None) -> str:
+        """`language_qa` is the Language QA stage's findings per verse, open
+        and decided (each decided one carries `decision`). Kept apart from
+        `verses`, which every reader takes as QaFinding dicts. None (a job
+        without the stage) keeps the chapter's previous Language QA share."""
         identity = self.workbench_identity
         chapter_key = str(chapter)
         row_id = self._check_findings_row_id(chapter_key)
+        if language_qa is None:
+            previous = self.workbench.get('check_findings', row_id)
+            try:
+                language_qa = json.loads(previous['payload_json']).get('languageQa') if previous else None
+            except (TypeError, ValueError, KeyError):
+                language_qa = None
+        payload: dict[str, Any] = {
+            'schemaVersion': 1, 'bookId': self.book_id, 'chapter': chapter_key,
+            'updatedAt': self._timestamp()[0],
+            'verses': {str(v): list(findings) for v, findings in verses.items()},
+        }
+        if isinstance(language_qa, dict):
+            payload['languageQa'] = {str(v): list(f) for v, f in language_qa.items()}
         self.workbench._write(
             'check_findings', row_id,
             project_id=identity.project_id, book_id=self.book_id,
-            payload={
-                'schemaVersion': 1, 'bookId': self.book_id, 'chapter': chapter_key,
-                'updatedAt': self._timestamp()[0],
-                'verses': {str(v): list(findings) for v, findings in verses.items()},
-            },
+            payload=payload,
             actor_id=identity.actor_id, device_id=identity.device_id,
             expected_revision=None,
             extra_columns={'chapter': chapter_key},
         )
         return row_id
+
+    def language_qa_snapshots(self) -> dict[tuple[str, str], list[dict[str, Any]]]:
+        """(chapter, verse) -> the Language QA findings the last check job with
+        the Language QA stage reported, for the whole book in one query. Open
+        ones carry no `decision`; decided ones carry the decision that hid
+        them at the time (the progress rollup has the current status)."""
+        out: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for payload in self.workbench.payloads(
+            'check_findings', project_id=self.workbench_identity.project_id, book_id=self.book_id,
+        ):
+            chapter = str(payload.get('chapter') or '')
+            by_verse = payload.get('languageQa')
+            if not chapter or not isinstance(by_verse, dict):
+                continue
+            for verse, findings in by_verse.items():
+                if isinstance(findings, list):
+                    out[(chapter, str(verse))] = [f for f in findings if isinstance(f, dict)]
+        return out
 
     def load_check_findings_snapshot(self, chapter: str | int) -> dict[str, list[dict[str, Any]]]:
         found = self.workbench.payloads(

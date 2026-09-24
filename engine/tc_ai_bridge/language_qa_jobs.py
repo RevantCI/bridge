@@ -116,6 +116,52 @@ def apply_decisions(findings: list[dict[str, Any]], decisions: dict[str, dict[st
     return shown
 
 
+def reported_language_qa(project: Any, rollup: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Every Language QA finding the last check job with the stage reported,
+    each with `status`: the progress rollup's current status for it (a
+    decision made since the job updates the rollup, Phase 4.1), else the
+    decision it was hidden by, else "open". The one reader the QA report, the
+    exception queue and the publication gate share, so they cannot disagree.
+    Persisted state only: it never scans."""
+    snapshots = project.language_qa_snapshots()
+    if not snapshots:
+        return []
+    rollup = rollup if rollup is not None else project.load_progress_rollup()
+    chapters = rollup.get("chapters", {}) if isinstance(rollup.get("chapters"), dict) else {}
+    out: list[dict[str, Any]] = []
+    for (chapter, verse), findings in snapshots.items():
+        chapter_entry = chapters.get(chapter) if isinstance(chapters.get(chapter), dict) else {}
+        verse_entry = (chapter_entry.get("verses") or {}).get(verse) or {}
+        statuses = verse_entry.get("findings") if isinstance(verse_entry, dict) else {}
+        for finding in findings:
+            current = (statuses or {}).get(str(finding.get("id", "")))
+            out.append({**finding, "status": str(current or finding.get("decision") or "open")})
+    return out
+
+
+LANGUAGE_QA_BLOCKING = ("high", "high")  # (severity, confidence) of an open finding that blocks
+
+
+def language_qa_open_counts(findings: list[dict[str, Any]]) -> dict[str, int]:
+    """Open Language QA findings, counted the way the publication gate and the
+    exception queue use them."""
+    open_findings = [f for f in findings if f.get("status") in ("open", "needs_discussion")]
+    return {
+        "open": len(open_findings),
+        "blocking": sum(1 for f in open_findings
+                        if (str(f.get("severity")), str(f.get("confidence"))) == LANGUAGE_QA_BLOCKING),
+        "high": sum(1 for f in open_findings if f.get("severity") == "high"),
+        "medium": sum(1 for f in open_findings if f.get("severity") == "medium"),
+        "low": sum(1 for f in open_findings if f.get("severity") == "low"),
+    }
+
+
+def _hidden(findings: list[dict[str, Any]], decided: dict[str, str]) -> list[dict[str, Any]]:
+    """The findings a decision hides, each with that decision: the reports list
+    them as resolved rows."""
+    return [{**f, "decision": decided[f["id"]]} for f in findings if f["id"] in decided]
+
+
 # Bump when the shape of a cached verse entry changes: persisted entries from
 # an older build are then rescanned rather than misread.
 SCAN_CACHE_VERSION = 2  # 2: `words` holds [count, start, end]; `firstSeen` is gone
@@ -663,7 +709,9 @@ class LanguageQaManager:
                 shown = apply_decisions(entry.get("findings", []), decisions, false_positives, decided)
                 room = MAX_BOOK_FINDINGS - len(findings) - len(chapter_findings)
                 chapter_findings.extend(shown[:max(0, room)])
-                by_verse[f"{chapter}:{verse}"] = {"findings": shown[:max(0, room)], "decided": decided}
+                by_verse[f"{chapter}:{verse}"] = {
+                    "findings": shown[:max(0, room)], "decided": decided,
+                    "hidden": _hidden(entry.get("findings", []), decided)}
                 if len(shown) > room:
                     chapter_limitations.append("Book finding limit reached; remaining verses omitted.")
                     omitted = True
@@ -693,8 +741,9 @@ class LanguageQaManager:
                 decided = {}
                 shown = apply_decisions([finding], decisions, false_positives, decided)
                 slot = by_verse.setdefault(f"{finding['chapter']}:{finding['verse']}",
-                                           {"findings": [], "decided": {}})
+                                           {"findings": [], "decided": {}, "hidden": []})
                 slot["decided"].update(decided)
+                slot["hidden"].extend(_hidden([finding], decided))
                 if not shown:
                     continue
                 if len(findings) >= MAX_BOOK_FINDINGS:
@@ -785,7 +834,7 @@ class LanguageQaManager:
         """The last pass's findings for one verse: `findings` (open, after
         decisions) and `decided` (finding id -> the decision that hides it)."""
         with self._lock:
-            slot = self._by_verse.get(f"{chapter}:{verse}") or {"findings": [], "decided": {}}
+            slot = self._by_verse.get(f"{chapter}:{verse}") or {"findings": [], "decided": {}, "hidden": []}
             return copy.deepcopy(slot)
 
     def _run(self) -> None:
