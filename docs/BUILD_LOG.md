@@ -11105,3 +11105,39 @@ success.**
 - Gates: `npm run check` 0/0; `npx vitest run` 506 passed; `npm run build`
   ok; engine `pytest -n auto` 1580 passed.
 - Desktop acceptance not yet run.
+
+### Audit follow-up: two test gaps closed, RULE_VERSION bumped, acceptance guide added
+
+An item-by-item audit of the four commits against the review brief found
+every fix present and behaving as specified. It also found two places where
+the tests fell short of the brief's wording. Both are closed here, with no
+behaviour change:
+
+- **The brief's exact footnote example is now a test.** The input is
+  `அந்த பட்டணம்\f + \fr 1:1 \ft note\f* வந்தான்`, `\fr` reference included.
+  The suite previously covered only a close variant. The finding is at raw
+  `[0, 12)` and is exact.
+- **A hand-typed save now has a test.** The flow is `startVerseEdit`, typed
+  text, `saveVerseEdit`, with no Use involved. It must clear that verse's
+  marks until the next poll. The earlier test reached the same save
+  function only through the suggested-fix path. The new test fails against
+  `verseEditor.ts` as of `bfd717f` and passes now.
+- **`RULE_VERSION` is `language-qa-6` → `language-qa-7`.** This is
+  informational, as with every earlier bump. Findings gained `source`, and
+  verses with inline USFM are now scanned. Finding ids do not include the
+  version, so they are unchanged. The frontend test fixtures still say
+  `language-qa-6`, but those are fixture data, not assertions against the
+  engine.
+- **`docs/LANGUAGE_QA_REVIEW_FIXES_ACCEPTANCE.md`** gives step-by-step
+  desktop cases for A52–A55. It includes a generated Titus fixture, because
+  real IRV Philippians has only 31 findings and no `\wj`. Every expected
+  number and text in it comes from importing that fixture in a scratch
+  folder and scanning it: 244 findings, chapter 3's first mark at item 162,
+  and the exact raw text after each Use.
+
+Also noted by the audit: the brief asks for `docs/DECISIONS.md` to be read,
+but that file does not exist in the repository.
+
+- Gates: `npm run check` 0/0; `npx vitest run` 507 passed; `npm run build`
+  ok; engine `pytest -n auto` 1581 passed.
+- Desktop acceptance not yet run.

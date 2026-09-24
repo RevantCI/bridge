@@ -1088,6 +1088,16 @@ def test_footnoted_verse_is_scanned_before_the_note():
     assert finding["suggestedReplacement"] == "அந்தப் பட்டணம்"
 
 
+def test_footnote_with_a_reference_marker_is_lifted_exactly_as_the_review_specified():
+    # The literal example from the #169 review brief, \fr reference included.
+    text = "அந்த பட்டணம்\\f + \\fr 1:1 \\ft note\\f* வந்தான்"
+    result = scan(text)
+    assert result["checked"] and not result["limitations"]
+    [finding] = vallinam_in(text)
+    assert (finding["start"], finding["end"]) == (0, len("அந்த பட்டணம்"))
+    assert finding["originalText"] == text[finding["start"]:finding["end"]] == "அந்த பட்டணம்"
+
+
 def test_footnoted_verse_is_scanned_after_the_note_at_raw_offsets():
     text = "அவன் சொன்னான்\\f + \\ft குறிப்பு\\f* அந்த காகம் பறந்தது."
     [finding] = vallinam_in(text)

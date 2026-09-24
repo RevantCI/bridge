@@ -11,7 +11,9 @@ vi.mock("../../api/bridgeClient", () => ({
   bridge: { editVerse, runVerseChecks, decideVerse },
 }));
 
-import { applyLanguageQaSuggestedFix, applySuggestedFindingFix, cancelVerseEdit } from "../../verseEditor";
+import {
+  applyLanguageQaSuggestedFix, applySuggestedFindingFix, cancelVerseEdit, editText, saveVerseEdit, startVerseEdit,
+} from "../../verseEditor";
 import {
   checkingProgress,
   findingsByVerse,
@@ -71,6 +73,16 @@ describe("applySuggestedFindingFix", () => {
     expect(result.ok).toBe(true);
     expect(get(languageQaFindingsByVerse)["1:6"]).toBeUndefined();
     expect(get(languageQaFindingsByVerse)["1:7"]).toEqual([expect.objectContaining({ id: "other" })]);
+  });
+
+  it("clears the verse's Language QA marks after a hand-typed edit is saved, until the next poll", async () => {
+    // No Use involved: the translator opens the editor, types, and saves.
+    languageQaFindingsByVerse.set({ "1:6": [languageQaFinding()] });
+    expect(startVerseEdit("1", "6")).toBe(true);
+    editText.set("alpha gamma");
+    expect(await saveVerseEdit()).toBe(true);
+    expect(editVerse).toHaveBeenCalledWith("1", "6", "alpha gamma");
+    expect(get(languageQaFindingsByVerse)["1:6"]).toBeUndefined();
   });
 
   it("keeps the Language QA marks when the save fails", async () => {

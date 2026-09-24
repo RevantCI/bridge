@@ -15,7 +15,7 @@ import regex
 
 from .usfm import marker_balance_issues
 
-RULE_VERSION = "language-qa-6"
+RULE_VERSION = "language-qa-7"
 MAX_VERSE_CHARS = 20_000
 MAX_VERSE_FINDINGS = 100
 # Whole-book wordlist audit (item 49). Rarity/frequency constants below are an
