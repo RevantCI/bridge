@@ -11138,6 +11138,68 @@ behaviour change:
 Also noted by the audit: the brief asks for `docs/DECISIONS.md` to be read,
 but that file does not exist in the repository.
 
+### Regression from `ca4dc5f`: poetry line breaks were reported as control characters
+
+**How it was found.** The layered-rules brief asks for a Psalms wall-time
+and memory baseline before its Phase 1. The first measurement showed
+something wrong: IRV Psalms produced 3,000 findings, 2,977 of them
+`unicode.invisible`, and the book cap stopped the pass at chapter 87.
+**Chapters 88–150 were never checked.** The Psalms SFM contains no
+invisible characters at all; a survey of all 66 IRV books found one ZWNJ, in
+1 Chronicles.
+
+**Cause.** Chapter JSON keeps a verse's USFM line structure. Poetry is
+stored like Psalm 23:1:
+`யெகோவா என் மேய்ப்பராக இருக்கிறார்;\n\q நான் தாழ்ச்சி அடையமாட்டேன்.\n\q`.
+Before `ca4dc5f` every such verse was skipped, because it contains a
+backslash. Once it was lifted and scanned, the `\q` markers were removed,
+but the line feeds stayed. `unicode.invisible` then reported each line feed,
+because it is category `Cc`. I introduced this regression in the
+inline-USFM fix, and nothing in its tests had poetry.
+
+**Fix.** In USFM a line break is whitespace, so `\n` and `\r` are no longer
+reported as control or unusual-space characters (`USFM_LINE_BREAKS`). A
+line break still separates words, as any whitespace does:
+- `அந்த\nகாகம்` is still a வல்லினம் candidate.
+- `அந்த\n\q காகம்` is a crossing candidate, dropped and counted like any
+  other.
+
+**Verification.**
+- New tests:
+  - the Psalm 23:1 shape gives no control or unusual-space finding, and no
+    limitation;
+  - a bare line break still separates words;
+  - `\q` between the two words is a counted crossing;
+  - ZWSP, ZWNJ and BEL are still reported.
+- Read-only rescan of all 66 IRV books, each imported into a scratch folder:
+  - 0 skipped verses anywhere;
+  - no floods;
+  - 119.7 s for the whole Bible, imports included.
+- Psalms: 2,461 of 2,461 verses checked, 226 findings, no limitations. That
+  is 2.0 s wall and 68 MB peak working set; before the fix it was 1.1 s,
+  but only because the pass stopped at chapter 87.
+- Totals across the Bible:
+
+  | Rule | Findings |
+  |---|---|
+  | `tamil.wordlist-variant` | 5,025 |
+  | `tamil.vallinam-missing` | 523 |
+  | `tamil.repeated-word` | 87 |
+  | `spacing.extra` | 14 |
+  | `punctuation.repeated` | 1 |
+  | `unicode.invisible` | 1 (the real ZWNJ) |
+
+- The only remaining limitations are crossing candidates, where `\wj`
+  sits between two words. There are about 120 verses in Matthew, Mark,
+  Luke, John, Acts and Revelation.
+- Gates: `npm run check` 0/0; `npx vitest run` 507 passed; `npm run build`
+  ok; engine `pytest -n auto` 1584 passed.
+
+**Found, not fixed (reported).** `wordlist_findings` stops at
+`MAX_WORDLIST_FINDINGS` (200) without adding a limitation. Larger books,
+Psalms among them, reach exactly 200, so the cut is invisible to the
+reviewer. It should become a reported limitation like every other cap.
+
 - Gates: `npm run check` 0/0; `npx vitest run` 507 passed; `npm run build`
   ok; engine `pytest -n auto` 1581 passed.
 - Desktop acceptance not yet run.

@@ -176,6 +176,12 @@ _ATTRIBUTES = regex.compile(r"\|[^\\]*(?=\\(?:\+?[A-Za-z0-9_-]+)?\*)")
 # marker syntax.
 _MARKER = regex.compile(r"\\(?:\+?[A-Za-z0-9_-]+(\*)?|(\*))( )?")
 CROSSING_LIMITATION = "candidate(s) spanning inline USFM markup omitted."
+# Chapter JSON keeps a verse's USFM line structure: poetry is stored as
+# "…;\n\q நான் …\n\q". In USFM a line break is whitespace, so it is never
+# reported as a control or unusual-space character. It still separates words,
+# as any whitespace does. Reporting it flooded IRV Psalms with 2,977 false
+# findings that filled the book cap by chapter 87.
+USFM_LINE_BREAKS = frozenset("\n\r")
 
 
 @dataclass(frozen=True)
@@ -310,6 +316,8 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
             if not unicodedata.is_normalized("NFC", cluster.group()):
                 add("unicode.nfc", *cluster.span(), "Canonically equivalent non-NFC text; review project normalization policy.")
     for index, char in enumerate(text):
+        if char in USFM_LINE_BREAKS:
+            continue  # USFM line structure, i.e. whitespace -- not a control character in the text
         category = unicodedata.category(char)
         if char == "\ufffd":
             add("unicode.corruption", index, index + 1, "Replacement character or isolated surrogate; inspect the source encoding.", "high")

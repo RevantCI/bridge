@@ -1180,6 +1180,34 @@ def test_lifted_text_mirrors_the_frontend_note_swallow_rule():
         assert lifted.visible == visible, raw
 
 
+def test_poetry_line_structure_is_whitespace_not_a_control_character():
+    # The shape IRV Psalm 23:1 has in chapter JSON. Before this was fixed,
+    # every line feed was a unicode.invisible finding: 2,977 in Psalms,
+    # filling the 3,000-finding book cap by chapter 87.
+    text = "யெகோவா என் மேய்ப்பராக இருக்கிறார்;\n\\q நான் தாழ்ச்சி அடையமாட்டேன்.\n\\q"
+    result = scan(text)
+    assert result["checked"] and not result["limitations"]
+    assert not [f for f in result["findings"] if f["rule"] in {"unicode.invisible", "spacing.unusual"}]
+    assert scan("அவன்\r\nவந்தான்")["findings"] == []
+
+
+def test_a_line_break_still_separates_words():
+    # A bare line break is whitespace between words: the pair is still checked.
+    text = "அவன் அந்த\nகாகம் பார்த்தான்."
+    [finding] = vallinam_in(text)
+    assert finding["originalText"] == text[finding["start"]:finding["end"]] == "அந்த\nகாகம்"
+    # A \q marker between them makes it a crossing candidate: dropped and counted, never drawn over markup.
+    result = scan("அவன் அந்த\n\\q காகம் பார்த்தான்.")
+    assert not vallinam_in("அவன் அந்த\n\\q காகம் பார்த்தான்.")
+    assert result["limitations"] == ["1 candidate(s) spanning inline USFM markup omitted."]
+
+
+def test_real_invisible_characters_are_still_reported():
+    for char in ("​", "‌", "\u0007"):
+        rules = {f["rule"] for f in scan(f"அவன்{char}வந்தான்")["findings"]}
+        assert "unicode.invisible" in rules, hex(ord(char))
+
+
 def test_verse_without_markup_is_unchanged_by_lifting():
     # Same findings, same ids, same offsets as before lifting existed.
     text = "அந்த காகம்  பறந்தது"
