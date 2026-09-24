@@ -10590,3 +10590,216 @@ needs human curation/review layered on top, not automatic ingestion, or it
 will enshrine the project's existing errors as "valid vocabulary" instead of
 catching them. Not yet scoped as concrete work; no code changed in this
 session.
+
+### 2026-09-24 LQA-2 Part B3: வல்லினம் மிகுதல் after explicit dative -க்கு
+
+A third maintainer-specified bounded rule, again reusing B1/B2's mechanism
+with zero new logic -- `VALLINAM_TRIGGERS` gained three more words:
+எனக்கு, உங்களுக்கு, தேவனுக்கு (explicit fourth-case/நான்காம் வேற்றுமை விரி
+surface forms), each followed by a க/ச/த/ப-initial word requiring the
+matching linking consonant, exactly like B1's demonstratives and B2's
+manner-adverbs.
+
+**How the candidate rule was found.** #169's own checklist had items 1/2/6
+blocked on "dictionary and morphology feasibility measured offline" since
+the 2026-09-23 external-library rejection (previous entry). The maintainer
+asked to research an authoritative source for B3 rather than requiring
+hand-supplied examples from scratch. Web research (Tamil Virtual Academy,
+Tamil Wikipedia's வல்லினம் மிகும் இடங்கள் article, cross-checked against
+independent grammar sites including an 8th-standard textbook chapter --
+same rule, same canonical examples, not a one-source claim) found
+"நான்காம் வேற்றுமை விரியில் வல்லினம் மிகும்" as a real, textbook-documented
+rule, directly quoted (not paraphrased) from the Wikipedia article:
+தந்தைக்குக் கொடுத்தான், தாய்க்குச் சொன்னான், தங்கைக்குத் தந்தான். The same
+research explicitly did *not* find equivalent support for genitive -உடைய or
+the quantifier எல்லா as general phrase-boundary rules -- the documented
+genitive rule only covers a fused compound (நாய்க்குட்டி, one word), not a
+spelled-out phrase like அவர்களுடைய + a separate following word, and no
+source addressed எல்லா at all. Reported back to the maintainer with an
+explicit caveat that a Wikipedia summary is a claim to verify, not a rule
+to ship from directly -- same discipline as every other external source
+this project has used.
+
+**The maintainer's actual spec (2026-09-24) is what B3 implements**, and it
+corrected two things the web research alone got wrong or left open:
+
+1. **-உடைய is the *opposite* direction, not merely "unconfirmed."** Standard
+   modern Tamil does *not* geminate after உடைய (அவர்களுடைய பெயர்கள் is
+   correct; அவர்களுடையப் பெயர்கள் is not) -- a candidate future "excess
+   வல்லினம்" rule if ever built, never folded into B3. This directly
+   concerns the 2026-09-24 Philippians Round 2 QA state doc's 3:19 row,
+   marked "Disputed" there for an unrelated reason (a live-file-content
+   contradiction, not a rule question) -- worth the maintainer knowing this
+   rule question and that factual dispute are two separate things about the
+   same verse.
+2. **The morphological guard.** `token.endswith("க்கு")`-style suffix
+   matching is explicitly unsafe -- ordinary Tamil lexical words can
+   themselves end in க்கு without being a fourth-case form, and Bridge has
+   no morphological analyzer to disambiguate. B3 ships as an allowlist of
+   three independently verified dative surface forms, the same
+   exact-match-against-the-bare-trigger-token mechanism B1/B2 already use
+   for their own closed trigger sets -- not a new mechanism, just a
+   pre-existing one applied to a third list. A new dative form gets added
+   to the allowlist only when its case analysis is independently verified,
+   same bar as B1/B2's own trigger words.
+
+**Explicitly out of scope for B3** (per the maintainer's spec, not to be
+inferred back in later without a fresh bounded rule statement): உடைய
+genitive, எல்லா, accusative -ஐ, any other case suffix, compounds,
+inferred/hidden fourth-case தொகை forms, general words merely ending in
+க்கு, morphology guessing, automatic Scripture correction.
+
+**Round 2 QA re-review.** The maintainer's spec explicitly warned against
+treating the Philippians Round 2 QA pass's own "Rejected"/"Fixed"
+dispositions as linguistic ground truth for this question -- that pass
+recorded human review outcomes on a different, broader question (is this
+inconsistency worth an editorial fix), not a validated grammatical rule.
+Three of the pass's dative-sandhi rows are exact instances of this rule:
+php 1:29 (உங்களுக்கு கொடுக்கப்பட்டிருக்கிறது, previously "Rejected"), php
+4:15 (தேவனுக்கு ... சுகந்த, the bare comparison point behind the already-
+"Rejected" 4:18 row), and php 1:12 (எனக்கு சம்பவித்தவைகள், the one row the
+maintainer had already marked "Fixed" -- consistent with this rule, not
+contradicting it). B3's own tests include a dedicated parametrized case
+(`test_vallinam_b3_matches_the_maintainers_philippians_fixtures`) against
+the maintainer's exact fixture text for these three, tied back to their
+verse references rather than left as synthetic examples. The Round 2 QA
+workbook/state doc themselves were not edited in this session -- that is
+tracked separately in `Claude outputs/philippians-round2-qa-state.md`, not
+part of the Bridge repository.
+
+`RULE_VERSION` bumped `language-qa-4` -> `language-qa-5` (informational
+only, same as B1->B2's own bump).
+
+**Tests**: 45 new focused cases -- 12 against every trigger x initial
+combination (3 triggers x 4 consonant classes), reusing only vocabulary
+already attested either in the maintainer's own spec or the existing B1/B2
+test suite (கொடு, தெரியும், பயன், சம்பவித்தவைகள், செய்தான், சுகந்த,
+கொடுக்கப்பட்டிருக்கிறது) rather than inventing new Tamil text -- same
+caution as everywhere else in this project about not trusting unverified
+linguistic judgment, including its own. Plus: the 3 maintainer-fixture cases
+above, correct-forms-not-flagged (12 cases), non-trigger-initial abstention
+(3), punctuation-boundary abstention (3), look-alike/suffixed-form
+abstention (3: எனக்குள், உங்களுக்குள், தேவனுக்குரிய -- the concrete
+demonstration of the morphological guard), trigger-at-end-of-verse (3),
+inline-USFM abstention, NFD-decomposed input, finding-identity stability, no
+input mutation, B1+B2+B3 coexistence in one verse, and an explicit
+B1/B2-regression-unaffected check. `test_language_qa.py` alone: **161
+passed**, up from 116 -- the delta is exactly the 45 new cases, confirming
+nothing else moved. Full engine suite (serial, ~19 minutes): **1491 passed,
+0 failed, 0 skipped**.
+
+**Round 2 QA re-audit, done immediately after (2026-09-24).** Per the
+maintainer's explicit instruction not to treat the Philippians Round 2 QA
+pass's own dispositions as linguistic ground truth, ran a systematic B3-rule
+re-scan of every எனக்கு/உங்களுக்கு/தேவனுக்கு occurrence in that book (same
+tokenizer as production, run against the same `staged/parsed.json` used for
+the original pass) rather than relying on the earlier manual read. Found 3
+genuine violations the original verse-by-verse read never caught -- php
+1:10 and 2:11 (both தேவனுக்கு + க-initial, bare), php 4:15 (எனக்கு +
+க-initial, bare) -- and one wrong citation in the original workbook: its
+4:18 row cited "bare at 4:15" as the comparison point, but 4:15 contains no
+தேவனுக்கு at all. php 1:29 changed from "Rejected" to "Confirmed" on this
+basis. All of this lives in `Claude outputs/philippians-round2-qa-state.md`
+and the regenerated workbook, not in the Bridge repository -- noted here
+only because it is the concrete evidence that B3 is a real, previously-
+undetected gap, not a synthetic example.
+
+No frontend changes needed or made: `INLINE_LANGUAGE_QA_MARKS` in
+`highlight.ts` keys on `finding.rule` (`"tamil.vallinam-missing"`), never on
+which trigger word fired, so B3 findings get the same yellow inline
+highlight, suggest/edit/ignore, and panel listing as B1/B2 automatically --
+confirmed by reading the mechanism, not assumed from B2's own precedent.
+
+Desktop acceptance not yet run -- awaiting the maintainer testing the actual
+build, same as every rule so far.
+
+### 2026-09-24 LQA-2 Part B4: வல்லினம் மிகுதல் after explicit accusative -ஐ
+
+A fourth maintainer-specified bounded rule, again reusing B1/B2/B3's
+mechanism with zero new logic -- `VALLINAM_TRIGGERS` gained five more words:
+என்னை, உங்களை, அவனை, அதை, எதை (explicit second-case/accusative,
+இரண்டாம் வேற்றுமை விரி surface forms), each followed by a க/ச/த/ப-initial
+word requiring the matching linking consonant.
+
+**How this candidate was actually found is worth recording precisely,
+because the process itself surfaced two real citation/verification
+failures worth remembering.** After B3, the maintainer asked for another
+researched B4 candidate. A first web-research pass proposed single-letter
+words (கை/தீ/தை/பூ/மை) and confirmed they are real vல்லினம் rules -- but
+they turned out to be *compound-word formation* (கை + குழந்தை = one fused
+word கைக்குழந்தை), not the *adjacent-word* sandhi B1-B3's mechanism handles;
+dropped as the wrong structural type, not wrong grammar. Accusative -ஐ and
+ஈறுகெட்ட எதிர்மறைப் பெயரெச்சம் were then identified as candidates with the
+right structural shape, but a scan of Philippians found zero real
+occurrences of either -- the book is short enough that not every sandhi
+environment shows up in it.
+
+The maintainer then supplied an extensive external research package (a
+133-rule catalogue, 42 sources, and a claimed local Psalms corpus archive
+at `D:\GPT Lab\...`) arguing for both candidates. Two things in it needed
+independent verification before use, same discipline as every source this
+project has ever used:
+
+1. **One citation was wrong.** The package's citation for accusative -ஐ's
+   `கண்ணனைக் கண்டான்` example pointed at a real TVA page that, when fetched
+   directly, turned out to be about அரை/பாதி instead -- a genuine citation
+   error. A second round from the maintainer supplied a *different*, correct
+   URL for the same claim, which was independently fetched and does contain
+   `கண்ணனைக் கண்டான்` under இரண்டாம் வேற்றுமை. Net effect: the underlying
+   grammar claim holds; "fabricated" (this session's first word for it) was
+   an overstatement of what was actually a wrong citation, corrected on
+   review -- worth recording as its own small calibration lesson.
+2. **The Psalms corpus evidence could not be verified and was not used.**
+   `D:\GPT Lab\...` is not a path on this machine, was never referenced
+   anywhere else in this session, and there is no way to confirm the claimed
+   archive, its SHA-256 hashes, or its extracted examples (E01-E06) are
+   genuine rather than constructed to look genuine. Separately, it was
+   Psalms, not Philippians -- the wrong book for this review regardless.
+   None of that corpus evidence was used for B4; it is not cited anywhere in
+   this rule's tests or specification.
+
+**What actually grounds B4 is a third, independently-verified pass**: the
+maintainer supplied three specific Philippians line/verse claims
+(php 2:28, 3:14, 4:18) against `Claude outputs/staged/51PHPIRVTam.SFM` --
+a real, local, directly-readable file from earlier this session. All three
+were read directly (not trusted from the claim) and confirmed byte-for-byte
+correct: php 2:28 (`அவனை சீக்கிரமாக`, bare, a pronoun -- in scope), php 3:14
+(`பரிசை பெற்றுக்கொள்ள`, bare, an ordinary noun -- correctly excluded from
+B4's scope, would need a noun/participle recognizer Bridge doesn't have),
+php 4:18 (`அனுப்பப்பட்டவைகளை தேவனுக்குச்`, bare, a participial noun --
+also correctly excluded, and a *second*, previously-uncaught boundary in
+the same verse already covered once by B3 for `தேவனுக்குச் சுகந்த`). Only
+php 2:28 is inside B4's actual scope, and it is the rule's real fixture.
+
+**Explicitly out of scope for B4**, same as every case-suffix rule so far:
+ordinary nouns/participles ending in bare ஐ (பரிசை, அனுப்பப்பட்டவைகளை --
+real, confirmed bare boundaries in Philippians, but excluded because
+distinguishing "accusative noun" from "any word ending in ஐ" needs a real
+morphological analyzer, not an allowlist), -உடைய, எல்லா, any other case
+suffix, compounds, தொகை forms, ஈறுகெட்ட எதிர்மறைப் பெயரெச்சம் (real grammar,
+zero verified Philippians occurrences, not pursued further this round),
+அரை/பாதி (same), and general words that merely end in ஐ.
+
+`RULE_VERSION` bumped `language-qa-5` -> `language-qa-6` (informational
+only, same as every earlier bump).
+
+**Tests**: 63 new focused cases -- 20 against every trigger x initial
+combination (5 triggers x 4 consonant classes), reusing only vocabulary
+already attested in the maintainer's own B3 spec or the existing B1/B2/B3
+test suite; 1 tied directly to the real, independently-verified php 2:28
+text (not a synthetic fixture); 20 correct-forms-not-flagged; 5
+non-trigger-initial abstention; 3 punctuation-boundary abstention; 3
+look-alike/suffixed-form abstention (என்னைவிட, அதைவிட, அவனைப்போல -- real
+Tamil comparative/similative constructions, each tokenizing as one word);
+5 trigger-at-end-of-verse; inline-USFM abstention; NFD-decomposed input;
+finding-identity stability; no input mutation; B1+B2+B3+B4 coexistence in
+one verse; and an explicit B1/B2/B3-regression-unaffected check.
+`test_language_qa.py` alone: **224 passed**, up from 161 -- the delta is
+exactly the 63 new cases. Full engine suite (serial, ~19 minutes): **1554
+passed, 0 failed, 0 skipped** (up from 1491, confirming nothing else moved).
+
+No frontend changes needed or made, same reasoning as B3: `finding.rule`
+stays `"tamil.vallinam-missing"` regardless of which trigger fired.
+
+Desktop acceptance not yet run -- awaiting the maintainer testing the
+actual build, same as every rule so far.

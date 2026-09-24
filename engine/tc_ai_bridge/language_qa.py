@@ -12,7 +12,7 @@ from typing import Any
 
 import regex
 
-RULE_VERSION = "language-qa-4"
+RULE_VERSION = "language-qa-6"
 MAX_VERSE_CHARS = 20_000
 MAX_VERSE_FINDINGS = 100
 # Whole-book wordlist audit (item 49). Rarity/frequency constants below are an
@@ -29,21 +29,48 @@ WORDLIST_RATIO_MIN = 5
 MAX_WORDLIST_FINDINGS = 200
 CONSONANTS = frozenset("கஙசஜஞடணதநனபமயரறலளழவஶஷஸஹ")
 SIGNS = frozenset("ாிீுூெேைொோௌ்ௗ")
-# Part B1/B2: closed-class வல்லினம் மிகுதல் environments only -- a
-# demonstrative (B1: அந்த/இந்த/எந்த) or a manner-adverb (B2: அப்படி/இப்படி/
-# எப்படி) followed by a க/ச/த/ப-initial word. Deliberately not general sandhi
-# -- see docs/BUILD_LOG.md's dated entries for each bounded rule statement
-# this mirrors. Both trigger sets share this one mechanism on purpose (same
+# Part B1/B2/B3/B4: closed-class வல்லினம் மிகுதல் environments only -- a
+# demonstrative (B1: அந்த/இந்த/எந்த), a manner-adverb (B2: அப்படி/இப்படி/
+# எப்படி), an explicit fourth-case/dative (B3: நான்காம் வேற்றுமை விரி --
+# எனக்கு/உங்களுக்கு/தேவனுக்கு), or an explicit second-case/accusative
+# (B4: இரண்டாம் வேற்றுமை விரி -- என்னை/உங்களை/அவனை/அதை/எதை) followed by a
+# க/ச/த/ப-initial word. Deliberately not general sandhi -- see
+# docs/BUILD_LOG.md's dated entries for each bounded rule statement this
+# mirrors. All four trigger sets share this one mechanism on purpose (same
 # tokenizer, same exact-match-against-the-bare-trigger-token, same
-# whitespace-only-adjacency and initial-consonant-class checks below) --
-# not two parallel rule engines. Exact-match against the bare trigger form
-# is also what keeps this from firing on a token that already carries the
+# whitespace-only-adjacency and initial-consonant-class checks below) -- not
+# four parallel rule engines. Exact-match against the bare trigger form is
+# also what keeps this from firing on a token that already carries the
 # linking consonant (e.g. "அப்படிக்" tokenizes as one word, not equal to
 # "அப்படி") or on a longer word that merely contains a trigger as a prefix
-# (அப்படித்தான், இப்படியும், எப்படியோ, ...) -- no separate exclusion list
-# needed for either case.
+# (அப்படித்தான், இப்படியும், எப்படியோ, எனக்குள்ளே, அதைவிட, ...) -- no separate
+# exclusion list needed for any case.
+#
+# B3 is deliberately an allowlist of explicitly verified dative *surface
+# forms*, not a suffix rule (`token.endswith("க்கு")`) -- ordinary Tamil
+# lexical words can themselves end in க்கு without being a fourth-case form,
+# and Bridge has no morphological analyzer to tell the difference reliably.
+# Add a new dative form only when its case analysis is independently
+# verified, the same discipline that gated B1/B2's own trigger words.
+# Explicitly out of scope for B3: -உடைய (genitive; standard modern Tamil
+# does *not* geminate after உடைய -- the opposite direction from B1/B2/B3/B4, and
+# a candidate future "excess வல்லினம்" rule, never folded into this one),
+# எல்லா (not a case marker; ungated, no rule statement exists yet), any other
+# case suffix, compounds, inferred/hidden fourth-case தொகை forms, and general
+# words that merely end in க்கு or ஐ.
+#
+# B4: explicit accusative (இரண்டாம் வேற்றுமை விரி, -ஐ) surface forms, same
+# allowlist discipline as B3 -- a fixed list of pronoun forms verified as
+# genuine accusative case, not a suffix rule (ordinary nouns/participles can
+# end in bare ஐ without being this case -- e.g. பரிசை "the prize",
+# அனுப்பப்பட்டவைகளை "the things sent" are real, confirmed bare-boundary
+# violations in Philippians too, but are excluded from B4 because they need
+# a noun/participle recognizer Bridge doesn't have, not just an allowlist
+# lookup). Confirmed real violation: php 2:28 அவனை சீக்கிரமாக (bare).
 VALLINAM_TRIGGERS = frozenset({
     "அந்த", "இந்த", "எந்த", "அப்படி", "இப்படி", "எப்படி",
+    "எனக்கு", "உங்களுக்கு", "தேவனுக்கு",
+    "என்னை", "உங்களை", "அவனை", "அதை", "எதை",
 })
 VALLINAM_INITIALS = frozenset("கசதப")
 WORD = regex.compile(r"\p{L}[\p{L}\p{M}]*")

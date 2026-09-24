@@ -211,6 +211,246 @@ def test_vallinam_b1_regression_is_unaffected_by_b2():
     assert len(findings) == 1 and findings[0]["originalText"] == "அந்த காகம்"
 
 
+# Part B3: same mechanism again, a third closed-class trigger set -- an
+# explicit fourth-case/dative surface form (எனக்கு/உங்களுக்கு/தேவனுக்கு)
+# rather than B1's demonstratives or B2's manner-adverbs. This is an
+# allowlist of independently verified dative forms, not a suffix rule --
+# see VALLINAM_TRIGGERS's own comment in language_qa.py.
+
+
+@pytest.mark.parametrize("text,flagged,initial", [
+    ("எனக்கு கொடு", "எனக்கு", "க"), ("எனக்கு சம்பவித்தவைகள்", "எனக்கு", "ச"),
+    ("எனக்கு தெரியும்", "எனக்கு", "த"), ("எனக்கு பயன்", "எனக்கு", "ப"),
+    ("உங்களுக்கு கொடுக்கப்பட்டிருக்கிறது", "உங்களுக்கு", "க"), ("உங்களுக்கு செய்தான்", "உங்களுக்கு", "ச"),
+    ("உங்களுக்கு தெரியும்", "உங்களுக்கு", "த"), ("உங்களுக்கு பயன்", "உங்களுக்கு", "ப"),
+    ("தேவனுக்கு கொடு", "தேவனுக்கு", "க"), ("தேவனுக்கு சுகந்த", "தேவனுக்கு", "ச"),
+    ("தேவனுக்கு தெரியும்", "தேவனுக்கு", "த"), ("தேவனுக்கு பயன்", "தேவனுக்கு", "ப"),
+])
+def test_vallinam_b3_missing_link_is_flagged(text, flagged, initial):
+    findings = [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["severity"] == "medium" and finding["status"] == "review-needed"
+    assert finding["originalText"] == text
+    assert flagged in finding["message"] and f"{flagged}{initial}்" in finding["message"]
+    assert text[finding["start"]:finding["end"]] == finding["originalText"]
+    assert finding["suggestedReplacement"] == text.replace(flagged, f"{flagged}{initial}்", 1)
+
+
+@pytest.mark.parametrize("text,flagged,initial,expected_span", [
+    ("எனக்கு சம்பவித்தவைகள்", "எனக்கு", "ச", "எனக்கு சம்பவித்தவைகள்"),
+    ("உங்களுக்கு கொடுக்கப்பட்டிருக்கிறது", "உங்களுக்கு", "க", "உங்களுக்கு கொடுக்கப்பட்டிருக்கிறது"),
+    # The maintainer's literal fixture has a third word (வாசனையாக) that sits
+    # outside the flagged span -- the rule only ever covers the trigger plus
+    # its immediately following word, same as every other case here.
+    ("தேவனுக்கு சுகந்த வாசனையாக", "தேவனுக்கு", "ச", "தேவனுக்கு சுகந்த"),
+])
+def test_vallinam_b3_matches_the_maintainers_philippians_fixtures(text, flagged, initial, expected_span):
+    # The exact "incorrect" forms from the maintainer's B3 spec (2026-09-24),
+    # each traceable to a real verse from the Round 2 QA pass (php 1:12,
+    # 1:29, 4:15 respectively) rather than a synthetic example -- and each
+    # previously carried a "Rejected"/no-finding disposition in that pass's
+    # own review, which the maintainer explicitly said not to treat as
+    # linguistic ground truth. This rule now flags all three.
+    findings = [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["originalText"] == expected_span
+    assert finding["suggestedReplacement"] == expected_span.replace(flagged, f"{flagged}{initial}்", 1)
+
+
+@pytest.mark.parametrize("text", [
+    "எனக்குக் கொடு", "எனக்குச் சம்பவித்தவைகள்", "எனக்குத் தெரியும்", "எனக்குப் பயன்",
+    "உங்களுக்குக் கொடுக்கப்பட்டிருக்கிறது", "உங்களுக்குச் செய்தான்", "உங்களுக்குத் தெரியும்", "உங்களுக்குப் பயன்",
+    "தேவனுக்குக் கொடு", "தேவனுக்குச் சுகந்த வாசனையாக", "தேவனுக்குத் தெரியும்", "தேவனுக்குப் பயன்",
+])
+def test_vallinam_b3_correct_forms_are_not_flagged(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["எனக்கு வேண்டும்", "உங்களுக்கு நன்மை", "தேவனுக்கு மகிமை"])
+def test_vallinam_b3_ignores_non_trigger_initials(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["எனக்கு, கொடு", "உங்களுக்கு; செய்தான்", "தேவனுக்கு? தெரியும்"])
+def test_vallinam_b3_ignores_a_punctuation_boundary(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["எனக்குள் இருக்கிறது", "உங்களுக்குள் இருக்கிறது", "தேவனுக்குரிய கனம்"])
+def test_vallinam_b3_does_not_generalize_to_lookalike_suffixed_forms(text):
+    # எனக்குள்/உங்களுக்குள்/தேவனுக்குரிய each tokenize as one word (letters+
+    # marks, no internal whitespace), so none equals a bare trigger -- the
+    # same exact-match mechanism, not a new exclusion list. This is the
+    # concrete demonstration of the spec's morphological guard: B3 never
+    # infers "ends with க்கு" as dative, only exact surface-form membership.
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["எனக்கு", "உங்களுக்கு.", "தேவனுக்கு?"])
+def test_vallinam_b3_trigger_at_end_of_verse_does_not_crash_or_flag(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+def test_vallinam_b3_ignores_inline_usfm():
+    assert scan("\\wj எனக்கு கொடு\\wj*")["limitations"]
+
+
+def test_vallinam_b3_matches_nfd_decomposed_trigger_text():
+    nfd_text = unicodedata.normalize("NFD", "எனக்கு கொடு")
+    findings = [f for f in scan(nfd_text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(findings) == 1
+    assert findings[0]["originalText"] == nfd_text  # raw span, never rewritten to NFC
+
+
+def test_vallinam_b3_finding_identity_is_stable_across_repeated_scans():
+    first = next(f for f in scan("எனக்கு கொடு")["findings"] if f["rule"] == "tamil.vallinam-missing")
+    second = next(f for f in scan("எனக்கு கொடு")["findings"] if f["rule"] == "tamil.vallinam-missing")
+    assert first["id"] == second["id"]
+
+
+def test_vallinam_b3_never_mutates_the_input_text():
+    text = "எனக்கு கொடு"
+    scan(text)
+    assert text == "எனக்கு கொடு"
+
+
+def test_vallinam_b3_coexists_with_b1_and_b2_triggers_in_the_same_verse():
+    result = scan("அந்த காகம் இப்படி செய்தான் எனக்கு கொடு.")
+    findings = [f for f in result["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert {f["originalText"] for f in findings} == {"அந்த காகம்", "இப்படி செய்தான்", "எனக்கு கொடு"}
+
+
+def test_vallinam_b1_b2_regression_is_unaffected_by_b3():
+    # B1/B2's own tests above are untouched; this is a direct check that
+    # adding B3's trigger words did not change either's existing behavior.
+    b1 = [f for f in scan("அந்த காகம்")["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(b1) == 1 and b1[0]["originalText"] == "அந்த காகம்"
+    b2 = [f for f in scan("அப்படி கூறினான்")["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(b2) == 1 and b2[0]["originalText"] == "அப்படி கூறினான்"
+
+
+# Part B4: same mechanism again, a fourth closed-class trigger set -- an
+# explicit second-case/accusative surface form (என்னை/உங்களை/அவனை/அதை/எதை)
+# rather than B1's demonstratives, B2's manner-adverbs, or B3's dative
+# forms. Allowlist of verified accusative pronoun forms, not a suffix rule --
+# see VALLINAM_TRIGGERS's own comment in language_qa.py.
+
+
+@pytest.mark.parametrize("text,flagged,initial", [
+    ("என்னை கொடு", "என்னை", "க"), ("என்னை சம்பவித்தவைகள்", "என்னை", "ச"),
+    ("என்னை தெரியும்", "என்னை", "த"), ("என்னை பயன்", "என்னை", "ப"),
+    ("உங்களை கொடு", "உங்களை", "க"), ("உங்களை செய்தான்", "உங்களை", "ச"),
+    ("உங்களை திரும்பினான்", "உங்களை", "த"), ("உங்களை பயன்", "உங்களை", "ப"),
+    ("அவனை கொடு", "அவனை", "க"), ("அவனை சீக்கிரமாக", "அவனை", "ச"),
+    ("அவனை தெரியும்", "அவனை", "த"), ("அவனை பேசினான்", "அவனை", "ப"),
+    ("அதை கொடு", "அதை", "க"), ("அதை செய்தான்", "அதை", "ச"),
+    ("அதை திரும்பினான்", "அதை", "த"), ("அதை பயன்", "அதை", "ப"),
+    ("எதை கொடு", "எதை", "க"), ("எதை செய்தான்", "எதை", "ச"),
+    ("எதை தெரியும்", "எதை", "த"), ("எதை பேசினான்", "எதை", "ப"),
+])
+def test_vallinam_b4_missing_link_is_flagged(text, flagged, initial):
+    findings = [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["severity"] == "medium" and finding["status"] == "review-needed"
+    assert finding["originalText"] == text
+    assert flagged in finding["message"] and f"{flagged}{initial}்" in finding["message"]
+    assert text[finding["start"]:finding["end"]] == finding["originalText"]
+    assert finding["suggestedReplacement"] == text.replace(flagged, f"{flagged}{initial}்", 1)
+
+
+def test_vallinam_b4_matches_the_real_philippians_2_28_occurrence():
+    # Exact real text from php 2:28 (verified directly against the staged
+    # source file, not a synthetic example): "அவனை சீக்கிரமாக" is bare in
+    # the live project text. Not a maintainer-supplied fixture like B1-B3's
+    # -- an independently re-verified real occurrence in the actual review
+    # target, the same evidentiary bar.
+    text = "நீங்கள் அவனை மீண்டும் பார்த்து மகிழ்ச்சியடையவும், அவனை சீக்கிரமாக அனுப்பினேன்."
+    findings = [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(findings) == 1
+    finding = findings[0]
+    assert finding["originalText"] == "அவனை சீக்கிரமாக"
+    assert finding["suggestedReplacement"] == "அவனைச் சீக்கிரமாக"
+
+
+@pytest.mark.parametrize("text", [
+    "என்னைக் கொடு", "என்னைச் சம்பவித்தவைகள்", "என்னைத் தெரியும்", "என்னைப் பயன்",
+    "உங்களைக் கொடு", "உங்களைச் செய்தான்", "உங்களைத் திரும்பினான்", "உங்களைப் பயன்",
+    "அவனைக் கொடு", "அவனைச் சீக்கிரமாக", "அவனைத் தெரியும்", "அவனைப் பேசினான்",
+    "அதைக் கொடு", "அதைச் செய்தான்", "அதைத் திரும்பினான்", "அதைப் பயன்",
+    "எதைக் கொடு", "எதைச் செய்தான்", "எதைத் தெரியும்", "எதைப் பேசினான்",
+])
+def test_vallinam_b4_correct_forms_are_not_flagged(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["என்னை வேண்டும்", "உங்களை நான்", "அவனை மகிழ்ச்சி", "அதை நல்லது", "எதை மனிதன்"])
+def test_vallinam_b4_ignores_non_trigger_initials(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["என்னை, கொடு", "உங்களை; செய்தான்", "அவனை? தெரியும்"])
+def test_vallinam_b4_ignores_a_punctuation_boundary(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["என்னைவிட வந்தான்", "அதைவிட செய்தான்", "அவனைப்போல தெரியும்"])
+def test_vallinam_b4_does_not_generalize_to_lookalike_suffixed_forms(text):
+    # என்னைவிட/அதைவிட/அவனைப்போல each tokenize as one word (letters+marks, no
+    # internal whitespace), so none equals a bare trigger -- the same
+    # exact-match mechanism, not a new exclusion list.
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text", ["என்னை", "உங்களை.", "அவனை?", "அதை!", "எதை"])
+def test_vallinam_b4_trigger_at_end_of_verse_does_not_crash_or_flag(text):
+    assert not [f for f in scan(text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+
+
+def test_vallinam_b4_ignores_inline_usfm():
+    assert scan("\\wj அவனை சீக்கிரமாக\\wj*")["limitations"]
+
+
+def test_vallinam_b4_matches_nfd_decomposed_trigger_text():
+    nfd_text = unicodedata.normalize("NFD", "அவனை சீக்கிரமாக")
+    findings = [f for f in scan(nfd_text)["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(findings) == 1
+    assert findings[0]["originalText"] == nfd_text  # raw span, never rewritten to NFC
+
+
+def test_vallinam_b4_finding_identity_is_stable_across_repeated_scans():
+    first = next(f for f in scan("அவனை சீக்கிரமாக")["findings"] if f["rule"] == "tamil.vallinam-missing")
+    second = next(f for f in scan("அவனை சீக்கிரமாக")["findings"] if f["rule"] == "tamil.vallinam-missing")
+    assert first["id"] == second["id"]
+
+
+def test_vallinam_b4_never_mutates_the_input_text():
+    text = "அவனை சீக்கிரமாக"
+    scan(text)
+    assert text == "அவனை சீக்கிரமாக"
+
+
+def test_vallinam_b4_coexists_with_b1_b2_b3_triggers_in_the_same_verse():
+    result = scan("அந்த காகம் இப்படி செய்தான் எனக்கு கொடு அவனை சீக்கிரமாக.")
+    findings = [f for f in result["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert {f["originalText"] for f in findings} == {
+        "அந்த காகம்", "இப்படி செய்தான்", "எனக்கு கொடு", "அவனை சீக்கிரமாக",
+    }
+
+
+def test_vallinam_b1_b2_b3_regression_is_unaffected_by_b4():
+    # B1/B2/B3's own tests above are untouched; this is a direct check that
+    # adding B4's trigger words did not change any earlier behavior.
+    b1 = [f for f in scan("அந்த காகம்")["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(b1) == 1 and b1[0]["originalText"] == "அந்த காகம்"
+    b2 = [f for f in scan("அப்படி கூறினான்")["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(b2) == 1 and b2[0]["originalText"] == "அப்படி கூறினான்"
+    b3 = [f for f in scan("எனக்கு கொடு")["findings"] if f["rule"] == "tamil.vallinam-missing"]
+    assert len(b3) == 1 and b3[0]["originalText"] == "எனக்கு கொடு"
+
+
 def test_other_scan_text_rules_default_suggested_replacement_to_none():
     # add()'s new parameter defaults to None for every rule that doesn't
     # explicitly pass one -- only தமிழ்.vallinam-missing does today.
