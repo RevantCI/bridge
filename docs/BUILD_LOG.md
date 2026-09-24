@@ -12230,3 +12230,149 @@ the override box is ticked, then reuses the chosen path.
   `ExportModal.test.ts` (1 test).
 - **Not covered by a test:** the App-level wiring (the panel's placement, and
   `switchBook` refusing during a run). There is no App test harness.
+
+## 2026-09-24 — Layered-rules Phase 5: corpus lexicon, confusion-set distance, ranked suggestions
+
+### 5.2 `tamil_distance`
+
+`language_packs/tamil_distance.py` is a weighted edit distance over grapheme
+clusters (`regex` `\X`), with NFC comparison keys. The text itself is never
+normalised.
+
+Each of these confusions costs 0.5; everything else costs 1:
+- ர/ற, ல/ள/ழ, ண/ன/ந, with the same vowel sign;
+- the independent vowels எ/ஏ, ஒ/ஓ, இ/ஈ, உ/ஊ;
+- the same pairs as vowel signs (ெ/ே, ொ/ோ, ி/ீ, ு/ூ), which the brief did
+  not list but is where most length confusions occur;
+- ஐ/அய் and ஔ/அவ் (one cluster against two);
+- pulli present or absent, and ா present or absent.
+
+The brief's Round 2 typos come out at 1.0 (`உடன்பட்டிக்கையை`, one cluster
+deleted) and 0.5 (`ராஜ்யாபாரமும்`, an ா).
+
+The ai/அய் equivalence is between whole clusters only. A sign-level ை
+against ய் inside a syllable (கை against கய்) is not modelled.
+
+### 5.1 The lexicon
+
+`scripts/build_tamil_lexicon.py` builds `language_packs/ta-irv/lexicon.json`
+from all 66 IRV books, using the runtime's own tokens (`imported_verse_text`
+→ `lift_inline_usfm` → `word_occurrences`):
+
+| | |
+|---|---|
+| Verses / tokens / distinct forms | 31,092 / 470,413 / 79,208 |
+| Listed (≥ 3 occurrences) | 19,618 |
+| Common (≥ 6), with one-cluster deletion buckets precomputed | 9,515 words, 55,018 keys |
+| Curated pairs (`--curated`, the Round 2 / Pass 3 reports) | 151 |
+| Size / parse time / resident memory once loaded | 3.0 MB / ~150 ms / ~15 MB |
+
+The curated pairs come from positive typo rows whose Original and Suggested
+differ in exactly one word. Candidates were dropped in these cases:
+
+| Dropped because | Pairs |
+|---|---|
+| the wrong form is common in the corpus (more than 2 occurrences) | 158 |
+| the right form is unattested | 166 |
+| the reviews disagree | 6 |
+| the two are more than distance 2 apart | 20 |
+| the row changed more than one word | 196 |
+
+Some kept pairs are style or grammar edits rather than typos, for example
+இதயத்தில் → இருதயத்தில். They are kept because the maintainer ruled every AI
+proposal reliable. The rule's name and message call them "reviewed
+corrections", not misspellings of fact.
+
+The lexicon ships inside the pack directory, which `bridge-engine.spec`
+already bundles, so there is no spec change. The data budget is recorded in
+DECISIONS.md.
+
+### 5.3 The rules
+
+`language_packs/lexicon.py` defines two rules.
+
+**`lexicon.rare-near-common`** (typo, confidence medium, severity low,
+panel-only):
+- It flags a word at most twice in the book and at most twice in the corpus
+  (absent from the lexicon counts as rare) that is within **0.5** of a word
+  occurring at least 6 times in the corpus and at least 5 times as often.
+- It offers up to 5 suggestions, ranked by distance, then corpus count, then
+  same-book count. Each carries its evidence: "occurs 1007× in the corpus,
+  0× in this book (distance 0.5)".
+
+**`lexicon.known-misspelling`** (typo, confidence high, severity medium):
+it applies the curated map with the correction as the suggestion. Severity
+is medium, so it never blocks the publication gate, which blocks only
+high/high.
+
+**Where the rules run.** In `_scan`, the lexicon audit replaces
+`wordlist_findings` for the `ta-irv` pack. The within-book audit remains
+the fallback for a pack without a lexicon, and its tests pin that fallback
+with the lexicon switched off.
+
+**The threshold was chosen by measurement.** At distance 1.0 (any
+one-cluster edit), Tamil inflection flooded the rule: 2,931 findings at
+0.8%. At 0.5 it gives 76 at 2.6%, against the old wordlist's 2,473 at 2.0%.
+
+**A capping bug, found and fixed.** The two rules first shared one
+200-finding cap, and the noisy rule consumed it: known-misspelling showed 59
+findings instead of 140. Each rule is now capped separately.
+
+### 5.4 Feedback, bounded
+
+`scripts/lexicon_feedback_report.py` lists every Language QA decision on a
+`lexicon.*` finding, across the project folders given: the Use choice, or a
+false positive. It writes CSV for a person to fold into `--curated`. It never
+writes the lexicon, and a test checks the file's bytes are unchanged
+(DECISIONS.md).
+
+### Benchmark (`--gate` passes; baseline and labelled fixtures regenerated)
+
+| Rule | Findings | Strict precision |
+|---|---|---|
+| `lexicon.rare-near-common` | 76 | 2.6% |
+| `lexicon.known-misspelling` | 140 | 92.9%, **not independent**: built from these reviews |
+| `tamil.wordlist-variant` (Phase 4, replaced) | 2,473 | 2.0% |
+
+Typo recall is 20.9%, up from 8.9%, mostly through known-misspelling, which
+carries the same caveat. Sandhi, punctuation and usfm are unchanged.
+
+### Performance
+
+These are Psalms full passes, measured while a whole-Bible collection run
+was also using the CPU. They are comparable with each other, not with
+earlier, unloaded figures.
+
+| | Cold | Reopen | RSS after | Findings |
+|---|---|---|---|---|
+| Lexicon off | 3.16 s | 0.60 s | 51 MB | 309 |
+| Lexicon on | 3.19 s | 0.56 s | 66 MB | 149 |
+
+The lexicon adds no measurable wall time and about 15 MB RSS, within the
+contract's 50 MB.
+
+### Verification
+
+- **Engine.** `test_lexicon.py` (30 tests):
+  - each confusion pair costs 0.5 in both directions;
+  - other edits cost 1;
+  - the Round 2 typos come out at 1.0 and 0.5;
+  - distance is measured over clusters;
+  - the lexicon is bounded, and its buckets are precomputed;
+  - the curated map keeps only safe pairs;
+  - it loads within budget;
+  - ranked suggestions carry evidence;
+  - a common word is never flagged;
+  - a known misspelling is high confidence;
+  - the ratio guard holds;
+  - the manager uses the lexicon for a Tamil book;
+  - the feedback report lists decisions and does not change the lexicon.
+- `test_language_qa.py` and `test_language_qa_benchmark.py` run with the
+  lexicon off, as the fallback and synthetic-harness tests they are.
+- `test_language_qa_labelled.py`: the regenerated fixtures now credit five
+  typo positives to the lexicon rules. These are book-level, so the test
+  runs them through `lexicon_findings` over the example verse (a book of
+  one) instead of `scan_text`. This was caught by the first full run: 5
+  failed, 2202 passed.
+- Full engine suite: 2202 passed, plus the 489 labelled checks, which pass
+  after that fix.

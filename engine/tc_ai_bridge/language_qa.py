@@ -91,7 +91,11 @@ RULES: dict[str, RuleMeta] = {
     "tamil.repeated-word": RuleMeta("ta-irv", "pattern", "typo", "low"),
     "tamil.dependent-sign": RuleMeta("ta-irv", "integrity", "unicode", "high"),
     "tamil.mixed-word": RuleMeta("ta-irv", "integrity", "typo", "medium"),
+    # The within-book wordlist audit: the fallback when a pack has no lexicon.
     "tamil.wordlist-variant": RuleMeta("ta-irv", "lexicon", "typo", "low"),
+    # The corpus lexicon (layered-rules Phase 5; language_packs/lexicon.py).
+    "lexicon.rare-near-common": RuleMeta("ta-irv", "lexicon", "typo", "medium"),
+    "lexicon.known-misspelling": RuleMeta("ta-irv", "lexicon", "typo", "high"),
     "terminology.deprecated-form": RuleMeta("project", "housestyle", "termbase", "high"),
 }
 # The version of the rules above, which live in code. A pack rule's findings

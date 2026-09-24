@@ -42,6 +42,17 @@ def test_example_is_well_formed(bucket, example):
     assert example["expect"] or example.get("maybe") or "rejectedSpan" in example
 
 
+def lexicon_over(text):
+    from tc_ai_bridge.language_packs.lexicon import default_lexicon, lexicon_findings
+    from tc_ai_bridge.language_qa import RULE_VERSION, rule_fields, suggestion, word_occurrences
+    counts, first_seen = {}, {}
+    for word, start, end in word_occurrences(text):
+        counts[word] = counts.get(word, 0) + 1
+        first_seen.setdefault(word, ("1", "1", start, end, text[start:end], "h"))
+    return lexicon_findings("x", counts, first_seen, default_lexicon(), rule_fields=rule_fields,
+                            suggestion=suggestion, rule_version=RULE_VERSION)
+
+
 @pytest.mark.parametrize("bucket,example", examples())
 def test_a_positive_credited_to_a_rule_is_still_found_by_it(bucket, example):
     for expected in example["expect"]:
@@ -49,7 +60,13 @@ def test_a_positive_credited_to_a_rule_is_still_found_by_it(bucket, example):
             continue  # no current rule covers it; Phase 3+ will
         if expected["ruleId"].endswith("/tamil.wordlist-variant"):
             continue  # a book-wide audit, not a per-verse rule; the benchmark measures it
-        findings = scan_text(example["text"], book="x", chapter="1", verse="1", tamil=True)["findings"]
+        if "/lexicon." in expected["ruleId"]:
+            # The lexicon rules run over a book's word counts; over this verse
+            # alone every word is "rare in the book", and a known misspelling
+            # needs no book at all, so the verse is a book of one.
+            findings = lexicon_over(example["text"])
+        else:
+            findings = scan_text(example["text"], book="x", chapter="1", verse="1", tamil=True)["findings"]
         # ruleId, not the `rule` alias: migrated pack rules keep their legacy name there.
         spans = [nfc(f["originalText"]) for f in findings if f["ruleId"] == expected["ruleId"]]
         span = nfc(expected["span"])

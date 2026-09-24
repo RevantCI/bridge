@@ -27,6 +27,10 @@ Related:
 language_packs/ta-irv/
   pack.json                       pack metadata + ordered list of rule files
   rules/<rule id>.json            one rule per file
+  lexicon.json                    the corpus lexicon (Phase 5; scripts/build_tamil_lexicon.py).
+                                  Not a rule file: language_packs/lexicon.py reads it for the
+                                  lexicon.* rules, lazily. A pack without one falls back to the
+                                  within-book wordlist audit.
 ```
 
 `pack.json` holds `pack`, `version` (semver), `language`, `script`, `description`

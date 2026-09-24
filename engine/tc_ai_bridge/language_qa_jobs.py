@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 from . import terminology
 from .language_packs import default_pack, load_project_overrides, loaded_pack
+from .language_packs.lexicon import default_lexicon, lexicon_findings
 from .language_packs.loader import apply_overrides
 from .language_qa import (CROSSING_LIMITATION, FINDING_SOURCE, INLINE_RULES, MAX_VERSE_CHARS, MAX_WORDLIST_TERMS,
                           inline_rule_names, rule_fields, suggestion,
@@ -739,12 +740,19 @@ class LanguageQaManager:
         # A truncated pass never opened every chapter, so a word that is genuinely
         # common in the unread tail would look artificially rare here -- exactly
         # the false-positive shape the rarity+similarity guardrail must prevent.
+        # With the pack's corpus lexicon (Phase 5) the audit compares each rare
+        # word against the whole corpus; without one it falls back to the
+        # within-book wordlist audit, which is bounded by MAX_WORDLIST_TERMS.
+        lexicon = default_lexicon() if tamil and rule_pack.name == "ta-irv" else None
         if truncated:
             limitations.append("Wordlist audit skipped: book scan was truncated.")
-        elif len(book_counts) > MAX_WORDLIST_TERMS:
+        elif lexicon is None and len(book_counts) > MAX_WORDLIST_TERMS:
             limitations.append("Wordlist audit skipped: too many distinct words to compare.")
         else:
-            for finding in wordlist_findings(book, book_counts, book_first_seen):
+            audit = (lexicon_findings(book, book_counts, book_first_seen, lexicon, rule_fields=rule_fields,
+                                      suggestion=suggestion, rule_version=RULE_VERSION)
+                     if lexicon is not None else wordlist_findings(book, book_counts, book_first_seen))
+            for finding in audit:
                 decided = {}
                 shown = apply_decisions([finding], decisions, false_positives, decided)
                 slot = by_verse.setdefault(f"{finding['chapter']}:{finding['verse']}",

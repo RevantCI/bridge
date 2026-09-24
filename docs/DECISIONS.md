@@ -224,4 +224,18 @@ deferred, not rejected; anything in the UI that assumes several users on one mac
 **Rules out:** an export that silently ignores open blocking findings; a hard block with no override; a second gate definition.
 **Revisit when:** a team role model decides who may override (TEAM_ARCHITECTURE §5).
 
+## 2026-09-24 — The lexicon's data budget: about 3 MB, bounded by frequency
+
+**Decision:** `language_packs/ta-irv/lexicon.json` lists every IRV word seen at least 3 times (19,618 of 79,208 distinct forms, capped at `--top`, default 60,000). It also carries the 9,515 words common enough to suggest (at least 6 occurrences), their precomputed one-cluster deletion buckets (55k keys), and 151 curated pairs. It is 3.0 MB on disk, takes about 150 ms to parse, and adds about 15 MB of resident memory once loaded. It is loaded lazily, off the dispatcher.
+**Because:** the LQA-1 100 KiB budget was for runtime source, not data. The performance contract caps added RSS at 50 MB and startup at 200 ms, and a lazy load adds nothing to startup. A word left out of the list is by definition rare, which is the only thing the rule asks of it. Precomputing the buckets is what keeps a lookup a dict read.
+**Rules out:** shipping the full 79k-form table or building buckets at load.
+**Revisit when:** a second language pack needs a lexicon, or the frozen build's per-launch extraction makes 3 MB noticeable.
+
+## 2026-09-24 — The lexicon is never updated from decisions
+
+**Decision:** Translator decisions on lexicon findings (a Use, a false positive) are listed by `scripts/lexicon_feedback_report.py` for a person to fold into the curated corrections. Neither the engine nor the scan ever writes the lexicon.
+**Because:** the brief, and `passage-aware-semantic-alignment.md` §31: learning may improve ranking, never become an unconditional rule. A decision is one reviewer's call at one verse, while the curated map is a hard rule applied everywhere.
+**Rules out:** automatic lexicon growth; a decision silently becoming a `known-misspelling` pair.
+**Revisit when:** not planned. House-style learning (Phase 6) narrows and ranks, and it is a separate mechanism.
+
 <!-- New entries go above this line. -->

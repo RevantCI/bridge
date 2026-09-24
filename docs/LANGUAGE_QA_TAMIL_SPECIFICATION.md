@@ -57,8 +57,8 @@ A verse does not move on while obvious Tamil errors remain.
 
 | # | Item | What it covers | Status | Bridge rule / evidence | Owner |
 |---|---|---|---|---|---|
-| 1 | Spelling (எழுத்துப்பிழை) | Missing, extra or transposed letters. Wrong consonant or vowel sign, குறில்/நெடில், புள்ளி. Confusable pairs ர/ற, ல/ள/ழ, ந/ன/ண. Grantha use. | Partial | `ta-irv/typo.divine-name.vowel-drop`, `ta-irv/typo.divine-name.dative-stem`, `ta-irv/typo.suffix.dropped-tha` (known IRV defect shapes); `ta-irv/tamil.wordlist-variant` (low precision, panel only); `ta-irv/tamil.repeated-word`. Confusion-set distance: **Planned (P5)** | Proofreader |
-| 2 | Word form and morphology | Noun and verb inflection, tense, finite/non-finite forms, participles, negative and honorific forms. | Not checked | Corpus lexicon: **Planned (P5)**. It will flag forms unattested in the corpus, and will not judge grammar. | Proofreader |
+| 1 | Spelling (எழுத்துப்பிழை) | Missing, extra or transposed letters. Wrong consonant or vowel sign, குறில்/நெடில், புள்ளி. Confusable pairs ர/ற, ல/ள/ழ, ந/ன/ண. Grantha use. | Partial | `ta-irv/lexicon.known-misspelling` (curated Round 2 / Pass 3 corrections); `ta-irv/lexicon.rare-near-common` (a rare word one typist confusion away from a common one, ranked suggestions, panel only); `ta-irv/typo.divine-name.vowel-drop`, `ta-irv/typo.divine-name.dative-stem`, `ta-irv/typo.suffix.dropped-tha` (known IRV defect shapes); `ta-irv/tamil.repeated-word` | Proofreader |
+| 2 | Word form and morphology | Noun and verb inflection, tense, finite/non-finite forms, participles, negative and honorific forms. | Not checked | The corpus lexicon flags a rare form near a common one. It does not judge grammar, and an unusual but correct inflection is a false positive to ignore. | Proofreader |
 | 3 | சந்தி / புணர்ச்சி | Where வல்லினம் doubles (மிகும்) and where it does not (மிகா). Joining and splitting; suffix and case-marker joining. | Partial | `ta-irv/sandhi.vallinam.demonstrative`, `.manner-adverb`, `.accusative`, `.dative` (missing link), `ta-irv/sandhi.vallinam.wrong-consonant`. All are inline on the maintainer's sign-off. Unnecessary வல்லினம் (மிகா இடம்) is **not checked**. | Proofreader |
 | 4 | Word division | Wrongly split or wrongly joined units: compounds, postpositions, clitics, name + suffix. | Partial | `ta-irv/sandhi.clitic.fused` (தான்/கூட written apart; panel only) | Proofreader |
 | 5 | வேற்றுமை / case suffixes | Missing, unnecessary or wrong case. Inconsistent case across coordinated nouns. | Not checked | The accusative and dative rules check only the sandhi after a case form, not the choice of case. | Proofreader |
@@ -132,7 +132,7 @@ Bridge has no typesetting engine. Every item in this gate is proofed on the PDF.
 | # | Item | What it covers | Status | Bridge rule / evidence | Owner |
 |---|---|---|---|---|---|
 | 48 | Run every automated check | All checks run and clean, or every finding decided. | Planned (P4) | Language QA as a check-framework stage, the collection runner and the publication gate | Publisher |
-| 49 | Whole-Bible wordlist audit | Every word form reviewed across the Bible. | Partial | `ta-irv/tamil.wordlist-variant` (per book). Corpus lexicon: **Planned (P5)** | Proofreader |
+| 49 | Whole-Bible wordlist audit | Every word form reviewed across the Bible. | Partial | `ta-irv/lexicon.rare-near-common` compares each book against the whole-corpus lexicon (`lexicon.json`) | Proofreader |
 | 50 | Whole-Bible glossary audit | Glossary terms used consistently. | Planned (P6) | Termbase v3 | Consultant |
 | 51 | Whole-Bible proper-name audit | One spelling per name across all books. | Partial | `names.spelling_similarity`; name pack **Planned (P6)** | Translator |
 | 52 | Final blind proofread | A fresh reader who has not seen earlier rounds. | Not checked | | Proofreader |

@@ -128,7 +128,7 @@ BUILD_LOG. It fails when:
 ## Results
 
 <!-- benchmark:start -->
-_Generated 2026-09-24T19:57:43 by scripts/language_qa_benchmark.py._
+_Generated 2026-09-24T22:02:07 by scripts/language_qa_benchmark.py._
 
 Pack version `language-qa-7+ta-irv@1.0.0`; books: 1CH, 1KI, 1SA, 2CH, 2KI, 2SA, DEU, EXO, EZR, GEN, JDG, JOS, LEV, NUM, PHP, PSA, RUT.
 
@@ -139,13 +139,14 @@ Per rule (a finding is a true positive when it overlaps a review row of a compat
 | `common/punctuation.repeated` | no | 1 | 1 | 0 | 0 | 100.0% | 100.0% | 0 | 0 |
 | `common/unicode.invisible` | no | 1 | 1 | 0 | 0 | 100.0% | 100.0% | 0 | 0 |
 | `ta-irv/integrity.space-before-note-end` | no | 74 | 55 | 19 | 0 | 74.3% | 74.3% | 0 | 0 |
+| `ta-irv/lexicon.known-misspelling` | no | 140 | 130 | 10 | 0 | 92.9% | 92.9% | 0 | 0 |
+| `ta-irv/lexicon.rare-near-common` | no | 76 | 2 | 74 | 0 | 2.6% | 2.6% | 0 | 0 |
 | `ta-irv/sandhi.clitic.fused` | no | 4 | 0 | 4 | 0 | 0.0% | 0.0% | 0 | 0 |
 | `ta-irv/sandhi.vallinam.accusative` | yes | 500 | 275 | 225 | 0 | 55.0% | 55.2% | 1 | 0 |
 | `ta-irv/sandhi.vallinam.dative` | yes | 396 | 197 | 199 | 0 | 49.8% | 49.8% | 0 | 0 |
 | `ta-irv/sandhi.vallinam.demonstrative` | yes | 80 | 33 | 47 | 13 | 41.2% | 55.0% | 11 | 0 |
 | `ta-irv/sandhi.vallinam.manner-adverb` | yes | 13 | 2 | 11 | 0 | 15.4% | 15.4% | 0 | 0 |
 | `ta-irv/tamil.repeated-word` | no | 33 | 0 | 33 | 0 | 0.0% | 0.0% | 0 | 0 |
-| `ta-irv/tamil.wordlist-variant` | no | 2473 | 49 | 2424 | 0 | 2.0% | 2.0% | 0 | 0 |
 | `ta-irv/typo.divine-name.dative-stem` | no | 13 | 9 | 4 | 0 | 69.2% | 69.2% | 0 | 0 |
 | `ta-irv/typo.divine-name.vowel-drop` | no | 11 | 11 | 0 | 0 | 100.0% | 100.0% | 0 | 0 |
 | `ta-irv/typo.suffix.dropped-tha` | no | 2 | 2 | 0 | 0 | 100.0% | 100.0% | 0 | 0 |
@@ -154,12 +155,45 @@ Per review bucket (recall counts only rows whose Original Tamil is found in the 
 
 | Bucket | Positive rows | Maybe rows | Negative rows | Unanchored | Found (positive) | Recall strict | Recall lenient |
 |---|---|---|---|---|---|---|---|
-| typo | 839 | 13 | 0 | 80 | 68 | 8.9% | 8.8% |
+| typo | 839 | 13 | 0 | 80 | 159 | 20.9% | 20.6% |
 | sandhi | 1877 | 34 | 0 | 110 | 501 | 28.3% | 28.5% |
 | punctuation | 72 | 0 | 0 | 22 | 9 | 18.0% | 18.0% |
 | name | 528 | 3 | 0 | 144 | 0 | 0.0% | 0.0% |
 | usfm | 680 | 4 | 0 | 421 | 64 | 24.4% | 24.3% |
 <!-- benchmark:end -->
+
+## Lexicon rules (Phase 5)
+
+The thresholds live in one place, `engine/tc_ai_bridge/language_packs/lexicon.py`:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `RARE_BOOK_MAX` | 2 | a word flagged by `lexicon.rare-near-common` occurs at most twice in the book |
+| `RARE_CORPUS_MAX` | 2 | …and at most twice in the corpus. A word absent from the lexicon counts as rare: only words seen 3 or more times are listed |
+| `COMMON_MIN` | 6 | a suggestion occurs at least 6 times in the corpus |
+| `RATIO_MIN` | 5 | …and at least 5 times as often as the flagged word |
+| `MAX_DISTANCE` | 0.5 | Tamil confusion-set distance (`tamil_distance.py`); 0.5 means one typist confusion |
+| `MIN_CLUSTERS` | 3 | shorter words are not audited |
+| `MAX_SUGGESTIONS` | 5 | ranked by distance, then corpus count, then same-book count |
+
+**What these thresholds produced on the review set (2026-09-24):**
+
+| `MAX_DISTANCE` | `rare-near-common` findings | Strict precision |
+|---|---|---|
+| 1.0, any one-cluster edit | 2,931 | 0.8% |
+| **0.5, typist confusions only** | **76** | **2.6%** |
+
+For comparison, the within-book wordlist audit it replaces produced 2,473
+findings at 2.0%. Tamil inflection makes "one cluster away" true of most
+rare forms, so 0.5 was kept. The rule stays panel-only.
+
+**`lexicon.known-misspelling` is not independently measured.** Its 92.9%
+(130 of 140) is measured on the same review rows its curated pairs were
+built from, so the figure is close to 100% by construction. It says only
+that the pairs are applied where they came from. A real measure needs
+reviews the pairs were not built from (a new book), or a human-labelled
+set. The typo bucket's recall rise, from 8.9% to 20.9%, is mostly this
+rule, and carries the same caveat.
 
 ## History
 
@@ -167,3 +201,4 @@ Per review bucket (recall counts only rows whose Original Tamil is found in the 
 |---|---|---|---|
 | 2026-09-24 | language-qa-7 | Phase 2 baseline, before any rule change. **The gate fails:** the only inline rule reaches 37.9% strict precision; 77 of its 193 false positives fall on confirmed house forms. | 37.9% / 6.8% |
 | 2026-09-24 | language-qa-7+ta-irv@1.0.0 | Phase 3: rules move into the `ta-irv` pack; B1/B2 split into four vallinam rules with corpus abstains (house forms, root nouns, clitics); one wrong-consonant rule and five IRV defect-shape rules added. House-form false positives on the demonstrative rule fall from 77 to 13. **The gate passes on sign-offs, not on the 90% floor:** the maintainer signed off every vallinam rule for inline display at its measured precision (docs/DECISIONS.md). The column is now the best vallinam rule. | 55.0% (accusative; demonstrative 41.2%) / 28.3% |
+| 2026-09-24 | language-qa-7+ta-irv@1.0.0, lexicon ta-irv-lexicon@1 | Phase 5: the corpus lexicon replaces the within-book wordlist audit. `lexicon.rare-near-common`: 76 findings at 2.6%, against the wordlist's 2,473 at 2.0%. `lexicon.known-misspelling`: 140 at 92.9%, not independent (built from these reviews). Typo recall is 20.9%, up from 8.9%. The vallinam rules are unchanged. | 55.0% / 28.3% |

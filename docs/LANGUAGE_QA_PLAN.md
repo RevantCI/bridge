@@ -115,8 +115,8 @@ in order, and each is its own commit series:
 | 2 | Benchmark harness over the Round 2 / Pass 3 review CSVs; labelled fixtures; `--gate`; latency gate; one status channel | Done (A61, A62). Baseline: the only inline rule, `tamil.vallinam-missing`, is at 37.9% strict precision, so the accuracy gate fails. See [LANGUAGE_QA_BENCHMARK.md](LANGUAGE_QA_BENCHMARK.md) |
 | 3 | `ta-irv` rule pack as data; B1–B4 migrated to shape rules; known IRV defect rules | Done (A63–A66). `ta-irv@1.0.0` has 11 rules; every வல்லினம் rule is inline on the maintainer's sign-off (41–55% strict; manner adverbs 15%). Sandhi recall is 28.3%, up from 6.8%. See [LANGUAGE_QA_RULE_PACK.md](LANGUAGE_QA_RULE_PACK.md) |
 | 4 | Language QA as a check-framework stage; reports, exception queue, publication gate; collection runner | Done (A67–A71). 4.1: a check-job stage, counted in the rollup, persisted in `language_qa_cache` (workbench v4); a decision rescans nothing, and a live edit rescans one verse. 4.2: reports, exception queue, publication gate. 4.3: one review surface. 4.4: collection runner. 4.5: export gate with a recorded override |
-| 5 | Corpus lexicon and Tamil confusion-set distance | Next |
-| 6 | Termbase v3, name pack, scoped ignores, house-style learner, export ledger | Planned |
+| 5 | Corpus lexicon and Tamil confusion-set distance | Done (A72). `ta-irv-lexicon@1`: 19,618 forms and 151 curated pairs, 3 MB, loaded lazily. `lexicon.rare-near-common` (76 findings, 2.6%, panel-only) replaces the wordlist audit. `lexicon.known-misspelling` is not independently measured. Typo recall is 20.9%, up from 8.9%. See [LANGUAGE_QA_BENCHMARK.md](LANGUAGE_QA_BENCHMARK.md) |
+| 6 | Termbase v3, name pack, scoped ignores, house-style learner, export ledger | Next |
 | 7 | Structured "checks / does not check" boundary shown in the panel | Planned |
 
 The "Ignore ▸ this word / this rule" menu scopes arrive with Phase 6.

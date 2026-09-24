@@ -44,6 +44,22 @@
    "precision_lenient": 0.7432,
    "inline": false
   },
+  "ta-irv/lexicon.known-misspelling": {
+   "findings": 140,
+   "tp_strict": 130,
+   "fp_strict": 10,
+   "precision_strict": 0.9286,
+   "precision_lenient": 0.9286,
+   "inline": false
+  },
+  "ta-irv/lexicon.rare-near-common": {
+   "findings": 76,
+   "tp_strict": 2,
+   "fp_strict": 74,
+   "precision_strict": 0.0263,
+   "precision_lenient": 0.0263,
+   "inline": false
+  },
   "ta-irv/sandhi.clitic.fused": {
    "findings": 4,
    "tp_strict": 0,
@@ -92,14 +108,6 @@
    "precision_lenient": 0.0,
    "inline": false
   },
-  "ta-irv/tamil.wordlist-variant": {
-   "findings": 2473,
-   "tp_strict": 49,
-   "fp_strict": 2424,
-   "precision_strict": 0.0198,
-   "precision_lenient": 0.0198,
-   "inline": false
-  },
   "ta-irv/typo.divine-name.dative-stem": {
    "findings": 13,
    "tp_strict": 9,
@@ -127,8 +135,8 @@
  },
  "buckets": {
   "typo": {
-   "recall_strict": 0.0892,
-   "recall_lenient": 0.0881,
+   "recall_strict": 0.2087,
+   "recall_lenient": 0.206,
    "rows_positive": 839
   },
   "sandhi": {

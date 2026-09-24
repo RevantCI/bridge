@@ -21,6 +21,16 @@ from tests.support.paths import REPO_ROOT
 from bridge_service import BridgeEngine
 
 
+@pytest.fixture(autouse=True)
+def within_book_wordlist(monkeypatch):
+    """These tests pin the within-book wordlist audit on synthetic words that
+    the IRV corpus does not contain, so they run with the pack's corpus
+    lexicon switched off -- the fallback path that audit now is. The lexicon
+    rules are tested on the real lexicon in test_lexicon.py."""
+    from tc_ai_bridge.language_packs import lexicon
+    monkeypatch.setitem(lexicon._LOADED, "ta-irv", None)
+
+
 def scan(text, tamil=True):
     return scan_text(text, book="php", chapter="2", verse="3-4", tamil=tamil)
 
