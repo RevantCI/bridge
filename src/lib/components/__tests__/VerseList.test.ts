@@ -32,7 +32,7 @@ import {
   project,
 } from "../../stores";
 import { alignmentOpen, alignmentKey } from "../../alignmentUi";
-import { editingChapter, editingVerse, editSaving, recheckingKey } from "../../verseEditor";
+import { cancelVerseEdit, editingChapter, editingVerse, editSaving, recheckingKey } from "../../verseEditor";
 import { aiReviewRequest, aiJobActive } from "../../aiReviewUi";
 import type { QaFinding } from "../../types/finding";
 
@@ -341,6 +341,29 @@ describe("VerseList footnote handling", () => {
       });
       await waitFor(() => expect(area.selectionStart).toBe(3));
       expect(area.value.slice(area.selectionStart, area.selectionEnd)).toBe("அந்த காகம்");
+    });
+
+    it("meets the click budget: every action changes the screen in under 100 ms with the engine silent", async () => {
+      // The engine never answers, so any action that waited on it would never
+      // change the screen at all. jsdom does not paint; this times the DOM change.
+      const never = () => new Promise(() => {});
+      for (const [label, changed] of [
+        ["Ignore this occurrence", () => document.querySelector("mark.m-lqa-sandhi") === null],
+        ["Mark as false positive", () => document.querySelector("mark.m-lqa-sandhi") === null],
+        ['Use "அந்தக் காகம்"', () => Boolean(document.querySelector('[data-verse-key="1:6"] .vtext')
+          ?.textContent?.includes("அந்தக் காகம்"))],
+      ] as const) {
+        document.body.innerHTML = "";
+        await openMenu();
+        decideVerse.mockImplementation(never);
+        editVerse.mockImplementation(never);
+        const started = performance.now();
+        await fireEvent.click(screen.getByRole("menuitem", { name: label }));
+        expect(changed(), label).toBe(true);
+        expect(performance.now() - started, label).toBeLessThan(100);
+        cancelVerseEdit();
+        editSaving.set(false);
+      }
     });
 
     it("the verse menu opens this verse's Language QA history", async () => {

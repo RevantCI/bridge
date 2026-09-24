@@ -8,6 +8,7 @@
 import { get, writable } from "svelte/store";
 import { bridge } from "./api/bridgeClient";
 import { decideLanguageQaFinding } from "./findingActions";
+import { nudgeLanguageQa } from "./languageQaInline";
 import type { QaFinding } from "./types/finding";
 import type { LanguageQaFinding, LanguageQaSuggestion } from "./types/languageQa";
 import type { CorrectionApplicationIntent } from "./types/correctionReview";
@@ -168,6 +169,7 @@ export async function saveVerseEdit({ optimistic = false }: { optimistic?: boole
   try {
     const editResult = await bridge.editVerse(chapter, verse, text);
     undo = null;
+    nudgeLanguageQa();  // the edit started a new Language QA pass
     if (!optimistic) {
       showVerseText(key, text);
       cancelVerseEdit();

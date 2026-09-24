@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { get } from "svelte/store";
 import type { LanguageQaFinding, LanguageQaStatus } from "../../types/languageQa";
@@ -14,6 +14,7 @@ vi.mock("../../api/bridgeClient", () => ({ bridge: {
   languageQaHistory: (...args: unknown[]) => historyCall(...args),
 } }));
 import LanguageQaPanel from "../LanguageQaPanel.svelte";
+import { languageQaChannel } from "../../languageQaInline";
 
 function snapshot(overrides: Partial<LanguageQaStatus> = {}): LanguageQaStatus {
   return {
@@ -30,20 +31,43 @@ function snapshot(overrides: Partial<LanguageQaStatus> = {}): LanguageQaStatus {
   };
 }
 
+/** What languageQaInline.ts's status channel publishes: count-only status. */
+function publish(overrides: Partial<LanguageQaStatus> = {}, error = ""): void {
+  languageQaChannel.set({ projectPath: "C:/project", status: snapshot({ findings: [], ...overrides }), error });
+}
+
 beforeEach(() => {
+  // statusCall now serves only the panel's own page requests (limit 50).
   statusCall.mockReset().mockImplementation(async (_path, _offset, limit) =>
     snapshot({ findings: limit ? snapshot().findings : [] }));
   pauseCall.mockReset().mockResolvedValue(snapshot({ state: "paused", findings: [] }));
+  publish();
 });
 
+afterEach(() => languageQaChannel.set({ projectPath: "", status: null, error: "" }));
+
 describe("Language QA", () => {
-  it("stays collapsed automatically and fetches only the count while closed", async () => {
-    // Inline marks come from languageQa.inline (languageQaInline.ts), not
-    // from this panel's page, so collapsed needs the total only.
+  it("stays collapsed and makes no request of its own while closed", async () => {
+    // The status channel (languageQaInline.ts) supplies state and totals; the
+    // panel no longer polls.
     render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
-    await waitFor(() => expect(statusCall).toHaveBeenCalledWith("C:/project", 0, 0, "findings"));
+    expect(await screen.findByRole("button", { name: /Language QA · completed · 1/ })).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(statusCall).not.toHaveBeenCalled();
     expect(screen.queryByRole("region", { name: "Language QA results" })).toBeNull();
     expect(screen.queryByText("Check source encoding.")).toBeNull();
+  });
+
+  it("refetches the open page when a new pass lands on the channel, and not otherwise", async () => {
+    render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
+    await fireEvent.click(await screen.findByRole("button", { name: /Language QA · completed/ }));
+    await screen.findByText("Check source encoding.");
+    expect(statusCall).toHaveBeenCalledTimes(1);
+    publish();  // same generation and state: nothing new to show
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(statusCall).toHaveBeenCalledTimes(1);
+    publish({ generation: 2 });
+    await waitFor(() => expect(statusCall).toHaveBeenCalledTimes(2));
   });
 
   it("loads findings on demand and navigates exact verse bridges", async () => {
@@ -58,8 +82,10 @@ describe("Language QA", () => {
   });
 
   it("shows incomplete coverage instead of claiming a clean publication", async () => {
-    statusCall.mockResolvedValue(snapshot({ totalFindings: 0, findings: [], incomplete: true,
-      limitations: ["Chapter 1: 4: Unbalanced \\f: 1 open, 0 close; verse not checked."] }));
+    const incomplete = { totalFindings: 0, findings: [], incomplete: true,
+      limitations: ["Chapter 1: 4: Unbalanced \\f: 1 open, 0 close; verse not checked."] };
+    publish(incomplete);
+    statusCall.mockResolvedValue(snapshot(incomplete));
     render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
     await fireEvent.click(await screen.findByRole("button", { name: /Language QA · completed/ }));
     expect(screen.getByText(/Coverage incomplete/)).toBeTruthy();
@@ -79,9 +105,13 @@ describe("Language QA", () => {
   it("does not display a response belonging to a different project", async () => {
     statusCall.mockResolvedValue(snapshot({ projectPath: "C:/old-project" }));
     render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
+    await fireEvent.click(await screen.findByRole("button", { name: /Language QA/ }));
     await waitFor(() => expect(statusCall).toHaveBeenCalled());
-    await fireEvent.click(screen.getByRole("button", { name: /Language QA/ }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(screen.queryByText("Check source encoding.")).toBeNull();
+    // Nor a channel status published for another project.
+    languageQaChannel.set({ projectPath: "C:/old-project", status: snapshot(), error: "" });
+    expect(await screen.findByRole("button", { name: /Language QA · starting/ })).toBeTruthy();
   });
 
   it("never writes the inline-marks store, whatever page it shows", async () => {
@@ -148,8 +178,8 @@ describe("Language QA", () => {
       .toEqual(["Ignored", "Marked as false positive"]);
   });
 
-  it("surfaces failure and leaves automatic retry scheduled", async () => {
-    statusCall.mockRejectedValue(new Error("Engine unavailable"));
+  it("surfaces the channel's failure", async () => {
+    publish({}, "Engine unavailable");
     render(LanguageQaPanel, { projectPath: "C:/project", onNavigate: vi.fn() });
     await fireEvent.click(await screen.findByRole("button", { name: /Language QA · unavailable/ }));
     expect(screen.getByRole("alert").textContent).toContain("Engine unavailable");

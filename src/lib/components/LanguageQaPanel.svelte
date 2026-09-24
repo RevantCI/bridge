@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onDestroy } from "svelte";
   import { bridge } from "../api/bridgeClient";
+  import { languageQaChannel, nudgeLanguageQa } from "../languageQaInline";
   import type { LanguageQaStatus, LanguageQaView } from "../types/languageQa";
   import LanguageQaHistoryList from "./LanguageQaHistoryList.svelte";
 
@@ -13,13 +14,13 @@
   let view: LanguageQaView = "findings";
   // Finding ids whose decision history is expanded.
   let historyOpen = new Set<string>();
-  let status: LanguageQaStatus | null = null;
-  let error = "";
   let offset = 0;
   let sequence = 0;
   let disposed = false;
   let busy = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let localError = "";
+  // The page on show while expanded, fetched on demand (see below).
+  let page: LanguageQaStatus | null = null;
   const detectionLabels: Record<string, string> = {
     metadata: "Language supplied by the project.",
     "script-suggestion": "Tamil suggested from the script; the project has no declared language.",
@@ -28,78 +29,71 @@
     undetermined: "The language could not be determined. Only common checks are enabled.",
   };
 
-  // The panel shows a list, so it pages. It does NOT feed the verse marks:
-  // those come from languageQaInline.ts's unpaged languageQa.inline poll. A
-  // page is at most 100 findings, so marks drawn from it vanished for every
-  // chapter past the first page and moved whenever the list was paged.
-  // Collapsed, the panel only shows the total, so it asks for no rows.
-  async function refresh(): Promise<void> {
-    if (disposed || busy) return;
-    if (timer) clearTimeout(timer);
+  // The panel does not poll. Its state and totals come from the one Language
+  // QA status channel (languageQaInline.ts), which backs off when idle. It
+  // fetches rows only while expanded, and only when there is something new to
+  // show: it is opened, paged, switched to another list, or a new pass lands
+  // (a changed generation or state). It never feeds the verse marks; those
+  // come from languageQa.inline, unpaged.
+  $: channel = $languageQaChannel.projectPath === projectPath ? $languageQaChannel : null;
+  $: live = channel?.status ?? null;
+  $: error = localError || channel?.error || "";
+  $: status = expanded ? (page ?? live) : live;
+  $: pageKey = expanded && live ? `${view}|${offset}|${live.generation}|${live.state}` : "";
+  $: if (pageKey) void loadPage(pageKey);
+  $: if (!expanded) page = null;
+
+  async function loadPage(key: string): Promise<void> {
     const ticket = ++sequence;
     const path = projectPath;
     busy = true;
     try {
-      const next = await bridge.languageQaStatus(path, offset, expanded ? 50 : 0, view);
-      if (disposed || ticket !== sequence || path !== projectPath || next.projectPath !== path) return;
-      if (status && next.generation !== status.generation && offset !== 0) {
-        offset = 0;
-        // Fetch page one before presenting a different generation's rows.
-        status = { ...next, findings: [], offset: 0 };
+      const next = await bridge.languageQaStatus(path, offset, 50, view);
+      if (disposed || ticket !== sequence || key !== pageKey || next.projectPath !== path) return;
+      if (page && next.generation !== page.generation && offset !== 0) {
+        offset = 0;  // a new pass: start again from page one
         return;
       }
-      status = next;
-      error = "";
+      page = next;
+      localError = "";
     } catch (cause) {
-      if (!disposed && ticket === sequence) {
-        error = cause instanceof Error ? cause.message : String(cause);
-        status = null;
-      }
+      if (!disposed && ticket === sequence) localError = cause instanceof Error ? cause.message : String(cause);
     } finally {
-      busy = false;
-      const stale = ticket !== sequence;
-      if (!disposed) timer = setTimeout(() => void refresh(), stale ? 0 : expanded ? 2000 : 5000);
+      if (ticket === sequence) busy = false;
     }
   }
 
   async function togglePause(): Promise<void> {
-    if (busy) return;
+    if (busy || !live) return;
     busy = true;
-    ++sequence;
-    if (timer) clearTimeout(timer);
-    const ticket = sequence;
     const path = projectPath;
     try {
-      const next = await bridge.languageQaPause(path, status?.state !== "paused");
-      if (disposed || sequence !== ticket || projectPath !== path || next.projectPath !== path) return;
-      status = next;
+      const next = await bridge.languageQaPause(path, live.state !== "paused");
+      if (disposed || projectPath !== path || next.projectPath !== path) return;
+      languageQaChannel.set({ projectPath: path, status: { ...next, findings: [] }, error: "" });
       offset = 0;
-      error = "";
+      localError = "";
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+      localError = cause instanceof Error ? cause.message : String(cause);
     } finally {
       busy = false;
-      if (!disposed) void refresh();
+      nudgeLanguageQa();
     }
   }
 
   function toggle(): void {
     expanded = !expanded;
     offset = 0;
-    void refresh();
   }
 
-  function page(delta: number): void {
+  function turnPage(delta: number): void {
     offset = Math.max(0, offset + delta);
-    void refresh();
   }
 
   function showView(next: LanguageQaView): void {
     if (view === next) return;
     view = next;
     offset = 0;
-    ++sequence;  // an answer for the previous list must not land in this one
-    if (!busy) void refresh();  // otherwise the stale answer re-polls at once
   }
 
   function toggleHistory(id: string): void {
@@ -108,11 +102,9 @@
     historyOpen = next;
   }
 
-  onMount(() => { void refresh(); });
   onDestroy(() => {
     disposed = true;
     ++sequence;
-    if (timer) clearTimeout(timer);
   });
 </script>
 
@@ -188,9 +180,9 @@
         </ol>
         {#if status.totalFindings > 50}
           <div class="paging">
-            <button on:click={() => page(-50)} disabled={busy || offset === 0}>Previous</button>
+            <button on:click={() => turnPage(-50)} disabled={busy || offset === 0}>Previous</button>
             <span>{status.offset + 1}–{Math.min(status.offset + 50, status.totalFindings)} of {status.totalFindings}</span>
-            <button on:click={() => page(50)} disabled={busy || offset + 50 >= status.totalFindings}>Next</button>
+            <button on:click={() => turnPage(50)} disabled={busy || offset + 50 >= status.totalFindings}>Next</button>
           </div>
         {/if}
         <p class="muted">{status.coverage} {status.storage}</p>
@@ -198,8 +190,8 @@
     </section>
   {/if}
   <button class="launcher" on:click={toggle} aria-expanded={expanded} aria-controls="language-qa-results">
-    Language QA · {error ? "unavailable" : status?.state ?? "starting"}
-    {#if status?.totalFindings} · {status.totalFindings}{/if}
+    Language QA · {error ? "unavailable" : live?.state ?? "starting"}
+    {#if live?.totalFindings} · {live.totalFindings}{/if}
   </button>
 </aside>
 

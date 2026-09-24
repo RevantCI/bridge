@@ -321,6 +321,7 @@ This is the repository's one doc map; `CLAUDE.md`, `DEVELOPER_GUIDE.md` and
 | `ALIGNMENT.md` | Manual word alignment and the Bridge-private cross-verse link store: protocol, persistence, completion states. |
 | `TEAM_ARCHITECTURE.md` | Direction for #44 to #47. Its §3 and §4 describe shipped code; §5 to §8 are still design. |
 | `QA_TEST_MATRIX.md` | The release gate: what is tested, how, and the current pass state per row. |
+| `LANGUAGE_QA_PLAN.md` | Offline Language QA (#169): scope, coverage, the layered-rules phase table. `LANGUAGE_QA_BENCHMARK.md` holds the per-rule precision and recall against the IRV review reports and how to run them; `LANGUAGE_QA_REVIEW_FIXES_ACCEPTANCE.md` holds the desktop cases for A52–A55. |
 | `SIMPLIFICATION_AUDIT_2026-09.md` | What is slowing the codebase down, ranked, with the decisions taken. Point-in-time (2026-09-16). |
 | `USER_MANUAL.md` | What the app does, screen by screen, for translators and checkers. |
 | `RELEASE_*.md` | Release notes, one per version. |

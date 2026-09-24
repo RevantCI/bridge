@@ -1,4 +1,5 @@
 import { bridge } from "./api/bridgeClient";
+import { nudgeLanguageQa } from "./languageQaInline";
 import { findingsByVerse, languageQaFindingsByVerse, verseKey } from "./stores";
 import type { FindingStatus } from "./types/finding";
 import type { LanguageQaDecisionIssue, LanguageQaFinding, LanguageQaSuggestion } from "./types/languageQa";
@@ -43,7 +44,10 @@ export function decideLanguageQaFinding(
   chosen: LanguageQaSuggestion | null = null,
 ): Promise<Record<string, unknown>> {
   return bridge.decideVerse(finding.chapter, finding.verse, finding.id, status, undefined,
-    languageQaDecisionIssue(finding, chosen));
+    languageQaDecisionIssue(finding, chosen)).then((result) => {
+    nudgeLanguageQa();  // the decision started a new pass
+    return result;
+  });
 }
 
 /**

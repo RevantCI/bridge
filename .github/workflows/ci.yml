@@ -239,6 +239,19 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
         run: pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider
 
+      - name: Language QA foreground latency gate
+        # Layered-rules performance contract: while a Language QA pass runs,
+        # the RPCs Language QA owns or runs beside must keep a p95 under 50 ms,
+        # with the engine pinned to 2 cores. Those RPCs are ping, verse.get,
+        # a Language QA verse.decide, languageQa.status and languageQa.inline.
+        # It uses a synthetic 400-verse project, no translator data. The shared
+        # write paths (another verse.decide, verse.edit, project.open) are
+        # printed but not gated: they are over budget with or without a scan
+        # (BUILD_LOG 2026-09-24, Phase 2), which is not a Language QA cost.
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python ../scripts/benchmark_language_qa.py --gate --cores 2
+
   # ---------------------------------------------------------------------------
   # Rust / Tauri shell.
   # ---------------------------------------------------------------------------

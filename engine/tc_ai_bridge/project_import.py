@@ -136,6 +136,13 @@ def _flatten_alignment_markup(value: str) -> str:
     return value.strip()
 
 
+def imported_verse_text(raw_verse: str) -> str:
+    """The verse text an import writes to chapter JSON for one parsed verse:
+    alignment markup flattened, every other inline USFM kept. The Language QA
+    benchmark uses it so it scans exactly what an imported project holds."""
+    return _flatten_alignment_markup(raw_verse)
+
+
 def _target_word_bank(text: str) -> list[dict[str, Any]]:
     words = whitespace_tokens(text)
     totals = Counter(words)

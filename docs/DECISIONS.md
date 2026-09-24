@@ -133,4 +133,32 @@ adding a picker later attributes new rows correctly without touching old ones.
 deferred, not rejected; anything in the UI that assumes several users on one machine.
 **Revisit when:** v1 has shipped and a team shares a machine, or the hub slice starts.
 
+## 2026-09-24 — Language QA benchmark: AI review rows are the positives, contradictions are "maybe"
+
+**Decision:** The Phase 2 benchmark treats every in-scope row of the IRV Round 2 and Pass 3 reports as a positive (maintainer instruction). A row the reports contradict (a disagreeing fix, a reversal, a Pass 3 confirmed house form) or a human verdict against it is "maybe". Nothing is a negative.
+**Because:** these are the only labelled data there is. The alternatives were strict human-confirmed rows only (5 in Philippians) or waiting for human review. The Philippians Rejected rows answered a different question and are not ground truth.
+**Rules out:** reading benchmark precision as accuracy against verified truth; it is agreement with the AI review, and `docs/LANGUAGE_QA_BENCHMARK.md` says so at the top.
+**Revisit when:** a human-labelled set exists; it fills the reserved "negative" class.
+
+## 2026-09-24 — The accuracy gate is local; the latency gate is in CI
+
+**Decision:** `scripts/language_qa_benchmark.py --gate` runs locally before a rule change and its output goes in BUILD_LOG. `scripts/benchmark_language_qa.py --gate --cores 2` runs in CI.
+**Because:** the IRV text and review reports live outside the repository and are not committed. The latency benchmark uses a synthetic project and runs anywhere.
+**Rules out:** CI catching a precision regression by itself; committing the IRV corpus or the reports to make it do so.
+**Revisit when:** a redistributable benchmark slice is approved for the repository, or a self-hosted runner with the corpus exists.
+
+## 2026-09-24 — Language QA has one polled status channel, not engine push
+
+**Decision:** One count-only `languageQa.status` poll (`languageQaInline.ts`) feeds the marks and the panel. It runs at 500 ms while a pass is active and backs off to 10 s when idle, and a local edit or decision nudges it.
+**Because:** the sidecar reader (`sidecar.rs`) routes stdout only to a pending request id, so the engine cannot push. Adding push needs a Rust and protocol change, larger than this phase. The brief allows the polled fallback.
+**Rules out:** per-component Language QA pollers, since the panel no longer polls.
+**Revisit when:** the protocol gains server-initiated messages for any other reason.
+
+## 2026-09-24 — An ignore expires when its rule or pack version changes
+
+**Decision:** An "ignored" or "rejected" Language QA decision recorded under a different pack version or rule revision is not re-applied. The finding returns flagged `previouslyIgnored` for re-checking.
+**Because:** the layered-rules brief requires it: a changed rule may now be right where it was wrong. The alternative, silently keeping old ignores, hides a changed rule's new findings.
+**Rules out:** treating an ignore as permanent. Every `RULE_VERSION` bump sends existing ignores back for re-check.
+**Revisit when:** per-rule revisions replace the pack-wide version as the only trigger (Phase 3 pack).
+
 <!-- New entries go above this line. -->

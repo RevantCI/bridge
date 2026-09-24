@@ -11135,8 +11135,13 @@ behaviour change:
   folder and scanning it: 244 findings, chapter 3's first mark at item 162,
   and the exact raw text after each Use.
 
-Also noted by the audit: the brief asks for `docs/DECISIONS.md` to be read,
-but that file does not exist in the repository.
+~~Also noted by the audit: the brief asks for `docs/DECISIONS.md` to be read,
+but that file does not exist in the repository.~~
+
+**Correction (Phase 2 entry, below).** That was wrong. `docs/DECISIONS.md`
+exists and always did; the check that "found" it missing ran from `engine/`
+and looked for `engine/docs/`. It had not been read during the review fixes.
+It has been read since, and none of its decisions bear on Language QA.
 
 - Gates: `npm run check` 0/0; `npx vitest run` 507 passed; `npm run build`
   ok; engine `pytest -n auto` 1581 passed.
@@ -11397,3 +11402,205 @@ Phase 1 adds no measurable time or memory.
   is updated for the new mark style and menu labels.
 - Also fixed: the audit follow-up's gate lines had been left after the
   regression entry in `ec9b55b`; they are moved back to their own section.
+
+## 2026-09-24 — Layered-rules Phase 2: benchmark harness, latency gate, one status channel
+
+This is Phase 2 of the layered-rules brief. It measures before any rule
+changes. No rule logic changed in this phase.
+
+### Inputs, and a maintainer decision about them
+
+The reports: `D:\Claude Lab\Revant work\Claude outputs`, 16 Round 2 CSVs
+and 5 Pass 3 CSVs, 9,334 rows in total.
+- The Round 2 CSVs cover GEN–2CH, EZR, RUT and PSA.
+- The Pass 3 CSVs cover GEN, EXO, LEV, NUM and DEU.
+- `v1-before-split/` is not read: superseded.
+
+Also used: the human-reviewed Philippians CSV, and all 66 IRV books.
+
+The maintainer ruled that every AI proposal is reliable and to be used, and
+that contradicting results are "maybe". So:
+- positives are all in-scope AI rows;
+- "maybe" covers:
+  - rows at one place proposing different fixes;
+  - reversals;
+  - rows flagging a form `IRV_Pass3_Handoff.md` §5 confirms is house style
+    (`இந்த` + bare, `அந்த தேச-` bare, `-விட` bare, names in `-க்கு`, and
+    numerals spelt out);
+  - any human verdict against a row;
+- there are no negatives.
+
+The brief suggested seeding negatives from leads recorded as rejected
+(php 1:29, 4:18). That does not hold:
+- php 1:29 later went from Rejected to Confirmed;
+- php 3:14 and 4:18 are real bare boundaries that B4 excludes only for
+  scope;
+- the maintainer had already said the Philippians dispositions are not
+  linguistic ground truth.
+
+So Philippians Rejected rows are "maybe" too. **Precision is therefore
+agreement with the AI review, not accuracy**, and
+`docs/LANGUAGE_QA_BENCHMARK.md` says so first.
+
+### Harness
+
+**Code.** `engine/tc_ai_bridge/language_qa_benchmark.py` holds the harness,
+tested; `scripts/language_qa_benchmark.py` is the command line.
+
+**Scanning.** Each reviewed book is parsed with `parse_scripture_file` and
+`imported_verse_text`, the latter a new public wrapper around the import's
+own flattening. It is then scanned by the app's own `LanguageQaManager`
+over temporary chapter JSON. There is no second copy of the rules.
+
+**Matching.** A finding is a true positive when it overlaps a positive row
+at the same verse and the row's type is one the rule can find
+(`RULE_BUCKETS`).
+
+**Counting.** Per rule: precision strict and lenient, and false positives on
+house forms. Per bucket: recall over anchored rows, with unanchored rows
+counted separately.
+
+**Outputs.**
+- The full result goes to `benchmark/results/` (git-ignored): it quotes
+  Scripture and review text, and lists every unmatched finding and row for a
+  human to label.
+- Aggregate numbers go to `benchmark/baseline.json`.
+- The table goes into the doc between generated markers.
+
+**`--gate`** fails when:
+- an inline rule's strict precision is below 0.90;
+- a rule falls more than 2 points below the baseline (rules with 10 or more
+  findings only).
+
+It runs locally only, by maintainer decision, recorded in `DECISIONS.md`.
+
+**Labelled fixtures (2.4).** `engine/tests/fixtures/language_qa/labelled/`
+holds five JSONL files, one per bucket, about 155 KB. Each has every
+"maybe" row plus a strided sample of 40 positives, with verse text, span,
+fix and origin. `test_language_qa_labelled.py` checks the format, and checks
+that every positive credited to a current rule is still found by it: a
+regression guard in CI.
+
+### Baseline, before any Phase 3 change
+
+| Rule | Inline | Findings | Strict precision | False positives on a house form |
+|---|---|---|---|---|
+| `tamil.vallinam-missing` | yes | 311 | **37.9%** (lenient 43.4%) | 77 of 193 |
+| `tamil.wordlist-variant` | no | 2,473 | **2.0%** | — |
+| `tamil.repeated-word` | no | 33 | 0% | — |
+| `punctuation.repeated` | no | 1 | 100% | — |
+| `unicode.invisible` | no | 1 | 100% | — |
+
+- **The gate fails on the baseline.** The only inline rule is far below
+  0.90. That is the finding Phase 3 exists to act on: house-form abstains
+  and a proper-noun abstain are the obvious first levers, since 77 of its
+  193 false positives are house forms.
+- Recall, strict: typo 6.3%, sandhi 6.8%, punctuation 2.0%, name 0%, usfm 0%.
+  Name and usfm have no rules yet.
+- The wordlist audit is mostly sandhi variants (`அதைச்`/`அதைக்`) and
+  proper names flagged as spelling variants. Phase 5's lexicon replaces it.
+- All `tamil.repeated-word` findings are distributive reduplication, which
+  the reviews treat as house style.
+
+### Performance contract
+
+**Latency benchmark.** `scripts/benchmark_language_qa.py` now times
+foreground RPCs while a pass runs, on a synthetic 400-verse project. It
+has:
+- `--cores N`, which pins the engine to N cores via the Windows affinity
+  API. RAM and disk throttling are **not** emulated.
+- `--without-scan`, which samples the same RPCs with Language QA paused.
+- `--gate`.
+
+**Results, pinned to 2 cores, p95:**
+
+| RPC | During a scan | Without a scan |
+|---|---|---|
+| `verse.decide` on a Language QA finding | 16.6 ms | 17.6 ms |
+| `verse.get` | 3.4 ms | 2.1 ms |
+| `languageQa.status` | 0.3 ms | 0.5 ms |
+| `languageQa.inline` | 0.4 ms | 0.4 ms |
+| `ping` | 0.5 ms | 0.1 ms |
+| `verse.decide` on another finding | 85 ms | 121 ms |
+| `verse.edit` | 412 ms | 247 ms |
+| `project.open` | 174 ms | 195 ms |
+
+- The gate covers the first five, which are the RPCs Language QA owns or
+  runs beside. They pass, and run in CI (`ci.yml`, engine job).
+- **The shared write paths are over the 50 ms budget with or without a
+  scan, so the scan is not the cause.** Moving the scanner into a worker
+  process, the brief's remedy, would not fix them.
+- A cProfile of `verse.decide` puts the cost in the progress rollup. It
+  opens a fresh SQLite connection per query (45 closes: 124 ms over 10
+  calls) and commits, with an fsync, several times per decision (25
+  commits: 156 ms).
+- `verse.edit` is the journalled Scripture write.
+- Both are outside Language QA and involve durable-write design, so they
+  are **reported, not changed** (candidate follow-up issue). The Language QA
+  UI does not wait on them anyway: Use is optimistic since Phase 1.
+- `checks.status` needs a running check job; it is measured once Language
+  QA is a check stage (Phase 4).
+
+**Click budget.** A new `VerseList` test fires Use, Ignore and False positive
+with the engine never answering. It asserts the screen changed in under
+100 ms: this is the DOM change, since jsdom does not paint. It runs in CI.
+
+**One status channel.**
+- The engine cannot push: `sidecar.rs` drops a stdout line with no pending
+  request id. So the brief's fallback applies.
+- `languageQaInline.ts` is now Language QA's only poller. It makes one
+  count-only `languageQa.status` call, published as `languageQaChannel`, at
+  500 ms while a pass is queued or running and 10 s when idle. A local edit,
+  decision or pause nudges it (`nudgeLanguageQa`).
+- `LanguageQaPanel` no longer polls. It reads the channel, and fetches a
+  page only when opened, paged, switched to another list, or when a new
+  generation or state lands.
+- Marks are fetched only for a completed pass not yet drawn, or on a
+  chapter change. They no longer blink out during every rescan, which the
+  old 5 s inline poll made them do.
+- Two idle pollers every 2–5 s became one every 10 s.
+- **Not Language QA, not changed:** `App.svelte`'s 800 ms navigation-sync
+  poll runs whenever the app is open. The brief's "zero pollers awake when
+  idle" cannot hold while it does; reported.
+
+### Correction
+
+My review-fix audit said `docs/DECISIONS.md` did not exist. It does: that
+check globbed from `engine/`. The false claim in the audit follow-up entry
+is struck through with the correction beside it. The file has been read
+now: nothing in it bears on Language QA. It gains four entries: the
+benchmark's labels, the local accuracy gate versus the CI latency gate, the
+polled channel, and ignore-expiry.
+
+### Verification
+
+- Engine: `test_language_qa_benchmark.py` (9 tests, on a synthetic book and
+  report), covering:
+  - labels by scope, verdict and contradiction;
+  - the three contradiction kinds, including digits;
+  - matching against compatible rows only;
+  - recall over anchored rows;
+  - listing of unmatched findings with their house form;
+  - the gate's two conditions and small-rule skip;
+  - that the baseline carries no text;
+  - that labelled examples quote their verse;
+  - the CLI's exit codes and outputs.
+
+  `test_language_qa_labelled.py` adds 489 parametrized checks over the
+  committed fixtures.
+- Frontend:
+  - the channel tests: marks redrawn only for a new completed pass and kept
+    mid-pass, active versus idle cadence, a nudge, errors on the channel, no
+    refetch for an unchanged pass, per-verse patching;
+  - the panel tests, driven by the channel: no request while collapsed, a
+    page refetched only for a new generation;
+  - the click-budget test.
+- Gates:
+  - `npm run check` 0/0;
+  - `npx vitest run` 540 passed;
+  - `npm run build` ok;
+  - engine `pytest -n auto` 2111 passed, previously 1613: 9 harness tests,
+    489 fixture checks, 0 new warnings;
+  - `benchmark_language_qa.py --gate --cores 2` passes;
+  - `language_qa_benchmark.py --gate` **fails**: the baseline finding above.
+- Desktop acceptance not yet run.

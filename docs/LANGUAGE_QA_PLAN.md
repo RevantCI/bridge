@@ -112,16 +112,24 @@ in order, and each is its own commit series:
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Finding model (layer/category/confidence/suggestions/ruleId/packVersion); marks per category; menu with ranked suggestions, Edit-in-place, false positive; decision history; ignore-expiry on rule change; termbase overwrite guard | Done, source-verified (A56–A60); desktop pending |
-| 2 | Benchmark harness over the Round 2 review CSVs; labelled fixtures; `--gate` | Next |
-| 3 | `ta-irv` rule pack as data; B1–B4 migrated to shape rules; known IRV defect rules | Planned |
+| 2 | Benchmark harness over the Round 2 / Pass 3 review CSVs; labelled fixtures; `--gate`; latency gate; one status channel | Done (A61, A62). Baseline: the only inline rule, `tamil.vallinam-missing`, is at 37.9% strict precision, so the accuracy gate fails. See [LANGUAGE_QA_BENCHMARK.md](LANGUAGE_QA_BENCHMARK.md) |
+| 3 | `ta-irv` rule pack as data; B1–B4 migrated to shape rules; known IRV defect rules | Next |
 | 4 | Language QA as a check-framework stage; reports, exception queue, publication gate; collection runner | Planned |
 | 5 | Corpus lexicon and Tamil confusion-set distance | Planned |
 | 6 | Termbase v3, name pack, scoped ignores, house-style learner, export ledger | Planned |
 | 7 | Structured "checks / does not check" boundary shown in the panel | Planned |
 
-The "Ignore ▸ this word / this rule" menu scopes arrive with Phase 6. The
-single status channel and the p95/click-latency gates from the performance
-contract arrive with Phase 2's measurement harness.
+The "Ignore ▸ this word / this rule" menu scopes arrive with Phase 6.
+
+Performance contract status after Phase 2:
+- Met: one Language QA status poll (500 ms active, 10 s idle); the p95 gate
+  for the RPCs Language QA owns (in CI); the click budget.
+- Not met, and outside Language QA:
+  - `verse.edit`, `project.open` and a non-Language-QA `verse.decide` exceed
+    50 ms with or without a scan;
+  - the app's 800 ms navigation poll stays awake when idle.
+
+See BUILD_LOG, Phase 2.
 
 Execution of LQA-1 is authorized by the user's request. Later linguistic packs
 require approved project-specific data; the broad prose framework does not supply

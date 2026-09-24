@@ -1,0 +1,91 @@
+{
+ "packVersion": "language-qa-7",
+ "books": [
+  "1ch",
+  "1ki",
+  "1sa",
+  "2ch",
+  "2ki",
+  "2sa",
+  "deu",
+  "exo",
+  "ezr",
+  "gen",
+  "jdg",
+  "jos",
+  "lev",
+  "num",
+  "php",
+  "psa",
+  "rut"
+ ],
+ "rules": {
+  "common/punctuation.repeated": {
+   "findings": 1,
+   "tp_strict": 1,
+   "fp_strict": 0,
+   "precision_strict": 1.0,
+   "precision_lenient": 1.0,
+   "inline": false
+  },
+  "common/unicode.invisible": {
+   "findings": 1,
+   "tp_strict": 1,
+   "fp_strict": 0,
+   "precision_strict": 1.0,
+   "precision_lenient": 1.0,
+   "inline": false
+  },
+  "ta-irv/tamil.repeated-word": {
+   "findings": 33,
+   "tp_strict": 0,
+   "fp_strict": 33,
+   "precision_strict": 0.0,
+   "precision_lenient": 0.0,
+   "inline": false
+  },
+  "ta-irv/tamil.vallinam-missing": {
+   "findings": 311,
+   "tp_strict": 118,
+   "fp_strict": 193,
+   "precision_strict": 0.3794,
+   "precision_lenient": 0.4341,
+   "inline": true
+  },
+  "ta-irv/tamil.wordlist-variant": {
+   "findings": 2473,
+   "tp_strict": 49,
+   "fp_strict": 2424,
+   "precision_strict": 0.0198,
+   "precision_lenient": 0.0198,
+   "inline": false
+  }
+ },
+ "buckets": {
+  "typo": {
+   "recall_strict": 0.063,
+   "recall_lenient": 0.0622,
+   "rows_positive": 839
+  },
+  "sandhi": {
+   "recall_strict": 0.0679,
+   "recall_lenient": 0.0761,
+   "rows_positive": 1877
+  },
+  "punctuation": {
+   "recall_strict": 0.02,
+   "recall_lenient": 0.02,
+   "rows_positive": 72
+  },
+  "name": {
+   "recall_strict": 0.0,
+   "recall_lenient": 0.0,
+   "rows_positive": 528
+  },
+  "usfm": {
+   "recall_strict": 0.0,
+   "recall_lenient": 0.0,
+   "rows_positive": 680
+  }
+ }
+}
