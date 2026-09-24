@@ -4347,7 +4347,9 @@ class BridgeEngine:
 
     def terminology_record(
         self, concept_id: str, approved_renderings: list[str] | None = None,
-        rejected_renderings: list[str] | None = None, overwrite: bool = False,
+        rejected_renderings: list[str] | None = None, overwrite: bool = False, *,
+        allowed_alternatives: list[str] | None = None,
+        inflected_forms: dict[str, list[str]] | None = None, match_mode: str = "exact",
     ) -> dict[str, Any]:
         """Add a termbase rule from the Settings pane. A rule that already
         exists for this concept is never replaced silently: without
@@ -4360,8 +4362,10 @@ class BridgeEngine:
             return {"rules": self.project.terminology_rules(), "conflict": existing}
         self.project.record_terminology_rule(
             concept_id, approved_renderings=approved_renderings,
+            allowed_alternatives=allowed_alternatives,
             rejected_renderings=rejected_renderings,
             username=self.settings.reviewer_name or "Bridge Reviewer",
+            inflected_forms=inflected_forms, match_mode=match_mode,
         )
         # #171 desktop testing: a rule added here has no chapter-file change
         # for Language QA's idle-refresh to notice on its own, unlike an edit
@@ -4620,8 +4624,13 @@ class BridgeEngine:
                 overwrite = p.get("overwrite", False)
                 if not isinstance(overwrite, bool):
                     raise ProjectError("overwrite must be a boolean")
+                inflected = p.get("inflectedForms")
+                if inflected is not None and not isinstance(inflected, dict):
+                    raise ProjectError("inflectedForms must be an object")
                 return EngineResponse.ok(request.id, result=self.terminology_record(
                     p["conceptId"], p.get("approvedRenderings"), p.get("rejectedRenderings"), overwrite,
+                    allowed_alternatives=p.get("allowedAlternatives"), inflected_forms=inflected,
+                    match_mode=str(p.get("matchMode") or "exact"),
                 ))
             if m == Methods.EXPORT_ALIGNED:
                 return EngineResponse.ok(request.id, result=self.export_aligned(

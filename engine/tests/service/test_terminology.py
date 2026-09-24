@@ -149,7 +149,8 @@ def test_record_and_read_terminology_rule_round_trips(tmp_path):
     assert rule["category"] == "key_term"
     assert rule["provenance"] == "imported"  # provenance preserved distinctly from status
     assert rule["status"] == "approved"
-    assert rule["schemaVersion"] == 2
+    assert rule["schemaVersion"] == 3  # termbase v3 (layered-rules 6.1)
+    assert rule["matchMode"] == "exact" and rule["inflectedForms"] == {}
 
 
 def test_terminology_rule_survives_project_restart(tmp_path):
@@ -587,3 +588,66 @@ def test_terminology_record_through_the_dispatcher_is_picked_up_by_the_next_lang
         assert matches and matches[0]["originalText"] == "தேவன்"
     finally:
         engine._language_qa.unbind()
+
+
+# ---- termbase v3 (layered-rules 6.1) -------------------------------------------
+
+from tc_ai_bridge.terminology import CASE_SUFFIXES, join_suffix  # noqa: E402
+
+
+@pytest.mark.parametrize("word,suffix,joined", [
+    ("தேவன்", "ஐ", "தேவனை"), ("தேவன்", "இல்", "தேவனில்"), ("தேவன்", "உக்கு", "தேவனுக்கு"),
+    ("கர்த்தர்", "கள்", "கர்த்தர்கள்"), ("யெகோவா", "க்கு", "யெகோவாக்கு"),
+])
+def test_a_case_ending_joins_as_written_tamil_does(word, suffix, joined):
+    assert join_suffix(word, suffix) == unicodedata.normalize("NFC", joined)
+
+
+def v3_term(**extra):
+    return {**approved_term("god", ["தேவன்"], preferred=["இறைவன்", "கடவுள்"]), **extra}
+
+
+def test_prefix_mode_matches_case_forms_at_medium_confidence_with_the_same_ending(tmp_path):
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project_at(tmp_path, verses={"1": "அவன் தேவனை நோக்கினான்."},
+                            terminology=[v3_term(matchMode="prefix", allowedAlternatives=["ஆண்டவன்"])]))
+    [finding] = [f for f in wait(manager)["findings"] if f["rule"] == "terminology.deprecated-form"]
+    manager.unbind()
+    assert finding["originalText"] == "தேவனை" and finding["confidence"] == "medium"
+    assert [s["text"] for s in finding["suggestions"]] == ["இறைவனை", "கடவுளை", "ஆண்டவனை"]
+    assert "ending" in finding["message"]
+
+
+def test_exact_mode_leaves_case_forms_alone(tmp_path):
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project_at(tmp_path, verses={"1": "அவன் தேவனை நோக்கினான். தேவன் பேசினார்."},
+                            terminology=[v3_term()]))
+    matched = [f["originalText"] for f in wait(manager)["findings"] if f["rule"] == "terminology.deprecated-form"]
+    manager.unbind()
+    assert matched == ["தேவன்"]
+
+
+def test_a_listed_inflected_form_is_as_authoritative_as_the_rendering(tmp_path):
+    manager = LanguageQaManager(debounce=0, yield_seconds=0)
+    manager.bind(project_at(tmp_path, verses={"1": "அவன் தேவனே என்றான்."},
+                            terminology=[v3_term(inflectedForms={"தேவன்": ["தேவனே"]})]))
+    [finding] = [f for f in wait(manager)["findings"] if f["rule"] == "terminology.deprecated-form"]
+    manager.unbind()
+    assert finding["originalText"] == "தேவனே" and finding["confidence"] == "high"
+    assert [s["text"] for s in finding["suggestions"]] == ["இறைவன்", "கடவுள்"]
+
+
+def test_terminology_record_takes_the_v3_fields_and_refuses_an_unknown_mode(fixture_project):
+    engine = BridgeEngine()
+    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    recorded = call(engine, "terminology.record", {
+        "conceptId": "god", "approvedRenderings": ["இறைவன்"], "rejectedRenderings": ["தேவன்"],
+        "allowedAlternatives": ["கடவுள்"], "inflectedForms": {"தேவன்": ["தேவனே"]}, "matchMode": "prefix"})
+    assert recorded["success"], recorded
+    [rule] = recorded["result"]["rules"]
+    assert (rule["matchMode"], rule["inflectedForms"], rule["allowedAlternatives"]) == (
+        "prefix", {"தேவன்": ["தேவனே"]}, ["கடவுள்"])
+    bad = call(engine, "terminology.record", {"conceptId": "x", "rejectedRenderings": ["a"],
+                                               "matchMode": "fuzzy", "overwrite": True})
+    assert not bad["success"]
+    assert len(CASE_SUFFIXES) == len(set(CASE_SUFFIXES))

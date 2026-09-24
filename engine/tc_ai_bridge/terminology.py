@@ -17,6 +17,29 @@ from typing import Any
 from .language_qa import WORD
 
 MAX_PHRASE_WORDS = 6
+MATCH_MODES = ("exact", "prefix")
+
+# Termbase v3 (layered-rules 6.1). The closed list of case and plural endings
+# a "prefix" entry is matched with, written as they are spoken; join_suffix()
+# attaches them the way written Tamil does. It is deliberately small: a form
+# outside it is added by hand under `inflectedForms`.
+CASE_SUFFIXES = (
+    "ஐ", "க்கு", "உக்கு", "இல்", "ஆல்", "ஓடு", "உடன்", "இன்", "உம்", "இடம்", "இலிருந்து",
+    "கள்", "களை", "களுக்கு", "களின்", "களால்", "களோடு", "களும்",
+)
+PULLI = "்"
+# An initial vowel of a suffix fuses with a consonant-final stem into a sign.
+VOWEL_SIGNS = {"அ": "", "ஆ": "ா", "இ": "ி", "ஈ": "ீ", "உ": "ு", "ஊ": "ூ",
+               "எ": "ெ", "ஏ": "ே", "ஐ": "ை", "ஒ": "ொ", "ஓ": "ோ", "ஔ": "ௌ"}
+
+
+def join_suffix(word: str, suffix: str) -> str:
+    """தேவன் + ஐ = தேவனை: a pulli-final stem and a vowel-initial suffix fuse
+    into one syllable; anything else is simply joined."""
+    word = unicodedata.normalize("NFC", word)
+    if word.endswith(PULLI) and suffix[:1] in VOWEL_SIGNS:
+        return unicodedata.normalize("NFC", word[:-1] + VOWEL_SIGNS[suffix[0]] + suffix[1:])
+    return unicodedata.normalize("NFC", word + suffix)
 
 
 def phrase_tokens(rendering: str) -> tuple[str, ...]:
@@ -49,23 +72,50 @@ class TermIndex:
             if not concept_id:
                 continue
             preferred = [str(r) for r in (term.get("approvedRenderings") or []) if str(r).strip()]
+            allowed = [str(r) for r in (term.get("allowedAlternatives") or []) if str(r).strip()]
             note = str(term.get("note") or "")
+            prefix = term.get("matchMode") == "prefix"
+            inflected = term.get("inflectedForms") if isinstance(term.get("inflectedForms"), dict) else {}
             for rejected in term.get("rejectedRenderings") or []:
                 rejected = str(rejected).strip()
                 if not rejected:
                     continue
-                tokens = phrase_tokens(rejected)
-                if not tokens or len(tokens) > MAX_PHRASE_WORDS:
-                    continue  # malformed/unsupported entry: skip, don't crash, don't widen the search bound
-                self._by_phrase[tokens] = {
-                    "conceptId": concept_id, "rejectedForm": rejected,
-                    "preferredRenderings": preferred, "note": note,
-                    # A term may exist with only rejected forms recorded and no
-                    # preferred one settled yet -- never invent one, None is a
-                    # real, expected value here, not an oversight.
-                    "suggestedReplacement": preferred[0] if preferred else None,
-                }
-                self.max_phrase_length = max(self.max_phrase_length, len(tokens))
+                # The rendering itself, then the forms a reviewer listed (as
+                # authoritative as the rendering), then -- for a "prefix" entry
+                # -- each case/plural ending, matched at medium confidence and
+                # suggested with the same ending on the preferred form.
+                variants = [(rejected, "", "high")]
+                variants += [(str(f).strip(), "", "high") for f in inflected.get(rejected) or [] if str(f).strip()]
+                if prefix:
+                    variants += [(self._inflect(rejected, s), s, "medium") for s in CASE_SUFFIXES]
+                for form, suffix, confidence in variants:
+                    tokens = phrase_tokens(form)
+                    if not tokens or len(tokens) > MAX_PHRASE_WORDS:
+                        continue  # malformed/unsupported entry: skip, don't crash, don't widen the search bound
+                    if tokens in self._by_phrase and confidence == "medium":
+                        continue  # a generated form never displaces a listed one
+                    ranked = [(self._inflect(p, suffix), "Preferred form") for p in preferred]
+                    ranked += [(self._inflect(a, suffix), "Allowed alternative") for a in allowed]
+                    self._by_phrase[tokens] = {
+                        "conceptId": concept_id, "rejectedForm": rejected,
+                        "preferredRenderings": preferred, "note": note, "confidence": confidence,
+                        "matchedForm": form, "suffix": suffix,
+                        "suggestions": ranked,
+                        # A term may exist with only rejected forms recorded and no
+                        # preferred one settled yet -- never invent one, None is a
+                        # real, expected value here, not an oversight.
+                        "suggestedReplacement": ranked[0][0] if ranked else None,
+                    }
+                    self.max_phrase_length = max(self.max_phrase_length, len(tokens))
+
+    @staticmethod
+    def _inflect(rendering: str, suffix: str) -> str:
+        """The rendering with `suffix` on its last word (a multi-word
+        rendering inflects at the end)."""
+        if not suffix:
+            return rendering
+        head, _, last = rendering.rpartition(" ")
+        return (head + " " if head else "") + join_suffix(last, suffix)
 
     def match(self, tokens: tuple[str, ...]) -> dict[str, Any] | None:
         return self._by_phrase.get(tokens)

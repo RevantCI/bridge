@@ -1659,10 +1659,24 @@ class TranslationCoreProject:
         *, category: str = 'other', source_lemma: str = '', strong: str = '', note: str = '',
         provenance: str = 'human', status: str = 'approved',
         username: str = 'AI Bridge Reviewer', scope: str = 'book',
+        inflected_forms: dict[str, list[str]] | None = None, match_mode: str = 'exact',
     ) -> str:
+        """Termbase v3 (layered-rules 6.1) adds `inflected_forms` (rendering ->
+        its forms, as authoritative as the rendering) and `match_mode`
+        ("prefix" also matches the rejected renderings with a closed list of
+        case/plural endings, at medium confidence; terminology.CASE_SUFFIXES)."""
         concept_id = str(concept_id).strip()
         if not concept_id:
             raise ProjectError('Terminology concept/key-term ID is required.')
+        if match_mode not in ('exact', 'prefix'):
+            raise ProjectError(f"Unknown terminology match mode: {match_mode!r}.")
+        inflected: dict[str, list[str]] = {}
+        for rendering, forms in (inflected_forms or {}).items():
+            if not isinstance(forms, list):
+                raise ProjectError('inflectedForms must map a rendering to a list of forms.')
+            cleaned = [str(f).strip() for f in forms if str(f).strip()]
+            if str(rendering).strip() and cleaned:
+                inflected[str(rendering).strip()] = cleaned
         approved = [str(x).strip() for x in (approved_renderings or []) if str(x).strip()]
         allowed = [str(x).strip() for x in (allowed_alternatives or []) if str(x).strip()]
         rejected = [str(x).strip() for x in (rejected_renderings or []) if str(x).strip()]
@@ -1682,9 +1696,10 @@ class TranslationCoreProject:
             'sourceLemma': source_lemma, 'strong': strong,
             'approvedRenderings': approved, 'allowedAlternatives': allowed,
             'rejectedRenderings': rejected,
+            'inflectedForms': inflected, 'matchMode': match_mode,
             'note': note, 'scope': scope, 'provenance': provenance, 'status': status,
             'username': username, 'modifiedTimestamp': iso,
-            'app': 'translationCore AI Bridge', 'schemaVersion': 2,
+            'app': 'translationCore AI Bridge', 'schemaVersion': 3,
         }
         # Book-scoped rather than verse-scoped: a terminology rule applies to the
         # whole book, so chapter/verse stay empty and the concept is the key.

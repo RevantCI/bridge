@@ -34,6 +34,40 @@
   let newConceptId = "";
   let newPreferred = "";
   let newRejected = "";
+  // Termbase v3 (layered-rules 6.1).
+  let newAllowed = "";
+  let newInflected = "";      // one line per rejected rendering: "rendering: form, form"
+  let newPrefix = false;      // match the rejected renderings with case/plural endings too
+  let editingConcept: string | null = null;  // editing an existing rule: saving replaces it
+
+  const splitList = (value: string): string[] => value.split(",").map((s) => s.trim()).filter(Boolean);
+
+  function parseInflected(value: string): Record<string, string[]> {
+    const forms: Record<string, string[]> = {};
+    for (const line of value.split("\n")) {
+      const [rendering, rest] = line.split(":");
+      if (rendering?.trim() && rest !== undefined && splitList(rest).length) forms[rendering.trim()] = splitList(rest);
+    }
+    return forms;
+  }
+
+  function editTerminologyRule(rule: TerminologyRule): void {
+    editingConcept = rule.conceptId;
+    newConceptId = rule.conceptId;
+    newPreferred = rule.approvedRenderings.join(", ");
+    newRejected = rule.rejectedRenderings.join(", ");
+    newAllowed = (rule.allowedAlternatives ?? []).join(", ");
+    newInflected = Object.entries(rule.inflectedForms ?? {}).map(([r, f]) => `${r}: ${f.join(", ")}`).join("\n");
+    newPrefix = rule.matchMode === "prefix";
+    terminologyConflict = null;
+    terminologyMessage = "";
+  }
+
+  function resetTerminologyForm(): void {
+    editingConcept = null;
+    newConceptId = newPreferred = newRejected = newAllowed = newInflected = "";
+    newPrefix = false;
+  }
 
   const providerPresets: Record<string, string> = {
     openai: "",
@@ -165,8 +199,8 @@
       terminologyMessage = "Concept ID is required.";
       return;
     }
-    const approved = newPreferred.split(",").map((s) => s.trim()).filter(Boolean);
-    const rejected = newRejected.split(",").map((s) => s.trim()).filter(Boolean);
+    const approved = splitList(newPreferred);
+    const rejected = splitList(newRejected);
     if (!approved.length && !rejected.length) {
       terminologyMessage = "Enter at least one preferred or rejected rendering.";
       return;
@@ -175,15 +209,19 @@
     terminologyMessage = "";
     terminologyConflict = null;
     try {
-      const result = await bridge.terminologyRecord(conceptId, approved, rejected, overwrite);
+      // Editing the rule it was opened from replaces it; a new concept id that
+      // collides with an existing rule still asks first.
+      const replace = overwrite || editingConcept === conceptId;
+      const result = await bridge.terminologyRecord(conceptId, approved, rejected, replace, {
+        allowedAlternatives: splitList(newAllowed), inflectedForms: parseInflected(newInflected),
+        matchMode: newPrefix ? "prefix" : "exact",
+      });
       terminologyRules = result.rules;
       if (result.conflict) {
         terminologyConflict = result.conflict;
         return;
       }
-      newConceptId = "";
-      newPreferred = "";
-      newRejected = "";
+      resetTerminologyForm();
     } catch (e) {
       terminologyMessage = e instanceof Error ? e.message : String(e);
     } finally {
@@ -351,15 +389,23 @@
             <p class="muted">Loading…</p>
           {:else if terminologyRules.length}
             {#each terminologyRules as rule (rule.conceptId)}
-              <div class="kv">
+              <div class="kv term-rule">
                 <span>{rule.conceptId}</span>
-                <span>preferred: {rule.approvedRenderings.join(", ") || "none"} · rejected: {rule.rejectedRenderings.join(", ") || "none"}</span>
+                <span>
+                  preferred: {rule.approvedRenderings.join(", ") || "none"} · rejected: {rule.rejectedRenderings.join(", ") || "none"}
+                  {#if rule.allowedAlternatives?.length} · allowed: {rule.allowedAlternatives.join(", ")}{/if}
+                  {#if rule.matchMode === "prefix"} · <em>also with case endings</em>{/if}
+                  {#each Object.entries(rule.inflectedForms ?? {}) as [rendering, forms]}
+                    <br /><small>{rendering} → {forms.join(", ")}</small>
+                  {/each}
+                  <button class="btn link" on:click={() => editTerminologyRule(rule)}>Edit</button>
+                </span>
               </div>
             {/each}
           {:else}
             <p class="muted">No terminology rules recorded for this book yet.</p>
           {/if}
-          <h3 class="sub">Add a rule</h3>
+          <h3 class="sub">{editingConcept ? `Edit ${editingConcept}` : "Add a rule"}</h3>
           <div class="field">
             <label for="termConcept">Concept ID</label>
             <input id="termConcept" type="text" bind:value={newConceptId} placeholder="e.g. god" />
@@ -372,8 +418,21 @@
             <label for="termRejected">Rejected rendering(s)</label>
             <input id="termRejected" type="text" bind:value={newRejected} placeholder="Comma-separated, e.g. கடவுள்" />
           </div>
+          <div class="field">
+            <label for="termAllowed">Allowed alternative(s)</label>
+            <input id="termAllowed" type="text" bind:value={newAllowed} placeholder="Comma-separated; offered as further suggestions" />
+          </div>
+          <div class="field">
+            <label for="termInflected">Inflected forms of a rejected rendering</label>
+            <textarea id="termInflected" rows="2" bind:value={newInflected} placeholder="One per line, e.g. கடவுள்: கடவுளை, கடவுளுக்கு"></textarea>
+          </div>
+          <label class="check">
+            <input type="checkbox" bind:checked={newPrefix} />
+            Also match the rejected renderings with case and plural endings (ஐ, க்கு, இல், கள் …). Such matches are marked medium confidence, for you to confirm.
+          </label>
           <div class="save-row">
-            <button class="btn primary" on:click={() => addTerminologyRule()} disabled={terminologySaving}>{terminologySaving ? "Saving…" : "Add rule"}</button>
+            <button class="btn primary" on:click={() => addTerminologyRule()} disabled={terminologySaving}>{terminologySaving ? "Saving…" : editingConcept ? "Save changes" : "Add rule"}</button>
+            {#if editingConcept}<button class="btn" on:click={resetTerminologyForm} disabled={terminologySaving}>Cancel</button>{/if}
             {#if terminologyMessage}<span class="save-msg">{terminologyMessage}</span>{/if}
           </div>
           {#if terminologyConflict}
@@ -433,6 +492,10 @@
   .save-msg { font-size: var(--fs-xs); color: var(--success); }
   .term-conflict { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--warning); border-radius: 6px; background: var(--warning-bg); font-size: var(--fs-sm); }
   .term-conflict p { margin: 0 0 8px; }
+  .field textarea { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: var(--fs-sm); color: var(--text); background: var(--surface-2); box-sizing: border-box; font-family: inherit; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-xs); color: var(--text-2); margin: -4px 0 12px; }
+  .btn.link { border: none; background: none; padding: 0 0 0 6px; text-decoration: underline; cursor: pointer; font-size: var(--fs-xs); }
+  .term-rule small { color: var(--text-3); }
   .kv { display: flex; justify-content: space-between; font-size: var(--fs-sm); padding: 6px 0; border-bottom: 1px dashed var(--border); }
   .kv .on { color: var(--success); font-weight: 700; }
   .resource-note { font-size: var(--fs-2xs); line-height: 1.45; color: var(--text-3); margin-top: 10px; overflow-wrap: anywhere; }

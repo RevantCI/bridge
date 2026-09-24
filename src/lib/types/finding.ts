@@ -943,6 +943,10 @@ export interface TerminologyRule {
   status: string;
   provenance: string;
   modifiedTimestamp: string;
+  /** Termbase v3 (layered-rules 6.1): a rejected rendering -> its listed forms. */
+  inflectedForms?: Record<string, string[]>;
+  /** "prefix" also matches the rejected renderings with case/plural endings. */
+  matchMode?: "exact" | "prefix";
 }
 
 export const STATUS_COLOR: Record<string, string> = {

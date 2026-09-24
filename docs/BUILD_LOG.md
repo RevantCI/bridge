@@ -12376,3 +12376,59 @@ contract's 50 MB.
   failed, 2202 passed.
 - Full engine suite: 2202 passed, plus the 489 labelled checks, which pass
   after that fix.
+
+## 2026-09-24 — Layered-rules Phase 6.1: termbase v3
+
+`record_terminology_rule` writes **`schemaVersion` 3**, which adds two
+fields:
+- `inflectedForms`: a rejected rendering → its forms.
+- `matchMode`: `exact` (the default) or `prefix`.
+
+The `terminology.record` RPC takes both, plus `allowedAlternatives`, and
+refuses an unknown mode. A v2 row reads as `exact` with no forms, so there
+is no migration and no data change.
+
+**Matching** (`terminology.TermIndex`, pure).
+- **Listed forms** are indexed as exact tokens and are as authoritative as
+  the rendering: confidence high.
+- **`prefix`** generates each rejected rendering's inflected forms from a
+  closed list, `CASE_SUFFIXES`: ஐ, க்கு, உக்கு, இல், ஆல், ஓடு, உடன், இன்,
+  உம், இடம், இலிருந்து, கள், களை, களுக்கு, களின், களால், களோடு, களும்.
+  - `join_suffix` joins them as written Tamil does: a pulli-final stem and a
+    vowel-initial ending fuse into one syllable, so தேவன் + ஐ = தேவனை and
+    தேவன் + உக்கு = தேவனுக்கு. A multi-word rendering inflects at its last
+    word.
+  - Such a match is marked **confidence medium**, and its message names the
+    ending, so the reviewer confirms it.
+  - The suggestion is the preferred form with the **same ending**: தேவனை →
+    இறைவனை.
+  - A generated form never displaces a listed one.
+  - This generates forms rather than stripping suffixes from the text, so a
+    match is still an exact token. Nothing matches by guesswork, and a form
+    the closed list cannot produce is added by hand.
+- **Suggestions.** They are ranked: preferred renderings first (so
+  `approvedRenderings[1:]` now appear), then allowed alternatives, each with
+  its rationale and each inflected alike.
+
+**Settings → Terminology.**
+- Each rule shows its allowed alternatives, its inflected forms, and
+  "also with case endings".
+- **Edit** loads a rule into the form, including its inflected forms (one
+  line per rendering: `rendering: form, form`) and the prefix checkbox.
+  Saving an edited rule replaces it.
+- Adding a new concept that collides with an existing rule still asks first
+  (Phase 1.6).
+
+### Verification
+
+- **Engine.** `test_terminology.py` has 52 tests:
+  - `join_suffix` on five real joins;
+  - a prefix match of தேவனை at medium confidence, with suggestions
+    இறைவனை / கடவுளை / ஆண்டவனை;
+  - exact mode leaves case forms alone;
+  - a listed form matches at high confidence;
+  - the RPC round trip, with an unknown mode refused;
+  - schemaVersion 3 in the round-trip test.
+- **Frontend.** `SettingsModal.test.ts` (17 tests): editing shows the v3
+  fields and saves them with `overwrite`. Three existing expectations were
+  updated for the new fifth argument.

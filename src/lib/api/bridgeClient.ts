@@ -737,8 +737,9 @@ export const bridge = {
    * nothing is written and it comes back as `conflict`. */
   terminologyRecord(
     conceptId: string, approvedRenderings: string[], rejectedRenderings: string[], overwrite = false,
+    extra: { allowedAlternatives?: string[]; inflectedForms?: Record<string, string[]>; matchMode?: "exact" | "prefix" } = {},
   ): Promise<{ rules: TerminologyRule[]; conflict?: TerminologyRule }> {
-    return call("terminology.record", { conceptId, approvedRenderings, rejectedRenderings, overwrite });
+    return call("terminology.record", { conceptId, approvedRenderings, rejectedRenderings, overwrite, ...extra });
   },
 
   pickSavePath(defaultName: string): Promise<string | null> {

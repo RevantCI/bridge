@@ -304,7 +304,7 @@ describe("SettingsModal terminology (#171)", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
 
     await waitFor(() => expect(terminologyRecord).toHaveBeenCalledWith(
-      "god", ["இறைவன்"], ["கடவுள்", "தேவன்"], false,
+      "god", ["இறைவன்"], ["கடவுள்", "தேவன்"], false, { allowedAlternatives: [], inflectedForms: {}, matchMode: "exact" },
     ));
     expect(await screen.findByText("god")).toBeInTheDocument();
     expect(screen.queryByText(/No terminology rules recorded/)).not.toBeInTheDocument();
@@ -330,7 +330,7 @@ describe("SettingsModal terminology (#171)", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Replace existing terminology rule" });
     expect(dialog.textContent).toContain("already exists");
-    expect(terminologyRecord).toHaveBeenLastCalledWith("god", ["தேவன்"], [], false);
+    expect(terminologyRecord).toHaveBeenLastCalledWith("god", ["தேவன்"], [], false, { allowedAlternatives: [], inflectedForms: {}, matchMode: "exact" });
     // Nothing replaced yet, and the entry is kept for the reviewer to decide.
     expect(screen.getByLabelText("Concept ID")).toHaveValue("god");
 
@@ -340,9 +340,35 @@ describe("SettingsModal terminology (#171)", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
     await fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
-    await waitFor(() => expect(terminologyRecord).toHaveBeenLastCalledWith("god", ["தேவன்"], [], true));
+    await waitFor(() => expect(terminologyRecord).toHaveBeenLastCalledWith("god", ["தேவன்"], [], true, { allowedAlternatives: [], inflectedForms: {}, matchMode: "exact" }));
     expect(await screen.findByText(/preferred: தேவன்/)).toBeInTheDocument();
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("edits an existing rule with its v3 fields and saves it as a replacement (termbase v3)", async () => {
+    const existing = {
+      conceptId: "god", approvedRenderings: ["இறைவன்"], allowedAlternatives: ["கடவுள்"],
+      rejectedRenderings: ["தேவன்"], status: "approved", provenance: "human",
+      modifiedTimestamp: "2026-09-23T05:24:44.736Z",
+      inflectedForms: { "தேவன்": ["தேவனே"] }, matchMode: "exact" as const,
+    };
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [existing] });
+    terminologyRecord.mockResolvedValue({ rules: [{ ...existing, matchMode: "prefix" }] });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    expect(await screen.findByText(/தேவன் → தேவனே/)).toBeInTheDocument();
+    expect(screen.getByText(/allowed: கடவுள்/)).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Concept ID")).toHaveValue("god");
+    expect(screen.getByLabelText("Inflected forms of a rejected rendering")).toHaveValue("தேவன்: தேவனே");
+    await fireEvent.click(screen.getByRole("checkbox"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(terminologyRecord).toHaveBeenLastCalledWith(
+      "god", ["இறைவன்"], ["தேவன்"], true,
+      { allowedAlternatives: ["கடவுள்"], inflectedForms: { "தேவன்": ["தேவனே"] }, matchMode: "prefix" },
+    ));
+    expect(await screen.findByText(/also with case endings/)).toBeInTheDocument();
   });
 
   it("shows the RPC's validation error instead of silently doing nothing", async () => {

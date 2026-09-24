@@ -240,6 +240,14 @@ def scan_verse(book: str, chapter: str, verse: str, text: Any, *, tamil: bool, p
                 match["matchedText"], term_occurrences[key])
             preferred = ", ".join(match["preferredRenderings"]) or "no preferred form recorded yet"
             note = f" {match['note']}" if match["note"] else ""
+            ending = (f' (matched with the ending "{match["suffix"]}"; confirm it is this term)'
+                      if match.get("suffix") else "")
+            fields = rule_fields("terminology.deprecated-form", [
+                suggestion(text, "termbase", f'{why} for {match["conceptId"]}')
+                for text, why in match.get("suggestions") or []
+            ])
+            if match.get("confidence") == "medium":
+                fields["confidence"] = "medium"  # a generated case ending: the reviewer confirms (termbase v3)
             verse_findings.append({
                 "id": finding_id,
                 "book": book, "chapter": chapter, "verse": verse,
@@ -247,14 +255,11 @@ def scan_verse(book: str, chapter: str, verse: str, text: Any, *, tamil: bool, p
                 "start": match["start"], "end": match["end"],
                 "originalText": match["matchedText"],
                 "message": (f'"{match["matchedText"]}" is marked deprecated for '
-                           f'{match["conceptId"]}. Preferred form: {preferred}.{note} '
+                           f'{match["conceptId"]}{ending}. Preferred form: {preferred}.{note} '
                            f'Verify this occurrence.'),
                 "textHash": result["textHash"], "ruleVersion": RULE_VERSION,
                 "status": "review-needed",
-                **rule_fields("terminology.deprecated-form", [
-                    suggestion(match["suggestedReplacement"], "termbase",
-                               f'Preferred form for {match["conceptId"]}')
-                ] if match["suggestedReplacement"] else []),
+                **fields,
             })
         if crossing:
             limitations.append(f"{crossing} terminology {CROSSING_LIMITATION}")
