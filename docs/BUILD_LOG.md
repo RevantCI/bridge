@@ -12172,17 +12172,28 @@ import summary. A multi-book import already lands on the dashboard, so the
 panel's button is that offer. It is never started automatically
 (DECISIONS.md).
 
-**Whole-Bible wall time: measurement in progress.** The run imports all 66
+**Whole-Bible wall time: 6031.8 s (1 h 41 min).** The run imports all 66
 IRV books (6.8 s) and runs `collection.runChecks` with the default checks on
 this machine.
+- **Result:** `state=succeeded` on 2026-09-24; 66/66 books; no book error.
+- **Size:** 31,092 verses and 7,401 open Language QA findings.
+- **Time split:** the books took 5946 s, and the final stage (termbase
+  coverage, cross-book names) about 80 s.
 - Genesis took 260 s with the machine otherwise idle.
-- Exodus took 650 s while the engine test suite ran beside it.
-- After two books the runner estimated 5 to 8 hours for the collection.
+- Exodus took 650 s, and several other books ran slower, while the engine
+  test suite and gates ran beside the collection. The figure is therefore
+  an upper bound for an idle machine.
+- After two books the runner estimated 5 to 8 hours. Its estimate fell as
+  the shorter books ran.
 
 This confirms the brief's "run-overnight operation" and the no-auto-start
 decision. Most of the per-book time is the pre-existing checks, not
-Language QA: a full Language QA pass on Psalms is 2.45 s cold. The final
-figure will be appended here when the run completes.
+Language QA: a full Language QA pass on Psalms is 2.45 s cold.
+
+The process started before Phase 6 was committed. Its final stage therefore
+reported house-style propagation as "not built yet", so the Phase 6
+proposals across 66 books are still unmeasured (see the Phase 6.2–6.5
+entry).
 
 ### 4.5 Export gate
 
