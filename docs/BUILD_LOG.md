@@ -11604,3 +11604,226 @@ polled channel, and ignore-expiry.
   - `benchmark_language_qa.py --gate --cores 2` passes;
   - `language_qa_benchmark.py --gate` **fails**: the baseline finding above.
 - Desktop acceptance not yet run.
+
+## 2026-09-24 — Layered-rules Phase 3: the `ta-irv` rule pack, B1–B4 migrated, IRV defect rules
+
+This is Phase 3 of the layered-rules brief. The Tamil rules move out of Python
+into a data pack. The single B1–B4 rule becomes shape rules with corpus
+abstains, and the known IRV defect shapes from the reports become rules. The
+schema is in `docs/LANGUAGE_QA_RULE_PACK.md`.
+
+### The pack
+
+- **Location.** `engine/tc_ai_bridge/language_packs/`: the loader, plus
+  `ta-irv/pack.json` and 11 rule files, about 84 KB.
+- **Loading.** The pack loads lazily, once per process (`default_pack`,
+  `lru_cache`): 162 ms, within the 200 ms budget.
+- **Self-test.** Every rule's examples run through the real `scan_text` at
+  load, and a failure raises `PackError` naming the rule and the example's
+  origin.
+- **Validation.** Unknown keys, bad regexes, a raw-text match outside the
+  integrity layer, and an `inlineSignOff` without `by`/`date` are all refused.
+- **Primitives.** The closed set: token-context (a word pair across
+  whitespace only, with the previous word split into base and link, and
+  `link` = none/mismatch/any) and regex (visible text or raw text). Fixes
+  are insert-link, replace-link, fuse-link, replace and expand.
+- **Generation.** `scripts/build_ta_irv_pack.py` builds the pack from the 66
+  IRV books and the review reports, and the output is committed.
+  - Abstains carry their corpus counts in `origin`.
+  - Examples are real verses, preferring places the reviews also flagged.
+  - Where a shape has fewer than twelve real occurrences (wrong-consonant,
+    clitic, vowel-drop, dropped-tha), the rest are derived from a real verse
+    and labelled "derived from …".
+- **Wiring.**
+  - `scan_text(..., pack=, lists=)` calls `pack.pair_candidates` in its word
+    loop and `pack.regex_candidates` once per verse.
+  - `VALLINAM_TRIGGERS` and the hard-coded B1–B4 block are removed.
+    `INLINE_RULES` keeps only `terminology.deprecated-form`; pack rules carry
+    their own `inline`.
+  - `language_qa_jobs.project_rule_pack` applies the project overrides. The
+    pack fingerprint is appended to the per-chapter cache key.
+  - The summary gains `rulePack` and `inlineRules`.
+- **Frozen build.** `engine/bridge-engine.spec` lists the pack as `datas`,
+  because import analysis cannot see JSON. Verified on a scratch PyInstaller
+  build of the spec: the frozen exe opened a Tamil project and completed a
+  pass reporting `rulePack: ta-irv@1.0.0`. It flagged `அந்த காகம்` →
+  `அந்தக் காகம்` and abstained on `அந்த தேசத்தில்`.
+
+### The rules
+
+| Rule | From | Inline | Strict precision | Findings |
+|---|---|---|---|---|
+| `sandhi.vallinam.demonstrative` | B1 | yes, signed off | 41.2% (lenient 55.0%) | 80 |
+| `sandhi.vallinam.manner-adverb` | B1 | yes, signed off | 15.4% | 13 |
+| `sandhi.vallinam.accusative` | B2/B4, generalised to any -ஐ form | yes, signed off | 55.0% | 500 |
+| `sandhi.vallinam.dative` | B3, generalised to any -க்கு form | yes, signed off | 49.8% | 396 |
+| `sandhi.vallinam.wrong-consonant` | new | yes, signed off | no benchmark findings | 0 |
+| `sandhi.clitic.fused` | new | no | 0% (0 of 4) | 4 |
+| `typo.divine-name.vowel-drop` | Round 2 defect | no | 100% | 11 |
+| `typo.divine-name.dative-stem` | Round 2 defect | no | 69.2% | 13 |
+| `typo.suffix.dropped-tha` | Round 2 defect | no | 100% | 2 |
+| `integrity.space-before-note-end` | Round 2/Pass 3 USFM rows | no | 74.3% | 74 |
+| `integrity.digits-in-text` | — | disabled | — | — |
+
+**Before and after, on the four migrated vallinam rules taken together:**
+
+| | Findings | Strict TP | Strict precision | Sandhi recall |
+|---|---|---|---|---|
+| Phase 2 baseline | 311 | 118 | 37.9% | 6.8% |
+| Phase 3 | 989 | 507 | 51.3% | 28.3% |
+
+House-form false positives on the demonstrative rule fell from 77 to 13.
+Recall rose in other buckets too: typo 6.3% → 8.9%, punctuation 2.0% → 18.0%,
+usfm 0% → 24.4%. Name recall is still 0%.
+
+### The maintainer's decisions in this phase, and how each was applied
+
+**All வல்லினம் rules inline.** The maintainer said: "Can we keep all
+வல்லினம் inline. if it is false possitive the user will click ignore. then
+the system will lean from its mistake."
+
+- Every vallinam rule carries an `inlineSignOff` with the precision it was
+  signed off at.
+- The benchmark gate now holds a signed-off rule to within 2 points of that
+  figure, rather than to the 90% floor.
+- The 90% floor still applies to any unsigned inline rule.
+- A sign-off with no measured precision fails the gate. None does today:
+  wrong-consonant records `null` precision and has no findings, so the gate
+  has nothing to hold it to. It must be measured once it has findings.
+- Learning from ignores is Phase 6.4, which the maintainer approved here.
+
+**"Army is a plain noun": a rule, not a list.** The maintainer asked for a
+rule that tells root nouns from case forms, as the வல்லினம் decision about
+படை had done. The root-noun test (`root_nouns` in the builder) is a
+morphological one, run on the corpus:
+
+- A word ending in ை is a root if its +யை accusative is attested
+  (படை→படையை, மலை→மலையை). A real accusative never takes a second one: there
+  is no அதையை.
+- A word ending in க்கு is a root if its -க்கில் locative or -க்குக்கு dative
+  is attested (கிழக்கு→கிழக்கில்). A real dative has neither: there is no
+  எனக்கில்.
+
+The resulting words are a `notLexical` condition on the accusative, dative,
+wrong-consonant and clitic rules. `ஈசாக்கு` and `ஏனோக்கு` are added from
+Pass 3 §5 (names in -க்கு are nominatives).
+
+**Also abstaining:**
+
+- house forms, from the bare/doubled counts per trigger and stem (at least 3
+  contexts, bare majority): for example அந்த தேச- (bare 31, doubled 8) and
+  அந்த தேவ- (3/0);
+- clitics and quotatives (தான், கூட, மட்டும், ஆவது, போல, என்று, என,
+  எனும்);
+- `housestyle.properNouns`.
+
+### Rejected, and why
+
+- **Seeding `housestyle.properNouns` from the names adapter.** Its majority
+  forms include common words, and it takes about 15 s per book. The list
+  ships empty until Phase 6 (DECISIONS.md).
+- **Enabling `integrity.digits-in-text`.** Pass 3 §5 confirms digits are IRV
+  house form, and IRV has 2,423 of them. The rule ships disabled, and an
+  override cannot enable it.
+- **A new rule for ZWNJ.** It stays under `common/unicode.invisible`, with
+  no pack duplicate.
+
+### A bug found and fixed on the way
+
+`decision_effect` split a pack `ruleVersion` (`ta-irv@1.0.0#1`) the way it
+splits a legacy one (`language-qa-7#2`). It therefore read a decision made a
+moment earlier as recorded under another version, and a **fresh ignore
+immediately came back as `previouslyIgnored`**. It now parses both shapes. A
+regression test ignores a pack finding and checks that it stays suppressed.
+
+### Behaviour change a translator will see
+
+Existing B1–B4 findings keep their `rule` (`tamil.vallinam-missing`, through
+`legacyId`) and their finding ids, so their decisions still match. Their
+`ruleVersion` changed, though, so **every existing வல்லினம் ignore comes back
+once for re-check**, flagged as previously ignored. This is the Phase 1
+ignore-expiry working as designed. There are no users yet, but it is recorded
+here so it is not mistaken for a regression.
+
+### Docs
+
+- New: `docs/LANGUAGE_QA_RULE_PACK.md`, the schema.
+- `docs/LANGUAGE_QA_TAMIL_SPECIFICATION.md` is replaced by an owned version.
+  The six gates and 56 items are kept as tables with Status, Owner and pack
+  ids. The 20 `utm_source` links are removed, and the sources are listed
+  once.
+- DECISIONS.md gains five entries: rules as data; overrides only narrow; the
+  inline sign-off; the root-noun test; the proper-noun seed rejected.
+- Also updated: `LANGUAGE_QA_PLAN.md` phase table; the
+  `LANGUAGE_QA_BENCHMARK.md` history row and regenerated results;
+  `ARCHITECTURE.md` §9; QA matrix A63–A66.
+- Labelled fixtures and `benchmark/baseline.json` are regenerated against
+  the pack. These are benchmark data, not goldens, and neither golden moved.
+
+### A latency regression caught by the gate, and fixed
+
+The first run of `benchmark_language_qa.py --gate --cores 2` on the pack
+**failed**. `languageQa.status` p95 was 82 ms, where Phase 2 measured 0.3 ms.
+
+**Cause.** `status()` asked `inline_rule_names()`, which called the lazy
+`default_pack()`. That was an `lru_cache`, which does not serialise
+concurrent first calls. A poll arriving during the worker's first load
+therefore ran a second full load itself, including every example (about
+160 ms).
+
+**Fix.**
+- `default_pack` is now a lock-guarded load-once.
+- A new `loaded_pack()` returns the pack only if it is already loaded.
+- The manager's `_inline_rules` never loads the pack. Before the pass has
+  loaded it, no pack finding exists, so the non-pack list is the right
+  answer.
+- The pass publishes its `inlineRules` as soon as it has the pack.
+
+**After:** `languageQa.status` 0.34 ms. A regression test covers both
+halves: a status request loads nothing, and four concurrent first calls load
+once.
+
+### Verification
+
+- **Engine.**
+  - `test_language_pack.py`: 41 tests, covering:
+    - the pack loads, and every example passes;
+    - legacy names and ids;
+    - inline rules are exactly the signed-off ones;
+    - the case rules on real case forms;
+    - roots, names, house forms and clitics abstain;
+    - wrong-consonant, and consonant-final names left alone;
+    - clitic fusion;
+    - the defect shapes;
+    - the raw-offset note rule;
+    - digits disabled;
+    - the house-style list abstain;
+    - eleven malformed-rule refusals;
+    - failing and wrong-fix examples refuse the pack;
+    - override narrowing and refusal, and an override file honoured by the
+      manager;
+    - the latency regression above.
+  - `test_language_qa.py` / `test_language_qa_benchmark.py` /
+    `test_language_qa_labelled.py` were updated for the pack's rule ids and
+    sign-off.
+  - Language QA files: 868 passed.
+  - Full `pytest -n auto`: 2155 passed after the latency fix (2154 before
+    it), 0 warnings.
+- **Frontend** (no frontend change in this phase):
+  - `npm run check` 0 errors / 0 warnings;
+  - `npx vitest run` 540 passed;
+  - `npm run build` ok.
+- **Gates.**
+  - `language_qa_benchmark.py --gate` **passes** (exit 0) on the sign-offs.
+  - `benchmark_language_qa.py --gate --cores 2` **passes** after the fix. p95:
+    `verse.decide` (Language QA) 15.5 ms, `verse.get` 4.0 ms,
+    `languageQa.status` 0.34 ms, `languageQa.inline` 0.3 ms, `ping` 0.44 ms.
+  - The shared write paths are still over budget, as in Phase 2 and outside
+    Language QA: another `verse.decide` 262 ms, `verse.edit` 238 ms,
+    `project.open` 180 ms. These numbers are noisy on a loaded machine.
+- **Frozen.** A scratch PyInstaller build of `bridge-engine.spec` finds the
+  pack and produces the வல்லினம் finding (above).
+  `scripts/smoke_sidecars.py` was not run: the USFM checker exe was not
+  rebuilt.
+- **Desktop acceptance: not run.** Watch in particular for existing
+  வல்லினம் ignores coming back once for re-check, which is expected.

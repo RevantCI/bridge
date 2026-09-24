@@ -8,8 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from tc_ai_bridge.language_packs import default_pack
 from tc_ai_bridge.language_qa import (
-    CATEGORIES, CONFIDENCES, INLINE_RULES, LAYERS, RULE_VERSION, RULES, WORDLIST_COMMON_MIN, WORDLIST_MIN_LENGTH, WORDLIST_RARE_MAX, WORDLIST_RATIO_MIN,
+    CATEGORIES, CONFIDENCES, INLINE_RULES, LAYERS, RULE_VERSION, RULES, WORDLIST_COMMON_MIN, inline_rule_names, WORDLIST_MIN_LENGTH, WORDLIST_RARE_MAX, WORDLIST_RATIO_MIN,
     detect_language, lift_inline_usfm, scan_text, stable_finding_id, text_hash, wordlist_findings,
 )
 from tc_ai_bridge.language_qa_jobs import (
@@ -636,6 +637,10 @@ def fake(finding_id="f", pack=RULE_VERSION, revision=1):
     # Decisions from before Phase 1 recorded the pack version as ruleVersion.
     ({"decision": "ignored", "issue": {"source": "languageQa", "ruleVersion": "language-qa-6"}}, "recheck"),
     ({"decision": "ignored", "issue": {"source": "languageQa", "ruleVersion": RULE_VERSION}}, "suppress"),
+    # A pack rule's legacy ruleVersion is "<pack>@<version>#<revision>": both parts are compared.
+    ({"decision": "ignored", "issue": {"ruleVersion": f"{RULE_VERSION}#1"}}, "suppress"),
+    ({"decision": "ignored", "issue": {"ruleVersion": f"{RULE_VERSION}#2"}}, "recheck"),
+    ({"decision": "ignored", "issue": {"ruleVersion": "ta-irv@0.9.0#1"}}, "recheck"),
     # No version at all (legacy, or a caller that sent no issue): cannot be compared, still suppresses.
     ({"decision": "ignored", "issue": {}}, "suppress"),
     ({"decision": "ignored", "issue": {"source": "unspecified"}}, "suppress"),
@@ -755,7 +760,7 @@ def test_history_lists_every_decision_on_a_finding_in_order(vallinam_engine):
     assert [e["seq"] for e in entries] == sorted(e["seq"] for e in entries)
     assert entries[-1]["chosenSuggestion"] == chosen["text"] and entries[-1]["chosenRank"] == 1
     assert [e["revision"] for e in entries] == [1, 2, 3]
-    assert all(e["ruleId"] == "ta-irv/tamil.vallinam-missing" and e["recordedAt"] for e in entries)
+    assert all(e["ruleId"] == "ta-irv/sandhi.vallinam.demonstrative" and e["recordedAt"] for e in entries)
     verse = call(engine, "languageQa.history", {"projectPath": str(project), "chapter": "1", "verse": "1"})
     assert {e["findingId"] for e in verse["result"]["entries"]} == {finding["id"]}
 
@@ -1152,10 +1157,14 @@ def test_inline_without_a_chapter_returns_the_whole_book_and_only_inline_rules(t
     wait(manager)
     inline = manager.inline()
     assert len(inline["findings"]) == 180
-    assert {f["rule"] for f in inline["findings"]} <= INLINE_RULES
+    assert all(f["inline"] for f in inline["findings"])
+    assert {f["rule"] for f in inline["findings"]} <= set(inline_rule_names())
     assert inline["chapter"] is None
-    assert inline["inlineRules"] == sorted(INLINE_RULES)
-    assert manager.status()["inlineRules"] == sorted(INLINE_RULES)
+    # The drawn rules: the in-code INLINE_RULES plus the pack's signed-off inline rules.
+    assert inline["inlineRules"] == inline_rule_names()
+    assert manager.status()["inlineRules"] == inline_rule_names()
+    # The migrated வல்லினம் rules keep their legacy name; the new wrong-consonant rule has its own.
+    assert set(inline_rule_names()) == INLINE_RULES | {"tamil.vallinam-missing", "sandhi.vallinam.wrong-consonant"}
 
 
 def test_category_marks_match_the_engine():
@@ -1187,6 +1196,11 @@ def test_every_rule_has_valid_metadata_and_inline_flags_follow_the_engine_list()
         assert meta.layer in LAYERS and meta.category in CATEGORIES and meta.confidence in CONFIDENCES, rule
         assert meta.pack in {"common", "ta-irv", "project"} and meta.revision >= 1, rule
     assert INLINE_RULES <= set(RULES)
+    for pack_rule in default_pack().rules:
+        assert pack_rule.layer in LAYERS and pack_rule.category in CATEGORIES, pack_rule.id
+        assert pack_rule.confidence in CONFIDENCES, pack_rule.id
+        # Drawn inline only with the maintainer's recorded sign-off (the benchmark gate checks its floor).
+        assert not pack_rule.inline or pack_rule.sign_off, pack_rule.id
 
 
 FINDING_FIELDS = {"id", "book", "chapter", "verse", "rule", "severity", "start", "end", "originalText",
@@ -1197,11 +1211,22 @@ FINDING_FIELDS = {"id", "book", "chapter", "verse", "rule", "severity", "start",
 
 def assert_finding_shape(finding):
     assert set(finding) == FINDING_FIELDS, set(finding) ^ FINDING_FIELDS
-    meta = RULES[finding["rule"]]
-    assert (finding["layer"], finding["category"], finding["confidence"]) == (meta.layer, meta.category, meta.confidence)
-    assert finding["ruleId"] == f'{meta.pack}/{finding["rule"]}'
-    assert finding["packVersion"] == RULE_VERSION and finding["ruleRevision"] == meta.revision
-    assert finding["inline"] is (finding["rule"] in INLINE_RULES)
+    pack = default_pack()
+    pack_rule = pack.by_id(finding["ruleId"].split("/", 1)[1]) if finding["ruleId"].startswith("ta-irv/") else None
+    if pack_rule is not None:
+        # A pack rule: its metadata and versions come from the pack.
+        assert finding["rule"] == pack_rule.name
+        assert (finding["layer"], finding["category"], finding["confidence"], finding["severity"]) == (
+            pack_rule.layer, pack_rule.category, pack_rule.confidence, pack_rule.severity)
+        assert finding["packVersion"] == pack.pack_version and finding["ruleRevision"] == pack_rule.version
+        assert finding["ruleVersion"] == f"{pack.pack_version}#{pack_rule.version}"
+        assert finding["inline"] is pack_rule.inline
+    else:
+        meta = RULES[finding["rule"]]
+        assert (finding["layer"], finding["category"], finding["confidence"]) == (meta.layer, meta.category, meta.confidence)
+        assert finding["ruleId"] == f'{meta.pack}/{finding["rule"]}'
+        assert finding["packVersion"] == RULE_VERSION and finding["ruleRevision"] == meta.revision
+        assert finding["inline"] is (finding["rule"] in INLINE_RULES)
     assert finding["source"] == "languageQa"
     ranks = [s["rank"] for s in finding["suggestions"]]
     assert ranks == list(range(1, len(ranks) + 1)) and len(ranks) <= 5
@@ -1218,7 +1243,7 @@ def test_every_scan_text_finding_has_the_layered_shape():
     for finding in findings:
         assert_finding_shape(finding)
     [vallinam] = [f for f in findings if f["rule"] == "tamil.vallinam-missing"]
-    assert vallinam["ruleId"] == "ta-irv/tamil.vallinam-missing" and vallinam["category"] == "sandhi"
+    assert vallinam["ruleId"] == "ta-irv/sandhi.vallinam.demonstrative" and vallinam["category"] == "sandhi"
     assert vallinam["suggestions"] == [{"text": "அந்தக் காகம்", "rank": 1, "source": "rule",
                                         "rationale": '"அந்த" before a க-initial word takes the linking க்'}]
 

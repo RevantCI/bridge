@@ -1,5 +1,5 @@
 {
- "packVersion": "language-qa-7",
+ "packVersion": "language-qa-7+ta-irv@1.0.0",
  "books": [
   "1ch",
   "1ki",
@@ -36,6 +36,54 @@
    "precision_lenient": 1.0,
    "inline": false
   },
+  "ta-irv/integrity.space-before-note-end": {
+   "findings": 74,
+   "tp_strict": 55,
+   "fp_strict": 19,
+   "precision_strict": 0.7432,
+   "precision_lenient": 0.7432,
+   "inline": false
+  },
+  "ta-irv/sandhi.clitic.fused": {
+   "findings": 4,
+   "tp_strict": 0,
+   "fp_strict": 4,
+   "precision_strict": 0.0,
+   "precision_lenient": 0.0,
+   "inline": false
+  },
+  "ta-irv/sandhi.vallinam.accusative": {
+   "findings": 500,
+   "tp_strict": 275,
+   "fp_strict": 225,
+   "precision_strict": 0.55,
+   "precision_lenient": 0.552,
+   "inline": true
+  },
+  "ta-irv/sandhi.vallinam.dative": {
+   "findings": 396,
+   "tp_strict": 197,
+   "fp_strict": 199,
+   "precision_strict": 0.4975,
+   "precision_lenient": 0.4975,
+   "inline": true
+  },
+  "ta-irv/sandhi.vallinam.demonstrative": {
+   "findings": 80,
+   "tp_strict": 33,
+   "fp_strict": 47,
+   "precision_strict": 0.4125,
+   "precision_lenient": 0.55,
+   "inline": true
+  },
+  "ta-irv/sandhi.vallinam.manner-adverb": {
+   "findings": 13,
+   "tp_strict": 2,
+   "fp_strict": 11,
+   "precision_strict": 0.1538,
+   "precision_lenient": 0.1538,
+   "inline": true
+  },
   "ta-irv/tamil.repeated-word": {
    "findings": 33,
    "tp_strict": 0,
@@ -44,14 +92,6 @@
    "precision_lenient": 0.0,
    "inline": false
   },
-  "ta-irv/tamil.vallinam-missing": {
-   "findings": 311,
-   "tp_strict": 118,
-   "fp_strict": 193,
-   "precision_strict": 0.3794,
-   "precision_lenient": 0.4341,
-   "inline": true
-  },
   "ta-irv/tamil.wordlist-variant": {
    "findings": 2473,
    "tp_strict": 49,
@@ -59,22 +99,46 @@
    "precision_strict": 0.0198,
    "precision_lenient": 0.0198,
    "inline": false
+  },
+  "ta-irv/typo.divine-name.dative-stem": {
+   "findings": 13,
+   "tp_strict": 9,
+   "fp_strict": 4,
+   "precision_strict": 0.6923,
+   "precision_lenient": 0.6923,
+   "inline": false
+  },
+  "ta-irv/typo.divine-name.vowel-drop": {
+   "findings": 11,
+   "tp_strict": 11,
+   "fp_strict": 0,
+   "precision_strict": 1.0,
+   "precision_lenient": 1.0,
+   "inline": false
+  },
+  "ta-irv/typo.suffix.dropped-tha": {
+   "findings": 2,
+   "tp_strict": 2,
+   "fp_strict": 0,
+   "precision_strict": 1.0,
+   "precision_lenient": 1.0,
+   "inline": false
   }
  },
  "buckets": {
   "typo": {
-   "recall_strict": 0.063,
-   "recall_lenient": 0.0622,
+   "recall_strict": 0.0892,
+   "recall_lenient": 0.0881,
    "rows_positive": 839
   },
   "sandhi": {
-   "recall_strict": 0.0679,
-   "recall_lenient": 0.0761,
+   "recall_strict": 0.2834,
+   "recall_lenient": 0.2848,
    "rows_positive": 1877
   },
   "punctuation": {
-   "recall_strict": 0.02,
-   "recall_lenient": 0.02,
+   "recall_strict": 0.18,
+   "recall_lenient": 0.18,
    "rows_positive": 72
   },
   "name": {
@@ -83,8 +147,8 @@
    "rows_positive": 528
   },
   "usfm": {
-   "recall_strict": 0.0,
-   "recall_lenient": 0.0,
+   "recall_strict": 0.2443,
+   "recall_lenient": 0.2433,
    "rows_positive": 680
   }
  }

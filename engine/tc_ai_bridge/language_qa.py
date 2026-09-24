@@ -32,57 +32,18 @@ WORDLIST_RATIO_MIN = 5
 MAX_WORDLIST_FINDINGS = 200
 CONSONANTS = frozenset("கஙசஜஞடணதநனபமயரறலளழவஶஷஸஹ")
 SIGNS = frozenset("ாிீுூெேைொோௌ்ௗ")
-# Part B1/B2/B3/B4: closed-class வல்லினம் மிகுதல் environments only -- a
-# demonstrative (B1: அந்த/இந்த/எந்த), a manner-adverb (B2: அப்படி/இப்படி/
-# எப்படி), an explicit fourth-case/dative (B3: நான்காம் வேற்றுமை விரி --
-# எனக்கு/உங்களுக்கு/தேவனுக்கு), or an explicit second-case/accusative
-# (B4: இரண்டாம் வேற்றுமை விரி -- என்னை/உங்களை/அவனை/அதை/எதை) followed by a
-# க/ச/த/ப-initial word. Deliberately not general sandhi -- see
-# docs/BUILD_LOG.md's dated entries for each bounded rule statement this
-# mirrors. All four trigger sets share this one mechanism on purpose (same
-# tokenizer, same exact-match-against-the-bare-trigger-token, same
-# whitespace-only-adjacency and initial-consonant-class checks below) -- not
-# four parallel rule engines. Exact-match against the bare trigger form is
-# also what keeps this from firing on a token that already carries the
-# linking consonant (e.g. "அப்படிக்" tokenizes as one word, not equal to
-# "அப்படி") or on a longer word that merely contains a trigger as a prefix
-# (அப்படித்தான், இப்படியும், எப்படியோ, எனக்குள்ளே, அதைவிட, ...) -- no separate
-# exclusion list needed for any case.
+# The வல்லினம் rules (B1–B4 and those added since) are data, not code: the
+# bundled `ta-irv` rule pack (language_packs/ta-irv/), whose matchers are
+# compiled and whose examples run as tests at load (layered-rules Phase 3).
+# The B1–B4 trigger lists this file used to hold, and the scope reasoning
+# behind each, are in docs/BUILD_LOG.md's dated entries and in each rule's
+# `provenance`.
 #
-# B3 is deliberately an allowlist of explicitly verified dative *surface
-# forms*, not a suffix rule (`token.endswith("க்கு")`) -- ordinary Tamil
-# lexical words can themselves end in க்கு without being a fourth-case form,
-# and Bridge has no morphological analyzer to tell the difference reliably.
-# Add a new dative form only when its case analysis is independently
-# verified, the same discipline that gated B1/B2's own trigger words.
-# Explicitly out of scope for B3: -உடைய (genitive; standard modern Tamil
-# does *not* geminate after உடைய -- the opposite direction from B1/B2/B3/B4, and
-# a candidate future "excess வல்லினம்" rule, never folded into this one),
-# எல்லா (not a case marker; ungated, no rule statement exists yet), any other
-# case suffix, compounds, inferred/hidden fourth-case தொகை forms, and general
-# words that merely end in க்கு or ஐ.
-#
-# B4: explicit accusative (இரண்டாம் வேற்றுமை விரி, -ஐ) surface forms, same
-# allowlist discipline as B3 -- a fixed list of pronoun forms verified as
-# genuine accusative case, not a suffix rule (ordinary nouns/participles can
-# end in bare ஐ without being this case -- e.g. பரிசை "the prize",
-# அனுப்பப்பட்டவைகளை "the things sent" are real, confirmed bare-boundary
-# violations in Philippians too, but are excluded from B4 because they need
-# a noun/participle recognizer Bridge doesn't have, not just an allowlist
-# lookup). Confirmed real violation: php 2:28 அவனை சீக்கிரமாக (bare).
-VALLINAM_TRIGGERS = frozenset({
-    "அந்த", "இந்த", "எந்த", "அப்படி", "இப்படி", "எப்படி",
-    "எனக்கு", "உங்களுக்கு", "தேவனுக்கு",
-    "என்னை", "உங்களை", "அவனை", "அதை", "எதை",
-})
-VALLINAM_INITIALS = frozenset("கசதப")
-# The rules whose findings are drawn inline in the verse text, as opposed to
-# listed only in the Language QA panel. The one authority for that choice:
-# every finding carries `inline` from it, languageQa.inline filters on that
-# flag server-side, and languageQa.status exposes the list. The frontend never
-# decides this; it only styles a finding by its category. (Phase 3 moves the
-# choice into the rule pack.)
-INLINE_RULES = frozenset({"terminology.deprecated-form", "tamil.vallinam-missing"})
+# The non-pack rules drawn inline in the verse text (a pack rule carries its
+# own `inline`). The engine alone decides: every finding carries `inline`,
+# languageQa.inline filters on it, and languageQa.status lists the drawn rule
+# names. The frontend only styles a finding by its category.
+INLINE_RULES = frozenset({"terminology.deprecated-form"})
 # Every Language QA finding carries this, and the frontend sends it back in the
 # `issue` of a verse.decide call. decide_verse keys on it to keep Language QA
 # decisions out of the review-progress rollup. Origin is never inferred from
@@ -130,12 +91,12 @@ RULES: dict[str, RuleMeta] = {
     "tamil.repeated-word": RuleMeta("ta-irv", "pattern", "typo", "low"),
     "tamil.dependent-sign": RuleMeta("ta-irv", "integrity", "unicode", "high"),
     "tamil.mixed-word": RuleMeta("ta-irv", "integrity", "typo", "medium"),
-    "tamil.vallinam-missing": RuleMeta("ta-irv", "pattern", "sandhi", "medium"),
     "tamil.wordlist-variant": RuleMeta("ta-irv", "lexicon", "typo", "low"),
     "terminology.deprecated-form": RuleMeta("project", "housestyle", "termbase", "high"),
 }
-# Until the Phase 3 rule pack carries its own version, every finding's
-# packVersion is the engine's rule version.
+# The version of the rules above, which live in code. A pack rule's findings
+# carry the pack's own version instead ("ta-irv@1.0.0") and the rule's own
+# version as ruleRevision.
 PACK_VERSION = RULE_VERSION
 MAX_SUGGESTIONS = 5
 
@@ -146,20 +107,38 @@ def suggestion(text: str, source: str, rationale: str, rank: int = 1) -> dict[st
     return {"text": text, "rank": rank, "source": source, "rationale": rationale}
 
 
-def rule_fields(rule: str, suggestions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def rule_fields(rule: str, suggestions: list[dict[str, Any]] | None = None, *,
+                pack: Any = None, pack_rule: Any = None) -> dict[str, Any]:
     """The Phase 1.1 finding fields every producer shares (scan_text's
-    add(), the terminology pass, the wordlist audit). `rule` and
-    `suggestedReplacement` stay as aliases for one release:
+    add(), the terminology pass, the wordlist audit). A pack rule's fields
+    come from the pack (`pack`, `pack_rule`); every other rule's from RULES.
+    `rule` and `suggestedReplacement` stay as aliases for one release:
     suggestedReplacement is suggestions[0].text, or None."""
-    meta = RULES[rule]
     ranked = [dict(s, rank=i) for i, s in enumerate((suggestions or [])[:MAX_SUGGESTIONS], start=1)]
-    return {
-        "source": FINDING_SOURCE, "layer": meta.layer, "category": meta.category,
-        "confidence": meta.confidence, "ruleId": f"{meta.pack}/{rule}",
-        "packVersion": PACK_VERSION, "ruleRevision": meta.revision,
-        "inline": rule in INLINE_RULES, "suggestions": ranked,
-        "suggestedReplacement": ranked[0]["text"] if ranked else None,
-    }
+    if pack_rule is not None:
+        fields = {
+            "layer": pack_rule.layer, "category": pack_rule.category, "confidence": pack_rule.confidence,
+            "ruleId": f"{pack.name}/{pack_rule.id}", "packVersion": pack.pack_version,
+            "ruleRevision": pack_rule.version, "inline": pack_rule.inline,
+        }
+    else:
+        meta = RULES[rule]
+        fields = {
+            "layer": meta.layer, "category": meta.category, "confidence": meta.confidence,
+            "ruleId": f"{meta.pack}/{rule}", "packVersion": PACK_VERSION,
+            "ruleRevision": meta.revision, "inline": rule in INLINE_RULES,
+        }
+    return {"source": FINDING_SOURCE, **fields, "suggestions": ranked,
+            "suggestedReplacement": ranked[0]["text"] if ranked else None}
+
+
+def inline_rule_names(pack: Any = None) -> list[str]:
+    """The `rule` names drawn inline: the non-pack INLINE_RULES plus every
+    enabled inline rule of the pack (default: the bundled ta-irv pack)."""
+    if pack is None:
+        from .language_packs import default_pack
+        pack = default_pack()
+    return sorted(INLINE_RULES | {r.name for r in pack.rules if r.enabled and r.inline})
 
 
 WORD = regex.compile(r"\p{L}[\p{L}\p{M}]*")
@@ -330,12 +309,16 @@ def lift_inline_usfm(raw: str) -> tuple[LiftedVerse | None, str]:
 
 
 def scan_text(text: str, *, book: str, chapter: str, verse: str,
-              tamil: bool) -> dict[str, Any]:
+              tamil: bool, pack: Any = None, lists: dict[str, frozenset] | None = None) -> dict[str, Any]:
     """Every rule runs on the verse's visible text (lift_inline_usfm); every
     finding's start/end/originalText is exact raw code points, so
     originalText == text[start:end]. A candidate that would cross lifted
     markup is dropped and counted as a limitation. `checked` is False only
-    when the verse was not scanned at all."""
+    when the verse was not scanned at all.
+
+    For Tamil, the rule pack (`pack`, default: the bundled ta-irv pack,
+    loaded on first use) contributes its token-context and regex rules;
+    `lists` resolves its `listRef`s (house-style lists, empty until Phase 6)."""
     digest = text_hash(text)
     result: dict[str, Any] = {"textHash": digest, "findings": [], "limitations": [], "checked": False}
     if len(text) > MAX_VERSE_CHARS:
@@ -359,9 +342,10 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
     crossing = 0
 
     def add(rule: str, start: int, end: int, message: str, severity: str = "low",
-            suggestions: list[dict[str, Any]] | None = None) -> None:
+            suggestions: list[dict[str, Any]] | None = None, *, pack_rule: Any = None,
+            raw_offsets: bool = False) -> None:
         nonlocal crossing
-        span = lifted.raw_span(start, end)
+        span = (start, end) if raw_offsets else lifted.raw_span(start, end)
         if span is None:
             crossing += 1
             return
@@ -377,9 +361,21 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
             "book": book, "chapter": chapter, "verse": verse, "rule": rule,
             "severity": severity, "start": raw_start, "end": raw_end,
             "originalText": original, "message": message, "textHash": digest,
-            "ruleVersion": RULE_VERSION, "status": "review-needed",
-            **rule_fields(rule, suggestions),
+            "ruleVersion": f"{pack.pack_version}#{pack_rule.version}" if pack_rule is not None else RULE_VERSION,
+            "status": "review-needed",
+            **rule_fields(rule, suggestions, pack=pack, pack_rule=pack_rule),
         })
+
+    def add_candidate(candidate: Any) -> None:
+        pack_rule = candidate.rule
+        add(pack_rule.name, candidate.start, candidate.end, candidate.message, pack_rule.severity,
+            [suggestion(candidate.replacement, "rule", candidate.rationale)] if candidate.replacement else [],
+            pack_rule=pack_rule, raw_offsets=candidate.raw)
+
+    if tamil and pack is None:
+        from .language_packs import default_pack  # loaded once, on first Tamil scan
+        pack = default_pack()
+    lists = lists or {}
 
     if not unicodedata.is_normalized("NFC", text):
         # Report a small exact span rather than copying an entire verse into a finding.
@@ -413,24 +409,14 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
                 word_norm = unicodedata.normalize("NFC", word.group())
                 if prev_norm == word_norm:
                     add("tamil.repeated-word", *word.span(), "Adjacent repeated word; Tamil reduplication may be intentional.")
-                if prev_norm in VALLINAM_TRIGGERS and word_norm[:1] in VALLINAM_INITIALS:
-                    initial = word_norm[0]
-                    corrected = f"{prev_norm}{initial}்"
-                    # The suggested fix is the whole flagged span with only the
-                    # linking consonant inserted -- the raw trigger text and
-                    # everything after it (original whitespace, the following
-                    # word exactly as written) are preserved untouched.
-                    replacement = (
-                        text[previous.start():previous.end()] + initial + "்"
-                        + text[previous.end():word.end()]
-                    )
-                    add("tamil.vallinam-missing", previous.start(), word.end(),
-                        f'Possible missing வல்லினம் at this word boundary: "{prev_norm} {initial}..." '
-                        f'normally takes "{corrected} {initial}...". Verify before editing.',
-                        "medium", suggestions=[suggestion(
-                            replacement, "rule",
-                            f'"{prev_norm}" before a {initial}-initial word takes the linking {initial}்')])
+                # The pack's word-pair rules (வல்லினம் and the rest). A fix is
+                # the whole flagged span with only the linking consonant
+                # changed; the raw words and whitespace are kept as written.
+                for candidate in pack.pair_candidates(text, previous, word, lists):
+                    add_candidate(candidate)
             previous = word
+        for candidate in pack.regex_candidates(text, raw):
+            add_candidate(candidate)
         for cluster in GRAPHEME.finditer(text):
             normalized = unicodedata.normalize("NFC", cluster.group())
             if any(c in SIGNS and (i == 0 or normalized[i - 1] not in CONSONANTS)

@@ -113,8 +113,8 @@ in order, and each is its own commit series:
 |---|---|---|
 | 1 | Finding model (layer/category/confidence/suggestions/ruleId/packVersion); marks per category; menu with ranked suggestions, Edit-in-place, false positive; decision history; ignore-expiry on rule change; termbase overwrite guard | Done, source-verified (A56–A60); desktop pending |
 | 2 | Benchmark harness over the Round 2 / Pass 3 review CSVs; labelled fixtures; `--gate`; latency gate; one status channel | Done (A61, A62). Baseline: the only inline rule, `tamil.vallinam-missing`, is at 37.9% strict precision, so the accuracy gate fails. See [LANGUAGE_QA_BENCHMARK.md](LANGUAGE_QA_BENCHMARK.md) |
-| 3 | `ta-irv` rule pack as data; B1–B4 migrated to shape rules; known IRV defect rules | Next |
-| 4 | Language QA as a check-framework stage; reports, exception queue, publication gate; collection runner | Planned |
+| 3 | `ta-irv` rule pack as data; B1–B4 migrated to shape rules; known IRV defect rules | Done (A63–A66). `ta-irv@1.0.0` has 11 rules; every வல்லினம் rule is inline on the maintainer's sign-off (41–55% strict; manner adverbs 15%). Sandhi recall is 28.3%, up from 6.8%. See [LANGUAGE_QA_RULE_PACK.md](LANGUAGE_QA_RULE_PACK.md) |
+| 4 | Language QA as a check-framework stage; reports, exception queue, publication gate; collection runner | Next |
 | 5 | Corpus lexicon and Tamil confusion-set distance | Planned |
 | 6 | Termbase v3, name pack, scoped ignores, house-style learner, export ledger | Planned |
 | 7 | Structured "checks / does not check" boundary shown in the panel | Planned |

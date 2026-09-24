@@ -47,10 +47,10 @@ def test_a_positive_credited_to_a_rule_is_still_found_by_it(bucket, example):
     for expected in example["expect"]:
         if not expected["ruleId"]:
             continue  # no current rule covers it; Phase 3+ will
-        rule = expected["ruleId"].split("/", 1)[1]
-        if rule == "tamil.wordlist-variant":
+        if expected["ruleId"].endswith("/tamil.wordlist-variant"):
             continue  # a book-wide audit, not a per-verse rule; the benchmark measures it
         findings = scan_text(example["text"], book="x", chapter="1", verse="1", tamil=True)["findings"]
-        spans = [nfc(f["originalText"]) for f in findings if f["rule"] == rule]
+        # ruleId, not the `rule` alias: migrated pack rules keep their legacy name there.
+        spans = [nfc(f["originalText"]) for f in findings if f["ruleId"] == expected["ruleId"]]
         span = nfc(expected["span"])
         assert any(s in span or span in s for s in spans), (expected, spans)

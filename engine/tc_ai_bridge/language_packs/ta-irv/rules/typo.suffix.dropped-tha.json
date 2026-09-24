@@ -1,0 +1,140 @@
+{
+ "id": "typo.suffix.dropped-tha",
+ "version": 1,
+ "category": "typo",
+ "severity": "medium",
+ "confidence": "high",
+ "inline": false,
+ "title": {
+  "ta": "-வதற்கு — த விடுபட்டது",
+  "en": "Dropped த in -வதற்கு"
+ },
+ "message": {
+  "en": "\"{span}\" drops the த of -வதற்கு; \"{fix}\" is expected. Verify before editing."
+ },
+ "rationale": "The purposive verbal noun is -வதற்கு",
+ "match": {
+  "type": "regex",
+  "on": "visible",
+  "pattern": "(?<![\\p{L}\\p{M}])(?P<span>(?P<stem>\\p{L}[\\p{L}\\p{M}]{2,}?)வற்கு)(?![\\p{L}\\p{M}])"
+ },
+ "fix": {
+  "type": "expand",
+  "template": "\\g<stem>வதற்கு"
+ },
+ "provenance": "Known IRV defect shape (Round 2). IRV: 2 real occurrences (நடத்துவற்கு, செய்வற்கு), each with its -வதற்கு form attested; -வதற்கு 328.",
+ "examples": {
+  "incorrect": [
+   {
+    "text": "சங்கீத சேவையை நடத்துவற்கு ஏற்படுத்தியவர்களும்,",
+    "span": "நடத்துவற்கு",
+    "fix": "நடத்துவதற்கு",
+    "origin": "1CH 6:31 (also in the review reports)"
+   },
+   {
+    "text": "என்றும், துதி செய்வற்கு தான் செய்து",
+    "span": "செய்வற்கு",
+    "fix": "செய்வதற்கு",
+    "origin": "1CH 23:5 (also in the review reports)"
+   },
+   {
+    "text": "அழகும் சாப்பிடுவற்கு ஏற்ற",
+    "span": "சாப்பிடுவற்கு",
+    "fix": "சாப்பிடுவதற்கு",
+    "origin": "derived from GEN 2:9 (த removed from -வதற்கு)"
+   },
+   {
+    "text": "பழம் சாப்பிடுவற்கு நல்லதும்,",
+    "span": "சாப்பிடுவற்கு",
+    "fix": "சாப்பிடுவதற்கு",
+    "origin": "derived from GEN 3:6 (த removed from -வதற்கு)"
+   },
+   {
+    "text": "உயிரோடு காக்கப்படுவற்கு, கப்பலுக்குள்ளே",
+    "span": "காக்கப்படுவற்கு",
+    "fix": "காக்கப்படுவதற்கு",
+    "origin": "derived from GEN 6:19 (த removed from -வதற்கு)"
+   },
+   {
+    "text": "உயிரோடு காக்கப்படுவற்கு உன்னிடத்திலே",
+    "span": "காக்கப்படுவற்கு",
+    "fix": "காக்கப்படுவதற்கு",
+    "origin": "derived from GEN 6:20 (த removed from -வதற்கு)"
+   },
+   {
+    "text": "தூளை எண்ணுவற்கு முடியுமானால்,",
+    "span": "எண்ணுவற்கு",
+    "fix": "எண்ணுவதற்கு",
+    "origin": "derived from GEN 13:16 (த removed from -வதற்கு)"
+   },
+   {
+    "text": "சுமரச் செய்வற்கு உனக்கு",
+    "span": "செய்வற்கு",
+    "fix": "செய்வதற்கு",
+    "origin": "derived from GEN 20:9 (த removed from -வதற்கு)"
+   },
+   {
+    "text": "அடக்கம் செய்வற்கு, உங்களிடத்தில்",
+    "span": "செய்வற்கு",
+    "fix": "செய்வதற்கு",
+    "origin": "derived from GEN 23:4 (த removed from -வதற்கு)"
+   },
+   {
+    "text": "காரியத்தைச் சொல்லுவற்கு முன்பாகச்",
+    "span": "சொல்லுவற்கு",
+    "fix": "சொல்லுவதற்கு",
+    "origin": "derived from GEN 24:33 (த removed from -வதற்கு)"
+   }
+  ],
+  "correct": [
+   {
+    "text": "அழகும் சாப்பிடுவதற்கு ஏற்ற",
+    "origin": "GEN 2:9 (correct form)"
+   },
+   {
+    "text": "தூரம் போவதற்கு முன்னே,",
+    "origin": "GEN 44:4 (correct form)"
+   },
+   {
+    "text": "வேலை செய்வதற்கும்,",
+    "origin": "EXO 31:3 (correct form)"
+   },
+   {
+    "text": "பிரமாணம் முழுவதற்கும் இணையாக",
+    "origin": "DEU 4:8 (correct form)"
+   },
+   {
+    "text": "பயந்திருக்கும்படி கற்றுக்கொள்வதற்கு,",
+    "origin": "DEU 17:19 (correct form)"
+   },
+   {
+    "text": "சூரியன் மறைவதற்குத் துரிதப்படாமல்,",
+    "origin": "JOS 10:13 (correct form)"
+   },
+   {
+    "text": "தகனம் செய்வதற்கு முன்னும்,",
+    "origin": "1SA 2:15 (correct form)"
+   },
+   {
+    "text": "வாலிபர்கள் சாப்பிடுவதற்கும், திராட்சை",
+    "origin": "2SA 16:2 (correct form)"
+   },
+   {
+    "text": "யெஸ்ரயேலிலே ஆற்றிக்கொள்வதற்கு, ராஜாவாகிய",
+    "origin": "2KI 9:15 (correct form)"
+   },
+   {
+    "text": "ஆலயத்திற்குள் வருவதற்கு வேண்டாம்;",
+    "origin": "2CH 23:6 (correct form)"
+   },
+   {
+    "text": "சற்று இளைப்பாறுவதற்கு நீர்",
+    "origin": "JOB 10:22 (correct form)"
+   },
+   {
+    "text": "செவ்வையாகச் செய்வதற்கு ஞானமே",
+    "origin": "ECC 10:10 (correct form)"
+   }
+  ]
+ }
+}

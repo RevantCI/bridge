@@ -18,9 +18,10 @@ SFM = "\n".join([
     "\\id RUT synthetic benchmark book", "\\c 1", "\\p",
     "\\v 1 அவன் அந்த காகம் பார்த்தான்.",       # vallinam, flagged by the review -> TP
     "\\v 2 அவள் அந்த பெண் வந்தாள்.",            # vallinam, not in the review -> FP
-    "\\v 3 அவன் அந்த தேசத்தில் இருந்தான்.",       # vallinam on a confirmed house form -> FP, house form
+    "\\v 3 அவன் இந்த கல்லை எடுத்தான்.",          # vallinam on a Pass 3 house form (இந்த + bare), no row -> FP, house form
     "\\v 4 அவன் இந்த பட்டணம் போனான்.",          # vallinam; the row flagging it is house form -> maybe
-    "\\v 5 அவர் அந்த சபையை கண்டார்.",           # vallinam; a human rejected the AI row -> maybe
+    "\\v 5 அவர் அந்த சபையைக் கண்டார்.",          # vallinam; a human rejected the AI row -> maybe
+    "\\v 7 அவன் அந்த தேசத்தில் இருந்தான்.",       # the pack abstains: IRV house form அந்த தேச- -> no finding
     "\\v 6 இது முழவதும் சரி.",                   # typo row the engine cannot find -> FN
     "",
 ])
@@ -100,13 +101,13 @@ def test_contradicting_rows_become_maybe():
 
 def test_findings_are_scored_against_compatible_rows_only(benchmark):
     _, result, _ = benchmark
-    vallinam = result["rules"]["ta-irv/tamil.vallinam-missing"]
+    vallinam = result["rules"]["ta-irv/sandhi.vallinam.demonstrative"]
     assert vallinam["findings"] == 5
     assert vallinam["tp_strict"] == 1                 # 1:1
     assert vallinam["matched_maybe"] == 2             # 1:4 house form, 1:5 human-rejected: strict FP, lenient TP
     assert vallinam["matched_negative"] == 0
     assert vallinam["fp_strict"] == 4 and vallinam["tp_lenient"] == 3
-    assert vallinam["fp_house_form"] == 1             # 1:3 அந்த தேச-
+    assert vallinam["fp_house_form"] == 1             # 1:3 இந்த + bare (1:7 அந்த தேச- is abstained by the pack)
     assert vallinam["precision_strict"] == 0.2 and vallinam["precision_lenient"] == 0.6
     assert vallinam["inline"] is True
     # The spacing row at 1:2 is not matched by the vallinam finding at the same verse.
@@ -129,18 +130,31 @@ def test_recall_counts_only_anchored_rows(benchmark):
 def test_unmatched_findings_are_listed_for_a_human_to_label(benchmark):
     _, result, _ = benchmark
     unmatched = {(f["verse"], f["originalText"]): f for f in result["unmatchedFindings"]}
-    assert set(unmatched) == {("2", "அந்த பெண்"), ("3", "அந்த தேசத்தில்")}
-    assert unmatched[("3", "அந்த தேசத்தில்")]["houseForm"] == "அந்த தேச- bare"
+    assert set(unmatched) == {("2", "அந்த பெண்"), ("3", "இந்த கல்லை")}
+    assert unmatched[("3", "இந்த கல்லை")]["houseForm"] == "இந்த + bare hard consonant"
+    assert unmatched[("2", "அந்த பெண்")]["houseForm"] is None
 
 
 def test_gate_fails_an_imprecise_inline_rule_and_a_precision_drop(benchmark):
     _, result, _ = benchmark
-    failures = bench.gate(result, None)
-    assert failures == ["ta-irv/tamil.vallinam-missing is inline but strict precision is 20.0% (< 90.0%)"]
-    baseline = {"rules": {"ta-irv/tamil.vallinam-missing": {"precision_strict": 0.5, "findings": 12}}}
-    small = bench.gate(result, baseline)  # 5 findings now: too few to compare a drop
-    assert len(small) == 1
-    result["rules"]["ta-irv/tamil.vallinam-missing"]["findings"] = 12
+    rule = result["rules"]["ta-irv/sandhi.vallinam.demonstrative"]
+    # Signed off for inline at 41.25%: this synthetic 20% is more than 2 points below that.
+    assert rule["signOff"]["precisionStrict"] == 0.4125
+    assert bench.gate(result, None) == [
+        "ta-irv/sandhi.vallinam.demonstrative fell below its inline sign-off: 20.0% < 41.2% - 2 points"]
+    # Within 2 points of the sign-off it passes, though far below 90%.
+    rule["signOff"] = {**rule["signOff"], "precisionStrict": 0.21}
+    assert bench.gate(result, None) == []
+    # Without a sign-off an inline rule must reach 90%.
+    rule["signOff"] = None
+    assert bench.gate(result, None) == [
+        "ta-irv/sandhi.vallinam.demonstrative is inline but strict precision is 20.0% (< 90.0%)"]
+    rule["signOff"] = {"by": "m", "date": "d", "precisionStrict": None}
+    assert "records no precision" in bench.gate(result, None)[0]
+    rule["signOff"] = {"by": "m", "date": "d", "precisionStrict": 0.21}
+    baseline = {"rules": {"ta-irv/sandhi.vallinam.demonstrative": {"precision_strict": 0.5, "findings": 12}}}
+    assert bench.gate(result, baseline) == []  # 5 findings now: too few to compare a drop
+    rule["findings"] = 12
     dropped = bench.gate(result, baseline)
     assert "fell from 50.0% to 20.0%" in dropped[-1]
     assert bench.gate(result, baseline, inline_min_precision=0.1, max_drop=0.5) == []
@@ -150,7 +164,7 @@ def test_baseline_holds_numbers_only(benchmark):
     _, result, _ = benchmark
     text = json.dumps(bench.baseline_of(result), ensure_ascii=False)
     assert "அந்த" not in text and "unmatched" not in text
-    assert bench.baseline_of(result)["rules"]["ta-irv/tamil.vallinam-missing"]["precision_strict"] == 0.2
+    assert bench.baseline_of(result)["rules"]["ta-irv/sandhi.vallinam.demonstrative"]["precision_strict"] == 0.2
 
 
 def test_labelled_examples_quote_their_verse(benchmark):
@@ -163,7 +177,7 @@ def test_labelled_examples_quote_their_verse(benchmark):
     positive = sandhi[2]
     assert positive["expect"][0]["span"] in positive["text"]
     assert positive["expect"][0]["fix"] == "அந்தக் காகம்"
-    assert positive["expect"][0]["ruleId"] == "ta-irv/tamil.vallinam-missing"
+    assert positive["expect"][0]["ruleId"] == "ta-irv/sandhi.vallinam.demonstrative"
     assert positive["origin"].startswith("RUT 1:1")
 
 
@@ -176,7 +190,7 @@ def test_cli_gate_exit_code_and_outputs(tmp_path):
                "--baseline", str(tmp_path / "baseline.json")]
     written = subprocess.run(command + ["--write-baseline"], capture_output=True, text=True, encoding="utf-8")
     assert written.returncode == 0, written.stderr
-    assert "| `ta-irv/tamil.vallinam-missing` | yes | 5 |" in written.stdout
+    assert "| `ta-irv/sandhi.vallinam.demonstrative` | yes | 5 |" in written.stdout
     assert json.loads((tmp_path / "baseline.json").read_text(encoding="utf-8"))["books"] == ["rut"]
     [result_file] = out.glob("*.json")
     assert json.loads(result_file.read_text(encoding="utf-8"))["unmatchedFindings"]

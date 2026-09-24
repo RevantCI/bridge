@@ -1,0 +1,209 @@
+{
+ "id": "sandhi.vallinam.manner-adverb",
+ "version": 1,
+ "legacyId": "tamil.vallinam-missing",
+ "category": "sandhi",
+ "severity": "medium",
+ "confidence": "medium",
+ "inline": true,
+ "title": {
+  "ta": "வல்லினம் மிகுதல் — விதம்",
+  "en": "Vallinam doubling after a manner adverb"
+ },
+ "message": {
+  "en": "Possible missing வல்லினம் at this word boundary: \"{prev} {initial}...\" normally takes \"{prev}{initial}் {initial}...\". Verify before editing."
+ },
+ "rationale": "\"{prev}\" before a {initial}-initial word takes the linking {initial}்",
+ "match": {
+  "type": "token-context",
+  "prev": {
+   "lexical": [
+    "அப்படி",
+    "இப்படி",
+    "எப்படி"
+   ]
+  },
+  "gap": "whitespace",
+  "next": {
+   "initial": [
+    "க",
+    "ச",
+    "த",
+    "ப"
+   ]
+  },
+  "link": "none"
+ },
+ "abstain": [
+  {
+   "next": {
+    "lexical": [
+     "தான்",
+     "கூட",
+     "மட்டும்",
+     "ஆவது",
+     "போல",
+     "என்று",
+     "என",
+     "எனும்"
+    ]
+   },
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form; see sandhi.clitic.fused."
+  },
+  {
+   "next": {
+    "listRef": "housestyle.properNouns"
+   },
+   "origin": "A proper noun after the trigger: the project's house-style name list (Phase 6). Empty until then; the names adapter's majority forms were evaluated as a seed and rejected (BUILD_LOG, Phase 3)."
+  },
+  {
+   "prev": {
+    "lexical": [
+     "இப்படி"
+    ]
+   },
+   "next": {
+    "prefix": [
+     "தேவ"
+    ]
+   },
+   "origin": "IRV corpus house form after இப்படி: தேவ- bare 3/doubled 1"
+  }
+ ],
+ "fix": {
+  "type": "insert-link"
+ },
+ "provenance": "B2 (BUILD_LOG 2026-09-23). IRV doubles after அப்படி 97%, இப்படி 92%, எப்படி 87%.",
+ "inlineSignOff": {
+  "by": "maintainer (session of 2026-09-24)",
+  "date": "2026-09-24",
+  "reason": "Maintainer sign-off 2026-09-24: keep all வல்லினம் rules inline; false positives are handled by Ignore and learned from (Phase 6). Precision is agreement with the minority-form AI review, not verified accuracy.",
+  "precisionStrict": 0.1538
+ },
+ "examples": {
+  "incorrect": [
+   {
+    "text": "இப்படி சாலொமோன் கிபியோனிலிருக்கிற மேட்டிற்குப்",
+    "span": "இப்படி சாலொமோன்",
+    "fix": "இப்படிச் சாலொமோன்",
+    "origin": "2CH 1:13 (also in the review reports)"
+   },
+   {
+    "text": "உம்முடைய தகப்பனிடம் எப்படி பணிவிடை செய்தோனோ, அப்படியே",
+    "span": "எப்படி பணிவிடை",
+    "fix": "எப்படிப் பணிவிடை",
+    "origin": "2SA 16:19 (also in the review reports)"
+   },
+   {
+    "text": "என்று நீங்கள் இப்படி கேட்கிறீர்கள்.",
+    "span": "இப்படி கேட்கிறீர்கள்",
+    "fix": "இப்படிக் கேட்கிறீர்கள்",
+    "origin": "EXO 5:17 (also in the review reports)"
+   },
+   {
+    "text": "இன்றுதானே எனக்கு இப்படி சம்பவித்ததே; பாவநிவாரணபலியை இன்று",
+    "span": "இப்படி சம்பவித்ததே",
+    "fix": "இப்படிச் சம்பவித்ததே",
+    "origin": "LEV 10:19 (also in the review reports)"
+   },
+   {
+    "text": "மிகவும் பயப்பட்டதால் அப்படி செய்ய மாட்டேன் என்றான்.",
+    "span": "அப்படி செய்ய",
+    "fix": "அப்படிச் செய்ய",
+    "origin": "1CH 10:4"
+   },
+   {
+    "text": "புறப்பட்டுப் போனான்; இப்படி சீமேயி போய், தன்னுடைய",
+    "span": "இப்படி சீமேயி",
+    "fix": "இப்படிச் சீமேயி",
+    "origin": "1KI 2:40"
+   },
+   {
+    "text": "எந்த ராஜ்யத்திலும் இப்படி செய்யப்படவில்லை.",
+    "span": "இப்படி செய்யப்படவில்லை",
+    "fix": "இப்படிச் செய்யப்படவில்லை",
+    "origin": "1KI 10:20"
+   },
+   {
+    "text": "ஆனாலும் முழுமனதோடு அப்படி செய்யவில்லை.",
+    "span": "அப்படி செய்யவில்லை",
+    "fix": "அப்படிச் செய்யவில்லை",
+    "origin": "2CH 25:2"
+   },
+   {
+    "text": "அவன் இப்படி புரிந்துகொண்ட பின்பு, மாற்கு",
+    "span": "இப்படி புரிந்துகொண்ட",
+    "fix": "இப்படிப் புரிந்துகொண்ட",
+    "origin": "ACT 12:12"
+   },
+   {
+    "text": "போகும்; மூடன் எப்படி சாகிறானோ அப்படியே ஞானியும்",
+    "span": "எப்படி சாகிறானோ",
+    "fix": "எப்படிச் சாகிறானோ",
+    "origin": "ECC 2:16"
+   },
+   {
+    "text": "அழிவை நான் எப்படி சகிக்கமுடியும்? என்றாள்.",
+    "span": "எப்படி சகிக்கமுடியும்",
+    "fix": "எப்படிச் சகிக்கமுடியும்",
+    "origin": "EST 8:6"
+   },
+   {
+    "text": "இத்தனை சீக்கிரமாக எப்படி கிடைத்தது என்றான். அவன்:",
+    "span": "எப்படி கிடைத்தது",
+    "fix": "எப்படிக் கிடைத்தது",
+    "origin": "GEN 27:20"
+   }
+  ],
+  "correct": [
+   {
+    "text": "ஏன் இப்படிச் செய்தாய் என்றார்.",
+    "origin": "GEN 3:13 (correctly linked)"
+   },
+   {
+    "text": "செய்வதும், இப்படி தேவன் உமக்குக்",
+    "origin": "EXO 18:23 (house form)"
+   },
+   {
+    "text": "மாட்டார்கள்; அப்படிச் செய்வது எகிப்தியருக்கு",
+    "origin": "GEN 43:32 (correctly linked)"
+   },
+   {
+    "text": "இப்படி தேவன் அந்த",
+    "origin": "JDG 4:23 (house form)"
+   },
+   {
+    "text": "கூட்டிக்கொண்டு, அப்படிச் செய்தவர்களைச் சூரிய",
+    "origin": "NUM 25:4 (correctly linked)"
+   },
+   {
+    "text": "இப்படி தேவாலயத்தின் வாசலுக்கும்",
+    "origin": "1KI 6:33 (house form)"
+   },
+   {
+    "text": "ஆகையால், இப்படிச் செய்யும்படி நான்",
+    "origin": "DEU 24:22 (correctly linked)"
+   },
+   {
+    "text": "நீ இப்படிக் கூட்டத்துடன் வருகிற",
+    "origin": "JDG 18:23 (correctly linked)"
+   },
+   {
+    "text": "நான் அப்படிச் செய்கிறது இல்லை",
+    "origin": "2SA 11:11 (correctly linked)"
+   },
+   {
+    "text": "முகத்தை எப்படித் திருப்புவாய்? இரதங்களோடு",
+    "origin": "2KI 18:24 (correctly linked)"
+   },
+   {
+    "text": "கஷ்மூவும் அப்படிச் சொல்லுகிறான்; இப்போதும்",
+    "origin": "NEH 6:7 (correctly linked)"
+   },
+   {
+    "text": "நீர் அப்படிச் செய்ய மாட்டேன்",
+    "origin": "JOB 34:33 (correctly linked)"
+   }
+  ]
+ }
+}

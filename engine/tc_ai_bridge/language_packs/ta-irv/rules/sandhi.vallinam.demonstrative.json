@@ -1,0 +1,242 @@
+{
+ "id": "sandhi.vallinam.demonstrative",
+ "version": 1,
+ "legacyId": "tamil.vallinam-missing",
+ "category": "sandhi",
+ "severity": "medium",
+ "confidence": "medium",
+ "inline": true,
+ "title": {
+  "ta": "வல்லினம் மிகுதல் — சுட்டு",
+  "en": "Vallinam doubling after a demonstrative"
+ },
+ "message": {
+  "en": "Possible missing வல்லினம் at this word boundary: \"{prev} {initial}...\" normally takes \"{prev}{initial}் {initial}...\". Verify before editing."
+ },
+ "rationale": "\"{prev}\" before a {initial}-initial word takes the linking {initial}்",
+ "match": {
+  "type": "token-context",
+  "prev": {
+   "lexical": [
+    "அந்த",
+    "இந்த",
+    "எந்த"
+   ]
+  },
+  "gap": "whitespace",
+  "next": {
+   "initial": [
+    "க",
+    "ச",
+    "த",
+    "ப"
+   ]
+  },
+  "link": "none"
+ },
+ "abstain": [
+  {
+   "next": {
+    "lexical": [
+     "தான்",
+     "கூட",
+     "மட்டும்",
+     "ஆவது",
+     "போல",
+     "என்று",
+     "என",
+     "எனும்"
+    ]
+   },
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form; see sandhi.clitic.fused."
+  },
+  {
+   "next": {
+    "listRef": "housestyle.properNouns"
+   },
+   "origin": "A proper noun after the trigger: the project's house-style name list (Phase 6). Empty until then; the names adapter's majority forms were evaluated as a seed and rejected (BUILD_LOG, Phase 3)."
+  },
+  {
+   "prev": {
+    "lexical": [
+     "அந்த"
+    ]
+   },
+   "next": {
+    "prefix": [
+     "தேச",
+     "தேவ"
+    ]
+   },
+   "origin": "IRV corpus house form after அந்த: தேச- bare 31/doubled 8, தேவ- bare 3/doubled 0 (also IRV_Pass3_Handoff.md §5)"
+  },
+  {
+   "prev": {
+    "lexical": [
+     "இந்த"
+    ]
+   },
+   "next": {
+    "prefix": [
+     "தேச",
+     "தீங",
+     "தண்",
+     "தரி",
+     "திர",
+     "தூண"
+    ]
+   },
+   "origin": "IRV corpus house form after இந்த: தேச- bare 46/doubled 0, தீங- bare 9/doubled 0, தண்- bare 6/doubled 4, தரி- bare 6/doubled 1, திர- bare 5/doubled 1, தூண- bare 3/doubled 0 (also IRV_Pass3_Handoff.md §5)"
+  },
+  {
+   "prev": {
+    "lexical": [
+     "எந்த"
+    ]
+   },
+   "next": {
+    "prefix": [
+     "தேச",
+     "தேவ"
+    ]
+   },
+   "origin": "IRV corpus house form after எந்த: தேச- bare 4/doubled 0, தேவ- bare 4/doubled 0 (also IRV_Pass3_Handoff.md §5)"
+  }
+ ],
+ "fix": {
+  "type": "insert-link"
+ },
+ "provenance": "B1 (BUILD_LOG 2026-09-22). IRV doubles after அந்த 89%, இந்த 84%, எந்த 86% of hard-initial contexts.",
+ "inlineSignOff": {
+  "by": "maintainer (session of 2026-09-24)",
+  "date": "2026-09-24",
+  "reason": "Maintainer sign-off 2026-09-24: keep all வல்லினம் rules inline; false positives are handled by Ignore and learned from (Phase 6). Precision is agreement with the minority-form AI review, not verified accuracy.",
+  "precisionStrict": 0.4125
+ },
+ "examples": {
+  "incorrect": [
+   {
+    "text": "அந்த படைகளுக்கு விரோதமாக இவர்கள்",
+    "span": "அந்த படைகளுக்கு",
+    "fix": "அந்தப் படைகளுக்கு",
+    "origin": "1CH 12:21 (also in the review reports)"
+   },
+   {
+    "text": "பெத்தேலில் இருக்கிற அந்த பலிபீடத்திற்கு எதிராக தேவனுடைய",
+    "span": "அந்த பலிபீடத்திற்கு",
+    "fix": "அந்தப் பலிபீடத்திற்கு",
+    "origin": "1KI 13:4 (also in the review reports)"
+   },
+   {
+    "text": "சாப்பான் அந்த புத்தகத்தை ராஜாவினிடத்திற்குக் கொண்டுபோய்,",
+    "span": "அந்த புத்தகத்தை",
+    "fix": "அந்தப் புத்தகத்தை",
+    "origin": "2CH 34:16 (also in the review reports)"
+   },
+   {
+    "text": "அந்த பெண் கர்ப்பவதியாகி, ஒரு",
+    "span": "அந்த பெண்",
+    "fix": "அந்தப் பெண்",
+    "origin": "EXO 2:2 (also in the review reports)"
+   },
+   {
+    "text": "நீ எழுந்து, அந்த படையினிடத்திற்குப் போ; அதை",
+    "span": "அந்த படையினிடத்திற்குப்",
+    "fix": "அந்தப் படையினிடத்திற்குப்",
+    "origin": "JDG 7:9 (also in the review reports)"
+   },
+   {
+    "text": "அப்பொழுது சாபகாரணமான அந்த தண்ணீர் அவளுக்குள் இறங்கிக்",
+    "span": "அந்த தண்ணீர்",
+    "fix": "அந்தத் தண்ணீர்",
+    "origin": "NUM 5:24 (also in the review reports)"
+   },
+   {
+    "text": "அந்த பாவநிவிர்த்தி பணத்தை நீ",
+    "span": "அந்த பாவநிவிர்த்தி",
+    "fix": "அந்தப் பாவநிவிர்த்தி",
+    "origin": "EXO 30:16 (also in the review reports)"
+   },
+   {
+    "text": "யெகோவாவுடைய தூதன் அந்த பெண்ணுக்குத் தரிசனமாகி, அவளை",
+    "span": "அந்த பெண்ணுக்குத்",
+    "fix": "அந்தப் பெண்ணுக்குத்",
+    "origin": "JDG 13:3 (also in the review reports)"
+   },
+   {
+    "text": "எரிச்சலின் காணிக்கையை அந்த பெண்ணின் கையில் இருந்து",
+    "span": "அந்த பெண்ணின்",
+    "fix": "அந்தப் பெண்ணின்",
+    "origin": "NUM 5:25 (also in the review reports)"
+   },
+   {
+    "text": "மனைவியையும் ஆசீர்வதித்து: இந்த பெண் யெகோவாவுக்கென்று ஒப்புக்",
+    "span": "இந்த பெண்",
+    "fix": "இந்தப் பெண்",
+    "origin": "1SA 2:20"
+   },
+   {
+    "text": "அப்பொழுது அந்த பெண் சவுலிடத்தில் வந்து,",
+    "span": "அந்த பெண்",
+    "fix": "அந்தப் பெண்",
+    "origin": "1SA 28:21"
+   },
+   {
+    "text": "அந்த பெண் கர்ப்பவதியாகி, எலிசா",
+    "span": "அந்த பெண்",
+    "fix": "அந்தப் பெண்",
+    "origin": "2KI 4:17"
+   }
+  ],
+  "correct": [
+   {
+    "text": "அப்பொழுது அந்தப் பெண், அந்த",
+    "origin": "GEN 3:6 (correctly linked)"
+   },
+   {
+    "text": "என்னை இந்த தேசத்திலிருந்து துரத்திவிடுகிறீர்;",
+    "origin": "GEN 4:14 (house form)"
+   },
+   {
+    "text": "அவன் அந்தச் சிலைகளைத் தேடியும்",
+    "origin": "GEN 31:35 (correctly linked)"
+   },
+   {
+    "text": "என்னுடன் இந்த தேசத்திற்கு வர",
+    "origin": "GEN 24:5 (house form)"
+   },
+   {
+    "text": "பரவாயில்லை; இந்தக் கூட்டம் முழுவதையும்",
+    "origin": "EXO 16:3 (correctly linked)"
+   },
+   {
+    "text": "வெறுப்பாயிருக்கிறது; இந்த தேசத்துப் பெண்களாகிய",
+    "origin": "GEN 27:46 (house form)"
+   },
+   {
+    "text": "கொண்டு, அந்தச் சாம்பலை முகாமிற்கு",
+    "origin": "LEV 6:11 (correctly linked)"
+   },
+   {
+    "text": "சந்ததிக்கும் இந்த தேசத்தைக் கொடுப்பேன்",
+    "origin": "GEN 35:12 (house form)"
+   },
+   {
+    "text": "முறுமுறுக்கும்படி அந்தத் துர்ச்செய்தியைச் சொன்னவர்களாகிய",
+    "origin": "NUM 14:37 (correctly linked)"
+   },
+   {
+    "text": "நீங்கள் இந்த தேசத்தைவிட்டு, தாம்",
+    "origin": "GEN 50:24 (house form)"
+   },
+   {
+    "text": "கூறப்பட்டதால், அந்தக் கடனை மற்றவனிடத்திலாவது",
+    "origin": "DEU 15:2 (correctly linked)"
+   },
+   {
+    "text": "அந்த தேசத்தின் குடிகளோடு",
+    "origin": "EXO 34:15 (house form)"
+   }
+  ]
+ }
+}

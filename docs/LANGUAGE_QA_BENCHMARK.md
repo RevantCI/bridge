@@ -128,9 +128,9 @@ BUILD_LOG. It fails when:
 ## Results
 
 <!-- benchmark:start -->
-_Generated 2026-09-24T19:07:14 by scripts/language_qa_benchmark.py._
+_Generated 2026-09-24T19:57:43 by scripts/language_qa_benchmark.py._
 
-Pack version `language-qa-7`; books: 1CH, 1KI, 1SA, 2CH, 2KI, 2SA, DEU, EXO, EZR, GEN, JDG, JOS, LEV, NUM, PHP, PSA, RUT.
+Pack version `language-qa-7+ta-irv@1.0.0`; books: 1CH, 1KI, 1SA, 2CH, 2KI, 2SA, DEU, EXO, EZR, GEN, JDG, JOS, LEV, NUM, PHP, PSA, RUT.
 
 Per rule (a finding is a true positive when it overlaps a review row of a compatible type at the same verse):
 
@@ -138,19 +138,27 @@ Per rule (a finding is a true positive when it overlaps a review row of a compat
 |---|---|---|---|---|---|---|---|---|---|
 | `common/punctuation.repeated` | no | 1 | 1 | 0 | 0 | 100.0% | 100.0% | 0 | 0 |
 | `common/unicode.invisible` | no | 1 | 1 | 0 | 0 | 100.0% | 100.0% | 0 | 0 |
+| `ta-irv/integrity.space-before-note-end` | no | 74 | 55 | 19 | 0 | 74.3% | 74.3% | 0 | 0 |
+| `ta-irv/sandhi.clitic.fused` | no | 4 | 0 | 4 | 0 | 0.0% | 0.0% | 0 | 0 |
+| `ta-irv/sandhi.vallinam.accusative` | yes | 500 | 275 | 225 | 0 | 55.0% | 55.2% | 1 | 0 |
+| `ta-irv/sandhi.vallinam.dative` | yes | 396 | 197 | 199 | 0 | 49.8% | 49.8% | 0 | 0 |
+| `ta-irv/sandhi.vallinam.demonstrative` | yes | 80 | 33 | 47 | 13 | 41.2% | 55.0% | 11 | 0 |
+| `ta-irv/sandhi.vallinam.manner-adverb` | yes | 13 | 2 | 11 | 0 | 15.4% | 15.4% | 0 | 0 |
 | `ta-irv/tamil.repeated-word` | no | 33 | 0 | 33 | 0 | 0.0% | 0.0% | 0 | 0 |
-| `ta-irv/tamil.vallinam-missing` | yes | 311 | 118 | 193 | 77 | 37.9% | 43.4% | 17 | 0 |
 | `ta-irv/tamil.wordlist-variant` | no | 2473 | 49 | 2424 | 0 | 2.0% | 2.0% | 0 | 0 |
+| `ta-irv/typo.divine-name.dative-stem` | no | 13 | 9 | 4 | 0 | 69.2% | 69.2% | 0 | 0 |
+| `ta-irv/typo.divine-name.vowel-drop` | no | 11 | 11 | 0 | 0 | 100.0% | 100.0% | 0 | 0 |
+| `ta-irv/typo.suffix.dropped-tha` | no | 2 | 2 | 0 | 0 | 100.0% | 100.0% | 0 | 0 |
 
 Per review bucket (recall counts only rows whose Original Tamil is found in the scanned verse):
 
 | Bucket | Positive rows | Maybe rows | Negative rows | Unanchored | Found (positive) | Recall strict | Recall lenient |
 |---|---|---|---|---|---|---|---|
-| typo | 839 | 13 | 0 | 80 | 48 | 6.3% | 6.2% |
-| sandhi | 1877 | 34 | 0 | 110 | 120 | 6.8% | 7.6% |
-| punctuation | 72 | 0 | 0 | 22 | 1 | 2.0% | 2.0% |
+| typo | 839 | 13 | 0 | 80 | 68 | 8.9% | 8.8% |
+| sandhi | 1877 | 34 | 0 | 110 | 501 | 28.3% | 28.5% |
+| punctuation | 72 | 0 | 0 | 22 | 9 | 18.0% | 18.0% |
 | name | 528 | 3 | 0 | 144 | 0 | 0.0% | 0.0% |
-| usfm | 680 | 4 | 0 | 421 | 0 | 0.0% | 0.0% |
+| usfm | 680 | 4 | 0 | 421 | 64 | 24.4% | 24.3% |
 <!-- benchmark:end -->
 
 ## History
@@ -158,3 +166,4 @@ Per review bucket (recall counts only rows whose Original Tamil is found in the 
 | Date | Pack | Change | `tamil.vallinam-missing` strict precision / sandhi recall |
 |---|---|---|---|
 | 2026-09-24 | language-qa-7 | Phase 2 baseline, before any rule change. **The gate fails:** the only inline rule reaches 37.9% strict precision; 77 of its 193 false positives fall on confirmed house forms. | 37.9% / 6.8% |
+| 2026-09-24 | language-qa-7+ta-irv@1.0.0 | Phase 3: rules move into the `ta-irv` pack; B1/B2 split into four vallinam rules with corpus abstains (house forms, root nouns, clitics); one wrong-consonant rule and five IRV defect-shape rules added. House-form false positives on the demonstrative rule fall from 77 to 13. **The gate passes on sign-offs, not on the 90% floor:** the maintainer signed off every vallinam rule for inline display at its measured precision (docs/DECISIONS.md). The column is now the best vallinam rule. | 55.0% (accusative; demonstrative 41.2%) / 28.3% |

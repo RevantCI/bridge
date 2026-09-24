@@ -15,8 +15,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import terminology
+from .language_packs import default_pack, load_project_overrides, loaded_pack
+from .language_packs.loader import apply_overrides
 from .language_qa import (CROSSING_LIMITATION, FINDING_SOURCE, INLINE_RULES, MAX_VERSE_CHARS, MAX_WORDLIST_TERMS,
-                          rule_fields, suggestion,
+                          inline_rule_names, rule_fields, suggestion,
                           RULE_VERSION, detect_language, lift_inline_usfm, scan_text,
                           stable_finding_id, word_occurrences, wordlist_findings)
 
@@ -35,6 +37,20 @@ def _may_concern_language_qa(decision: dict[str, Any]) -> bool:
     if not isinstance(issue, dict) or "source" not in issue:
         return True
     return issue["source"] == FINDING_SOURCE
+
+
+# The rule pack's listRef lists. Phase 6 fills these from the project's house
+# style; until then they are empty, so a proper-noun abstain never fires.
+HOUSE_STYLE_LISTS: dict[str, frozenset] = {"housestyle.properNouns": frozenset()}
+
+
+def project_rule_pack(project_path: str | Path) -> tuple[Any, list[str]]:
+    """The bundled ta-irv pack narrowed by the project's overrides, and any
+    notes about overrides that were refused or unreadable."""
+    base = default_pack()
+    overrides, problems = load_project_overrides(project_path)
+    pack = apply_overrides(base, overrides)
+    return pack, [f"Rule pack: {p}" for p in problems + pack.problems]
 
 
 MAX_FALSE_POSITIVES = 500
@@ -59,8 +75,15 @@ def decision_effect(finding: dict[str, Any], decision: dict[str, Any] | None) ->
     if not decision or str(decision.get("decision", "")) not in SUPPRESSING_DECISIONS:
         return None
     issue = decision.get("issue") if isinstance(decision.get("issue"), dict) else {}
-    pack = issue.get("packVersion", issue.get("ruleVersion"))
+    pack = issue.get("packVersion")
     revision = issue.get("ruleRevision")
+    legacy = issue.get("ruleVersion")
+    if pack is None and isinstance(legacy, str):
+        # Only the legacy field: before Phase 1 it was the pack version alone
+        # ("language-qa-6"); for a pack rule it is "<pack>@<version>#<revision>".
+        pack, _, rev = legacy.rpartition("#") if "#" in legacy else (legacy, "", "")
+        if revision is None and rev.isdigit():
+            revision = int(rev)
     if pack is not None and pack != finding.get("packVersion"):
         return "recheck"
     if revision is not None and revision != finding.get("ruleRevision"):
@@ -108,6 +131,16 @@ class LanguageQaManager:
 
     def touch(self) -> None:
         self._foreground = time.monotonic()
+
+    def _inline_rules(self) -> list[str]:
+        """The rule names drawn inline for this project: from the current pass
+        (its project-narrowed pack), else the bundled pack's once loaded. A
+        request never loads the pack itself: before the first pass has it,
+        no pack finding exists yet, so the non-pack rules are the answer."""
+        if self._summary.get("inlineRules"):
+            return self._summary["inlineRules"]
+        pack = loaded_pack()
+        return inline_rule_names(pack) if pack is not None else sorted(INLINE_RULES)
 
     def bind(self, project: Any, *, blocked_reason: str = "") -> None:
         target = project.manifest.get("target_language", {})
@@ -232,7 +265,7 @@ class LanguageQaManager:
                     self._schedule()
 
     def inline(self, *, chapter: str | None = None) -> dict[str, Any]:
-        """Every finding of an INLINE_RULES rule, for one chapter or the whole
+        """Every finding drawn inline (its `inline` flag), for one chapter or the whole
         book -- not paged. The verse marks are drawn from this; status() is a
         page for the panel's list, and a page cannot back marks (a book with
         more findings than one page lost marks past it). Still bounded: the
@@ -252,7 +285,7 @@ class LanguageQaManager:
                 "generation": self._generation,
                 "state": self._summary.get("state", "idle"),
                 "ruleVersion": RULE_VERSION, "chapter": wanted,
-                "inlineRules": sorted(INLINE_RULES), "findings": findings,
+                "inlineRules": self._inline_rules(), "findings": findings,
             })
 
     def status(self, *, offset: int = 0, limit: int = 0, view: str = "findings") -> dict[str, Any]:
@@ -278,7 +311,7 @@ class LanguageQaManager:
                 "projectPath": self._context[0] if self._context else "",
                 "book": self._context[1] if self._context else "",
                 "generation": self._generation, "ruleVersion": RULE_VERSION,
-                "inlineRules": sorted(INLINE_RULES),
+                "inlineRules": self._inline_rules(),
                 "totalFindings": len(findings), "offset": offset,
                 "findings": findings[offset:offset + limit],
                 "coverage": "Enabled technical checks only; no grammar or publication certification.",
@@ -399,9 +432,18 @@ class LanguageQaManager:
         # changing must invalidate every cached chapter's findings the same
         # way an edited chapter would, even though the chapter's own text is
         # untouched.
+        # The rule pack, narrowed by this project's overrides (only narrowing is
+        # accepted; refusals become coverage notes). Its fingerprint joins the
+        # cache key, so an override takes effect on the next pass.
+        rule_pack, pack_problems = project_rule_pack(context[0])
+        limitations.extend(pack_problems)
+        with self._lock:
+            if self._cancelled(generation):
+                return None
+            self._summary["inlineRules"] = inline_rule_names(rule_pack)
         termbase_version = hashlib.sha1(
             json.dumps(raw_terms, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
-        ).hexdigest()
+        ).hexdigest() + "|" + rule_pack.fingerprint()
         # Only decisions that can be about a Language QA finding bust every
         # chapter: those whose issue says "languageQa", plus legacy rows
         # recorded before verse.decide stamped a source at all. A Greek Room
@@ -445,7 +487,8 @@ class LanguageQaManager:
                             chapter_result["skipped"] += 1
                             continue
                         result = scan_text(text, book=book, chapter=path.stem, verse=verse,
-                                           tamil=detection["pack"] == "tamil")
+                                           tamil=detection["pack"] == "tamil", pack=rule_pack,
+                                           lists=HOUSE_STYLE_LISTS)
                         verse_limitations = list(result["limitations"])
                         verse_findings: list[dict[str, Any]] = []
                         if not result["checked"]:
@@ -571,7 +614,8 @@ class LanguageQaManager:
                 return None
             self._cache = cache
         return {"state": "completed", "language": detection, "findings": findings,
-                "falsePositives": false_positives,
+                "falsePositives": false_positives, "inlineRules": inline_rule_names(rule_pack),
+                "rulePack": rule_pack.pack_version,
                 "recheckCount": sum(1 for f in findings if f.get("previouslyIgnored")),
                 "limitations": limitations, "incomplete": bool(limitations or skipped),
                 "checkedVerses": checked, "skippedVerses": skipped,

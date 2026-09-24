@@ -1,0 +1,152 @@
+{
+ "id": "typo.divine-name.dative-stem",
+ "version": 1,
+ "category": "typo",
+ "severity": "high",
+ "confidence": "high",
+ "inline": false,
+ "title": {
+  "ta": "யெகோவா — நான்காம் வேற்றுமை அடி",
+  "en": "Divine name: dative stem"
+ },
+ "message": {
+  "en": "\"{span}\" builds the dative without the -வு- stem; \"{fix}\" is expected. Verify before editing."
+ },
+ "rationale": "The dative of யெகோவா is யெகோவாவுக்கு",
+ "match": {
+  "type": "regex",
+  "on": "visible",
+  "pattern": "யெகோவாக்க"
+ },
+ "fix": {
+  "type": "replace",
+  "text": "யெகோவாவுக்க"
+ },
+ "provenance": "Known IRV defect shape (Round 2). IRV: யெகோவாக்க 13.",
+ "examples": {
+  "incorrect": [
+   {
+    "text": "அநேகம் பேர் யெகோவாக்கென்று எருசலேமுக்குக் காணிக்கைகளையும்,",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "2CH 32:23 (also in the review reports)"
+   },
+   {
+    "text": "கூட வந்து யெகோவாக்காக எனக்கு இருக்கிற",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "2KI 10:16 (also in the review reports)"
+   },
+   {
+    "text": "மகனுக்காக முழுவதும் யெகோவாக்கென்று நியமித்தேன்; இப்போதும்",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "JDG 17:3 (also in the review reports)"
+   },
+   {
+    "text": "யெகோவாக்கென்று சீட்டு விழுந்த",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "LEV 16:9 (also in the review reports)"
+   },
+   {
+    "text": "தன்னுடைய விரதநாட்களை யெகோவாக்கென்று காத்து, ஒரு",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "NUM 6:12 (also in the review reports)"
+   },
+   {
+    "text": "போன படைவீரர்களிடத்தில் யெகோவாக்காக மனிதர்களிலும், மாடுகளிலும்,",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "NUM 31:28 (also in the review reports)"
+   },
+   {
+    "text": "கூடாது; இது யெகோவாக்கென்று உனக்குப் பரிசுத்தமாக",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "EXO 30:37 (also in the review reports)"
+   },
+   {
+    "text": "வெள்ளாட்டுக்கடாக்களையும் குறித்து யெகோவாக்கென்று ஒரு சீட்டும்,",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "LEV 16:8 (also in the review reports)"
+   },
+   {
+    "text": "உங்கள் வீடுகளிலிருந்து யெகோவாக்கென்று முதற்பலனாகக் கொண்டுவந்து,",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "LEV 23:17 (also in the review reports)"
+   },
+   {
+    "text": "ஆணோ பெண்ணோ யெகோவாக்கென்று விரதம் செய்து",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "NUM 6:2 (also in the review reports)"
+   },
+   {
+    "text": "மக்களை நோக்கி: யெகோவாக்காக மீதியானியர்களிடம் பழிவாங்கத்தக்க,",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "NUM 31:3 (also in the review reports)"
+   },
+   {
+    "text": "சேனைகளின் தேவனாகிய யெகோவாக்காக மிகவும் பக்திவைராக்கியமாக",
+    "span": "யெகோவாக்க",
+    "fix": "யெகோவாவுக்க",
+    "origin": "1KI 19:10"
+   }
+  ],
+  "correct": [
+   {
+    "text": "தேவனாகிய யெகோவாவுக்கு முன்பாக",
+    "origin": "GEN 3:8 (correct form)"
+   },
+   {
+    "text": "கொண்டு யெகோவாவுக்கு ஆராதனை",
+    "origin": "EXO 10:26 (correct form)"
+   },
+   {
+    "text": "அது யெகோவாவுக்குப் பரிசுத்தமானது;",
+    "origin": "EXO 31:15 (correct form)"
+   },
+   {
+    "text": "எடுத்து, யெகோவாவுக்குத் தகனபலியாகச்",
+    "origin": "LEV 3:15 (correct form)"
+   },
+   {
+    "text": "அவர்கள் யெகோவாவுக்குப் படைக்கிற",
+    "origin": "LEV 22:15 (correct form)"
+   },
+   {
+    "text": "வயலை யெகோவாவுக்குப் பரிசுத்தம்",
+    "origin": "LEV 27:22 (correct form)"
+   },
+   {
+    "text": "செய்ய, யெகோவாவுக்குக் கொடுக்கப்பட்ட",
+    "origin": "NUM 18:6 (correct form)"
+   },
+   {
+    "text": "நாட்கள் யெகோவாவுக்குப் பண்டிகை",
+    "origin": "NUM 29:12 (correct form)"
+   },
+   {
+    "text": "நீங்கள் யெகோவாவுக்கு விரோதமாகக்",
+    "origin": "DEU 9:24 (correct form)"
+   },
+   {
+    "text": "அது யெகோவாவுக்கு முன்பாக",
+    "origin": "DEU 24:4 (correct form)"
+   },
+   {
+    "text": "கொண்டு, யெகோவாவுக்குக் கோபமூட்டினார்கள்.",
+    "origin": "JDG 2:12 (correct form)"
+   },
+   {
+    "text": "தினம் யெகோவாவுக்குச் சர்வாங்கதகனங்களைச்",
+    "origin": "1SA 6:15 (correct form)"
+   }
+  ]
+ }
+}

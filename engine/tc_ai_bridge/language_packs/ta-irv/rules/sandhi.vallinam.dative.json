@@ -1,0 +1,219 @@
+{
+ "id": "sandhi.vallinam.dative",
+ "version": 1,
+ "legacyId": "tamil.vallinam-missing",
+ "category": "sandhi",
+ "severity": "medium",
+ "confidence": "medium",
+ "inline": true,
+ "title": {
+  "ta": "வல்லினம் மிகுதல் — நான்காம் வேற்றுமை",
+  "en": "Vallinam doubling after the dative -க்கு"
+ },
+ "message": {
+  "en": "Possible missing வல்லினம் at this word boundary: \"{prev} {initial}...\" normally takes \"{prev}{initial}் {initial}...\". Verify before editing."
+ },
+ "rationale": "\"{prev}\" before a {initial}-initial word takes the linking {initial}்",
+ "match": {
+  "type": "token-context",
+  "prev": {
+   "suffix": "க்கு$",
+   "minLength": 4,
+   "notLexical": [
+    "அபிமெலேக்கு",
+    "அமலேக்கு",
+    "ஈசாக்கு",
+    "எலிமெலேக்கு",
+    "ஏனோக்கு",
+    "கணக்கு",
+    "கிரேக்கு",
+    "கிழக்கு",
+    "குத்துவிளக்கு",
+    "சந்ததிகளுக்கு",
+    "சபைக்கு",
+    "சிலைகளுக்கு",
+    "தூக்கு",
+    "தூணுக்கு",
+    "நீதிமானுக்கு",
+    "பள்ளத்தாக்கு",
+    "மெல்கிசேதேக்கு",
+    "யோபுக்கு",
+    "வடக்கு",
+    "வழக்கு",
+    "வாக்கு",
+    "வானராணிக்கு",
+    "விளக்கு",
+    "வெள்ளப்பெருக்கு"
+   ]
+  },
+  "gap": "whitespace",
+  "next": {
+   "initial": [
+    "க",
+    "ச",
+    "த",
+    "ப"
+   ]
+  },
+  "link": "none"
+ },
+ "abstain": [
+  {
+   "next": {
+    "lexical": [
+     "தான்",
+     "கூட",
+     "மட்டும்",
+     "ஆவது",
+     "போல",
+     "என்று",
+     "என",
+     "எனும்"
+    ]
+   },
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form; see sandhi.clitic.fused."
+  },
+  {
+   "next": {
+    "listRef": "housestyle.properNouns"
+   },
+   "origin": "A proper noun after the trigger: the project's house-style name list (Phase 6). Empty until then; the names adapter's majority forms were evaluated as a seed and rejected (BUILD_LOG, Phase 3)."
+  }
+ ],
+ "fix": {
+  "type": "insert-link"
+ },
+ "provenance": "Generalises B3 (three datives) to the -க்கு ending. notLexical is (1) root nouns and names in -க்கு, 16 words shown by a locative in -க்கில் or a dative -க்குக்கு (கிழக்கு -> கிழக்கில், விளக்கு, வழக்கு, ஈசாக்கு, அபிமெலேக்கு); a real dative has neither (no எனக்கில்); (2) IRV's bare-majority -க்கு words (bare/doubled): கிழக்கு 34/9; வடக்கு 14/3; ஈசாக்கு 13/0; சபைக்கு 7/6; அபிமெலேக்கு 6/0; நீதிமானுக்கு 4/2; கிரேக்கு 3/0; யோபுக்கு 3/0; வானராணிக்கு 3/2; சந்ததிகளுக்கு 2/1; சிலைகளுக்கு 2/1; தூணுக்கு 2/1; பள்ளத்தாக்கு 2/1; (3) the names IRV_Pass3_Handoff.md §5 lists as nominatives. -ற்கு is a different ending and is not matched.",
+ "inlineSignOff": {
+  "by": "maintainer (session of 2026-09-24)",
+  "date": "2026-09-24",
+  "reason": "Maintainer sign-off 2026-09-24: keep all வல்லினம் rules inline; false positives are handled by Ignore and learned from (Phase 6). Precision is agreement with the minority-form AI review, not verified accuracy.",
+  "precisionStrict": 0.4975
+ },
+ "examples": {
+  "incorrect": [
+   {
+    "text": "சவுல் யெகோவாவுடைய வார்த்தைக்கு கீழ்ப்படியாமல், யெகோவாவுக்குச் செய்த",
+    "span": "வார்த்தைக்கு கீழ்ப்படியாமல்",
+    "fix": "வார்த்தைக்குக் கீழ்ப்படியாமல்",
+    "origin": "1CH 10:13 (also in the review reports)"
+   },
+   {
+    "text": "பகூரிம் வரை அவளுக்கு பின்னே அழுது கொண்டு",
+    "span": "அவளுக்கு பின்னே",
+    "fix": "அவளுக்குப் பின்னே",
+    "origin": "2SA 3:16 (also in the review reports)"
+   },
+   {
+    "text": "இன்று நான் உனக்கு கொடுக்கிற உன் தேவனாகிய",
+    "span": "உனக்கு கொடுக்கிற",
+    "fix": "உனக்குக் கொடுக்கிற",
+    "origin": "DEU 28:1 (also in the review reports)"
+   },
+   {
+    "text": "போகும் என்பதை ராஜாவுக்கு தெரியப்படுத்துகிறோம் என்று எழுதி",
+    "span": "ராஜாவுக்கு தெரியப்படுத்துகிறோம்",
+    "fix": "ராஜாவுக்குத் தெரியப்படுத்துகிறோம்",
+    "origin": "EZR 4:16 (also in the review reports)"
+   },
+   {
+    "text": "கொடுத்தார்; அவனுடைய தளபதிக்கு சிசெரா என்று பெயர்;",
+    "span": "தளபதிக்கு சிசெரா",
+    "fix": "தளபதிக்குச் சிசெரா",
+    "origin": "JDG 4:2 (also in the review reports)"
+   },
+   {
+    "text": "யெகோவா இஸ்ரவேல் மக்களுக்கு கொடுத்த தேசத்திற்கு அவர்கள்",
+    "span": "மக்களுக்கு கொடுத்த",
+    "fix": "மக்களுக்குக் கொடுத்த",
+    "origin": "NUM 32:7 (also in the review reports)"
+   },
+   {
+    "text": "நீர் எனக்கு சாப்பிட உணவையும், குடிக்கத்",
+    "span": "எனக்கு சாப்பிட",
+    "fix": "எனக்குச் சாப்பிட",
+    "origin": "DEU 2:29 (also in the review reports)"
+   },
+   {
+    "text": "அதற்கு எப்பெரோன் ஆபிரகாமுக்கு பதிலாக:",
+    "span": "ஆபிரகாமுக்கு பதிலாக",
+    "fix": "ஆபிரகாமுக்குப் பதிலாக",
+    "origin": "GEN 23:14 (also in the review reports)"
+   },
+   {
+    "text": "படைப்பாக ஆசாரியனாகிய எலெயாசாருக்கு கொடுக்க வேண்டும்.",
+    "span": "எலெயாசாருக்கு கொடுக்க",
+    "fix": "எலெயாசாருக்குக் கொடுக்க",
+    "origin": "NUM 31:29 (also in the review reports)"
+   },
+   {
+    "text": "களத்திலே யெகோவா தனக்கு பதில் சொன்னதை தாவீது",
+    "span": "தனக்கு பதில்",
+    "fix": "தனக்குப் பதில்",
+    "origin": "1CH 21:28"
+   },
+   {
+    "text": "தனக்கு தீங்கு செய்யச் சவுல்",
+    "span": "தனக்கு தீங்கு",
+    "fix": "தனக்குத் தீங்கு",
+    "origin": "1SA 23:9"
+   },
+   {
+    "text": "அபியத்தார் என்னும் ஆசாரியர்களுக்கு தெரியப்படுத்து.",
+    "span": "ஆசாரியர்களுக்கு தெரியப்படுத்து",
+    "fix": "ஆசாரியர்களுக்குத் தெரியப்படுத்து",
+    "origin": "2SA 15:35"
+   }
+  ],
+  "correct": [
+   {
+    "text": "உருவாக்கி, ஆகாயவிரிவுக்குக் கீழே இருக்கிற",
+    "origin": "GEN 1:7 (correctly linked)"
+   },
+   {
+    "text": "இறந்து, பெத்தேலுக்குச் சமீபமாயிருந்த ஒரு",
+    "origin": "GEN 35:8 (correctly linked)"
+   },
+   {
+    "text": "நான் உனக்குக் கட்டளையிட்டபடி ஆபீப்",
+    "origin": "EXO 23:15 (correctly linked)"
+   },
+   {
+    "text": "இஸ்ரவேலில் ஆயிரம்பேர்களுக்குத் தலைவர்களுமாக இருப்பவர்கள்",
+    "origin": "NUM 1:16 (correctly linked)"
+   },
+   {
+    "text": "மலைநாட்டை ஏசாவுக்குச் சொந்தமாகக் கொடுத்திருக்கிறேன்.",
+    "origin": "DEU 2:5 (correctly linked)"
+   },
+   {
+    "text": "நான் உங்களுக்குக் கட்டளையிட்டபடி அந்தக்",
+    "origin": "DEU 27:4 (correctly linked)"
+   },
+   {
+    "text": "எபிரோனைக் காலேபுக்குக் கொடுத்தார்கள்; அவன்",
+    "origin": "JDG 1:20 (correctly linked)"
+   },
+   {
+    "text": "இஸ்ரவேல் கோத்திரங்களுக்குத் தலைவரானீர்; யெகோவா",
+    "origin": "1SA 15:17 (correctly linked)"
+   },
+   {
+    "text": "எனக்காகப் பழிக்குப் பழி வாங்கி,",
+    "origin": "2SA 22:48 (correctly linked)"
+   },
+   {
+    "text": "அதைக் கூட்டத்தாருக்குச் சாப்பிடக்கொடு; சாப்பிட்டப்",
+    "origin": "2KI 4:43 (correctly linked)"
+   },
+   {
+    "text": "தகப்பனாகிய தாவீதுக்குக் கொடுத்த உமது",
+    "origin": "2CH 1:9 (correctly linked)"
+   },
+   {
+    "text": "நீங்கள் மலைகளுக்குப் புறப்பட்டுப் போய்",
+    "origin": "NEH 8:15 (correctly linked)"
+   }
+  ]
+ }
+}

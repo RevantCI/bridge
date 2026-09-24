@@ -28,7 +28,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable
 
-from .language_qa import INLINE_RULES, PACK_VERSION, RULES
+from .language_qa import PACK_VERSION
 from .language_qa_jobs import LanguageQaManager
 from .project_import import BOOK_NAMES, imported_verse_text, parse_scripture_file
 
@@ -46,24 +46,23 @@ SCORED_TYPES = {
 }
 BUCKETS = ("typo", "sandhi", "punctuation", "name", "usfm")
 
-# Which review bucket a rule's finding can agree with. A finding that only
-# overlaps a row of another bucket is not a true positive for that rule.
-RULE_BUCKETS = {
-    "tamil.vallinam-missing": {"sandhi"},
-    "tamil.repeated-word": {"typo"},
-    "tamil.wordlist-variant": {"typo"},
-    "tamil.mixed-word": {"typo"},
-    "tamil.dependent-sign": {"typo"},
-    "unicode.corruption": {"typo"},
-    "unicode.nfc": {"typo"},
-    "unicode.private-use": {"typo"},
-    "unicode.invisible": {"typo"},
-    "spacing.extra": {"punctuation", "usfm"},
-    "spacing.unusual": {"punctuation"},
-    "punctuation.repeated": {"punctuation"},
-    "punctuation.space-before": {"punctuation", "usfm"},
-    "terminology.deprecated-form": {"name", "typo"},
+# Which review bucket a finding can agree with, by the finding's category. A
+# finding that only overlaps a row of another bucket is not a true positive.
+# Keyed by category, not rule, so a new pack rule is scored without an edit here.
+CATEGORY_BUCKETS = {
+    "sandhi": {"sandhi"},
+    "word-joining": {"sandhi"},
+    "typo": {"typo"},
+    "unicode": {"typo"},
+    "punctuation": {"punctuation", "usfm"},
+    "spacing": {"punctuation", "usfm"},
+    "termbase": {"name", "typo"},
+    "name": {"name"},
 }
+
+
+def finding_buckets(finding: dict[str, Any]) -> set[str]:
+    return CATEGORY_BUCKETS.get(finding.get("category", ""), set())
 
 # House forms the Pass 3 reviewers confirmed are NOT errors
 # (IRV_Pass3_Handoff.md, section 5, "Method notes carried forward"). A row
@@ -281,8 +280,7 @@ def score(rows: list[ReviewRow], scans: dict[str, dict[str, Any]],
     unmatched_findings: list[dict[str, Any]] = []
     for book, scan in scans.items():
         for finding in scan["findings"]:
-            rule = finding["rule"]
-            buckets = RULE_BUCKETS.get(rule, set())
+            buckets = finding_buckets(finding)
             candidates = [r for r in by_verse.get((book, finding["chapter"], finding["verse"]), [])
                           if r.bucket in buckets and _overlaps(finding["originalText"], r.original)]
             labels = {r.label for r in candidates}
@@ -290,6 +288,7 @@ def score(rows: list[ReviewRow], scans: dict[str, dict[str, Any]],
                 r.matched_by.append(finding["ruleId"])
             stats = per_rule[finding["ruleId"]]
             stats["findings"] += 1
+            stats["inline"] = int(bool(finding.get("inline")) or stats.get("inline", 0))
             if "negative" in labels:
                 stats["fp_strict"] += 1
                 stats["fp_lenient"] += 1
@@ -339,11 +338,15 @@ def score(rows: list[ReviewRow], scans: dict[str, dict[str, Any]],
 
     rule_keys = ("findings", "tp_strict", "fp_strict", "tp_lenient", "fp_lenient",
                  "matched_maybe", "matched_negative", "fp_house_form")
+    from .language_packs import default_pack
+    pack = default_pack()
     rules_out = {}
     for rule_id, stats in sorted(per_rule.items()):
+        pack_rule = pack.by_id(rule_id.split("/", 1)[1]) if rule_id.startswith(f"{pack.name}/") else None
         rules_out[rule_id] = {
             **{key: stats.get(key, 0) for key in rule_keys},
-            "inline": rule_id.split("/", 1)[-1] in INLINE_RULES,
+            "inline": bool(stats.get("inline")),
+            "signOff": pack_rule.sign_off if pack_rule is not None else None,
             "precision_strict": ratio(stats["tp_strict"], stats["tp_strict"] + stats["fp_strict"]),
             "precision_lenient": ratio(stats["tp_lenient"], stats["tp_lenient"] + stats["fp_lenient"]),
         }
@@ -359,7 +362,7 @@ def score(rows: list[ReviewRow], scans: dict[str, dict[str, Any]],
         }
     labels = Counter((r.label, r.family) for r in rows)
     return {
-        "packVersion": PACK_VERSION,
+        "packVersion": pack_version_label(),
         "books": sorted(books),
         "rows": {"total": len(rows), **{f"{label}/{family}": n for (label, family), n in sorted(labels.items())}},
         "outOfScope": dict(Counter(r.issue_type for r in rows if r.label == "out-of-scope" and r.book in books)),
@@ -405,15 +408,25 @@ def markdown_tables(result: dict[str, Any]) -> str:
 def gate(result: dict[str, Any], baseline: dict[str, Any] | None, *,
          inline_min_precision: float = 0.90, max_drop: float = 0.02, min_findings: int = 10) -> list[str]:
     """Failures, empty when the gate passes:
-    - an inline rule below `inline_min_precision` (strict);
+    - an inline rule below `inline_min_precision` (strict), unless the
+      maintainer signed it off for inline display (`signOff`), in which case
+      it fails only if it fell more than `max_drop` below the precision
+      recorded at sign-off;
     - any rule whose strict precision fell more than `max_drop` below the
       committed baseline (rules with fewer than `min_findings` findings in
       either run are too small to compare and are skipped)."""
     failures = []
     for rule_id, stats in result["rules"].items():
         precision = stats["precision_strict"]
+        sign_off = stats.get("signOff")
         if stats["inline"] and precision is not None and precision < inline_min_precision:
-            failures.append(f"{rule_id} is inline but strict precision is {_pct(precision)} (< {_pct(inline_min_precision)})")
+            if not sign_off:
+                failures.append(f"{rule_id} is inline but strict precision is {_pct(precision)} (< {_pct(inline_min_precision)})")
+            elif sign_off.get("precisionStrict") is None:
+                failures.append(f"{rule_id} is signed off for inline but the sign-off records no precision")
+            elif precision < sign_off["precisionStrict"] - max_drop:
+                failures.append(f"{rule_id} fell below its inline sign-off: {_pct(precision)} "
+                                f"< {_pct(sign_off['precisionStrict'])} - {max_drop * 100:.0f} points")
         before = (baseline or {}).get("rules", {}).get(rule_id)
         if before and precision is not None and before.get("precision_strict") is not None \
                 and stats.get("findings", 0) >= min_findings and before.get("findings", 0) >= min_findings \
@@ -466,5 +479,7 @@ def labelled_examples(rows: list[ReviewRow], verses: dict[str, dict[str, dict[st
     return out
 
 
-def load_rules_inline() -> dict[str, bool]:
-    return {f"{meta.pack}/{rule}": rule in INLINE_RULES for rule, meta in RULES.items()}
+def pack_version_label() -> str:
+    """Both versions a result depends on: the in-code rules and the ta-irv pack."""
+    from .language_packs import default_pack
+    return f"{PACK_VERSION}+{default_pack().pack_version}"
