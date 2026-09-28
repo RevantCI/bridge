@@ -15,7 +15,8 @@ from .adapters.names_adapter import NamesAdapter, NamesCheckError
 from .models.finding import QaFinding
 from .protocol import EngineRequest, EngineResponse, Methods
 
-ENGINE_VERSION = "0.11.0"
+# Kept in step with package.json by tests/service/test_version_consistency.py.
+ENGINE_VERSION = "0.12.0"
 
 
 class GreekRoomEngine:

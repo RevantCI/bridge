@@ -134,7 +134,8 @@ from triage_jobs import (
     TriageJobNotFound,
 )
 
-BRIDGE_VERSION = "0.11.0"
+# Kept in step with package.json by tests/service/test_version_consistency.py.
+BRIDGE_VERSION = "0.12.0"
 
 # tc_ai_bridge's QAIssue.severity strings -> our shared Severity enum
 _SEVERITY_MAP = {

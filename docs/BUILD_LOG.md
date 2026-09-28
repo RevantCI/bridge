@@ -9691,3 +9691,44 @@ sub-issues and 18 QA board items were read back, and `git diff --check` is clean
 apart from Git's existing LF→CRLF notices. No engine, frontend, Rust, frozen, or
 installed-app test was run because this work changes documentation and project
 tracking only.
+
+## 2026-09-28 — The release version is declared in five places (#170)
+
+Release 0.12.0 bumped `package.json`, `src-tauri/tauri.conf.json` and
+`src-tauri/Cargo.toml` but left `BRIDGE_VERSION` (`engine/bridge_service.py`)
+and `ENGINE_VERSION` (`engine/greek_room_engine/engine.py`) on `0.11.0`. Both
+are now `0.12.0`.
+
+**Why nothing caught it.** The only existing check is the frozen-pair smoke's
+version assertion, and `scripts/smoke_sidecars.py` is `continue-on-error` in
+`release.yml` because of the separate #130 `inspectImport` mismatch. So a release
+could go green carrying a sidecar that reported the previous version, and the
+first symptom was a smoke run that never reached its later steps.
+
+**The gate.** `engine/tests/service/test_version_consistency.py` treats
+`package.json` as the single source of truth — the same source the smoke script
+already compares the frozen engine against — and asserts the two Python constants
+and both Rust-side manifests agree with it, plus that each is a bare
+`MAJOR.MINOR.PATCH` string. It runs in the ordinary engine suite, so CI catches a
+half-applied bump on the pull request rather than at release time.
+
+**Blast radius, checked rather than assumed.** `BRIDGE_VERSION` is reported by
+`engine.info` and stamped as `engine_version` provenance on each `QaFinding`.
+It is *not* part of `_stable_finding_id()` (sha1 of
+`chapter:verse:engine:check_type:disambiguator`, where `engine` is the adapter
+name), so no saved decision is detached by the bump. The other `*_ENGINE_VERSION`
+constants in `tc_ai_bridge/` are pipeline-stage identifiers such as
+`bridge-meaning-analysis-v2`, not release numbers, and were deliberately left
+alone. `semantic_mapping.py`'s `3.0.1-stage3` is Stage 3's own and is untouched.
+
+**Found and not fixed here.** `project_import.py:505` writes
+`"generator": {"name": "Bridge", "build": "0.11.0"}` into every imported
+project's `manifest.json` — the same stale-literal bug, filed as #176 rather
+than folded in, because it changes what Bridge writes into a
+translationCore-compatible manifest rather than into a diagnostic response.
+Nothing reads `generator.build` today.
+
+**Verification.** The new file: 4 passed, and the gate was confirmed to actually
+fail by reverting `BRIDGE_VERSION` to `0.11.0` and watching it report the
+mismatch. `tests/service`: 145 passed. Frozen-pair smoke NOT rerun — that needs a
+PyInstaller rebuild, and #130 still fails it at a later step regardless.
