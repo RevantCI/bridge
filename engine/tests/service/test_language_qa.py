@@ -804,7 +804,8 @@ def vallinam_engine(fixture_project):
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
-    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம்  பறந்தது."})["success"]
+    # The dative rule: inline on its human precision, so the inline list sees it.
+    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அவனுக்கு பதில்  சொன்னான்."})["success"]
     finding = next(f for f in wait(engine._language_qa)["findings"] if f["rule"] == "tamil.vallinam-missing")
     yield engine, finding, fixture_project
     engine._language_qa.unbind()
@@ -898,7 +899,7 @@ def test_history_lists_every_decision_on_a_finding_in_order(vallinam_engine):
     assert [e["seq"] for e in entries] == sorted(e["seq"] for e in entries)
     assert entries[-1]["chosenSuggestion"] == chosen["text"] and entries[-1]["chosenRank"] == 1
     assert [e["revision"] for e in entries] == [1, 2, 3]
-    assert all(e["ruleId"] == "ta-irv/sandhi.vallinam.demonstrative" and e["recordedAt"] for e in entries)
+    assert all(e["ruleId"] == "ta-irv/sandhi.vallinam.dative" and e["recordedAt"] for e in entries)
     verse = call(engine, "languageQa.history", {"projectPath": str(project), "chapter": "1", "verse": "1"})
     assert {e["findingId"] for e in verse["result"]["entries"]} == {finding["id"]}
 
@@ -1260,13 +1261,14 @@ def test_book_limits_and_status_page_are_bounded(tmp_path):
 
 
 def _three_chapter_project(root, verses_per_chapter=60):
-    # Every verse yields one inline finding (tamil.vallinam-missing, "அந்த காகம்")
-    # and one panel-only finding (spacing.extra, the trailing double space), so
-    # the book holds 180 inline findings -- well past one 100-finding page.
-    project = project_at(root, verses={str(n): "அந்த காகம்  " for n in range(1, verses_per_chapter + 1)})
+    # Every verse yields one inline finding (the dative வல்லினம் rule,
+    # "அவனுக்கு பதில்", inline on its human precision) and one panel-only
+    # finding (spacing.extra, the trailing double space), so the book holds 180
+    # inline findings -- well past one 100-finding page.
+    project = project_at(root, verses={str(n): "அவனுக்கு பதில்  " for n in range(1, verses_per_chapter + 1)})
     for chapter in ("2", "3"):
         (project.book_dir / f"{chapter}.json").write_text(json.dumps(
-            {str(n): "அந்த காகம்  " for n in range(1, verses_per_chapter + 1)},
+            {str(n): "அவனுக்கு பதில்  " for n in range(1, verses_per_chapter + 1)},
             ensure_ascii=False), encoding="utf-8")
     return project
 
@@ -1298,11 +1300,12 @@ def test_inline_without_a_chapter_returns_the_whole_book_and_only_inline_rules(t
     assert all(f["inline"] for f in inline["findings"])
     assert {f["rule"] for f in inline["findings"]} <= set(inline_rule_names())
     assert inline["chapter"] is None
-    # The drawn rules: the in-code INLINE_RULES plus the pack's signed-off inline rules.
+    # The drawn rules: the in-code INLINE_RULES plus the pack's inline rules
+    # (inline on human-labelled precision, DECISIONS.md 2026-09-28).
     assert inline["inlineRules"] == inline_rule_names()
     assert manager.status()["inlineRules"] == inline_rule_names()
-    # The migrated வல்லினம் rules keep their legacy name; the new wrong-consonant rule has its own.
-    assert set(inline_rule_names()) == INLINE_RULES | {"tamil.vallinam-missing", "sandhi.vallinam.wrong-consonant"}
+    # The migrated வல்லினம் rules keep their legacy name.
+    assert set(inline_rule_names()) == INLINE_RULES | {"tamil.vallinam-missing"}
 
 
 def test_category_marks_match_the_engine():
@@ -1337,8 +1340,8 @@ def test_every_rule_has_valid_metadata_and_inline_flags_follow_the_engine_list()
     for pack_rule in default_pack().rules:
         assert pack_rule.layer in LAYERS and pack_rule.category in CATEGORIES, pack_rule.id
         assert pack_rule.confidence in CONFIDENCES, pack_rule.id
-        # Drawn inline only with the maintainer's recorded sign-off (the benchmark gate checks its floor).
-        assert not pack_rule.inline or pack_rule.sign_off, pack_rule.id
+        # Inline is decided by the human-label gate (language_qa_benchmark.human_gate), never a sign-off.
+        assert "inlineSignOff" not in pack_rule.source, pack_rule.id
 
 
 FINDING_FIELDS = {"id", "book", "chapter", "verse", "rule", "severity", "start", "end", "originalText",
@@ -1406,7 +1409,7 @@ def test_terminology_and_wordlist_findings_have_the_layered_shape(tmp_path):
 
 def test_inline_rpc_filters_on_the_findings_own_flag(tmp_path):
     manager = LanguageQaManager(debounce=0, yield_seconds=0)
-    manager.bind(project_at(tmp_path, verses={"1": "அந்த காகம்  பறந்தது"}))
+    manager.bind(project_at(tmp_path, verses={"1": "அவனுக்கு பதில்  சொன்னான்"}))
     wait(manager)
     assert [f["rule"] for f in manager.inline()["findings"]] == ["tamil.vallinam-missing"]
     assert all(f["inline"] for f in manager.inline()["findings"])
@@ -1417,7 +1420,7 @@ def test_inline_rpc_is_project_guarded_and_validates_chapter(fixture_project):
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     try:
         assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
-        assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]
+        assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அவனுக்கு பதில் சொன்னான்."})["success"]
         wait(engine._language_qa)
         path = str(fixture_project)
         assert not call(engine, "languageQa.inline", {"projectPath": "other", "chapter": "1"})["success"]
@@ -1425,7 +1428,7 @@ def test_inline_rpc_is_project_guarded_and_validates_chapter(fixture_project):
         response = call(engine, "languageQa.inline", {"projectPath": path, "chapter": "1"})
         assert response["success"]
         findings = response["result"]["findings"]
-        assert [f["originalText"] for f in findings] == ["அந்த காகம்"]
+        assert [f["originalText"] for f in findings] == ["அவனுக்கு பதில்"]
     finally:
         engine._language_qa.unbind()
 

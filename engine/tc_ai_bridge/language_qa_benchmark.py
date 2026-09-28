@@ -343,8 +343,6 @@ def score(rows: list[ReviewRow], scans: dict[str, dict[str, Any]],
 
     rule_keys = ("findings", "tp_strict", "fp_strict", "tp_lenient", "fp_lenient",
                  "matched_maybe", "matched_negative", "fp_house_form")
-    from .language_packs import default_pack
-    pack = default_pack()
     rules_out = {}
     # Findings a project's house style hid (--housestyle): reported, not scored,
     # so a learned entry can never raise a rule's precision silently.
@@ -354,11 +352,9 @@ def score(rows: list[ReviewRow], scans: dict[str, dict[str, Any]],
     for rule_id in suppressed:
         per_rule.setdefault(rule_id, Counter())
     for rule_id, stats in sorted(per_rule.items()):
-        pack_rule = pack.by_id(rule_id.split("/", 1)[1]) if rule_id.startswith(f"{pack.name}/") else None
         rules_out[rule_id] = {
             **{key: stats.get(key, 0) for key in rule_keys},
             "inline": bool(stats.get("inline")),
-            "signOff": pack_rule.sign_off if pack_rule is not None else None,
             "suppressedByHouseStyle": suppressed.get(rule_id, 0),
             "precision_strict": ratio(stats["tp_strict"], stats["tp_strict"] + stats["fp_strict"]),
             "precision_lenient": ratio(stats["tp_lenient"], stats["tp_lenient"] + stats["fp_lenient"]),
@@ -423,27 +419,16 @@ def markdown_tables(result: dict[str, Any]) -> str:
 
 
 def gate(result: dict[str, Any], baseline: dict[str, Any] | None, *,
-         inline_min_precision: float = 0.90, max_drop: float = 0.02, min_findings: int = 10) -> list[str]:
-    """Failures, empty when the gate passes:
-    - an inline rule below `inline_min_precision` (strict), unless the
-      maintainer signed it off for inline display (`signOff`), in which case
-      it fails only if it fell more than `max_drop` below the precision
-      recorded at sign-off;
-    - any rule whose strict precision fell more than `max_drop` below the
-      committed baseline (rules with fewer than `min_findings` findings in
-      either run are too small to compare and are skipped)."""
+         max_drop: float = 0.02, min_findings: int = 10) -> list[str]:
+    """The AI-agreement gate, diagnostic only: failures when a rule's strict
+    precision fell more than `max_drop` below the committed baseline (rules
+    with fewer than `min_findings` findings in either run are too small to
+    compare and are skipped). Agreement with the AI review is a lower bound,
+    not accuracy, so it never decides inline; human_gate() does
+    (DECISIONS.md, 2026-09-28)."""
     failures = []
     for rule_id, stats in result["rules"].items():
         precision = stats["precision_strict"]
-        sign_off = stats.get("signOff")
-        if stats["inline"] and precision is not None and precision < inline_min_precision:
-            if not sign_off:
-                failures.append(f"{rule_id} is inline but strict precision is {_pct(precision)} (< {_pct(inline_min_precision)})")
-            elif sign_off.get("precisionStrict") is None:
-                failures.append(f"{rule_id} is signed off for inline but the sign-off records no precision")
-            elif precision < sign_off["precisionStrict"] - max_drop:
-                failures.append(f"{rule_id} fell below its inline sign-off: {_pct(precision)} "
-                                f"< {_pct(sign_off['precisionStrict'])} - {max_drop * 100:.0f} points")
         before = (baseline or {}).get("rules", {}).get(rule_id)
         if before and precision is not None and before.get("precision_strict") is not None \
                 and stats.get("findings", 0) >= min_findings and before.get("findings", 0) >= min_findings \
@@ -500,3 +485,244 @@ def pack_version_label() -> str:
     """Both versions a result depends on: the in-code rules and the ta-irv pack."""
     from .language_packs import default_pack
     return f"{PACK_VERSION}+{default_pack().pack_version}"
+
+
+# ---- human-labelled precision (2026-09-28 review) -------------------------
+#
+# A Tamil reviewer labelled a stratified sample of the engine's own findings
+# on GEN, PSA and JHN (benchmark/human/<date>/human_labels.jsonl). Those
+# verdicts are ground truth; the AI-agreement numbers above are diagnostic
+# only. A rule may be drawn inline only on its human number
+# (docs/DECISIONS.md, 2026-09-28).
+
+HUMAN_INLINE_MIN_PRECISION = 0.90
+HUMAN_INLINE_MIN_LABELLED = 20
+HUMAN_EXCLUDED = {None, "", "UNSURE"}   # unanswered or "unsure": never scored
+_COUNTS = ("labelled", "tp", "fp", "house", "lost_tp", "removed_fp", "removed_house", "reattributed", "excluded")
+
+
+def human_verdict(code: str | None) -> str | None:
+    """"tp" | "fp" | "house" for a scored verdict; None when excluded."""
+    if code in HUMAN_EXCLUDED:
+        return None
+    if code.startswith("TP"):
+        return "tp"
+    if code.startswith("FP"):
+        return "fp"
+    if code == "HOUSE":
+        return "house"
+    return None
+
+
+def load_human_labels(path: Path) -> list[dict[str, Any]]:
+    with Path(path).open(encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def human_verses_path(labels_path: Path) -> Path:
+    return Path(labels_path).with_name("verses.jsonl")
+
+
+def load_human_verses(path: Path) -> dict[str, dict[str, dict[str, str]]]:
+    """book -> chapter -> verse -> text, as an import writes it."""
+    verses: dict[str, dict[str, dict[str, str]]] = defaultdict(lambda: defaultdict(dict))
+    with Path(path).open(encoding="utf-8") as handle:
+        for line in handle:
+            if line.strip():
+                row = json.loads(line)
+                verses[row["book"]][row["chapter"]][row["verse"]] = row["text"]
+    return {book: dict(chapters) for book, chapters in verses.items()}
+
+
+def human_label_verses(labels: list[dict[str, Any]], irv_dir: Path) -> list[dict[str, str]]:
+    """The imported text of every verse a label points at, from the IRV SFM,
+    so the human gate can run where the corpus is not available (CI)."""
+    wanted = sorted({(r["book"], r["ch"], r["v"]) for r in labels if r.get("book")},
+                    key=lambda k: (k[0], int(k[1]), k[2]))
+    books = {w[0] for w in wanted}
+    by_book: dict[str, dict[str, dict[str, str]]] = {}
+    for sfm in sorted(Path(irv_dir).glob("*.SFM")):
+        book, chapters = book_verses(sfm)
+        if book in books:
+            by_book[book] = chapters
+    out = []
+    for book, chapter, verse in wanted:
+        text = by_book.get(book, {}).get(chapter, {}).get(verse)
+        if text is None:
+            raise ValueError(f"{book.upper()} {chapter}:{verse} is not in {irv_dir}")
+        out.append({"book": book, "chapter": chapter, "verse": verse, "text": text})
+    return out
+
+
+def _anchor(label: dict[str, Any], text: str) -> tuple[int, int] | None:
+    """The label's span in the verse. Offsets are raw code points from the
+    engine that produced it; a pair across a poetry line has none (-1), and
+    is anchored at its previous word."""
+    start, end = label.get("start", -1), label.get("end", -1)
+    if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(text):
+        return start, end
+    for needle in (label.get("original") or "", label.get("prev") or ""):
+        at = nfc(text).find(nfc(needle)) if needle else -1
+        if at >= 0:
+            return at, at + len(nfc(needle))
+    return None
+
+
+def human_score(labels: list[dict[str, Any]], scans: dict[str, dict[str, Any]],
+                verses: dict[str, dict[str, dict[str, str]]]) -> dict[str, Any]:
+    """Score the current findings against the reviewer's verdicts.
+
+    - Flagged rows (the findings the reviewer judged): a current finding at
+      exactly the label's book/chapter/verse/start/end, with the same text
+      (NFC), is credited to the finding's own rule as TP, FP or house form.
+      Precision = TP / (TP + FP) over labelled findings only; house forms are
+      reported apart. A labelled finding the engine no longer produces is
+      counted as lost (a TP) or removed (an FP or a house form).
+    - Abstained rows (contexts the pack skipped on purpose): recall proxies
+      per class -- whether a sandhi finding now overlaps the pair. They are
+      proxies, not recall: the sample is of the abstains, not of the text."""
+    findings_at: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for book, scan in scans.items():
+        for finding in scan["findings"]:
+            findings_at[(book, finding["chapter"], finding["verse"])].append(finding)
+    rules: dict[str, Counter] = defaultdict(Counter)
+    proxies: dict[str, Counter] = defaultdict(Counter)
+    mismatches: list[str] = []
+    for label in labels:
+        kind = label.get("kind")
+        if kind not in {"flagged", "abstained"}:
+            continue  # word rows (sheet 3) judge list membership, not a finding
+        where = f"{label['id']} {label['book'].upper()} {label['ch']}:{label['v']}"
+        text = verses.get(label["book"], {}).get(label["ch"], {}).get(label["v"])
+        if text is None:
+            mismatches.append(f"{where}: verse not available")
+            continue
+        here = findings_at.get((label["book"], label["ch"], label["v"]), [])
+        if kind == "flagged":
+            verdict = human_verdict(label.get("verdict"))
+            if verdict is None:
+                rules[label["rule"]]["excluded"] += 1
+                continue
+            span = (label["start"], label["end"])
+            if nfc(text[span[0]:span[1]]) != nfc(label["original"]):
+                mismatches.append(f"{where}: label text does not match the verse at {span}")
+                continue
+            hit = next((f for f in here if (f["start"], f["end"]) == span
+                        and nfc(f["originalText"]) == nfc(label["original"])), None)
+            if hit is None:
+                rules[label["rule"]][{"tp": "lost_tp", "fp": "removed_fp", "house": "removed_house"}[verdict]] += 1
+                continue
+            stats = rules[hit["ruleId"]]
+            stats["labelled"] += 1
+            stats[verdict] += 1
+            if hit["ruleId"] != label["rule"]:
+                stats["reattributed"] += 1
+        else:
+            key = {"MISSED": "missed", "CORRECT_SKIP": "correct_skip", "HOUSE": "house"}.get(label.get("verdict"))
+            stats = proxies[label.get("cls") or "unknown"]
+            if key is None:
+                stats["excluded"] += 1
+                continue
+            anchor = _anchor(label, text)
+            stats[key] += 1
+            if anchor is not None and any(
+                    f.get("category") in {"sandhi", "word-joining"} and f["start"] < anchor[1] and anchor[0] < f["end"]
+                    for f in here):
+                stats[f"{key}_now_flagged"] += 1
+
+    def ratio(numerator: int, denominator: int) -> float | None:
+        return round(numerator / denominator, 4) if denominator else None
+
+    inline = human_inline_rules()
+    for rule_id in inline:
+        rules.setdefault(rule_id, Counter())
+    rules_out = {}
+    for rule_id, s in sorted(rules.items()):
+        rules_out[rule_id] = {**{k: s.get(k, 0) for k in _COUNTS},
+                              "precision": ratio(s["tp"], s["tp"] + s["fp"]), "inline": rule_id in inline}
+    proxies_out = {}
+    for cls, s in sorted(proxies.items()):
+        proxies_out[cls] = {
+            **{k: s.get(k, 0) for k in ("missed", "missed_now_flagged", "correct_skip",
+                                        "correct_skip_now_flagged", "house", "house_now_flagged", "excluded")},
+            "still_missed_rate": ratio(s["missed"] - s["missed_now_flagged"],
+                                       s["missed"] + s["correct_skip"] + s["house"]),
+        }
+    return {"packVersion": pack_version_label(), "labels": len(labels),
+            "books": sorted(scans), "rules": rules_out, "recallProxies": proxies_out,
+            "mismatches": mismatches}
+
+
+def human_inline_rules() -> set[str]:
+    """ruleIds drawn inline, from the pack and the in-code rules. The
+    project's own data (house style, termbase: pack "project") is not a rule
+    the benchmark can label, and is not gated."""
+    from .language_packs import default_pack
+    from .language_qa import INLINE_RULES, RULES
+    pack = default_pack()
+    inline = {f"{pack.name}/{r.id}" for r in pack.rules if r.enabled and r.inline}
+    inline |= {f"{RULES[name].pack}/{name}" for name in INLINE_RULES if RULES[name].pack != "project"}
+    return inline
+
+
+def human_gate(result: dict[str, Any], baseline: dict[str, Any] | None) -> list[str]:
+    """Failures, empty when the gate passes:
+    - an inline rule below HUMAN_INLINE_MIN_PRECISION, or with fewer than
+      HUMAN_INLINE_MIN_LABELLED labelled findings;
+    - a rule whose human precision fell below the committed baseline;
+    - a human-confirmed finding the engine no longer produces;
+    - a label that no longer anchors in its verse (the text or the offsets
+      moved, so the score would shrink without anyone noticing)."""
+    failures = [f"label not scored: {m}" for m in result["mismatches"]]
+    for rule_id, s in result["rules"].items():
+        precision = s["precision"]
+        if s["inline"]:
+            if s["labelled"] < HUMAN_INLINE_MIN_LABELLED:
+                failures.append(f"{rule_id} is inline with {s['labelled']} human-labelled findings "
+                                f"(< {HUMAN_INLINE_MIN_LABELLED})")
+            elif precision is None or precision < HUMAN_INLINE_MIN_PRECISION:
+                failures.append(f"{rule_id} is inline but human precision is {_pct(precision)} "
+                                f"(< {_pct(HUMAN_INLINE_MIN_PRECISION)})")
+        if s["lost_tp"]:
+            failures.append(f"{rule_id}: {s['lost_tp']} human-confirmed finding(s) no longer produced")
+        before = (baseline or {}).get("rules", {}).get(rule_id, {}).get("precision")
+        if before is not None and precision is not None and precision < before:
+            failures.append(f"{rule_id} human precision fell from {_pct(before)} to {_pct(precision)}")
+    return failures
+
+
+def human_baseline_of(result: dict[str, Any]) -> dict[str, Any]:
+    keep = ("labelled", "tp", "fp", "house", "precision", "inline")
+    return {"packVersion": result["packVersion"], "books": result["books"],
+            "rules": {rule: {k: s.get(k) for k in keep} for rule, s in result["rules"].items()},
+            "recallProxies": {cls: {k: s.get(k) for k in ("missed", "missed_now_flagged", "still_missed_rate")}
+                              for cls, s in result["recallProxies"].items()}}
+
+
+def human_markdown(result: dict[str, Any]) -> str:
+    lines = [
+        f"Pack version `{result['packVersion']}`; books: {', '.join(b.upper() for b in result['books'])}; "
+        f"{result['labels']} label rows.",
+        "",
+        "| Rule | Inline | Labelled | TP | FP | House form | Human precision | Lost TP | FP no longer produced |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for rule_id, s in result["rules"].items():
+        lines.append(f"| `{rule_id}` | {'yes' if s['inline'] else 'no'} | {s['labelled']} | {s['tp']} | {s['fp']} "
+                     f"| {s['house']} | {_pct(s['precision'])} | {s['lost_tp']} | {s['removed_fp']} |")
+    lines += [
+        "",
+        "Recall proxies over the contexts the pack skipped on purpose (a sample of the abstains, not of "
+        "the text, so these are not recall):",
+        "",
+        "| Abstain class | Reviewer: missed | now flagged | Reviewer: correct skip | now flagged "
+        "| House form | now flagged | Still-missed rate |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for cls, s in result["recallProxies"].items():
+        lines.append(f"| {cls} | {s['missed']} | {s['missed_now_flagged']} | {s['correct_skip']} "
+                     f"| {s['correct_skip_now_flagged']} | {s['house']} | {s['house_now_flagged']} "
+                     f"| {_pct(s['still_missed_rate'])} |")
+    if result["mismatches"]:
+        lines += ["", "Labels not scored: " + "; ".join(result["mismatches"])]
+    return "\n".join(lines)

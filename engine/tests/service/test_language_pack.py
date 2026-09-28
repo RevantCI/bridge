@@ -70,13 +70,12 @@ def test_the_migrated_rules_keep_their_legacy_name_and_so_their_finding_ids():
     assert finding["id"] == stable_finding_id("php", "1", "1", "tamil.vallinam-missing", "அந்த காகம்", 1)
 
 
-def test_inline_rules_are_exactly_the_signed_off_ones():
+def test_inline_rules_are_exactly_the_human_justified_ones():
+    # Inline needs >= 0.90 human-labelled precision on >= 20 findings
+    # (DECISIONS.md 2026-09-28); the benchmark's human gate enforces it in CI.
     inline = {r.id for r in default_pack().rules if r.inline}
-    assert inline == {"sandhi.vallinam.demonstrative", "sandhi.vallinam.manner-adverb",
-                      "sandhi.vallinam.accusative", "sandhi.vallinam.dative", "sandhi.vallinam.wrong-consonant"}
-    for rule in default_pack().rules:
-        if rule.inline:
-            assert rule.sign_off["by"] and rule.sign_off["date"] == "2026-09-24", rule.id
+    assert inline == {"sandhi.vallinam.dative"}
+    assert not any("inlineSignOff" in r.source for r in default_pack().rules)
 
 
 # ---- rule behaviour --------------------------------------------------------
@@ -108,7 +107,7 @@ def test_wrong_linking_consonant_is_replaced_not_added():
     [finding] = by_rule("அவன் அதைக் பார்த்தான்", "sandhi.vallinam.wrong-consonant")
     assert finding["originalText"] == "அதைக் பார்த்தான்"
     assert finding["suggestedReplacement"] == "அதைப் பார்த்தான்"
-    assert finding["inline"] is True
+    assert finding["inline"] is False  # no human-labelled sample yet (DECISIONS.md 2026-09-28)
 
 
 @pytest.mark.parametrize("text", [
@@ -185,7 +184,8 @@ def pack_copy(tmp_path, edit):
     (lambda r: r["match"]["prev"].update(suffix="(["), "bad regex"),
     (lambda r: r["match"]["prev"].update(spelling=["x"]), "unknown condition keys ['spelling']"),
     (lambda r: r.update(fix={"type": "rewrite"}), "fix.type must be one of"),
-    (lambda r: r.update(inlineSignOff={"reason": "no name"}), "inlineSignOff needs at least 'by' and 'date'"),
+    # The AI-agreement sign-off was superseded by the human gate (2026-09-28).
+    (lambda r: r.update(inlineSignOff={"by": "m", "date": "d"}), "unknown rule keys ['inlineSignOff']"),
     (lambda r: r.update(match={"type": "regex", "on": "raw", "pattern": "x"}), "only integrity rules may match raw"),
 ])
 def test_a_malformed_rule_stops_the_pack_loading(tmp_path, edit, message):
@@ -215,16 +215,16 @@ def test_a_wrong_fix_in_an_example_stops_the_pack_loading(tmp_path):
 def test_overrides_narrow_and_refuse_to_widen():
     base = default_pack()
     narrowed = apply_overrides(base, {"rules": {
-        "sandhi.vallinam.dative": {"enabled": False},
-        "sandhi.vallinam.accusative": {"inline": False, "abstain": [{"prev": {"lexical": ["அதை"]}}]},
+        "sandhi.vallinam.accusative": {"enabled": False},
+        "sandhi.vallinam.dative": {"inline": False, "abstain": [{"prev": {"lexical": ["அவருக்கு"]}}]},
         "integrity.digits-in-text": {"enabled": True},             # refused: cannot enable
         "sandhi.clitic.fused": {"inline": True, "match": {}},      # refused twice
         "no.such.rule": {"enabled": False},
     }})
-    assert not by_rule("அவருக்கு பதில் சொன்னான்", "sandhi.vallinam.dative", pack=narrowed)
-    assert by_rule("அவருக்கு பதில் சொன்னான்", "sandhi.vallinam.dative", pack=base)
     assert not by_rule("அவன் அதை செய்தான்", "sandhi.vallinam.accusative", pack=narrowed)
-    [still] = by_rule("அவன் வார்த்தையை கேட்டான்", "sandhi.vallinam.accusative", pack=narrowed)
+    assert by_rule("அவன் அதை செய்தான்", "sandhi.vallinam.accusative", pack=base)
+    assert not by_rule("அவருக்கு பதில் சொன்னான்", "sandhi.vallinam.dative", pack=narrowed)
+    [still] = by_rule("அவனுக்கு பதில் சொன்னான்", "sandhi.vallinam.dative", pack=narrowed)
     assert still["inline"] is False
     assert not by_rule("அவன் 12 பேர்", "integrity.digits-in-text", pack=narrowed)
     assert narrowed.by_id("sandhi.clitic.fused").inline is False
@@ -234,7 +234,7 @@ def test_overrides_narrow_and_refuse_to_widen():
     assert "unknown rule 'no.such.rule'" in problems
     assert narrowed.fingerprint() != base.fingerprint()
     # The bundled pack itself is untouched.
-    assert base.by_id("sandhi.vallinam.dative").enabled and base.by_id("sandhi.vallinam.accusative").inline
+    assert base.by_id("sandhi.vallinam.accusative").enabled and base.by_id("sandhi.vallinam.dative").inline
 
 
 def test_a_project_override_file_applies_on_the_next_pass(tmp_path):

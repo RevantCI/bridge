@@ -1,0 +1,21 @@
+{
+ "schemaVersion": 1,
+ "bookId": "*",
+ "entries": [
+  {
+   "scope": "word-in-project",
+   "ruleId": "",
+   "list": "properNouns",
+   "word": "சேத்து",
+   "provenance": "curated",
+   "state": "active",
+   "evidence": [
+    {
+     "book": "gen",
+     "chapter": "4",
+     "verse": "24"
+    }
+   ]
+  }
+ ]
+}

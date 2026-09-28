@@ -17,7 +17,7 @@ Related:
 
 - `docs/LANGUAGE_QA_BENCHMARK.md` explains how each rule's precision is measured.
 - `docs/DECISIONS.md` records why rules are data, why overrides only narrow, and
-  the inline sign-off.
+  why inline is decided by human-labelled precision (2026-09-28).
 - `docs/LANGUAGE_QA_TAMIL_SPECIFICATION.md` maps the 56 proofreading items to
   pack ids.
 
@@ -58,7 +58,6 @@ beside a module.
 | `layer` | no | Overrides the category's default layer. |
 | `severity`, `confidence` | yes | `high`, `medium` or `low`. |
 | `inline` | no (false) | Draw the finding as a mark in the verse editor, with the right-click menu. |
-| `inlineSignOff` | no | `{by, date, reason, precisionStrict}`. The maintainer's sign-off for drawing the rule inline below the benchmark's 90% floor. `by` and `date` are required. See "Inline and the gate" below. |
 | `title` | no | `{ta, en}`, used for display. |
 | `message` | yes | `{en: "..."}`. A `str.format` template (see "Placeholders"). |
 | `rationale` | no | A template, shown in the finding's "why". |
@@ -229,22 +228,24 @@ rescanned.
 
 ## Inline and the gate
 
-The benchmark gate (`scripts/language_qa_benchmark.py --gate`) requires an inline
-rule to reach **90% strict precision**, unless the rule carries an
-`inlineSignOff`. A signed-off rule instead must stay within **2 points** of the
-`precisionStrict` it was signed off at. A sign-off with no recorded precision
-fails the gate until one is measured. Every `ta-irv` வல்லினம் rule is signed off,
-by the maintainer's instruction of 2026-09-24 (DECISIONS.md).
+A rule is drawn inline only on its **human-labelled precision**: at least
+**0.90** on at least **20** findings a Tamil reviewer labelled
+(`scripts/language_qa_benchmark.py --human-labels … --gate`, run in CI; see
+`docs/LANGUAGE_QA_BENCHMARK.md`). AI-agreement precision is a lower bound and is
+diagnostic only. There is no sign-off waiver: the 2026-09-24 sign-off that drew
+every வல்லினம் rule inline on AI-agreement numbers was superseded on 2026-09-28
+(DECISIONS.md), and a rule file carrying `inlineSignOff` no longer loads. The
+builder's `INLINE` table records the human number behind each inline rule.
 
 ## `ta-irv@1.0.0`
 
 | Rule | Replaces | Inline | Shape | Strict precision (2026-09-24) |
 |---|---|---|---|---|
-| `sandhi.vallinam.demonstrative` | B1 | yes, signed off | அந்த/இந்த/எந்த + bare hard consonant | 41.2% (80 findings) |
-| `sandhi.vallinam.manner-adverb` | B1 | yes, signed off | அப்படி/இப்படி/எப்படி + bare | 15.4% (13) |
-| `sandhi.vallinam.accusative` | B2 | yes, signed off | -ஐ accusative + bare; root nouns abstain | 55.0% (500) |
-| `sandhi.vallinam.dative` | B2 | yes, signed off | -க்கு dative + bare; root nouns and house names abstain | 49.8% (396) |
-| `sandhi.vallinam.wrong-consonant` | new | yes, signed off | linked with the wrong hard consonant | no findings in the benchmark books |
+| `sandhi.vallinam.demonstrative` | B1 | no (8 human labels) | அந்த/இந்த/எந்த + bare hard consonant | 41.2% (80 findings) |
+| `sandhi.vallinam.manner-adverb` | B1 | no (1 human label) | அப்படி/இப்படி/எப்படி + bare | 15.4% (13) |
+| `sandhi.vallinam.accusative` | B2 | no (70% human, 50 labels) | -ஐ accusative + bare; root nouns abstain | 55.0% (500) |
+| `sandhi.vallinam.dative` | B2 | **yes (93.9% human, 49 labels)** | -க்கு dative + bare; root nouns and house names abstain | 49.8% (396) |
+| `sandhi.vallinam.wrong-consonant` | new | no (no human labels) | linked with the wrong hard consonant | no findings in the benchmark books |
 | `sandhi.clitic.fused` | new | no | manner adverb, -ஐ or -க்கு + தான்/கூட written apart | 0.0% (4) |
 | `typo.divine-name.vowel-drop` | new | no | யெகோவவ for யெகோவாவ | 100% (11) |
 | `typo.divine-name.dative-stem` | new | no | யெகோவாக்க (the dative is யெகோவாவுக்கு) | 69.2% (13) |
@@ -252,7 +253,8 @@ by the maintainer's instruction of 2026-09-24 (DECISIONS.md).
 | `integrity.space-before-note-end` | new | no | space before `\f*` / `\x*` (raw) | 74.3% (74) |
 | `integrity.digits-in-text` | new | disabled | digits in verse text: an IRV house form (Pass 3 §5) | — |
 
-These precision figures measure agreement with the AI review, not accuracy
+The precision column measures agreement with the AI review, not accuracy. The
+inline column follows the human-labelled precision of the 2026-09-28 review
 (`docs/LANGUAGE_QA_BENCHMARK.md`).
 
 B1 and B2 share `legacyId: "tamil.vallinam-missing"`. Their finding ids, and so
@@ -276,9 +278,9 @@ The builder computes every corpus-derived part of the pack:
   (`MIN_CONTEXTS = 3`), and root nouns (a ை-word whose +யை form is attested; a
   க்கு-word whose -க்கில் or -க்குக்கு form is attested);
 - the examples;
-- the sign-offs.
+- `inline`, from the builder's `INLINE` table of human-measured rules.
 
 After a rebuild, run `pytest tests/service/test_language_pack.py` and the
-benchmark with `--gate`, and record the before and after numbers in
+benchmark with `--gate` in both modes (AI agreement and `--human-labels`), and record the before and after numbers in
 `docs/BUILD_LOG.md`. Editing a rule JSON by hand is allowed for a one-off fix, but
 the next rebuild overwrites it. Put lasting changes in the builder.

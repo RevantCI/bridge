@@ -57,29 +57,15 @@ HOUSE_NAMES_IN_KKU = ["ஈசாக்கு", "ஏனோக்கு"]  # IRV_P
 MISSING_MESSAGE = ('Possible missing வல்லினம் at this word boundary: "{prev} {initial}..." normally takes '
                    '"{prev}{initial}் {initial}...". Verify before editing.')
 MISSING_RATIONALE = '"{prev}" before a {initial}-initial word takes the linking {initial}்'
-# Inline status needs strict benchmark precision >= 0.90 AND the maintainer's
-# sign-off (layered-rules brief §3.3). On 2026-09-24 the maintainer signed
-# off every வல்லினம் rule as inline below 0.90: "if it is a false positive
-# the user will click Ignore, and the system will learn from its mistake".
-# The benchmark measures agreement with a review that flagged only minority
-# forms, not accuracy. The gate exempts a signed-off rule from the 0.90 floor,
-# but still fails it if its precision falls more than 2 points below the
-# value recorded here. Values: the strict precision measured when signed off.
-SIGN_OFF_REASON = ("Maintainer sign-off 2026-09-24: keep all வல்லினம் rules inline; false positives are "
-                   "handled by Ignore and learned from (Phase 6). Precision is agreement with the "
-                   "minority-form AI review, not verified accuracy.")
-SIGN_OFF = {rule_id: {"by": "maintainer (session of 2026-09-24)", "date": "2026-09-24",
-                      "reason": SIGN_OFF_REASON, "precisionStrict": precision}
-            for rule_id, precision in {
-                # Measured by scripts/language_qa_benchmark.py on 2026-09-24 (pack 1.0.0).
-                "sandhi.vallinam.demonstrative": 0.4125,
-                "sandhi.vallinam.manner-adverb": 0.1538,
-                "sandhi.vallinam.accusative": 0.55,
-                "sandhi.vallinam.dative": 0.4975,
-                # No finding in any reviewed book yet: the gate asks for a
-                # value once it has one.
-                "sandhi.vallinam.wrong-consonant": None,
-            }.items()}
+# Inline is decided by human-labelled precision only: >= 0.90 on >= 20
+# findings a Tamil reviewer labelled (scripts/language_qa_benchmark.py
+# --human-labels; DECISIONS.md 2026-09-28). The 2026-09-24 sign-off that put
+# every வல்லினம் rule inline on AI-agreement numbers is superseded. Values:
+# the human precision that justifies each entry, and its sample.
+INLINE = {
+    # 2026-09-28 review (GEN/PSA/JHN): 46 TP / 3 FP.
+    "sandhi.vallinam.dative": {"humanPrecision": 0.9388, "labelled": 49},
+}
 PROPER_NOUNS = {"next": {"listRef": "housestyle.properNouns"},
                 "origin": "A proper noun after the trigger: the project's house-style name list (Phase 6). "
                           "Empty until then; the names adapter's majority forms were evaluated as a seed "
@@ -518,9 +504,7 @@ def main() -> int:
     print(f"{len(verses)} verses", file=sys.stderr)
     rules = definitions(*pair_stats(verses), *root_nouns(verses))
     for rule in rules:
-        if rule["id"] in SIGN_OFF:
-            rule["inline"] = True
-            rule["inlineSignOff"] = SIGN_OFF[rule["id"]]
+        rule["inline"] = rule["id"] in INLINE
     meta = {"pack": "ta-irv", "version": PACK_VERSION, "language": "ta", "script": "Taml",
             "description": "Tamil IRV rule pack: sandhi (வல்லினம்) shape rules and known IRV defect shapes. "
                            "Built by scripts/build_ta_irv_pack.py from the IRV corpus; see docs/LANGUAGE_QA_RULE_PACK.md.",

@@ -1,12 +1,102 @@
 # Language QA benchmark
 
-Per-rule precision and recall of Bridge's offline Language QA, measured on
-the Tamil IRV against the Round 2 and Pass 3 review reports. This is Phase 2
-of the layered-rules plan in [LANGUAGE_QA_PLAN.md](LANGUAGE_QA_PLAN.md): it
-decides whether a rule earns inline status, and it guards every later phase
-against regression.
+Per-rule precision of Bridge's offline Language QA on the Tamil IRV, measured
+two ways:
 
-## What the numbers mean — read this first
+- **Human precision** against a Tamil reviewer's verdicts on a sample of the
+  engine's own findings. This is the only number that may put a rule inline
+  (DECISIONS.md, 2026-09-28), and CI gates on it.
+- **AI agreement** with the Round 2 and Pass 3 review reports (Phase 2 of the
+  layered-rules plan in [LANGUAGE_QA_PLAN.md](LANGUAGE_QA_PLAN.md)). It is a
+  lower bound, not accuracy, so it is diagnostic only: it guards against
+  regression and lists unmatched findings for the next human sample.
+
+## Human precision (2026-09-28 review, GEN/PSA/JHN)
+
+**The data.** Yesu Selva Benz labelled a stratified sample of the engine's
+findings on Genesis, Psalms and John: 598 items, 597 answered (R0102, PSA
+119:54, is unanswered and excluded), none "unsure", with a grammatical
+reason on every row. The labels are committed as data and never
+regenerated, in `benchmark/human/2026-09-28/`:
+
+| File | What it is |
+|---|---|
+| `human_labels.jsonl` | every labelled item with its verdict code and the reviewer's note |
+| `verses.jsonl` | the imported text of the 332 labelled verses, so the gate runs without the IRV corpus |
+| `summary.json`, `pack_changes.md` | the converter's per-rule numbers and proposed pack edits |
+| `labelled/*.jsonl` | the same items as test fixtures (merged into `engine/tests/fixtures/language_qa/labelled/`) |
+| `housestyle_import.json`, `lexicon_curated.csv` | the house-style seed and the confirmed misspellings |
+| `ta_irv_labels_to_candidate.py` | the converter that produced the files above from the reviewer's workbook |
+
+**The text.** The labels' offsets are exact in `D:\Claude Lab\IRV Tamil`, the
+copy the reviewer worked from (224 of 224 flagged items). The older
+`C:\Users\Benz\Documents\IRV Tamil`, which the pack builder and the
+AI-agreement benchmark read, matches only 163 of them: the two copies differ
+in 61 labelled verses. `verses.jsonl` is built from the reviewer's copy.
+
+**Method.**
+- A flagged item is scored when a current finding sits at exactly its book,
+  chapter, verse, start and end, with the same text after NFC. It is
+  credited to that finding's rule. Precision = TP ÷ (TP + FP) over labelled
+  findings only. Verdicts `TP`, `TP1`, `TP23` and `TP_OTHER_FIX` are true
+  positives; every `FP*` is a false alarm; `HOUSE` (an IRV house form) is
+  reported apart and not counted; `UNSURE` and unanswered rows are excluded.
+  Unlabelled findings are not scored.
+- A labelled finding the engine no longer produces is reported. A lost TP
+  fails the gate; a removed FP is the point of a fix.
+- The abstained items (contexts the pack deliberately skipped) give **recall
+  proxies** per abstain class: how many the reviewer said were missed, and
+  how many a sandhi finding now covers. They sample the abstains, not the
+  text, so they are not recall.
+
+**The gate** (`--human-labels … --gate`, run in CI) fails when:
+- an inline rule has human precision below **0.90**, or fewer than **20**
+  labelled findings. Project data (`project/*`: house style, the termbase)
+  is not a labelled rule and is not gated;
+- any rule's human precision fell below `benchmark/human/baseline.json`;
+- a human-confirmed finding is no longer produced;
+- a label no longer anchors in its verse.
+
+```powershell
+.\engine\.venv\Scripts\python.exe scripts\language_qa_benchmark.py `
+  --human-labels benchmark\human\2026-09-28\human_labels.jsonl --gate
+```
+
+`--update-doc` rewrites the block below; `--write-baseline` rewrites
+`benchmark/human/baseline.json`; `--write-human-verses --irv-dir …` rebuilds
+`verses.jsonl`.
+
+<!-- human-benchmark:start -->
+_Generated 2026-09-28T16:34:26 by scripts/language_qa_benchmark.py --human-labels benchmark/human/2026-09-28/human_labels.jsonl._
+
+Pack version `language-qa-7+ta-irv@1.0.0`; books: GEN, JHN, PSA; 598 label rows.
+
+| Rule | Inline | Labelled | TP | FP | House form | Human precision | Lost TP | FP no longer produced |
+|---|---|---|---|---|---|---|---|---|
+| `common/spacing.extra` | no | 15 | 15 | 0 | 0 | 100.0% | 0 | 0 |
+| `ta-irv/integrity.space-before-note-end` | no | 15 | 0 | 15 | 0 | 0.0% | 0 | 0 |
+| `ta-irv/lexicon.known-misspelling` | no | 43 | 43 | 0 | 0 | 100.0% | 0 | 0 |
+| `ta-irv/lexicon.rare-near-common` | no | 21 | 0 | 21 | 0 | 0.0% | 0 | 0 |
+| `ta-irv/sandhi.vallinam.accusative` | no | 50 | 35 | 15 | 0 | 70.0% | 0 | 0 |
+| `ta-irv/sandhi.vallinam.dative` | yes | 49 | 46 | 3 | 0 | 93.9% | 0 | 0 |
+| `ta-irv/sandhi.vallinam.demonstrative` | no | 8 | 7 | 1 | 0 | 87.5% | 0 | 0 |
+| `ta-irv/sandhi.vallinam.manner-adverb` | no | 1 | 1 | 0 | 0 | 100.0% | 0 | 0 |
+| `ta-irv/tamil.repeated-word` | no | 20 | 0 | 20 | 0 | 0.0% | 0 | 0 |
+| `ta-irv/typo.divine-name.vowel-drop` | no | 1 | 1 | 0 | 0 | 100.0% | 0 | 0 |
+
+Recall proxies over the contexts the pack skipped on purpose (a sample of the abstains, not of the text, so these are not recall):
+
+| Abstain class | Reviewer: missed | now flagged | Reviewer: correct skip | now flagged | House form | now flagged | Still-missed rate |
+|---|---|---|---|---|---|---|---|
+| A_ai_rootnoun | 1 | 0 | 29 | 1 | 0 | 0 | 3.3% |
+| B_ai_baremajority | 5 | 0 | 45 | 0 | 0 | 0 | 10.0% |
+| D_rku_dative | 17 | 0 | 0 | 0 | 0 | 0 | 100.0% |
+| E_kku_exception | 5 | 0 | 7 | 0 | 0 | 0 | 41.7% |
+| G_marker | 2 | 0 | 0 | 0 | 2 | 0 | 50.0% |
+| H_demonstrative_houseform | 9 | 0 | 0 | 0 | 0 | 0 | 100.0% |
+<!-- human-benchmark:end -->
+
+## AI agreement: what the numbers mean — read this first
 
 - **Every review row is an AI proposal.** The reports say so on every row
   ("AI proposal awaiting human review"). On 2026-09-24 the maintainer
@@ -116,16 +206,15 @@ The full result goes to `benchmark/results/<date>-<pack>.json`, which is not
 committed because it quotes Scripture and review text. It holds every
 unmatched finding and every unmatched row.
 
-**The gate is local.** The IRV text and the reports live outside the
-repository, so CI cannot run it (maintainer decision, 2026-09-24). Run
-`--gate` before committing a change to a rule, and record its output in
-BUILD_LOG. It fails when:
-- an inline rule's strict precision is below 0.90;
-- any rule's strict precision fell more than 2 points below
-  `benchmark/baseline.json`. Rules with fewer than 10 findings are too small
-  to compare.
+**This gate is local and diagnostic.** The IRV text and the reports live
+outside the repository, so CI cannot run it. It no longer decides inline:
+the human gate does (DECISIONS.md, 2026-09-28). Run `--gate` before
+committing a change to a rule, and record its output in BUILD_LOG. It fails
+only when a rule's strict precision fell more than 2 points below
+`benchmark/baseline.json`. Rules with fewer than 10 findings are too small
+to compare.
 
-## Results
+## AI agreement results
 
 <!-- benchmark:start -->
 _Generated 2026-09-24T22:02:07 by scripts/language_qa_benchmark.py._

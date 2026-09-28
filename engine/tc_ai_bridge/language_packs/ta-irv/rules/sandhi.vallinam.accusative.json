@@ -5,7 +5,7 @@
  "category": "sandhi",
  "severity": "medium",
  "confidence": "medium",
- "inline": true,
+ "inline": false,
  "title": {
   "ta": "வல்லினம் மிகுதல் — இரண்டாம் வேற்றுமை",
   "en": "Vallinam doubling after the accusative -ஐ"
@@ -269,12 +269,6 @@
   "type": "insert-link"
  },
  "provenance": "Generalises B4 (five pronouns) to the -ஐ ending, as the layered-rules brief asks. notLexical (209 words) is two corpus tests: (1) root nouns, 156 words whose -ஐ is part of the noun, shown by their own accusative in -யை (படை -> படையை, மலை -> மலையை, கை -> கையை); a real accusative never takes a second (no அதையை); (2) the 116 -ஐ words IRV writes bare in most of at least 3 hard-initial contexts (bare/doubled): வரை 198/4; கொலை 190/1; வேலை 110/2; நன்மை 91/0; யெகோவாவை 88/81; ஆராதனை 82/1; ஆலோசனை 73/24; முறை 65/1; பணிவிடை 63/0; உடன்படிக்கை 62/39; மேன்மை 49/0; கை 44/18; தலைமுறை 44/1; விடுதலை 42/3; அசட்டை 40/1; கிருபை 40/0; தீமை 38/0; போதனை 35/1; முத்திரை 30/4; அறிக்கை 28/3; வார்த்தை 28/0; ஆளுகை 27/0; கட்டளை 27/15; மகிமை 27/3; பிரதிஷ்டை 25/2; பிள்ளை 24/0; பொருத்தனை 24/1; யோசனை 24/0; காணிக்கை 22/8; தடை 21/0; மழை 20/2; திசை 19/1; முற்றுகை 18/6; தலை 14/7; தயை 13/0; எல்லை 12/0; எண்ணிக்கை 11/0; எத்தனை 11/1; பெருமை 11/1; பொறாமை 11/0; …. IRV overall: -ஐ doubled 14,496, bare 3,082.",
- "inlineSignOff": {
-  "by": "maintainer (session of 2026-09-24)",
-  "date": "2026-09-24",
-  "reason": "Maintainer sign-off 2026-09-24: keep all வல்லினம் rules inline; false positives are handled by Ignore and learned from (Phase 6). Precision is agreement with the minority-form AI review, not verified accuracy.",
-  "precisionStrict": 0.55
- },
  "examples": {
   "incorrect": [
    {
@@ -284,34 +278,34 @@
     "origin": "1CH 4:10 (also in the review reports)"
    },
    {
-    "text": "சவுல் பெலிஸ்தர்களின் முகாமை கண்ட போது பயந்தான்;",
-    "span": "முகாமை கண்ட",
-    "fix": "முகாமைக் கண்ட",
-    "origin": "1SA 28:5 (also in the review reports)"
+    "text": "யெகோவா தம்முடைய மக்களை சிநேகித்ததால், உம்மை அவர்கள்",
+    "span": "மக்களை சிநேகித்ததால்",
+    "fix": "மக்களைச் சிநேகித்ததால்",
+    "origin": "2CH 2:11 (also in the review reports)"
    },
    {
-    "text": "அவர்களை பூமியின் தூளாக இடித்து,",
-    "span": "அவர்களை பூமியின்",
-    "fix": "அவர்களைப் பூமியின்",
-    "origin": "2SA 22:43 (also in the review reports)"
+    "text": "பெரிய நெருப்பு எங்களை சுட்டெரிக்குமே; நாங்கள் இன்னும்",
+    "span": "எங்களை சுட்டெரிக்குமே",
+    "fix": "எங்களைச் சுட்டெரிக்குமே",
+    "origin": "DEU 5:25 (also in the review reports)"
    },
    {
-    "text": "நோக்கி: முந்தினக் கற்பலகைகளை போன்ற இரண்டு கற்பலகைகளை",
-    "span": "கற்பலகைகளை போன்ற",
-    "fix": "கற்பலகைகளைப் போன்ற",
-    "origin": "EXO 34:1 (also in the review reports)"
+    "text": "அறியத்தக்க மரத்தின் பழத்தை சாப்பிட வேண்டாம்; அதை",
+    "span": "பழத்தை சாப்பிட",
+    "fix": "பழத்தைச் சாப்பிட",
+    "origin": "GEN 2:17 (also in the review reports)"
    },
    {
-    "text": "நான் உன்னுடைய உணவை சாப்பிடமாட்டேன்; நீ சர்வாங்க",
-    "span": "உணவை சாப்பிடமாட்டேன்",
-    "fix": "உணவைச் சாப்பிடமாட்டேன்",
-    "origin": "JDG 13:16 (also in the review reports)"
+    "text": "பேரைப் பிரித்தெடுத்து, அவர்களை பெத்தேலுக்கும் ஆயீக்கும் நடுவே",
+    "span": "அவர்களை பெத்தேலுக்கும்",
+    "fix": "அவர்களைப் பெத்தேலுக்கும்",
+    "origin": "JOS 8:12 (also in the review reports)"
    },
    {
-    "text": "அவர்கள் கண்கள் எங்களை பார்த்துக்கொண்டிருக்கின்றன.",
-    "span": "எங்களை பார்த்துக்கொண்டிருக்கின்றன",
-    "fix": "எங்களைப் பார்த்துக்கொண்டிருக்கின்றன",
-    "origin": "PSA 17:11 (also in the review reports)"
+    "text": "தன்னுடைய பெருமையினால்\nஏழ்மையானவனை கொடூரமாகத் துன்பப்படுத்துகிறான்;\nஅவர்கள்",
+    "span": "ஏழ்மையானவனை கொடூரமாகத்",
+    "fix": "ஏழ்மையானவனைக் கொடூரமாகத்",
+    "origin": "PSA 10:2 (also in the review reports)"
    },
    {
     "text": "சகோதரர்களுக்குள்ளே புளிப்பில்லாத அப்பங்களை சாப்பிடுவதற்குமாத்திரம் அனுமதி பெற்றார்கள்.",
@@ -326,28 +320,28 @@
     "origin": "GEN 25:20 (also in the review reports)"
    },
    {
-    "text": "கோபத்தை தள்ளி, கடுங்கோபத்தை விட்டுவிடு;",
-    "span": "கோபத்தை தள்ளி",
-    "fix": "கோபத்தைத் தள்ளி",
-    "origin": "PSA 37:8 (also in the review reports)"
+    "text": "சுட்டெரித்தவனும் தன்னுடைய ஆடைகளை தண்ணீரில் தோய்த்து, தண்ணீரில்",
+    "span": "ஆடைகளை தண்ணீரில்",
+    "fix": "ஆடைகளைத் தண்ணீரில்",
+    "origin": "NUM 19:8 (also in the review reports)"
    },
    {
-    "text": "இப்பொழுதோ அவருடைய இரக்கத்தை பெற்றவர்களாக இருக்கிறீர்கள்.",
-    "span": "இரக்கத்தை பெற்றவர்களாக",
-    "fix": "இரக்கத்தைப் பெற்றவர்களாக",
-    "origin": "1PE 2:10"
+    "text": "அறிந்திருக்கிறோம்; தேவனால் பிறந்தவனை தேவன் தீமையில் இருந்து",
+    "span": "பிறந்தவனை தேவன்",
+    "fix": "பிறந்தவனைத் தேவன்",
+    "origin": "1JN 5:18"
    },
    {
-    "text": "மக்களை வேதனைப்படுத்துகிற தூதனை தாவீது கண்ட போது,",
-    "span": "தூதனை தாவீது",
-    "fix": "தூதனைத் தாவீது",
-    "origin": "2SA 24:17"
+    "text": "என்று நாங்கள் பலமுறை பார்த்து அறிந்தவனும், இப்பொழுது",
+    "span": "பலமுறை பார்த்து",
+    "fix": "பலமுறைப் பார்த்து",
+    "origin": "2CO 8:22"
    },
    {
-    "text": "மகனை, உன்னுடைய மூத்தமகனை கொல்லுவேன் என்று யெகோவா",
-    "span": "மூத்தமகனை கொல்லுவேன்",
-    "fix": "மூத்தமகனைக் கொல்லுவேன்",
-    "origin": "EXO 4:23"
+    "text": "போது நுழைந்து, ஆசைவார்த்தை பேசி, அதைப் பிடித்துக்",
+    "span": "ஆசைவார்த்தை பேசி",
+    "fix": "ஆசைவார்த்தைப் பேசி",
+    "origin": "DAN 11:21"
    }
   ],
   "correct": [

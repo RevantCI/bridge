@@ -5,7 +5,7 @@
  "category": "sandhi",
  "severity": "medium",
  "confidence": "medium",
- "inline": true,
+ "inline": false,
  "title": {
   "ta": "வல்லினம் மிகுதல் — சுட்டு",
   "en": "Vallinam doubling after a demonstrative"
@@ -107,12 +107,6 @@
   "type": "insert-link"
  },
  "provenance": "B1 (BUILD_LOG 2026-09-22). IRV doubles after அந்த 89%, இந்த 84%, எந்த 86% of hard-initial contexts.",
- "inlineSignOff": {
-  "by": "maintainer (session of 2026-09-24)",
-  "date": "2026-09-24",
-  "reason": "Maintainer sign-off 2026-09-24: keep all வல்லினம் rules inline; false positives are handled by Ignore and learned from (Phase 6). Precision is agreement with the minority-form AI review, not verified accuracy.",
-  "precisionStrict": 0.4125
- },
  "examples": {
   "incorrect": [
    {

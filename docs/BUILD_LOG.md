@@ -12626,3 +12626,86 @@ app has no in-app doc viewer.
 - A `LanguageQaPanel.test.ts` test checks that the block is visible with no
   findings, holds both languages and the reason, and is not inside a
   `<details>`.
+
+## 2026-09-28 — Language QA on human labels: benchmark, rule pack, lexicon, house style (#169)
+
+**The data.** Yesu Selva Benz, a Tamil reviewer, labelled a stratified sample of the
+engine's own findings on Genesis, Psalms and John:
+- 598 items, 597 answered: R0102, PSA 119:54, is unanswered and excluded;
+- none "unsure", with a grammatical reason on every row.
+
+The reviewer's workbook was converted by `ta_irv_labels_to_candidate.py`. The output is
+committed as data in `benchmark/human/2026-09-28/`, and never regenerated.
+
+Before this, "precision" was agreement with the Round 2 AI review rows. The 15–55% that
+put the வல்லினம் rules inline were therefore lower bounds. From now on the human number
+is the only one that decides inline.
+
+### Step 1 — the human labels become the authoritative score
+
+- **Scorer.** `language_qa_benchmark.human_score()`:
+  - a flagged item is scored when a current finding sits at exactly its book, chapter,
+    verse, start and end, with the same NFC text, credited to the finding's own rule;
+  - precision = TP ÷ (TP + FP) over labelled findings; house forms are reported apart;
+  - lost TPs and removed FPs are reported;
+  - the abstained items give recall *proxies* per abstain class.
+- **Gate.** `human_gate()` fails in four cases:
+  - an inline rule below 0.90 human precision, or with fewer than 20 labelled findings;
+  - any rule below `benchmark/human/baseline.json`;
+  - a lost human-confirmed finding;
+  - a label that no longer anchors.
+- **CI.** The gate runs in `ci.yml` after the latency gate, in 1.6 s locally. It needs no
+  IRV corpus, because `verses.jsonl` (the 332 labelled verses) is committed beside the
+  labels. The engine path filter now includes `benchmark/**`.
+- **Scorer check.** On the unchanged pack it reproduces the converter's `summary.json`
+  exactly for every rule (TP/FP), and the recall proxies match `pack_changes.md`. This
+  is the check that the scorer is the reviewer's scorer.
+- **The two IRV copies differ.** The labels anchor 224/224 in `D:\Claude Lab\IRV Tamil`,
+  the copy the reviewer used, but only 163/224 in `C:\Users\Benz\Documents\IRV Tamil`,
+  which the pack builder and the AI-agreement benchmark read. The two copies differ in
+  61 labelled verses (for example GEN 6:7: `பூமியின்மேல்` against `பூமியின் மேல`).
+  `verses.jsonl` is built from the reviewer's copy. The builder is left on its
+  documented corpus, so that the pack changes only where the brief asks. Which copy is
+  canonical is a question for the maintainer.
+- **The waiver is removed.** `inlineSignOff` is gone from `gate()`, the loader (a rule
+  file carrying it now fails to load as an unknown key) and every rule file. The
+  builder's `SIGN_OFF` table becomes `INLINE`, which holds the human number behind each
+  inline rule. The AI-agreement `gate()` keeps only its regression check. DECISIONS.md
+  2026-09-28 supersedes the 2026-09-24 sign-off.
+- **Inline at step 1, on the human numbers.**
+  - Only `sandhi.vallinam.dative` qualifies: 93.9%, 46/49.
+  - Off inline: accusative (70.0%, 35/50), demonstrative (8 labels), manner-adverb
+    (1 label) and wrong-consonant (0 labels).
+- **Rebuild.** The pack was rebuilt with the documented command. Per rule, with the
+  examples set aside, the only differences from HEAD are `inline` and the removed
+  `inlineSignOff`. The examples differ, because the builder picked different real
+  verses. It prefers verses the reviews also flagged, and this machine's review folder
+  differs from the one the original build saw.
+- **Also fixed on the way.**
+  - `bba1275`: the engine's version strings were at 0.11.0 inside a 0.12.0 app, which
+    stopped `smoke_sidecars.py` at its first check.
+  - `e885f55`: the benchmark script now writes UTF-8 to stdout. Its `—` crashed a UTF-8
+    reader on a Windows pipe.
+- **Tests.**
+  - `test_language_qa_benchmark.py`:
+    - the human scorer (TP/FP/house/excluded/lost TP/recall proxy);
+    - the human gate (sample size, floor, baseline, lost TP);
+    - a label that no longer anchors;
+    - every committed label anchors in `verses.jsonl`;
+    - the CI command itself;
+    - the AI gate is regression-only.
+  - Tests that used a demonstrative pair as their "inline" example now use a dative pair.
+  - Fast engine suite: 2022 passed.
+
+| Rule (human precision, step 0) | Labelled | TP | FP | Precision |
+|---|---|---|---|---|
+| `sandhi.vallinam.dative` | 49 | 46 | 3 | 93.9% |
+| `sandhi.vallinam.accusative` | 50 | 35 | 15 | 70.0% |
+| `sandhi.vallinam.demonstrative` | 8 | 7 | 1 | 87.5% |
+| `sandhi.vallinam.manner-adverb` | 1 | 1 | 0 | 100% |
+| `lexicon.known-misspelling` | 43 | 43 | 0 | 100% |
+| `common/spacing.extra` | 15 | 15 | 0 | 100% |
+| `typo.divine-name.vowel-drop` | 1 | 1 | 0 | 100% |
+| `lexicon.rare-near-common` | 21 | 0 | 21 | 0% |
+| `tamil.repeated-word` | 20 | 0 | 20 | 0% |
+| `integrity.space-before-note-end` | 15 | 0 | 15 | 0% |

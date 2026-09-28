@@ -84,12 +84,6 @@
   "type": "insert-link"
  },
  "provenance": "Generalises B3 (three datives) to the -க்கு ending. notLexical is (1) root nouns and names in -க்கு, 16 words shown by a locative in -க்கில் or a dative -க்குக்கு (கிழக்கு -> கிழக்கில், விளக்கு, வழக்கு, ஈசாக்கு, அபிமெலேக்கு); a real dative has neither (no எனக்கில்); (2) IRV's bare-majority -க்கு words (bare/doubled): கிழக்கு 34/9; வடக்கு 14/3; ஈசாக்கு 13/0; சபைக்கு 7/6; அபிமெலேக்கு 6/0; நீதிமானுக்கு 4/2; கிரேக்கு 3/0; யோபுக்கு 3/0; வானராணிக்கு 3/2; சந்ததிகளுக்கு 2/1; சிலைகளுக்கு 2/1; தூணுக்கு 2/1; பள்ளத்தாக்கு 2/1; (3) the names IRV_Pass3_Handoff.md §5 lists as nominatives. -ற்கு is a different ending and is not matched.",
- "inlineSignOff": {
-  "by": "maintainer (session of 2026-09-24)",
-  "date": "2026-09-24",
-  "reason": "Maintainer sign-off 2026-09-24: keep all வல்லினம் rules inline; false positives are handled by Ignore and learned from (Phase 6). Precision is agreement with the minority-form AI review, not verified accuracy.",
-  "precisionStrict": 0.4975
- },
  "examples": {
   "incorrect": [
    {
@@ -99,34 +93,34 @@
     "origin": "1CH 10:13 (also in the review reports)"
    },
    {
-    "text": "பகூரிம் வரை அவளுக்கு பின்னே அழுது கொண்டு",
-    "span": "அவளுக்கு பின்னே",
-    "fix": "அவளுக்குப் பின்னே",
-    "origin": "2SA 3:16 (also in the review reports)"
+    "text": "நான் நிச்சயமாக உனக்கு தயை செய்து, உன்னுடைய",
+    "span": "உனக்கு தயை",
+    "fix": "உனக்குத் தயை",
+    "origin": "2SA 9:7 (also in the review reports)"
    },
    {
-    "text": "இன்று நான் உனக்கு கொடுக்கிற உன் தேவனாகிய",
-    "span": "உனக்கு கொடுக்கிற",
-    "fix": "உனக்குக் கொடுக்கிற",
-    "origin": "DEU 28:1 (also in the review reports)"
+    "text": "எல்லாவற்றிலும் யெகோவா உனக்கு சாபத்தையும், குழப்பத்தையும், அழிவையும்",
+    "span": "உனக்கு சாபத்தையும்",
+    "fix": "உனக்குச் சாபத்தையும்",
+    "origin": "DEU 28:20 (also in the review reports)"
    },
    {
-    "text": "போகும் என்பதை ராஜாவுக்கு தெரியப்படுத்துகிறோம் என்று எழுதி",
-    "span": "ராஜாவுக்கு தெரியப்படுத்துகிறோம்",
-    "fix": "ராஜாவுக்குத் தெரியப்படுத்துகிறோம்",
-    "origin": "EZR 4:16 (also in the review reports)"
+    "text": "நித்தியகாலமாக உங்கள் பிள்ளைகளுக்கு சொத்தாகப் பின்வைக்கும்படிக்கு, நீங்கள்",
+    "span": "பிள்ளைகளுக்கு சொத்தாகப்",
+    "fix": "பிள்ளைகளுக்குச் சொத்தாகப்",
+    "origin": "EZR 9:12 (also in the review reports)"
    },
    {
-    "text": "கொடுத்தார்; அவனுடைய தளபதிக்கு சிசெரா என்று பெயர்;",
-    "span": "தளபதிக்கு சிசெரா",
-    "fix": "தளபதிக்குச் சிசெரா",
-    "origin": "JDG 4:2 (also in the review reports)"
+    "text": "திம்னாத் என்னும் ஊருக்கு போய், திம்னாத்திலே பெலிஸ்தர்களின்",
+    "span": "ஊருக்கு போய்",
+    "fix": "ஊருக்குப் போய்",
+    "origin": "JDG 14:1 (also in the review reports)"
    },
    {
-    "text": "யெகோவா இஸ்ரவேல் மக்களுக்கு கொடுத்த தேசத்திற்கு அவர்கள்",
-    "span": "மக்களுக்கு கொடுத்த",
-    "fix": "மக்களுக்குக் கொடுத்த",
-    "origin": "NUM 32:7 (also in the review reports)"
+    "text": "படைப்பாக ஆசாரியனாகிய எலெயாசாருக்கு கொடுக்க வேண்டும்.",
+    "span": "எலெயாசாருக்கு கொடுக்க",
+    "fix": "எலெயாசாருக்குக் கொடுக்க",
+    "origin": "NUM 31:29 (also in the review reports)"
    },
    {
     "text": "நீர் எனக்கு சாப்பிட உணவையும், குடிக்கத்",
@@ -141,28 +135,28 @@
     "origin": "GEN 23:14 (also in the review reports)"
    },
    {
-    "text": "படைப்பாக ஆசாரியனாகிய எலெயாசாருக்கு கொடுக்க வேண்டும்.",
-    "span": "எலெயாசாருக்கு கொடுக்க",
-    "fix": "எலெயாசாருக்குக் கொடுக்க",
-    "origin": "NUM 31:29 (also in the review reports)"
+    "text": "எலியாசாப் காத் சந்ததியாருக்கு படைத்தலைவனாக இருக்க வேண்டும்.",
+    "span": "சந்ததியாருக்கு படைத்தலைவனாக",
+    "fix": "சந்ததியாருக்குப் படைத்தலைவனாக",
+    "origin": "NUM 2:14 (also in the review reports)"
    },
    {
-    "text": "களத்திலே யெகோவா தனக்கு பதில் சொன்னதை தாவீது",
-    "span": "தனக்கு பதில்",
-    "fix": "தனக்குப் பதில்",
-    "origin": "1CH 21:28"
+    "text": "அவன் தனக்கு தாவீதின் நகரத்தில் வீடுகளைக்",
+    "span": "தனக்கு தாவீதின்",
+    "fix": "தனக்குத் தாவீதின்",
+    "origin": "1CH 15:1"
    },
    {
-    "text": "தனக்கு தீங்கு செய்யச் சவுல்",
-    "span": "தனக்கு தீங்கு",
-    "fix": "தனக்குத் தீங்கு",
-    "origin": "1SA 23:9"
+    "text": "நியாயத் தீர்ப்புச் செய்கிறவருக்கு தம்மையே ஒப்புவித்தார்.",
+    "span": "செய்கிறவருக்கு தம்மையே",
+    "fix": "செய்கிறவருக்குத் தம்மையே",
+    "origin": "1PE 2:23"
    },
    {
-    "text": "அபியத்தார் என்னும் ஆசாரியர்களுக்கு தெரியப்படுத்து.",
-    "span": "ஆசாரியர்களுக்கு தெரியப்படுத்து",
-    "fix": "ஆசாரியர்களுக்குத் தெரியப்படுத்து",
-    "origin": "2SA 15:35"
+    "text": "அல்லாமல், பலர் தேவனுக்கு செலுத்தும் நன்றியின் நிறைவாகவும்",
+    "span": "தேவனுக்கு செலுத்தும்",
+    "fix": "தேவனுக்குச் செலுத்தும்",
+    "origin": "2CO 9:12"
    }
   ],
   "correct": [

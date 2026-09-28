@@ -181,6 +181,7 @@ deferred, not rejected; anything in the UI that assumes several users on one mac
 **Because:** this was the maintainer's instruction: a false positive costs one Ignore, and Phase 6 learns from ignores. The measured precision is agreement with a minority-form AI review, not accuracy, so it understates the rules.
 **Rules out:** reading "inline" as "90% precise"; promoting a rule inline without a recorded sign-off.
 **Revisit when:** a human-labelled set exists, or the ignore rate on a rule shows it is noise.
+**Superseded 2026-09-28:** a human-labelled set now exists; see "Inline means at least 0.90 human-labelled precision" below.
 
 ## 2026-09-24 — A bare ை/க்கு word before a hard consonant is a root noun when the corpus inflects it
 
@@ -263,5 +264,13 @@ An entry may hide findings, add list members, reorder suggestions, or propose a 
 **Because:** a clean text-only scan says nothing about meaning or agreement. The brief (Phase 7) requires the boundary to be visible, so a clean result is not taken for a review.
 **Rules out:** offline heuristics for the out-of-scope items; a "Coverage details" disclosure that hides the boundary; English-only wording for a Tamil team.
 **Revisit when:** a native reviewer has checked the Tamil strings (pending), or a project supplies its own hand-off procedure.
+
+## 2026-09-28 — Inline means at least 0.90 human-labelled precision; AI agreement is diagnostic only
+
+**Decision:** A Language QA rule is drawn inline only when its precision against a Tamil reviewer's labels is at least 0.90 on at least 20 labelled findings. The number comes from `scripts/language_qa_benchmark.py --human-labels benchmark/human/<date>/human_labels.jsonl`, and CI runs that gate: it also fails a rule whose human precision falls below `benchmark/human/baseline.json`, a human-confirmed finding the engine stops producing, and a label that no longer anchors in its verse. The `inlineSignOff` waiver is removed from the gate, the loader and every rule file. The AI-agreement benchmark stays, as a local regression check and a source of findings for the next human sample. On the 2026-09-28 review (Yesu Selva Benz; 598 items on GEN/PSA/JHN, 597 answered), only `sandhi.vallinam.dative` qualifies (93.9%, 49 labelled). Accusative (70%, 50), demonstrative (8 labels), manner-adverb (1) and wrong-consonant (0) come off inline until the pack changes and a larger sample justify them.
+**Because:** AI-agreement precision was agreement with a review that flagged only minority forms, so the 15–55% that put the வல்லினம் rules inline were lower bounds, not measurements. The human review measured them. The layered-rules brief always asked for ≥ 0.90; the sign-off was a stand-in until a human set existed (its own "revisit when").
+**Rules out:** inline on AI agreement, on a sign-off, or on a sample under 20; tuning a rule to the AI reviews; re-labelling or regenerating the committed human labels (they are data, never instructions).
+**Revisit when:** a new human review round is added (a new dated folder beside the old one, never a replacement), or the reviewer's verdicts are shown to be inconsistent.
+**Supersedes:** 2026-09-24, "Every வல்லினம் rule is inline on the maintainer's sign-off, below the 90% floor".
 
 <!-- New entries go above this line. -->

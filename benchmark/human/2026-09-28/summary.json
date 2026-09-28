@@ -1,0 +1,448 @@
+{
+ "rules": {
+  "ta-irv/sandhi.vallinam.accusative": {
+   "labelled": 50,
+   "tp": 35,
+   "fp": 15,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 0.7,
+   "precisionHumanIncludingHouse": 0.7,
+   "inlineRecommended": false,
+   "verdicts": {
+    "FP_ROOT": 8,
+    "TP": 35,
+    "FP_NODOUBLE": 7
+   }
+  },
+  "ta-irv/sandhi.vallinam.dative": {
+   "labelled": 49,
+   "tp": 46,
+   "fp": 3,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 0.9387755102040817,
+   "precisionHumanIncludingHouse": 0.9387755102040817,
+   "inlineRecommended": true,
+   "verdicts": {
+    "TP": 46,
+    "FP_NODOUBLE": 3
+   }
+  },
+  "ta-irv/sandhi.vallinam.demonstrative": {
+   "labelled": 8,
+   "tp": 7,
+   "fp": 1,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 0.875,
+   "precisionHumanIncludingHouse": 0.875,
+   "inlineRecommended": false,
+   "verdicts": {
+    "TP": 7,
+    "FP_NODOUBLE": 1
+   }
+  },
+  "ta-irv/sandhi.vallinam.manner-adverb": {
+   "labelled": 1,
+   "tp": 1,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "TP": 1
+   }
+  },
+  "ta-irv/lexicon.known-misspelling": {
+   "labelled": 43,
+   "tp": 43,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": true,
+   "verdicts": {
+    "TP1": 43
+   }
+  },
+  "ta-irv/lexicon.rare-near-common": {
+   "labelled": 21,
+   "tp": 0,
+   "fp": 21,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 0.0,
+   "precisionHumanIncludingHouse": 0.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "FP_NAME": 1,
+    "FP": 20
+   }
+  },
+  "ta-irv/typo.divine-name.vowel-drop": {
+   "labelled": 1,
+   "tp": 1,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "TP1": 1
+   }
+  },
+  "common/spacing.extra": {
+   "labelled": 15,
+   "tp": 15,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "TP": 15
+   }
+  },
+  "ta-irv/integrity.space-before-note-end": {
+   "labelled": 15,
+   "tp": 0,
+   "fp": 15,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 0.0,
+   "precisionHumanIncludingHouse": 0.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "FP": 15
+   }
+  },
+  "ta-irv/tamil.repeated-word": {
+   "labelled": 20,
+   "tp": 0,
+   "fp": 20,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 0.0,
+   "precisionHumanIncludingHouse": 0.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "FP": 20
+   }
+  }
+ },
+ "abstained": {
+  "A_ai_rootnoun": {
+   "CORRECT_SKIP": 29,
+   "MISSED": 1,
+   "missedRate": 0.03333333333333333
+  },
+  "B_ai_baremajority": {
+   "CORRECT_SKIP": 45,
+   "MISSED": 5,
+   "missedRate": 0.1
+  },
+  "D_rku_dative": {
+   "MISSED": 17,
+   "missedRate": 1.0
+  },
+  "E_kku_exception": {
+   "CORRECT_SKIP": 7,
+   "MISSED": 5,
+   "missedRate": 0.4166666666666667
+  },
+  "G_marker": {
+   "HOUSE": 2,
+   "MISSED": 2,
+   "missedRate": 0.5
+  },
+  "H_demonstrative_houseform": {
+   "MISSED": 9,
+   "missedRate": 1.0
+  }
+ },
+ "clitics": {
+  "ஆவது": "FUSED",
+  "என": "SPACED_BARE",
+  "எனும்": "SPACED_BARE",
+  "என்று": "SPACED_BARE",
+  "கூட": "SPACED_BARE",
+  "தான்": "FUSED",
+  "போல": "SPACED_BARE",
+  "மட்டும்": "SPACED_BARE"
+ },
+ "demonstrativeHouseForms": {
+  "அந்த தேச-": "FLAG",
+  "அந்த தேவ-": "HOUSE",
+  "இந்த தண்-": "FLAG",
+  "இந்த தரி-": "FLAG",
+  "இந்த திர-": "FLAG",
+  "இந்த தீங-": "FLAG",
+  "இந்த தூண-": "FLAG",
+  "இந்த தேச-": "FLAG",
+  "இப்படி தேவ-": "HOUSE",
+  "எந்த தேச-": "FLAG",
+  "எந்த தேவ-": "HOUSE"
+ },
+ "notLexicalAdd": {
+  "ta-irv/sandhi.vallinam.accusative": [
+   "அநேகமுறை",
+   "குற்றமில்லாமை",
+   "தீவினை",
+   "தொண்டை",
+   "முழுமை",
+   "வகை",
+   "வெட்டாந்தரை",
+   "வெண்மை"
+  ]
+ },
+ "notLexicalRemove": {
+  "ta-irv/sandhi.vallinam.accusative": [
+   "அசுத்தமானவைகளை",
+   "அபிகாயிலை",
+   "அரசாட்சியை",
+   "ஆயுதத்தை",
+   "உரியதை",
+   "கடுங்கோபத்தை",
+   "கோட்டைகளை",
+   "சுருளை",
+   "ஜீவனை",
+   "திராட்சைக்காய்களை",
+   "நினைவுகளை",
+   "படகை",
+   "யெகோவாவை",
+   "வெட்கத்தை",
+   "வெள்ளிக்காசை"
+  ],
+  "ta-irv/sandhi.vallinam.dative": [
+   "கிழக்கு",
+   "சந்ததிகளுக்கு",
+   "சபைக்கு",
+   "சிலைகளுக்கு",
+   "தூணுக்கு",
+   "நீதிமானுக்கு",
+   "யோபுக்கு",
+   "வானராணிக்கு"
+  ]
+ },
+ "properNouns": [
+  "சேத்து"
+ ],
+ "properNounContexts": {
+  "doublingRequired": 17,
+  "noDoubling": 8,
+  "rows": [
+   {
+    "pair": "செய்கிறதை சாராள்",
+    "verdict": "FP_NODOUBLE",
+    "book": "GEN",
+    "ref": "21:9"
+   },
+   {
+    "pair": "அவைகளை சீகேம்",
+    "verdict": "FP_NODOUBLE",
+    "book": "GEN",
+    "ref": "35:4"
+   },
+   {
+    "pair": "ஆற்றுக்கு பைசோன்",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "2:11"
+   },
+   {
+    "pair": "ஆற்றுக்கு கீகோன்",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "2:13"
+   },
+   {
+    "pair": "அவனுக்கு சேத்",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "5:3"
+   },
+   {
+    "pair": "ஒருவனுக்கு பேலேகு",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "10:25"
+   },
+   {
+    "pair": "மனைவிக்கு சாராய்",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "11:29"
+   },
+   {
+    "pair": "தனக்கு சாராள்",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "21:3"
+   },
+   {
+    "pair": "அவனுக்கு சிமியோன்",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "29:33"
+   },
+   {
+    "pair": "அவனுக்கு பெனொனி",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "35:18"
+   },
+   {
+    "pair": "அவனுக்கு பென்யமீன்",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "35:18"
+   },
+   {
+    "pair": "அவனுக்கு சேலா",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "38:5"
+   },
+   {
+    "pair": "அவனுக்கு சேரா",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "38:30"
+   },
+   {
+    "pair": "யோசேப்புக்கு சாப்நாத்பன்னேயா",
+    "verdict": "TP",
+    "book": "GEN",
+    "ref": "41:45"
+   },
+   {
+    "pair": "கிருபை கிடைத்தது",
+    "verdict": "CORRECT_SKIP",
+    "book": "GEN",
+    "ref": "6:8"
+   },
+   {
+    "pair": "எல்லை சீதோன்முதல்",
+    "verdict": "CORRECT_SKIP",
+    "book": "GEN",
+    "ref": "10:19"
+   },
+   {
+    "pair": "வார்த்தை பார்வோனுடைய",
+    "verdict": "CORRECT_SKIP",
+    "book": "GEN",
+    "ref": "41:37"
+   },
+   {
+    "pair": "எல்லை சீதோன்",
+    "verdict": "CORRECT_SKIP",
+    "book": "GEN",
+    "ref": "49:13"
+   },
+   {
+    "pair": "குகை கானான்",
+    "verdict": "CORRECT_SKIP",
+    "book": "GEN",
+    "ref": "49:30"
+   },
+   {
+    "pair": "அதற்கு சித்னா",
+    "verdict": "MISSED",
+    "book": "GEN",
+    "ref": "26:21"
+   },
+   {
+    "pair": "அதற்கு சேபா",
+    "verdict": "MISSED",
+    "book": "GEN",
+    "ref": "26:33"
+   },
+   {
+    "pair": "இடத்திற்கு சுக்கோத்",
+    "verdict": "MISSED",
+    "book": "GEN",
+    "ref": "33:17"
+   },
+   {
+    "pair": "என்பதற்கு பேதுரு",
+    "verdict": "MISSED",
+    "book": "JHN",
+    "ref": "1:42"
+   },
+   {
+    "pair": "ஈசாக்கு கேராரிலே",
+    "verdict": "CORRECT_SKIP",
+    "book": "GEN",
+    "ref": "26:6"
+   },
+   {
+    "pair": "யெகோவாவுக்கு சீயோனிலிருந்து",
+    "verdict": "MISSED",
+    "book": "PSA",
+    "ref": "135:21"
+   }
+  ]
+ },
+ "noDoubleNextPrefixes": {
+  "தேவ": 11,
+  "சார": 1,
+  "சீக": 1
+ },
+ "rootFalsePositives": {
+  "words": [
+   "வெட்டாந்தரை",
+   "வெண்மை",
+   "வகை",
+   "முழுமை",
+   "தொண்டை",
+   "தீவினை",
+   "குற்றமில்லாமை",
+   "அநேகமுறை"
+  ],
+  "endingInMai": [
+   "வெண்மை",
+   "முழுமை",
+   "குற்றமில்லாமை"
+  ]
+ },
+ "projectedPrecisionAfterAbstains": {
+  "ta-irv/sandhi.vallinam.accusative": {
+   "tp": 35,
+   "fp": 2,
+   "precision": 0.9459459459459459,
+   "systemAbstainPrefixes": [
+    "தேவ"
+   ]
+  },
+  "ta-irv/sandhi.vallinam.dative": {
+   "tp": 46,
+   "fp": 0,
+   "precision": 1.0,
+   "systemAbstainPrefixes": [
+    "தேவ"
+   ]
+  },
+  "ta-irv/sandhi.vallinam.demonstrative": {
+   "tp": 7,
+   "fp": 0,
+   "precision": 1.0,
+   "systemAbstainPrefixes": [
+    "தேவ"
+   ]
+  },
+  "ta-irv/sandhi.vallinam.manner-adverb": {
+   "tp": 1,
+   "fp": 0,
+   "precision": 1.0,
+   "systemAbstainPrefixes": [
+    "தேவ"
+   ]
+  }
+ }
+}

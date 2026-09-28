@@ -119,6 +119,9 @@ jobs:
               # editing only a seed script would skip the suite it breaks.
               - 'schemas/**'
               - 'scripts/**'
+              # The human-labelled Language QA benchmark: the gate below scores
+              # the pack against these labels, so a change to them re-runs it.
+              - 'benchmark/**'
               # A change to the gate itself re-runs every job it defines. Without
               # this, a PR that edits ci.yml skips everything and merges green having
               # proved nothing about the workflow it just changed.
@@ -251,6 +254,18 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: '1'
         run: python ../scripts/benchmark_language_qa.py --gate --cores 2
+
+      - name: Language QA human-label accuracy gate
+        # A Tamil reviewer's verdicts on the engine's own findings
+        # (benchmark/human/2026-09-28). Inline requires >= 0.90 human precision
+        # on >= 20 labelled findings; no rule may fall below
+        # benchmark/human/baseline.json; no human-confirmed finding may be lost.
+        # The labelled verses are committed beside the labels, so this needs no
+        # IRV corpus. It replaces the AI-agreement gate as the inline decision,
+        # which stays local and diagnostic (DECISIONS.md 2026-09-28). ~10 s.
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python ../scripts/language_qa_benchmark.py --human-labels ../benchmark/human/2026-09-28/human_labels.jsonl --gate
 
   # ---------------------------------------------------------------------------
   # Rust / Tauri shell.

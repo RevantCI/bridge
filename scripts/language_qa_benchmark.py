@@ -12,10 +12,23 @@ unmatched findings) is written to benchmark/results/, which is not
 committed; only aggregate numbers go into benchmark/baseline.json and
 docs/LANGUAGE_QA_BENCHMARK.md. See that doc for what the numbers mean.
 
---gate exits 1 when an inline rule's strict precision is below 0.90, or a
-rule's strict precision fell more than 2 points below the committed
-baseline. It is a local gate: the IRV text and review reports live outside
-the repository, so CI cannot run it (maintainer decision, 2026-09-24).
+Two modes, one gate each:
+
+- AI agreement (--irv-dir, --reviews): precision is agreement with the
+  Round 2 / Pass 3 AI review rows, a lower bound, so it is diagnostic only.
+  --gate fails only when a rule's strict precision fell more than 2 points
+  below benchmark/baseline.json. It is local: the IRV text and the review
+  reports live outside the repository.
+- Human labels (--human-labels benchmark/human/<date>/human_labels.jsonl):
+  precision against a Tamil reviewer's verdicts, the only number that may
+  put a rule inline (DECISIONS.md, 2026-09-28). --gate fails an inline rule
+  below 0.90 human precision or with fewer than 20 labelled findings, any
+  rule below benchmark/human/baseline.json, a human-confirmed finding no
+  longer produced, and a label that no longer anchors. The labelled verses
+  are committed beside the labels (verses.jsonl), so CI runs this gate.
+
+    python scripts/language_qa_benchmark.py \
+        --human-labels benchmark/human/2026-09-28/human_labels.jsonl --gate
 """
 from __future__ import annotations
 
@@ -58,13 +71,66 @@ def sfm_by_book(irv_dir: Path) -> dict[str, Path]:
     return found
 
 
+HUMAN_BASELINE = REPO / "benchmark" / "human" / "baseline.json"
+HUMAN_START, HUMAN_END = "<!-- human-benchmark:start -->", "<!-- human-benchmark:end -->"
+
+
+def human_main(args: argparse.Namespace) -> int:
+    """--human-labels: precision against the reviewer's verdicts. Needs no IRV
+    corpus (the labelled verses are committed beside the labels), so CI runs it."""
+    labels = bench.load_human_labels(args.human_labels)
+    verses_path = bench.human_verses_path(args.human_labels)
+    if args.write_human_verses:
+        if not args.irv_dir:
+            raise SystemExit("--write-human-verses needs --irv-dir")
+        rows = bench.human_label_verses(labels, args.irv_dir)
+        with verses_path.open("w", encoding="utf-8", newline="\n") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        print(f"{len(rows)} verses written to {verses_path}", file=sys.stderr)
+    verses = bench.load_human_verses(verses_path)
+    scans = {book: bench.scan_book(book, chapters) for book, chapters in verses.items()}
+    result = bench.human_score(labels, scans, verses)
+    result["generatedAt"] = dt.datetime.now().isoformat(timespec="seconds")
+    result["labelsFile"] = args.human_labels.as_posix()
+    table = bench.human_markdown(result)
+    print(table)
+    baseline_path = args.baseline if args.baseline != REPO / "benchmark" / "baseline.json" else HUMAN_BASELINE
+    if args.update_doc:
+        doc = DOC.read_text(encoding="utf-8")
+        block = (f"{HUMAN_START}\n_Generated {result['generatedAt']} by scripts/language_qa_benchmark.py "
+                 f"--human-labels {result['labelsFile']}._\n\n{table}\n{HUMAN_END}")
+        head, _, rest = doc.partition(HUMAN_START)
+        _, _, tail = rest.partition(HUMAN_END)
+        DOC.write_text(head + block + tail, encoding="utf-8")
+        print(f"updated {DOC}", file=sys.stderr)
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else None
+    if args.write_baseline:
+        baseline_path.parent.mkdir(parents=True, exist_ok=True)
+        baseline_path.write_text(json.dumps(bench.human_baseline_of(result), ensure_ascii=False, indent=1) + "\n",
+                                 encoding="utf-8")
+        print(f"human baseline written to {baseline_path}", file=sys.stderr)
+    if args.gate:
+        failures = bench.human_gate(result, baseline)
+        for failure in failures:
+            print(f"GATE: {failure}", file=sys.stderr)
+        print("human gate: " + ("FAIL" if failures else "pass"), file=sys.stderr)
+        return 1 if failures else 0
+    return 0
+
+
 def main() -> int:
     # The tables carry Tamil text and "—"; a Windows pipe defaults to cp1252.
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--irv-dir", required=True, type=Path)
-    parser.add_argument("--reviews", required=True, nargs="+")
+    parser.add_argument("--irv-dir", type=Path, help="the IRV SFM folder (AI-agreement mode, --write-human-verses)")
+    parser.add_argument("--reviews", nargs="+", help="review CSVs or folders (AI-agreement mode)")
+    parser.add_argument("--human-labels", type=Path,
+                        help="human_labels.jsonl: score against the reviewer's verdicts instead (the gate "
+                             "that decides inline); verse text comes from verses.jsonl beside it")
+    parser.add_argument("--write-human-verses", action="store_true",
+                        help="with --human-labels and --irv-dir: write verses.jsonl from the SFM")
     parser.add_argument("--books", nargs="*", help="limit to these book codes")
     parser.add_argument("--out-dir", type=Path, default=REPO / "benchmark" / "results")
     parser.add_argument("--baseline", type=Path, default=REPO / "benchmark" / "baseline.json")
@@ -76,6 +142,10 @@ def main() -> int:
                         help="a project whose house style is applied; what it hides is reported, not scored, "
                              "and its false-positive marks are exported as reviewer-labelled negatives")
     args = parser.parse_args()
+    if args.human_labels:
+        return human_main(args)
+    if not args.irv_dir or not args.reviews:
+        parser.error("--irv-dir and --reviews are required unless --human-labels is given")
 
     housestyle: list = []
     if args.housestyle:

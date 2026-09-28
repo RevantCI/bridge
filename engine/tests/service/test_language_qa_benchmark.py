@@ -117,7 +117,7 @@ def test_findings_are_scored_against_compatible_rows_only(benchmark):
     assert vallinam["fp_strict"] == 4 and vallinam["tp_lenient"] == 3
     assert vallinam["fp_house_form"] == 1             # 1:3 இந்த + bare (1:7 அந்த தேச- is abstained by the pack)
     assert vallinam["precision_strict"] == 0.2 and vallinam["precision_lenient"] == 0.6
-    assert vallinam["inline"] is True
+    assert vallinam["inline"] is False  # panel-only until a human sample of >= 20 (2026-09-28)
     # The spacing row at 1:2 is not matched by the vallinam finding at the same verse.
     assert result["buckets"]["punctuation"]["found_positive"] == 0
 
@@ -143,29 +143,121 @@ def test_unmatched_findings_are_listed_for_a_human_to_label(benchmark):
     assert unmatched[("2", "அந்த பெண்")]["houseForm"] is None
 
 
-def test_gate_fails_an_imprecise_inline_rule_and_a_precision_drop(benchmark):
+def test_the_ai_agreement_gate_only_guards_regression(benchmark):
+    """AI agreement is a lower bound, so it never decides inline (DECISIONS.md
+    2026-09-28): an inline rule at 20% passes it; only a drop fails."""
     _, result, _ = benchmark
     rule = result["rules"]["ta-irv/sandhi.vallinam.demonstrative"]
-    # Signed off for inline at 41.25%: this synthetic 20% is more than 2 points below that.
-    assert rule["signOff"]["precisionStrict"] == 0.4125
-    assert bench.gate(result, None) == [
-        "ta-irv/sandhi.vallinam.demonstrative fell below its inline sign-off: 20.0% < 41.2% - 2 points"]
-    # Within 2 points of the sign-off it passes, though far below 90%.
-    rule["signOff"] = {**rule["signOff"], "precisionStrict": 0.21}
+    rule["inline"] = True
+    assert rule["precision_strict"] == 0.2 and "signOff" not in rule
     assert bench.gate(result, None) == []
-    # Without a sign-off an inline rule must reach 90%.
-    rule["signOff"] = None
-    assert bench.gate(result, None) == [
-        "ta-irv/sandhi.vallinam.demonstrative is inline but strict precision is 20.0% (< 90.0%)"]
-    rule["signOff"] = {"by": "m", "date": "d", "precisionStrict": None}
-    assert "records no precision" in bench.gate(result, None)[0]
-    rule["signOff"] = {"by": "m", "date": "d", "precisionStrict": 0.21}
     baseline = {"rules": {"ta-irv/sandhi.vallinam.demonstrative": {"precision_strict": 0.5, "findings": 12}}}
     assert bench.gate(result, baseline) == []  # 5 findings now: too few to compare a drop
     rule["findings"] = 12
     dropped = bench.gate(result, baseline)
-    assert "fell from 50.0% to 20.0%" in dropped[-1]
-    assert bench.gate(result, baseline, inline_min_precision=0.1, max_drop=0.5) == []
+    assert dropped == ["ta-irv/sandhi.vallinam.demonstrative strict precision fell from 50.0% to 20.0%"]
+    assert bench.gate(result, baseline, max_drop=0.5) == []
+
+
+# ---- human labels -----------------------------------------------------------
+
+def _human_inputs(benchmark):
+    """Labels over the synthetic book's own findings, as the reviewer's
+    converter writes them (flagged, abstained and word rows)."""
+    _, _, verses = benchmark
+    scans = {"rut": bench.scan_book("rut", verses["rut"])}
+    at = {(f["verse"], f["originalText"]): f for f in scans["rut"]["findings"]
+          if f["ruleId"] == "ta-irv/sandhi.vallinam.demonstrative"}
+
+    def flagged(ident, verse, original, verdict, start=None):
+        finding = at.get((verse, original))
+        s = finding["start"] if start is None else start
+        return {"id": ident, "kind": "flagged", "cls": "flagged", "rule": "ta-irv/sandhi.vallinam.demonstrative",
+                "book": "rut", "ch": "1", "v": verse, "start": s, "end": s + len(original),
+                "original": original, "verdict": verdict}
+
+    text7 = verses["rut"]["1"]["7"]
+    labels = [
+        flagged("R1", "1", "அந்த காகம்", "TP"),
+        flagged("R2", "2", "அந்த பெண்", "FP_NODOUBLE"),
+        flagged("R3", "3", "இந்த கல்லை", "HOUSE"),
+        flagged("R4", "4", "இந்த பட்டணம்", "UNSURE"),
+        # v7: the pack abstains on அந்த தேச- (a house form), so there is no
+        # finding there; the reviewer says doubling was required.
+        {"id": "R5", "kind": "flagged", "cls": "flagged", "rule": "ta-irv/sandhi.vallinam.demonstrative",
+         "book": "rut", "ch": "1", "v": "7", "start": text7.index("அந்த"),
+         "end": text7.index("அந்த") + len("அந்த தேசத்தில்"),
+         "original": "அந்த தேசத்தில்", "verdict": "TP"},
+        {"id": "R6", "kind": "abstained", "cls": "H_demonstrative_houseform", "rule": "(abstained)",
+         "book": "rut", "ch": "1", "v": "7", "start": -1, "end": -1, "original": "அந்த தேசத்தில்",
+         "prev": "அந்த", "next": "தேசத்தில்", "verdict": "MISSED"},
+        {"id": "W1", "kind": "word", "cls": "acc_root", "word": "மலை", "verdict": "ROOT_KEEP"},
+    ]
+    return labels, scans, verses
+
+
+def test_human_precision_counts_only_labelled_findings(benchmark):
+    labels, scans, verses = _human_inputs(benchmark)
+    result = bench.human_score(labels, scans, verses)
+    rule = result["rules"]["ta-irv/sandhi.vallinam.demonstrative"]
+    # R1 TP, R2 FP; R3 is a house form, reported apart; R4 "unsure" is excluded;
+    # the unlabelled v4 finding is not scored at all.
+    assert (rule["labelled"], rule["tp"], rule["fp"], rule["house"], rule["excluded"]) == (3, 1, 1, 1, 1)
+    assert rule["precision"] == 0.5
+    # R5: a human-confirmed finding the engine does not produce.
+    assert rule["lost_tp"] == 1
+    proxy = result["recallProxies"]["H_demonstrative_houseform"]
+    assert (proxy["missed"], proxy["missed_now_flagged"], proxy["still_missed_rate"]) == (1, 0, 1.0)
+    assert result["mismatches"] == []
+    table = bench.human_markdown(result)
+    assert "| `ta-irv/sandhi.vallinam.demonstrative` |" in table and "Recall proxies" in table
+
+
+def test_human_gate_decides_inline_on_precision_and_sample_size(benchmark):
+    labels, scans, verses = _human_inputs(benchmark)
+    result = bench.human_score(labels, scans, verses)
+    rule = result["rules"]["ta-irv/sandhi.vallinam.demonstrative"]
+    rule["inline"], rule["lost_tp"] = True, 0
+
+    def failures(baseline=None):
+        # Only this rule: the synthetic labels do not cover the pack's real inline rules.
+        return [f for f in bench.human_gate(result, baseline) if "demonstrative" in f]
+    assert failures() == ["ta-irv/sandhi.vallinam.demonstrative is inline with 3 human-labelled findings (< 20)"]
+    rule["labelled"], rule["tp"], rule["fp"], rule["precision"] = 20, 17, 3, 0.85
+    assert failures() == ["ta-irv/sandhi.vallinam.demonstrative is inline but human precision is 85.0% (< 90.0%)"]
+    rule["precision"] = 0.9
+    assert failures() == []
+    baseline = {"rules": {"ta-irv/sandhi.vallinam.demonstrative": {"precision": 0.95}}}
+    assert failures(baseline) == ["ta-irv/sandhi.vallinam.demonstrative human precision fell from 95.0% to 90.0%"]
+    rule["lost_tp"] = 1
+    assert "1 human-confirmed finding(s) no longer produced" in failures()[0]
+    # An inline rule the labels never reach fails too: inline needs a sample.
+    assert "ta-irv/sandhi.vallinam.dative is inline with 0 human-labelled findings (< 20)"         in bench.human_gate(result, None)
+
+
+def test_a_label_that_no_longer_anchors_fails_the_human_gate(benchmark):
+    labels, scans, verses = _human_inputs(benchmark)
+    labels[0] = {**labels[0], "start": labels[0]["start"] + 1, "end": labels[0]["end"] + 1}
+    result = bench.human_score(labels, scans, verses)
+    assert result["mismatches"] == ["R1 RUT 1:1: label text does not match the verse at "
+                                    f"({labels[0]['start']}, {labels[0]['end']})"]
+    assert bench.human_gate(result, None)[0].startswith("label not scored: R1 RUT 1:1")
+
+
+def test_the_committed_human_labels_anchor_in_their_verses():
+    """Every flagged label's text is at its offsets in the committed verses:
+    the CI gate scores all of them, and a verse edit is caught here first."""
+    folder = REPO_ROOT / "benchmark" / "human" / "2026-09-28"
+    labels = bench.load_human_labels(folder / "human_labels.jsonl")
+    verses = bench.load_human_verses(bench.human_verses_path(folder / "human_labels.jsonl"))
+    flagged = [r for r in labels if r["kind"] == "flagged"]
+    assert len(labels) == 598 and len(flagged) == 224
+    for label in flagged:
+        text = verses[label["book"]][label["ch"]][label["v"]]
+        assert bench.nfc(text[label["start"]:label["end"]]) == bench.nfc(label["original"]), label["id"]
+    # Exactly one row is unanswered (R0102, PSA 119:54) and it is never scored.
+    assert [r["id"] for r in labels if bench.human_verdict(r.get("verdict")) is None and r["kind"] == "flagged"] \
+        == ["R0102"]
 
 
 def test_baseline_holds_numbers_only(benchmark):
@@ -213,9 +305,23 @@ def test_cli_gate_exit_code_and_outputs(tmp_path):
                "--baseline", str(tmp_path / "baseline.json")]
     written = subprocess.run(command + ["--write-baseline"], capture_output=True, text=True, encoding="utf-8")
     assert written.returncode == 0, written.stderr
-    assert "| `ta-irv/sandhi.vallinam.demonstrative` | yes | 5 |" in written.stdout
+    assert "| `ta-irv/sandhi.vallinam.demonstrative` | no | 5 |" in written.stdout
     assert json.loads((tmp_path / "baseline.json").read_text(encoding="utf-8"))["books"] == ["rut"]
     [result_file] = out.glob("*.json")
     assert json.loads(result_file.read_text(encoding="utf-8"))["unmatchedFindings"]
+    # Diagnostic only: 5 findings are too few to compare against the baseline,
+    # and AI agreement no longer fails an inline rule (DECISIONS.md 2026-09-28).
     gated = subprocess.run(command + ["--gate"], capture_output=True, text=True, encoding="utf-8")
-    assert gated.returncode == 1 and "gate: FAIL" in gated.stderr
+    assert gated.returncode == 0 and "gate: pass" in gated.stderr, gated.stderr
+
+
+@pytest.mark.subprocess
+def test_cli_human_gate_runs_on_the_committed_labels_without_the_corpus():
+    """What CI runs: no --irv-dir, the verses come from verses.jsonl."""
+    labels = REPO_ROOT / "benchmark" / "human" / "2026-09-28" / "human_labels.jsonl"
+    command = [sys.executable, str(REPO_ROOT / "scripts" / "language_qa_benchmark.py"),
+               "--human-labels", str(labels), "--gate"]
+    gated = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
+    assert gated.returncode == 0 and "human gate: pass" in gated.stderr, gated.stderr
+    assert "| `ta-irv/sandhi.vallinam.dative` | yes |" in gated.stdout
+    assert "Recall proxies" in gated.stdout

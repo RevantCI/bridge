@@ -55,7 +55,7 @@ LINKS = ("none", "mismatch", "any")
 FIXES = ("insert-link", "replace-link", "fuse-link", "replace", "expand")
 CONDITION_KEYS = {"lexical", "notLexical", "suffix", "regex", "minLength", "initial", "prefix", "listRef"}
 RULE_KEYS = {"id", "version", "legacyId", "enabled", "category", "layer", "severity", "confidence",
-             "inline", "inlineSignOff", "title", "message", "rationale", "match", "abstain", "fix",
+             "inline", "title", "message", "rationale", "match", "abstain", "fix",
              "examples", "provenance"}
 OVERRIDE_RULE_KEYS = {"enabled", "inline", "abstain"}
 OVERRIDES_PATH = Path(".apps") / "translationCoreAI" / "language-packs"
@@ -169,9 +169,6 @@ class Rule:
     fix: dict[str, Any] | None = None
     examples: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     source: dict[str, Any] = field(default_factory=dict)
-    # The maintainer's sign-off for drawing this rule inline below the
-    # benchmark's precision floor: {by, date, reason, precisionStrict}.
-    sign_off: dict[str, Any] | None = None
 
     @property
     def name(self) -> str:
@@ -331,11 +328,7 @@ def _rule(raw: dict[str, Any], where: str) -> Rule:
         severity=raw["severity"], confidence=raw["confidence"], inline=bool(raw.get("inline", False)),
         message=message, rationale=str(raw.get("rationale", "")), match_type=match["type"],
         fix=raw.get("fix"), examples=raw.get("examples") or {}, source=raw,
-        sign_off=raw.get("inlineSignOff"),
     )
-    if rule.sign_off is not None and (not isinstance(rule.sign_off, dict)
-                                      or not rule.sign_off.get("by") or not rule.sign_off.get("date")):
-        raise PackError(f"{where}: inlineSignOff needs at least 'by' and 'date'")
     if match["type"] == "token-context":
         if match.get("gap", "whitespace") != "whitespace":
             raise PackError(f"{where}: gap must be 'whitespace' (punctuation, digits and markup abstain)")

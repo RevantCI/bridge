@@ -1,0 +1,122 @@
+{
+ "packVersion": "language-qa-7+ta-irv@1.0.0",
+ "books": [
+  "gen",
+  "jhn",
+  "psa"
+ ],
+ "rules": {
+  "common/spacing.extra": {
+   "labelled": 15,
+   "tp": 15,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false
+  },
+  "ta-irv/integrity.space-before-note-end": {
+   "labelled": 15,
+   "tp": 0,
+   "fp": 15,
+   "house": 0,
+   "precision": 0.0,
+   "inline": false
+  },
+  "ta-irv/lexicon.known-misspelling": {
+   "labelled": 43,
+   "tp": 43,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false
+  },
+  "ta-irv/lexicon.rare-near-common": {
+   "labelled": 21,
+   "tp": 0,
+   "fp": 21,
+   "house": 0,
+   "precision": 0.0,
+   "inline": false
+  },
+  "ta-irv/sandhi.vallinam.accusative": {
+   "labelled": 50,
+   "tp": 35,
+   "fp": 15,
+   "house": 0,
+   "precision": 0.7,
+   "inline": false
+  },
+  "ta-irv/sandhi.vallinam.dative": {
+   "labelled": 49,
+   "tp": 46,
+   "fp": 3,
+   "house": 0,
+   "precision": 0.9388,
+   "inline": true
+  },
+  "ta-irv/sandhi.vallinam.demonstrative": {
+   "labelled": 8,
+   "tp": 7,
+   "fp": 1,
+   "house": 0,
+   "precision": 0.875,
+   "inline": false
+  },
+  "ta-irv/sandhi.vallinam.manner-adverb": {
+   "labelled": 1,
+   "tp": 1,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false
+  },
+  "ta-irv/tamil.repeated-word": {
+   "labelled": 20,
+   "tp": 0,
+   "fp": 20,
+   "house": 0,
+   "precision": 0.0,
+   "inline": false
+  },
+  "ta-irv/typo.divine-name.vowel-drop": {
+   "labelled": 1,
+   "tp": 1,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false
+  }
+ },
+ "recallProxies": {
+  "A_ai_rootnoun": {
+   "missed": 1,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 0.0333
+  },
+  "B_ai_baremajority": {
+   "missed": 5,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 0.1
+  },
+  "D_rku_dative": {
+   "missed": 17,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 1.0
+  },
+  "E_kku_exception": {
+   "missed": 5,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 0.4167
+  },
+  "G_marker": {
+   "missed": 2,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 0.5
+  },
+  "H_demonstrative_houseform": {
+   "missed": 9,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 1.0
+  }
+ }
+}

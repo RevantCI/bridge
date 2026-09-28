@@ -4,7 +4,7 @@
  "category": "sandhi",
  "severity": "medium",
  "confidence": "medium",
- "inline": true,
+ "inline": false,
  "title": {
   "ta": "வல்லினம் — தவறான மெய்",
   "en": "Wrong linking consonant"
@@ -291,12 +291,6 @@
   "type": "replace-link"
  },
  "provenance": "Only after a base the வல்லினம் rules cover (a demonstrative, a manner adverb, -ஐ or -க்கு). In IRV every other 'wrong link' is a name ending in a consonant (காத் Gad, மோவாப் Moab), which this must never touch.",
- "inlineSignOff": {
-  "by": "maintainer (session of 2026-09-24)",
-  "date": "2026-09-24",
-  "reason": "Maintainer sign-off 2026-09-24: keep all வல்லினம் rules inline; false positives are handled by Ignore and learned from (Phase 6). Precision is agreement with the minority-form AI review, not verified accuracy.",
-  "precisionStrict": null
- },
  "examples": {
   "incorrect": [
    {
