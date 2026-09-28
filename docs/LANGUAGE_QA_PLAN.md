@@ -121,6 +121,40 @@ in order, and each is its own commit series:
 
 The "Ignore ▸ this word / this rule" menu scopes arrive with Phase 6.
 
+### Human review of 2026-09-28, and what it changed
+
+A Tamil reviewer labelled 598 of the engine's own findings on GEN, PSA and JHN
+(`benchmark/human/2026-09-28/`). Inline is now decided on human-labelled
+precision only: ≥ 0.90 on ≥ 20 labelled findings, gated in CI (DECISIONS.md).
+The pack (`ta-irv@1.1.0`), the lexicon (`ta-irv-lexicon@2`) and the house style
+changed to follow it; BUILD_LOG 2026-09-28 has the numbers. Flagged for the next
+review round, because each is at 100% on fewer than 20 labels:
+`sandhi.vallinam.demonstrative` (7), `sandhi.vallinam.manner-adverb` (1) and
+`common/spacing.extra` (15, 100%). Not yet labelled: `wrong-consonant`,
+`compound.direction`, `clitic.fused` and the `typo.*` rules.
+
+### Candidate, scoped but not built: `word-joining.orphan-syllable`
+
+Two of the reviewer's corrections were joins, not sandhi:
+- `கை கோலில்` → கைக்கோலில் (GEN 47:31);
+- `சு வரை` → சுவரை (PSA 48:13), a one-letter orphan token.
+
+The வல்லினம் rules correctly leave both alone, because கை and வரை stay excluded.
+A split-word check would catch them:
+
+- **Shape.** A token of 1–2 grapheme clusters that is not a known word
+  (lexicon count 0), and that, concatenated with its neighbour (either side),
+  forms a known word (lexicon count ≥ `COMMON_MIN`). Category `word-joining`,
+  panel-only, confidence low. The suggestion is the joined form.
+- **Guardrails.**
+  - Never a token that is itself a word (கை, பூ, தீ are words; கை கோலில் is a
+    compound question, not an orphan).
+  - Never across punctuation or markup.
+  - Never a numeral.
+- **Before it is built.** It needs its own labelled sample: a converter run over
+  its candidates on the three reviewed books, at least 20 labelled, before any
+  precision claim. It stays panel-only until the human gate says otherwise.
+
 Performance contract status after Phase 2:
 - Met: one Language QA status poll (500 ms active, 10 s idle); the p95 gate
   for the RPCs Language QA owns (in CI); the click budget.

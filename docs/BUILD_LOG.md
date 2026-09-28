@@ -12903,3 +12903,15 @@ it (`loaded_pack`). Full verses made it 179 ms before the review examples were w
   - `test_housestyle.py`: the seed is read-only and merged; the list returns it; a
     removal replaces it.
   - `SettingsModal.test.ts`: the bundled row, and its Remove.
+
+### Step 6 — the split-word check is scoped, not built
+
+Two reviewer corrections were joins, not sandhi: `கை கோலில்` → கைக்கோலில் and
+`சு வரை` → சுவரை. `LANGUAGE_QA_PLAN.md` now scopes `word-joining.orphan-syllable`:
+- the shape: a 1–2 cluster token that is not a known word, and that joins with its
+  neighbour into a known word;
+- the guardrails;
+- the requirement for its own labelled sample (≥ 20) before any precision claim.
+
+Nothing is implemented. The plan also lists the rules flagged for the next review round:
+demonstrative 7, manner-adverb 1 and spacing.extra 15 labels.
