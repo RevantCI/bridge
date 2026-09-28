@@ -12709,3 +12709,36 @@ is the only one that decides inline.
 | `lexicon.rare-near-common` | 21 | 0 | 21 | 0% |
 | `tamil.repeated-word` | 20 | 0 | 20 | 0% |
 | `integrity.space-before-note-end` | 15 | 0 | 15 | 0% |
+
+### Step 2 — the reviewer's fixtures
+
+- **Merge.** `benchmark/human/2026-09-28/labelled/*.jsonl` is appended to
+  `engine/tests/fixtures/language_qa/labelled/`:
+  - sandhi 73 → 240;
+  - typo 50 → 115;
+  - punctuation 40 → 55;
+  - usfm 41 → 56.
+
+  The fixtures are unedited. `--write-labelled` now keeps every human-review line, so a
+  future regeneration of the Phase 2.4 sample cannot delete the reviewer's data.
+- **Test.** `test_language_qa_labelled.py` gains:
+  - a `negative` span must yield no finding of its `ruleId`.
+    `integrity.space-before-note-end` is the one reading of "not a text error": it is
+    satisfied by a low-severity `usfm` markup finding, which is what step 3 makes it;
+  - a human-review `maybe` (a split word: கை கோலில், சு வரை) must not be claimed by any
+    sandhi finding;
+  - where a finding covers exactly a human-confirmed span, the reviewer's fix must be
+    among its suggestions.
+
+  Anchoring collapses whitespace, because the reviewer writes a pair across a poetry
+  line with a space. A category the benchmark scores against the bucket is accepted
+  (`spacing` in the punctuation bucket).
+- **111 failures, each one the pack disagreeing with the reviewer.** They are recorded
+  as strict `xfail` in `PENDING_PACK_CHANGES`:
+  - 75 confirmed false alarms: `tamil.repeated-word` 20, `lexicon.rare-near-common` 21,
+    `integrity.space-before-note-end` 15, accusative 15, dative 3, demonstrative 1;
+  - 36 missed positives: dative 23 (the `-ற்கு` datives, the `-க்கு` exception words
+    and a poetry boundary), demonstrative 9 (the house-form prefixes) and accusative 4.
+
+  Strict means each entry must start passing when its fix lands, and is then deleted.
+  Result: 1914 passed, 111 xfailed.

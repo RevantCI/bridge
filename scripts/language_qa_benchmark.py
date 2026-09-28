@@ -194,9 +194,16 @@ def main() -> int:
         target = REPO / "engine" / "tests" / "fixtures" / "language_qa" / "labelled"
         target.mkdir(parents=True, exist_ok=True)
         for bucket, examples in bench.labelled_examples(rows, verses).items():
-            with (target / f"{bucket}.jsonl").open("w", encoding="utf-8", newline="\n") as handle:
+            path = target / f"{bucket}.jsonl"
+            # The human-review fixtures (benchmark/human/<date>/labelled/, appended)
+            # are data from a reviewer, never regenerated: keep them.
+            kept = [line for line in (path.read_text(encoding="utf-8").splitlines() if path.exists() else [])
+                    if "(human review" in json.loads(line).get("origin", "")]
+            with path.open("w", encoding="utf-8", newline="\n") as handle:
                 for example in examples:
                     handle.write(json.dumps(example, ensure_ascii=False) + "\n")
+                for line in kept:
+                    handle.write(line + "\n")
         print(f"labelled fixtures written to {target}", file=sys.stderr)
     if args.update_doc:
         doc = DOC.read_text(encoding="utf-8")
