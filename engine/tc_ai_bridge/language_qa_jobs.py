@@ -798,7 +798,8 @@ class LanguageQaManager:
             if tamil:
                 audit += name_findings(book, book_counts, book_first_seen,
                                        style.lists.get("housestyle.properNouns", frozenset()),
-                                       rule_fields=rule_fields, suggestion=suggestion, rule_version=RULE_VERSION)
+                                       rule_fields=rule_fields, suggestion=suggestion, rule_version=RULE_VERSION,
+                                       corpus_count=lexicon.count if lexicon is not None else None)
             for finding in audit:
                 decided = {}
                 shown, hidden = settle([finding], decided)

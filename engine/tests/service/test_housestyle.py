@@ -114,6 +114,28 @@ def hs_engine(fixture_project):
     engine._language_qa.unbind()
 
 
+def test_a_short_approved_name_does_not_claim_ordinary_words():
+    """The seed name சேத்து is one cluster from காத்து, பூத்து, தைத்து, சேராது and
+    common words like பத்து and சேர்த்து. None of them is a variant of it: a
+    common corpus word is never a misspelt name, and a short name admits only a
+    single typist confusion (2026-09-28, found on the Bible-wide re-measure)."""
+    from tc_ai_bridge.housestyle import name_findings
+    from tc_ai_bridge.language_packs.lexicon import default_lexicon
+    from tc_ai_bridge.language_qa import RULE_VERSION, rule_fields, suggestion
+    words = ["காத்து", "பூத்து", "தைத்து", "சேராது", "கொத்து", "பத்து", "சேர்த்து", "செத்து"]
+    counts = {w: 1 for w in words}
+    first_seen = {w: ("1", str(i + 1), 0, len(w), w, "h") for i, w in enumerate(words)}
+    lexicon = default_lexicon()
+    found = name_findings("gen", counts, first_seen, frozenset({"சேத்து"}), rule_fields=rule_fields,
+                          suggestion=suggestion, rule_version=RULE_VERSION, corpus_count=lexicon.count)
+    assert found == []
+    # A longer approved name still admits a one-cluster variant.
+    found = name_findings("gen", {"பார்வொன்": 1}, {"பார்வொன்": ("1", "1", 0, 8, "பார்வொன்", "h")},
+                          frozenset({"பார்வோன்"}), rule_fields=rule_fields, suggestion=suggestion,
+                          rule_version=RULE_VERSION, corpus_count=lexicon.count)
+    assert [f["suggestions"][0]["text"] for f in found] == ["பார்வோன்"]
+
+
 def test_the_pack_seed_is_read_only_and_a_project_entry_replaces_it(hs_engine, fixture_project):
     """ta-irv bundles the 2026-09-28 review's curated names (one, சேத்து). It is
     merged into house style when read, never written into the workbench, and

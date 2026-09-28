@@ -274,17 +274,28 @@ class HouseStyleLearner:
 
 
 NAME_MAX_DISTANCE = 1.0   # tamil_distance from an approved name
+# A short name (at most this many grapheme clusters) sits one cluster from many
+# ordinary words -- சேத்து from காத்து, பூத்து, தைத்து -- so only a single typist
+# confusion (the lexicon's MAX_DISTANCE) counts as a variant of it (2026-09-28).
+NAME_SHORT_CLUSTERS = 3
+NAME_SHORT_MAX_DISTANCE = 0.5
 NAME_RARE_BOOK_MAX = 2    # a spelling this rare in the book, near an approved name
 
 
 def name_findings(book: str, counts: dict[str, int], first_seen: dict[str, tuple], names: frozenset,
-                  *, rule_fields: Any, suggestion: Any, rule_version: str) -> list[dict[str, Any]]:
+                  *, rule_fields: Any, suggestion: Any, rule_version: str,
+                  corpus_count: Callable[[str], int] | None = None) -> list[dict[str, Any]]:
     """`name.minority-spelling` (layered-rules 6.2): a word rare in the book
     that is within NAME_MAX_DISTANCE of a proper noun the project approved
     (house-style list properNouns), suggested as that name. The approved list
-    is the curated source; the names check only proposes candidates for it."""
-    from .language_packs.lexicon import deletion_keys
-    from .language_packs.tamil_distance import tamil_distance
+    is the curated source; the names check only proposes candidates for it.
+
+    A word the corpus uses commonly (`corpus_count` >= COMMON_MIN) is never a
+    misspelt name: a short name sits one letter from ordinary words (சேத்து
+    against காத்து, செத்து, சேர்த்து, பத்து, சொத்து), and those are words, not
+    variants. The same rule the lexicon keeps: a common word is never marked wrong."""
+    from .language_packs.lexicon import COMMON_MIN, deletion_keys
+    from .language_packs.tamil_distance import clusters, tamil_distance
     if not names:
         return []
     buckets: dict[str, set[str]] = {}
@@ -295,9 +306,12 @@ def name_findings(book: str, counts: dict[str, int], first_seen: dict[str, tuple
     for word in sorted(counts):
         if word in names or counts[word] > NAME_RARE_BOOK_MAX or word not in first_seen:
             continue
+        if corpus_count is not None and corpus_count(word) >= COMMON_MIN:
+            continue
         near = set().union(*(buckets.get(k, set()) for k in {word, *deletion_keys(word)}))
         ranked = sorted((tamil_distance(word, name), -counts.get(name, 0), name) for name in near)
-        ranked = [r for r in ranked if r[0] <= NAME_MAX_DISTANCE]
+        ranked = [r for r in ranked if r[0] <= (NAME_SHORT_MAX_DISTANCE if len(clusters(r[2])) <= NAME_SHORT_CLUSTERS
+                                                else NAME_MAX_DISTANCE)]
         if not ranked:
             continue
         chapter, verse, start, end, original, text_hash = first_seen[word]

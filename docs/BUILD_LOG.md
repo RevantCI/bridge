@@ -12915,3 +12915,23 @@ Two reviewer corrections were joins, not sandhi: `கை கோலில்` →
 
 Nothing is implemented. The plan also lists the rules flagged for the next review round:
 demonstrative 7, manner-adverb 1 and spacing.extra 15 labels.
+
+### Found while re-measuring: the seed name made `name.minority-spelling` noisy
+
+The same-text Bible scan showed `project/name.minority-spelling` going from 0 to 86. The
+new trigger is the bundled seed name சேத்து (step 5). A three-cluster name is one cluster
+(distance 1.0) away from ordinary words. It flagged காத்து, செத்து, சேர்த்து, பத்து,
+சொத்து, பூத்து, தைத்து, சேராது and சேமித்து as misspellings of it.
+
+Two guards fix it:
+1. A word the corpus uses commonly (lexicon count ≥ `COMMON_MIN`) is never a misspelt
+   name. This is the lexicon's own rule, and the scan passes `corpus_count=lexicon.count`.
+   That alone left 6.
+2. A name of at most `NAME_SHORT_CLUSTERS` = 3 clusters admits only a single typist
+   confusion (distance ≤ 0.5). That leaves none.
+
+Cost: IRV's own two-cluster spelling சேத் is no longer offered as a variant of சேத்து.
+A longer name keeps its one-cluster variants: பார்வொன் → பார்வோன் is still found.
+
+After the fix the rule raises 0 Bible-wide. Test:
+`test_a_short_approved_name_does_not_claim_ordinary_words`.
