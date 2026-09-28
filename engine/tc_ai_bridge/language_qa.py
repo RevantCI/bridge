@@ -155,7 +155,9 @@ RULES: dict[str, RuleMeta] = {
     # The within-book wordlist audit: the fallback when a pack has no lexicon.
     "tamil.wordlist-variant": RuleMeta("ta-irv", "lexicon", "typo", "low"),
     # The corpus lexicon (layered-rules Phase 5; language_packs/lexicon.py).
-    "lexicon.rare-near-common": RuleMeta("ta-irv", "lexicon", "typo", "medium"),
+    # Disabled (2026-09-28 review: 0 of 21, every suggestion a different real
+    # word); its reviewed false alarms are the lexicon's `protected` words.
+    "lexicon.rare-near-common": RuleMeta("ta-irv", "lexicon", "typo", "medium", enabled=False),
     "lexicon.known-misspelling": RuleMeta("ta-irv", "lexicon", "typo", "high"),
     # The project's approved proper nouns (house style, Phase 6.2).
     "name.minority-spelling": RuleMeta("project", "housestyle", "name", "medium"),

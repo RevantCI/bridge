@@ -295,4 +295,14 @@ An entry may hide findings, add list members, reorder suggestions, or propose a 
 - drawing a finding over markup.
 **Revisit when:** the maintainer declares one IRV copy canonical for every tool.
 
+## 2026-09-28 — `lexicon.rare-near-common` is off by default; `lexicon.known-misspelling` is inline
+
+**Decision:**
+- **`rare-near-common`.** It ships disabled (`RuleMeta.enabled=False`). Its 21 reviewed false alarms are `protected` words in `lexicon.json`, never flagged by either lexicon rule.
+- **`known-misspelling`.** It is inline. The 43 human-confirmed pairs are kept in the curated map without the frequency filters that guard AI-review pairs, and are listed as `humanConfirmed`.
+- **Re-enabling `rare-near-common`** needs two things: a morphology filter (never propose a form that is itself an attested inflection: -ஆள்/-ஆல்/-ஆன்/-ஆர் endings, -ையும் …), and at least 0.90 on a new human sample of at least 20.
+**Because:** the 2026-09-28 reviewer marked all 21 sampled rare-near-common findings wrong, since each suggestion was another real word (a gender/tense contrast, வாள்/வாழ், காலை/காளை, a name). They confirmed all 43 known-misspelling findings.
+**Rules out:** re-enabling rare-near-common by tuning `MAX_DISTANCE` or the rarity thresholds alone; learning protected words or pairs from decisions (the lexicon is still never updated from decisions).
+**Revisit when:** a morphology filter exists, or a project wants the audit as a panel-only report.
+
 <!-- New entries go above this line. -->

@@ -31,11 +31,11 @@
    "inline": true
   },
   "ta-irv/lexicon.rare-near-common": {
-   "labelled": 21,
+   "labelled": 0,
    "tp": 0,
-   "fp": 21,
+   "fp": 0,
    "house": 0,
-   "precision": 0.0,
+   "precision": null,
    "inline": false
   },
   "ta-irv/sandhi.vallinam.accusative": {

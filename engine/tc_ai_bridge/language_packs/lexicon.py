@@ -5,7 +5,10 @@ pack) holds how often each word occurs in the IRV corpus, the words common
 enough to suggest, their precomputed one-cluster deletion neighbours, and a
 curated map of known misspellings. Two rules use it:
 
-- `lexicon.rare-near-common`: a word rare in this book (at most
+- `lexicon.rare-near-common` (DISABLED by default since the 2026-09-28
+  review, 0 of 21: every suggestion was a different real word -- a feminine
+  past -ஆள் against a conditional -ஆல், வாள்/வாழ், காலை/காளை, a name): a word
+  rare in this book (at most
   RARE_BOOK_MAX times) and rare in the corpus (absent from, or at most
   RARE_CORPUS_MAX in, the lexicon) that is within MAX_DISTANCE of words
   common in the corpus (at least COMMON_MIN, and RATIO_MIN times the rare
@@ -13,7 +16,14 @@ curated map of known misspellings. Two rules use it:
   corpus count, same-book count), each with its evidence. It replaces the
   within-book wordlist audit whenever a pack has a lexicon.
 - `lexicon.known-misspelling`: a word in the curated `deprecated` map, with its
-  correction. Confidence high: it is a reviewed correction, not a guess.
+  correction. Confidence high: it is a reviewed correction, not a guess (43 of
+  43 human-confirmed on 2026-09-28; inline).
+
+`protected` holds words a reviewer confirmed are correct; neither rule ever
+flags one. rare-near-common may be re-enabled only when a candidate passes a
+morphology filter (never propose a form that is itself an attested
+inflection: -ஆள்/-ஆல்/-ஆன்/-ஆர், -ையும் …) and a new human sample shows at
+least 0.90 (DECISIONS.md, 2026-09-28).
 
 The lexicon is evidence for ranking and never learns by itself: translator
 decisions are reported for a human to fold into the curated list
@@ -30,7 +40,7 @@ from typing import Any
 
 from .tamil_distance import clusters, tamil_distance
 
-LEXICON_VERSION = "ta-irv-lexicon@1"
+LEXICON_VERSION = "ta-irv-lexicon@2"  # 2: the 2026-09-28 review (confirmed pairs, protected words)
 # Build-time bounds (scripts/build_tamil_lexicon.py).
 MIN_LISTED_COUNT = 3   # a word seen fewer times is not listed: absent means rare
 COMMON_MIN = 6         # corpus count a suggestion needs
@@ -63,6 +73,7 @@ class Lexicon:
     buckets: dict[str, list[int]]
     deprecated: dict[str, str]
     corpus: dict[str, Any]
+    protected: frozenset = frozenset()
 
     def count(self, word: str) -> int:
         entry = self.forms.get(word)
@@ -86,7 +97,8 @@ def load_lexicon(path: Path | None = None) -> Lexicon | None:
     data = json.loads(path.read_text(encoding="utf-8"))
     return Lexicon(version=str(data.get("version") or LEXICON_VERSION), forms=data.get("forms") or {},
                    common=list(data.get("common") or []), buckets=data.get("buckets") or {},
-                   deprecated=data.get("deprecated") or {}, corpus=data.get("corpus") or {})
+                   deprecated=data.get("deprecated") or {}, corpus=data.get("corpus") or {},
+                   protected=frozenset(data.get("protected") or ()))
 
 
 _LOADED: dict[str, Lexicon | None] = {}
@@ -102,15 +114,16 @@ def default_lexicon() -> Lexicon | None:
 def lexicon_findings(book: str, counts: dict[str, int],
                      first_seen: dict[str, tuple[str, str, int, int, str, str]],
                      lexicon: Lexicon, *, rule_fields: Any, suggestion: Any, rule_version: str,
-                     ) -> list[dict[str, Any]]:
+                     rare_near_common: bool = True) -> list[dict[str, Any]]:
     """Pure function over one book's word counts. `first_seen` maps a word to
     (chapter, verse, start, end, originalText, textHash) of its first
     occurrence; the finding sits there. `rule_fields`/`suggestion` are
-    language_qa's own builders (passed in to keep the import one-way)."""
+    language_qa's own builders (passed in to keep the import one-way).
+    `rare_near_common` is the rule's enabled flag (RULES in language_qa)."""
     findings: list[dict[str, Any]] = []
     near = 0  # the cap is per rule: the noisier rule must not crowd out the reviewed one
     for word in sorted(counts):
-        if word not in first_seen:
+        if word not in first_seen or word in lexicon.protected:
             continue
         chapter, verse, start, end, original, text_hash = first_seen[word]
         right = lexicon.deprecated.get(word)
@@ -120,6 +133,8 @@ def lexicon_findings(book: str, counts: dict[str, int],
                 f'"{word}" is a reviewed misspelling of "{right}" in this project\'s corrections. Verify this occurrence.',
                 [suggestion(right, "lexicon", "Reviewed correction (Round 2 / Pass 3 reports)")],
                 rule_fields, rule_version))
+            continue
+        if not rare_near_common:
             continue
         book_count = counts[word]
         corpus_count = lexicon.count(word)

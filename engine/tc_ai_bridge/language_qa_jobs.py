@@ -19,7 +19,7 @@ from .housestyle import house_style, name_findings, preferences_from
 from .language_packs import default_pack, load_project_overrides, loaded_pack
 from .language_packs.lexicon import default_lexicon, lexicon_findings
 from .language_packs.loader import apply_overrides
-from .language_qa import (CROSSING_LIMITATION, FINDING_SOURCE, INLINE_RULES, MAX_VERSE_CHARS, MAX_WORDLIST_TERMS,
+from .language_qa import (CROSSING_LIMITATION, FINDING_SOURCE, INLINE_RULES, MAX_VERSE_CHARS, MAX_WORDLIST_TERMS, RULES,
                           coverage, inline_rule_names, rule_fields, suggestion,
                           RULE_VERSION, detect_language, lift_inline_usfm, scan_text,
                           stable_finding_id, word_occurrences, wordlist_findings)
@@ -790,7 +790,8 @@ class LanguageQaManager:
             limitations.append("Wordlist audit skipped: too many distinct words to compare.")
         else:
             audit = (lexicon_findings(book, book_counts, book_first_seen, lexicon, rule_fields=rule_fields,
-                                      suggestion=suggestion, rule_version=RULE_VERSION)
+                                      suggestion=suggestion, rule_version=RULE_VERSION,
+                                      rare_near_common=RULES["lexicon.rare-near-common"].enabled)
                      if lexicon is not None else wordlist_findings(book, book_counts, book_first_seen))
             if tamil:
                 audit += name_findings(book, book_counts, book_first_seen,

@@ -29,14 +29,7 @@ LABELLED = REPO_ROOT / "engine" / "tests" / "fixtures" / "language_qa" / "labell
 # (test, example id) the pack does not yet satisfy: the reviewer disagrees with
 # it, and the pack changes that follow the review fix them. Strict, so each
 # entry must start passing when its fix lands, and is then deleted here.
-PENDING_PACK_CHANGES: set[tuple[str, str]] = {
-    ("negative", "typo-94"), ("negative", "typo-95"), ("negative", "typo-96"), ("negative", "typo-97"),
-    ("negative", "typo-98"), ("negative", "typo-99"), ("negative", "typo-100"), ("negative", "typo-101"),
-    ("negative", "typo-102"), ("negative", "typo-103"), ("negative", "typo-104"), ("negative", "typo-105"),
-    ("negative", "typo-106"), ("negative", "typo-107"), ("negative", "typo-108"), ("negative", "typo-109"),
-    ("negative", "typo-110"), ("negative", "typo-111"), ("negative", "typo-112"), ("negative", "typo-113"),
-    ("negative", "typo-114"),
-}
+PENDING_PACK_CHANGES: set[tuple[str, str]] = set()  # all cleared by the 2026-09-28 pack and lexicon changes
 
 # False alarms the pack still raises, and no pack change can remove: the two
 # accusatives before a name (GEN 21:9 செய்கிறதை சாராள், GEN 35:4 அவைகளை சீகேம்).

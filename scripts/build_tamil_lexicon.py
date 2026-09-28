@@ -13,7 +13,13 @@ Writes engine/tc_ai_bridge/language_packs/ta-irv/lexicon.json:
 - `deprecated`: wrong -> right from the Round 2 / Pass 3 reports' positive
   typo rows (`--curated`), kept only where the wrong form is rare in the
   corpus and the right form is attested. A hard rule; the frequency table is
-  evidence only.
+  evidence only. A pair a human reviewer confirmed (`--human-labels`,
+  `lexicon.known-misspelling` verdict TP) is kept without those filters, and
+  listed in `humanConfirmed`.
+- `protected`: words a human reviewer judged correct when
+  `lexicon.rare-near-common` flagged them (2026-09-28: 21 of 21 were real
+  words -- வாள்/வாழ், காலை/காளை, a feminine past -ஆள் against a conditional
+  -ஆல், the name சேத்து). Never flagged again, and never proposed.
 
 Tokens are the runtime's own: imported_verse_text -> lift_inline_usfm ->
 language_qa.word_occurrences (NFC keys; the text is never rewritten).
@@ -105,11 +111,33 @@ def curated_pairs(paths: list[str], counts: collections.Counter) -> tuple[dict[s
     return deprecated, dict(stats)
 
 
+def human_lexicon(labels_path: Path | None) -> tuple[dict[str, str], set[str]]:
+    """(confirmed wrong -> right, protected words) from the reviewer's labels."""
+    if labels_path is None or not labels_path.exists():
+        return {}, set()
+    confirmed: dict[str, str] = {}
+    protected: set[str] = set()
+    for label in bench.load_human_labels(labels_path):
+        if label.get("kind") != "flagged":
+            continue
+        verdict = bench.human_verdict(label.get("verdict"))
+        word = bench.nfc(label["original"])
+        if label["rule"] == "ta-irv/lexicon.known-misspelling" and verdict == "tp":
+            right = bench.nfc(label.get("correctForm") or (label.get("suggestions") or [""])[0])
+            if right and right != word:
+                confirmed[word] = right
+        elif label["rule"] == "ta-irv/lexicon.rare-near-common" and verdict == "fp":
+            protected.add(word)
+    return confirmed, protected
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--irv-dir", required=True, type=Path)
     parser.add_argument("--curated", nargs="*", default=[])
     parser.add_argument("--top", type=int, default=60_000, help="bound on listed forms (most frequent first)")
+    parser.add_argument("--human-labels", type=Path,
+                        default=REPO / "benchmark" / "human" / "2026-09-28" / "human_labels.jsonl")
     args = parser.parse_args()
     counts, books, verses, tokens, book_ids = corpus_counts(args.irv_dir)
     listed = [w for w, c in counts.most_common() if c >= MIN_LISTED_COUNT][:args.top]
@@ -120,6 +148,13 @@ def main() -> int:
         for key in {word, *deletion_keys(word)}:
             buckets[key].append(index[word])
     deprecated, curated_stats = curated_pairs(args.curated, counts) if args.curated else ({}, {})
+    confirmed, protected = human_lexicon(args.human_labels)
+    for wrong, right in confirmed.items():
+        if deprecated.get(wrong, right) != right:
+            curated_stats["human confirmation overrides a review pair"] =                 curated_stats.get("human confirmation overrides a review pair", 0) + 1
+        deprecated[wrong] = right  # confirmed by a person: no frequency filter
+    for word in protected:
+        deprecated.pop(word, None)
     data = {
         "version": LEXICON_VERSION,
         "corpus": {"books": len(book_ids), "verseCount": verses, "tokenCount": tokens,
@@ -128,13 +163,16 @@ def main() -> int:
         "forms": {w: [counts[w], len(books[w])] for w in listed},
         "common": common,
         "buckets": {k: v for k, v in sorted(buckets.items())},
-        "deprecated": deprecated,
+        "deprecated": dict(sorted(deprecated.items())),
+        "humanConfirmed": sorted(w for w in confirmed if w in deprecated),
+        "protected": sorted(protected),
         "curatedStats": curated_stats,
     }
     OUT.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"{len(book_ids)} books, {verses} verses, {tokens} tokens, {len(counts)} distinct forms", file=sys.stderr)
     print(f"listed {len(listed)} (count >= {MIN_LISTED_COUNT}), common {len(common)} (>= {COMMON_MIN}), "
           f"{len(buckets)} bucket keys, {len(deprecated)} deprecated pairs {curated_stats}", file=sys.stderr)
+    print(f"human review: {len(confirmed)} confirmed pairs, {len(protected)} protected words", file=sys.stderr)
     print(f"{OUT} {OUT.stat().st_size / 2**20:.2f} MB", file=sys.stderr)
     return 0
 

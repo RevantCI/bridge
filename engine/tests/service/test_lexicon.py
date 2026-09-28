@@ -1,5 +1,6 @@
 """The corpus lexicon, the Tamil confusion-set distance, and the lexicon rules
 (layered-rules Phase 5), on the real bundled lexicon."""
+import json
 import time
 
 import pytest
@@ -63,9 +64,17 @@ def test_the_bundled_lexicon_is_bounded_and_precomputed():
 def test_the_curated_map_only_keeps_safe_pairs():
     lexicon = default_lexicon()
     assert lexicon.deprecated
+    data = json.loads(lexicon_module.LEXICON_PATH.read_text(encoding="utf-8"))
+    confirmed = set(data["humanConfirmed"])
+    # The 2026-09-28 reviewer confirmed 43 pairs; they are all in the map.
+    assert len(confirmed) == 43 and confirmed <= set(lexicon.deprecated)
     for wrong, right in lexicon.deprecated.items():
-        assert lexicon.count(wrong) <= 2, wrong    # a common word is never marked wrong
+        # A common word is never marked wrong from an AI review row; a person's
+        # confirmation is the one exception (IRV repeats some misspellings).
+        assert lexicon.count(wrong) <= 2 or wrong in confirmed, wrong
         assert wrong != right
+    # The reviewer's rare-near-common false alarms are protected words.
+    assert len(lexicon.protected) == 21 and not (lexicon.protected & set(lexicon.deprecated))
 
 
 def test_lexicon_loads_within_the_startup_budget():
@@ -146,10 +155,21 @@ def test_the_feedback_report_lists_lexicon_decisions_and_changes_nothing(fixture
     assert lexicon_module.LEXICON_PATH.read_bytes() == before
 
 
-def test_the_manager_uses_the_lexicon_for_a_tamil_book(tmp_path):
-    manager = LanguageQaManager(debounce=0, yield_seconds=0)
-    manager.bind(project_at(tmp_path, verses={"1": "அவன் இஸ்றவேல் வந்தான்.", "2": "தேவன் பேசினார்."}))
-    findings = wait(manager)["findings"]
-    manager.unbind()
-    rules = {f["rule"] for f in findings}
-    assert "lexicon.rare-near-common" in rules and "tamil.wordlist-variant" not in rules
+def test_the_manager_uses_the_lexicon_for_a_tamil_book(tmp_path, monkeypatch):
+    verses = {"1": "அவன் இஸ்றவேல் வந்தான்.", "2": "தேவன் பேசினார்."}
+
+    def rules_found(root):
+        manager = LanguageQaManager(debounce=0, yield_seconds=0)
+        manager.bind(project_at(root, verses=verses))
+        findings = wait(manager)["findings"]
+        manager.unbind()
+        return {f["rule"] for f in findings}
+    # Disabled by default (2026-09-28 review, 0 of 21), and never the wordlist fallback.
+    rules = rules_found(tmp_path / "default")
+    assert "lexicon.rare-near-common" not in rules and "tamil.wordlist-variant" not in rules
+    # Enabled in code, the manager still uses the corpus lexicon for it.
+    from dataclasses import replace
+    from tc_ai_bridge import language_qa
+    monkeypatch.setitem(language_qa.RULES, "lexicon.rare-near-common",
+                        replace(language_qa.RULES["lexicon.rare-near-common"], enabled=True))
+    assert "lexicon.rare-near-common" in rules_found(tmp_path / "enabled")

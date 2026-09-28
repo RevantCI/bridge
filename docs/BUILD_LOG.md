@@ -12850,3 +12850,33 @@ step-3 numbers.
 **Performance.** The pack load (examples included) goes from 71 ms to 132 ms, median of 5.
 It is paid once per process, on the worker's first Tamil scan. A status poll never loads
 it (`loaded_pack`). Full verses made it 179 ms before the review examples were windowed.
+
+### Step 4 — the lexicon, `ta-irv-lexicon@2`
+
+- **Rebuild.** Rebuilt from `D:\Claude Lab\IRV Tamil` with
+  `--curated "D:\Claude Lab\Revant work\Claude outputs" benchmark/human/2026-09-28/lexicon_curated.csv`.
+  The current `@1` was built from the review folder alone: rebuilding it that way
+  reproduces it, except for 2 pairs from rows added to the folder since. So the
+  reviewer's CSV is added to the AI-review pairs rather than replacing them. Dropping
+  the ~107 pairs the review never sampled would lose coverage.
+- **Result.** 156 pairs (151 + 5). All 43 human-confirmed pairs are in, listed as
+  `humanConfirmed`. They skip the "wrong form is rare in the corpus" filter: a
+  person confirmed them, and IRV repeats some misspellings (கர்ச்சிக்கிற). 21
+  `protected` words. The file is 3.09 MB.
+- **`lexicon.rare-near-common`** is disabled (`RuleMeta.enabled=False`, passed to
+  `lexicon_findings(rare_near_common=)`): 0/21. `protected` words are never flagged by
+  either lexicon rule. It can be re-enabled only with a morphology filter and a new
+  human sample ≥ 0.90 (DECISIONS.md).
+- **`lexicon.known-misspelling`** is inline (step 3's `INLINE_RULES`): 43/43. It is
+  still reported once per book at the first occurrence, so the inline mark is on that
+  occurrence only.
+- **Human gate.** It passes. rare-near-common now shows 21 false alarms no longer
+  produced. The labelled fixtures' `PENDING_PACK_CHANGES` is empty; only the 2 name
+  residuals remain as strict xfail.
+- **Tests.** `test_lexicon.py`:
+  - the curated map holds the 43 confirmed pairs and 21 protected words;
+  - the frequency guard exempts only confirmed pairs;
+  - the manager leaves rare-near-common off by default and still uses the corpus
+    lexicon when it is enabled.
+
+  Service tests: 2619 passed, 2 xfailed.

@@ -67,7 +67,7 @@ in 61 labelled verses. `verses.jsonl` is built from the reviewer's copy.
 `verses.jsonl`.
 
 <!-- human-benchmark:start -->
-_Generated 2026-09-28T17:20:13 by scripts/language_qa_benchmark.py --human-labels benchmark/human/2026-09-28/human_labels.jsonl._
+_Generated 2026-09-28T17:37:15 by scripts/language_qa_benchmark.py --human-labels benchmark/human/2026-09-28/human_labels.jsonl._
 
 Pack version `language-qa-7+ta-irv@1.1.0`; books: GEN, JHN, PSA; 598 label rows.
 
@@ -76,7 +76,7 @@ Pack version `language-qa-7+ta-irv@1.1.0`; books: GEN, JHN, PSA; 598 label rows.
 | `common/spacing.extra` | no | 15 | 15 | 0 | 0 | 100.0% | 0 | 0 |
 | `ta-irv/integrity.space-before-note-end` | no | 15 | 0 | 15 | 0 | 0.0% | 0 | 0 |
 | `ta-irv/lexicon.known-misspelling` | yes | 43 | 43 | 0 | 0 | 100.0% | 0 | 0 |
-| `ta-irv/lexicon.rare-near-common` | no | 21 | 0 | 21 | 0 | 0.0% | 0 | 0 |
+| `ta-irv/lexicon.rare-near-common` | no | 0 | 0 | 0 | 0 | — | 0 | 21 |
 | `ta-irv/sandhi.vallinam.accusative` | yes | 37 | 35 | 2 | 0 | 94.6% | 0 | 13 |
 | `ta-irv/sandhi.vallinam.dative` | yes | 46 | 46 | 0 | 0 | 100.0% | 0 | 3 |
 | `ta-irv/sandhi.vallinam.demonstrative` | no | 7 | 7 | 0 | 0 | 100.0% | 0 | 1 |
@@ -252,6 +252,32 @@ Per review bucket (recall counts only rows whose Original Tamil is found in the 
 <!-- benchmark:end -->
 
 ## Lexicon rules (Phase 5)
+
+**Since the 2026-09-28 human review (`ta-irv-lexicon@2`):**
+
+- `lexicon.rare-near-common` is **disabled by default**: 0 of 21 labelled
+  findings were errors. Every suggestion was a different real word: a feminine
+  past -ஆள் against a conditional -ஆல், வாள்/வாழ், காலை/காளை, உற்று/ஊற்று,
+  and the name சேத்து. The 21 forms are the lexicon's `protected` words, never
+  flagged again. It may be re-enabled only when a candidate passes a morphology
+  filter (never propose a form that is itself an attested inflection) and a new
+  human sample shows ≥ 0.90.
+- `lexicon.known-misspelling` is **inline**: 43 of 43 labelled findings were
+  confirmed. The 43 pairs are `humanConfirmed` in `lexicon.json` and are kept
+  without the frequency filters that guard the AI-review pairs. The map has 156
+  pairs (151 before, plus 5).
+- A known misspelling is reported once per book, at its first occurrence, as
+  the lexicon rules always were: the inline mark is on that occurrence only.
+
+Rebuilt with:
+
+```powershell
+.\engine\.venv\Scripts\python.exe scripts\build_tamil_lexicon.py `
+  --irv-dir "D:\Claude Lab\IRV Tamil" `
+  --curated "D:\Claude Lab\Revant work\Claude outputs" benchmark\human\2026-09-28\lexicon_curated.csv
+```
+
+(`--human-labels` defaults to `benchmark/human/2026-09-28/human_labels.jsonl`.)
 
 The thresholds live in one place, `engine/tc_ai_bridge/language_packs/lexicon.py`:
 
