@@ -12935,3 +12935,111 @@ A longer name keeps its one-cluster variants: பார்வொன் → ப�
 
 After the fix the rule raises 0 Bible-wide. Test:
 `test_a_short_approved_name_does_not_claim_ordinary_words`.
+
+### Step 7 — re-measured
+
+**Human benchmark, final (`ta-irv@1.1.0`, `ta-irv-lexicon@2`).**
+
+| Rule | Step 0 | Final | Inline |
+|---|---|---|---|
+| `sandhi.vallinam.dative` | 93.9% (46/49) | 100% (46/46) | yes |
+| `sandhi.vallinam.accusative` | 70.0% (35/50) | 94.6% (35/37) | yes |
+| `sandhi.vallinam.demonstrative` | 87.5% (7/8) | 100% (7/7) | no, 7 labels |
+| `sandhi.vallinam.manner-adverb` | 100% (1/1) | 100% (1/1) | no |
+| `lexicon.known-misspelling` | 100% (43/43) | 100% (43/43) | yes |
+| `common/spacing.extra` | 100% (15/15) | 100% (15/15) | no, 15 labels |
+| `typo.divine-name.vowel-drop` | 100% (1/1) | 100% (1/1) | no |
+| `lexicon.rare-near-common` | 0% (0/21) | disabled; 21 false alarms gone | — |
+| `tamil.repeated-word` | 0% (0/20) | disabled; 20 false alarms gone | — |
+| `integrity.space-before-note-end` | 0/15 as a text error | markup item (`usfm`, low) | — |
+
+- **Precision.** Every rule's human precision is at or above its step-0 value.
+- **Lost findings.** No human-confirmed finding was lost.
+- **Missed contexts.** Every reviewer-labelled "missed" context is now found, except
+  the split word சு வரை, which the pack correctly leaves to a split-word check (step 6):
+  - -ற்கு 17/17;
+  - -க்கு exceptions 5/5;
+  - poetry lines 2/2;
+  - demonstrative house forms 9/9;
+  - bare-majority 4/5.
+- **Residuals.** The two accusative false alarms before a name are the only strict
+  residuals.
+
+**The same text, before and after.** Language QA alone over the 66 books of
+`D:\Claude Lab\IRV Tamil`. Before is b5688ef, the pre-task engine; after is the final
+code.
+
+| Rule | Before | After | Change | Drawn inline after |
+|---|---|---|---|---|
+| `ta-irv/sandhi.vallinam.accusative` | 982 | 1000 | +18 | 1000 |
+| `ta-irv/sandhi.vallinam.dative` | 643 | 789 | +146 | 789 |
+| `ta-irv/integrity.space-before-note-end` | 224 | 224 | +0 | 0 |
+| `ta-irv/lexicon.known-misspelling` | 154 | 160 | +6 | 160 |
+| `ta-irv/sandhi.vallinam.demonstrative` | 101 | 210 | +109 | 0 |
+| `common/spacing.extra` | 91 | 91 | +0 | 0 |
+| `ta-irv/lexicon.rare-near-common` | 179 | 0 | -179 | 0 |
+| `ta-irv/tamil.repeated-word` | 146 | 0 | -146 | 0 |
+| `ta-irv/sandhi.compound.direction` | 0 | 92 | +92 | 0 |
+| `ta-irv/sandhi.vallinam.manner-adverb` | 22 | 22 | +0 | 0 |
+| `ta-irv/typo.divine-name.dative-stem` | 13 | 13 | +0 | 0 |
+| `ta-irv/typo.divine-name.vowel-drop` | 11 | 11 | +0 | 0 |
+| `ta-irv/sandhi.clitic.fused` | 9 | 6 | -3 | 0 |
+| `ta-irv/typo.suffix.dropped-tha` | 2 | 2 | +0 | 0 |
+| `common/unicode.invisible` | 1 | 1 | +0 | 0 |
+| `ta-irv/sandhi.vallinam.wrong-consonant` | 1 | 1 | +0 | 0 |
+| `common/punctuation.repeated` | 1 | 1 | +0 | 0 |
+| **Total** | **2580** | **2623** | **+43** | **1949** (before 1749) |
+
+- **False alarms fall by 328:** rare-near-common −179, repeated-word −146, clitic −3.
+- **New true checks add 371:** dative +146 (-ற்கு), demonstrative +109 (no house-form
+  stems), direction +92, accusative +18, known-misspelling +6.
+- **Net.** The total rises by 43, and inline marks rise from 1,749 to 1,949. They now
+  come only from rules at 94.6–100% human precision: before, they came from five
+  வல்லினம் rules on a sign-off.
+
+**The whole-Bible collection run.** `collection.runChecks`, with the checks local,
+greekroom and languageQa, on the 66 books of `D:\Claude Lab\IRV Tamil`, on an idle
+machine:
+- **Result:** `succeeded`; 66/66 books; no book error; import 10.9 s.
+- **Wall time:** 3,745.9 s (62 min).
+- **Language QA findings:** 2,623, exactly the same-text scan's total.
+- **Final stage:** house-style propagation available, 0 proposals.
+
+The brief asked for a comparison with the earlier **7,401**. That figure is not
+comparable, and not only because the text changed:
+- It came from a process started on 2026-09-24 on mid-Phase-6 code.
+- Genesis on the same older text gives 110 Language QA findings with the pre-task engine
+  and 124 with the final one. Both were measured through the check job, with the
+  collection's own check set, counting each finding exactly once. The earlier run
+  reported 295.
+- So the per-verse sum that run reported is not reproducible with either committed
+  engine.
+- The like-for-like numbers are the same-text scan above: 2,580 → 2,623.
+
+The earlier 6,031.8 s wall time also ran beside test suites; 3,745.9 s is the idle
+figure.
+
+**Performance contract.**
+- **Psalms** (`D:` copy, three cold passes each):
+
+  | | Before | After |
+  |---|---|---|
+  | Cold wall | 2.52–2.59 s | 2.50–2.55 s |
+  | Peak RSS | 60.6 MB | 71.3 MB (+11 MB, limit +50) |
+  | Warm reopen | 0.43–0.46 s | 0.39 s |
+
+- **Latency gate** (`benchmark_language_qa.py --gate --cores 2`): pass. p95
+  `verse.decide` (Language QA) 23.9 ms, `verse.get` 3.6 ms, `languageQa.status` 1.1 ms,
+  `languageQa.inline` 0.4 ms. The shared write paths are over, as before and outside
+  Language QA: `verse.edit` 244 ms, `project.open` 166 ms.
+- **Pack load:** 71 → 132 ms, once per process.
+
+**Review date and reviewer:** 2026-09-28, Yesu Selva Benz. 598 items on GEN/PSA/JHN,
+597 answered; R0102 (PSA 119:54) excluded, and not re-labelled.
+
+**Final gates (2026-09-28).**
+- Full engine suite (`pytest tests/ greek_room_engine/tests/ -n auto`, slow tests
+  included): 3779 passed, 2 xfailed (the name residuals).
+- svelte-check 0/0; Vitest 556 passed; `npm run build` ok.
+- Human gate pass. Latency gate pass.
+- Rust untouched, so cargo was not re-run in this task.

@@ -67,7 +67,7 @@ in 61 labelled verses. `verses.jsonl` is built from the reviewer's copy.
 `verses.jsonl`.
 
 <!-- human-benchmark:start -->
-_Generated 2026-09-28T17:37:15 by scripts/language_qa_benchmark.py --human-labels benchmark/human/2026-09-28/human_labels.jsonl._
+_Generated 2026-09-28T19:17:00 by scripts/language_qa_benchmark.py --human-labels benchmark/human/2026-09-28/human_labels.jsonl._
 
 Pack version `language-qa-7+ta-irv@1.1.0`; books: GEN, JHN, PSA; 598 label rows.
 
