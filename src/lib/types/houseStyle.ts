@@ -37,6 +37,9 @@ export interface HouseStyleProposal {
 
 export interface HouseStyleListResponse {
   entries: HouseStyleEntry[];
+  /** The rule pack's bundled seed (read-only, never in the workbench); an own
+   * entry with the same key replaces a seed entry. */
+  seed?: HouseStyleEntry[];
   proposals: HouseStyleProposal[];
   thresholds: Record<string, number>;
 }

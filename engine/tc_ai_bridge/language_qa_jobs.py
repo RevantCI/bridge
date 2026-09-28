@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import terminology
-from .housestyle import house_style, name_findings, preferences_from
+from .housestyle import bundled_seed, house_style, name_findings, preferences_from, with_seed
 from .language_packs import default_pack, load_project_overrides, loaded_pack
 from .language_packs.lexicon import default_lexicon, lexicon_findings
 from .language_packs.loader import apply_overrides
@@ -648,7 +648,9 @@ class LanguageQaManager:
         with self._lock:
             housestyle_loader = self._housestyle_loader
         try:
-            style = house_style(housestyle_loader() if housestyle_loader else [],
+            # The ta-irv pack bundles a curated seed (the 2026-09-28 review's names).
+            seed = bundled_seed("ta-irv") if detection["pack"] == "tamil" else []
+            style = house_style(with_seed(housestyle_loader() if housestyle_loader else [], seed),
                                 preferences_from(raw_decisions))
         except Exception as exc:
             style = house_style([])

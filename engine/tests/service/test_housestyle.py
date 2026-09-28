@@ -114,6 +114,27 @@ def hs_engine(fixture_project):
     engine._language_qa.unbind()
 
 
+def test_the_pack_seed_is_read_only_and_a_project_entry_replaces_it(hs_engine, fixture_project):
+    """ta-irv bundles the 2026-09-28 review's curated names (one, சேத்து). It is
+    merged into house style when read, never written into the workbench, and
+    a project's own entry with its key -- here a removal -- replaces it."""
+    from tc_ai_bridge.housestyle import bundled_seed, house_style, with_seed
+    [seed] = bundled_seed("ta-irv")
+    assert (seed["list"], seed["word"], seed["provenance"], seed["seed"]) == ("properNouns", "சேத்து", "curated", True)
+    assert house_style(with_seed([], [seed])).lists["housestyle.properNouns"] == frozenset({"சேத்து"})
+    engine = hs_engine
+    listed = call(engine, "housestyle.list", {})["result"]
+    assert [e["word"] for e in listed["seed"]] == ["சேத்து"] and not listed["entries"]
+    removed = call(engine, "housestyle.record", {"entry": {"scope": "word-in-project", "list": "properNouns",
+                                                           "word": "சேத்து", "provenance": "curated",
+                                                           "state": "removed"}})
+    assert removed["success"], removed
+    after = call(engine, "housestyle.list", {})["result"]
+    assert after["seed"] == [] and [e["state"] for e in after["entries"]] == ["removed"]
+    own = engine.project.housestyle_entries()
+    assert house_style(with_seed(own, bundled_seed("ta-irv"))).lists["housestyle.properNouns"] == frozenset()
+
+
 def test_a_scoped_ignore_hides_the_word_and_counts_as_suppressed_by_house_style(hs_engine):
     engine = hs_engine
     assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]

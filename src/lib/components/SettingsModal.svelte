@@ -514,6 +514,17 @@
                 </span>
               </div>
             {/each}
+            {#each houseStyle.seed ?? [] as e (e.key)}
+              <div class="kv hs-entry hs-seed">
+                <span><span class="badge curated">bundled</span></span>
+                <span>{describeEntry(e)} · from the language pack's reviewed house style
+                  <!-- Removing a bundled entry records this project's own entry for it, state removed. -->
+                  <button class="btn link" on:click={() => houseStyleAct(() => bridge.housestyleRecord({ scope: e.scope,
+                    ruleId: e.ruleId, word: e.word, list: e.list === "properNouns" ? "properNouns" : "",
+                    provenance: "curated", state: "removed" }))} disabled={houseStyleBusy}>Remove</button>
+                </span>
+              </div>
+            {/each}
             {#each houseStyle.entries.filter((e) => e.state === "active") as e (e.key)}
               <div class="kv hs-entry">
                 <span><span class="badge {e.provenance}">{e.imported ? "imported" : e.provenance}</span></span>
@@ -523,7 +534,7 @@
                 </span>
               </div>
             {:else}
-              <p class="muted">No house style recorded yet.</p>
+              <p class="muted">No project house style recorded yet.</p>
             {/each}
           {/if}
           {#if nameSuggestions.length}

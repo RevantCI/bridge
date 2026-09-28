@@ -52,7 +52,7 @@ from tc_ai_bridge.project_import import (
 from collection_jobs import CollectionJobConflict, CollectionJobError, CollectionJobManager, CollectionJobSpec
 from tc_ai_bridge.housestyle import (
     LEARN_IGNORES, PREFER_USES, PROPOSE_PROJECT_BOOKS, PROPOSE_RULE_DECISIONS, PROPOSE_RULE_IGNORE_RATE,
-    HouseStyleLearner, name_suggestions, project_proposals,
+    HouseStyleLearner, bundled_seed, name_suggestions, project_proposals,
 )
 from tc_ai_bridge.original_language_resources import resource_inventory
 from tc_ai_bridge.lexicon_resources import lexicon_entry_for_strong, HEBREW_PREFIX_LABELS
@@ -4002,7 +4002,11 @@ class BridgeEngine:
                 books.append((project.book_id, project.housestyle_entries(), project.project_qa_decisions()))
             except Exception:
                 continue
-        return {"entries": self.project.housestyle_entries(), "proposals": project_proposals(books),
+        own = self.project.housestyle_entries()
+        own_keys = {entry.get("key") for entry in own}
+        return {"entries": own, "proposals": project_proposals(books),
+                # The pack's bundled seed, read-only; an own entry with its key replaces it.
+                "seed": [entry for entry in bundled_seed("ta-irv") if entry["key"] not in own_keys],
                 "thresholds": {"learnIgnores": LEARN_IGNORES, "proposeProjectBooks": PROPOSE_PROJECT_BOOKS,
                                "proposeRuleDecisions": PROPOSE_RULE_DECISIONS,
                                "proposeRuleIgnoreRate": PROPOSE_RULE_IGNORE_RATE, "preferUses": PREFER_USES}}

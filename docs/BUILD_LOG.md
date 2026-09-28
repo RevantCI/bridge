@@ -12880,3 +12880,26 @@ it (`loaded_pack`). Full verses made it 179 ms before the review examples were w
     lexicon when it is enabled.
 
   Service tests: 2619 passed, 2 xfailed.
+
+### Step 5 — house style
+
+- **Curated house style in the pack.** The தேவ- rule and the clitic policy are curated
+  project house style, and they live in the pack as abstains on every வல்லினம் rule
+  (step 3). `LANGUAGE_QA_HOUSESTYLE.md` records them as such. No per-word entries.
+- **The bundled seed.** `language_packs/ta-irv/housestyle-seed.json` is the review's
+  `housestyle_import.json`: one `properNouns` entry, சேத்து.
+  - `housestyle.bundled_seed()` reads it, validated and marked `seed`.
+  - `with_seed()` merges it under a project's entries: an own entry with the same key
+    replaces it, whatever its state.
+  - The scan applies the merge for a Tamil project. `housestyle.list` returns the seed
+    apart (`seed`), without the keys a project has overridden.
+  - Settings shows seed rows as **bundled**, with a Remove that records the project's
+    own removed entry.
+  - Nothing is written into a workbench on open. The seed ships in the frozen sidecar,
+    because `bridge-engine.spec` bundles the whole `ta-irv` folder.
+- **No name abstains from the sandhi rows.** The seed carries only the lexicon's
+  `FP_NAME`, as the brief says.
+- **Tests.**
+  - `test_housestyle.py`: the seed is read-only and merged; the list returns it; a
+    removal replaces it.
+  - `SettingsModal.test.ts`: the bundled row, and its Remove.

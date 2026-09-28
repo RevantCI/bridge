@@ -61,6 +61,33 @@ affect.
 A hidden finding still appears in the reports, as resolved and with
 `houseStyleSuppressed`. The status reports `houseStyleSuppressed` per rule.
 
+## Curated house style in the pack (2026-09-28 review)
+
+Two rules the reviewer stated as the IRV project's house style are **curated
+house style that lives in the `ta-irv` pack**, as abstains on every வல்லினம் rule.
+They are not per-word entries, and a project does not need to record them:
+
+| House style | Where it lives |
+|---|---|
+| **No doubling before தேவ- forms**: தேவன், தேவனுடைய, தேவனிடத்தில், தேவரீர், தேவசாயல் … (11 of 13 "case form, but no doubling here" verdicts). தேவை "need" is not a தேவ- form and is still checked. | abstain `{"next": {"prefix": ["தேவ"], "notPrefix": ["தேவை"]}}` |
+| **Clitics:** கூட, மட்டும், போல, என்று, என, எனும் are written apart, without doubling. தான் and ஆவது are written fused (அதைத்தான், யாராவது). | the clitic abstain; `sandhi.clitic.fused` suggests the fused form for தான் (ஆவது fuses by vowel sandhi, which no linking-consonant fix can express) |
+
+A project that disagrees narrows further with an override or an entry. It
+cannot widen, so it cannot turn these off (DECISIONS.md, overrides only narrow).
+
+**The bundled seed.** `language_packs/ta-irv/housestyle-seed.json` holds the
+review's curated names. Today that is one entry, the proper noun சேத்து, from a
+lexicon false alarm the reviewer marked "a name". Every Tamil project starts with
+it:
+- **Read-only.** It is merged into house style when read and never written into
+  a project's workbench.
+- **Visible.** Settings → House style shows it as **bundled**.
+- **Removable.** Remove records the project's own entry with the same key, state
+  `removed`, and an own entry always replaces a seed entry.
+
+The seed never holds name abstains from the sandhi rows: a name does not block
+doubling.
+
 ## The learner
 
 The learner is a deterministic, visible aggregation over the book's

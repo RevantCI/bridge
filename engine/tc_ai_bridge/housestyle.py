@@ -20,6 +20,11 @@ Nothing here adds or widens a match, changes a severity, or draws a rule
 inline. Removing an entry writes a new state on the same row; change_log keeps
 every earlier state, and nothing is deleted.
 
+A pack may bundle a seed (`language_packs/<pack>/housestyle-seed.json`):
+curated entries every project starts with, read-only, never written into a
+project's workbench. A project's own entry with the same key always wins, so
+Remove works on a seed entry as on any other (bundled_seed, with_seed).
+
 The learner (HouseStyleLearner) is a visible, deterministic aggregation over
 Language QA decisions, run incrementally: each decision recomputes only the
 (rule, word) pair it touched. Its thresholds are constants below, cited in
@@ -27,12 +32,14 @@ docs/LANGUAGE_QA_HOUSESTYLE.md.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import threading
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 SCOPES = ("word-in-book", "word-in-project", "rule-in-book", "rule-in-project")
@@ -82,6 +89,31 @@ def validate_entry(entry: dict[str, Any]) -> dict[str, Any]:
             "provenance": provenance, "state": state, "evidence": evidence[:50],
             "imported": bool(entry.get("imported", False)),
             "key": entry_key(scope, rule_id, word, list_name)}
+
+
+PACKS_DIR = Path(__file__).resolve().parent / "language_packs"
+
+
+@functools.lru_cache(maxsize=4)
+def _seed(pack: str) -> tuple[dict[str, Any], ...]:
+    path = PACKS_DIR / pack / "housestyle-seed.json"
+    if not path.is_file():
+        return ()
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    return tuple({**validate_entry({**entry, "provenance": "curated", "state": "active"}), "seed": True}
+                 for entry in data.get("entries") or [] if isinstance(entry, dict))
+
+
+def bundled_seed(pack: str = "ta-irv") -> list[dict[str, Any]]:
+    """The pack's bundled house-style seed, as validated entries marked `seed`."""
+    return [dict(entry) for entry in _seed(pack)]
+
+
+def with_seed(entries: list[dict[str, Any]], seed: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A project's entries over the pack's seed: an entry with a seed entry's
+    key replaces it, whatever its state (so a removed seed entry stays removed)."""
+    own = {entry.get("key") for entry in entries}
+    return [entry for entry in seed if entry.get("key") not in own] + list(entries)
 
 
 @dataclass

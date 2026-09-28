@@ -403,7 +403,23 @@ describe("SettingsModal terminology (#171)", () => {
       scope: "word-in-project", word: "அந்த தேசம்", state: "active" })));
     await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(housestyleSetState).toHaveBeenCalledWith("k1", "removed"));
-    expect(await screen.findByText(/No house style recorded yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/No project house style recorded yet/)).toBeInTheDocument();
+  });
+
+  it("shows the pack's bundled seed, and Remove records this project's own removed entry", async () => {
+    const seed = { scope: "word-in-project", ruleId: "", word: "சேத்து", list: "properNouns", provenance: "curated",
+      state: "active", imported: false, key: "word-in-project||சேத்து|properNouns", modifiedTimestamp: "",
+      evidence: [{ chapter: "4", verse: "24", decisionId: "" }] };
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    housestyleList.mockResolvedValue({ entries: [], seed: [seed], proposals: [], thresholds: { learnIgnores: 3 } });
+    housestyleRecord.mockResolvedValue({ entries: [{ ...seed, state: "removed" }], seed: [], proposals: [], thresholds: {}, entry: seed });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    expect(await screen.findByText(/proper noun “சேத்து” · from the language pack's reviewed house style/)).toBeInTheDocument();
+    expect(screen.getByText("bundled")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(housestyleRecord).toHaveBeenCalledWith({ scope: "word-in-project", ruleId: "",
+      word: "சேத்து", list: "properNouns", provenance: "curated", state: "removed" }));
   });
 
   it("adds a curated proper noun to the house-style list", async () => {
