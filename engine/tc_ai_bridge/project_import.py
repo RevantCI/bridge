@@ -509,7 +509,7 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
     original_resource = resource_for_book(book.book_id)
     original_resource_info = resource_inventory(book.book_id)
     manifest = {
-        "generator": {"name": "Bridge", "build": "0.11.0"},
+        "generator": {"name": "Bridge", "build": "0.12.0"},
         "target_language": {
             "id": language_id, "name": language_name, "direction": language_direction,
             "book": {"name": book.book_name},
