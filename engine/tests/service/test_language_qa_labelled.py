@@ -30,40 +30,20 @@ LABELLED = REPO_ROOT / "engine" / "tests" / "fixtures" / "language_qa" / "labell
 # it, and the pack changes that follow the review fix them. Strict, so each
 # entry must start passing when its fix lands, and is then deleted here.
 PENDING_PACK_CHANGES: set[tuple[str, str]] = {
-    ("negative", "sandhi-74"), ("negative", "sandhi-78"), ("negative", "sandhi-81"),
-    ("negative", "sandhi-82"), ("negative", "sandhi-83"), ("negative", "sandhi-87"),
-    ("negative", "sandhi-88"), ("negative", "sandhi-89"), ("negative", "sandhi-90"),
-    ("negative", "sandhi-91"), ("negative", "sandhi-93"), ("negative", "sandhi-97"),
-    ("negative", "sandhi-98"), ("negative", "sandhi-111"), ("negative", "sandhi-113"),
-    ("negative", "sandhi-136"), ("negative", "sandhi-141"), ("negative", "sandhi-166"),
-    ("negative", "sandhi-180"), ("negative", "sandhi-221"), ("negative", "sandhi-222"),
-    ("negative", "sandhi-223"), ("negative", "sandhi-224"), ("negative", "sandhi-225"),
-    ("negative", "sandhi-226"), ("negative", "sandhi-227"), ("negative", "sandhi-228"),
-    ("negative", "sandhi-229"), ("negative", "sandhi-230"), ("negative", "sandhi-231"),
-    ("negative", "sandhi-232"), ("negative", "sandhi-233"), ("negative", "sandhi-234"),
-    ("negative", "sandhi-235"), ("negative", "sandhi-236"), ("negative", "sandhi-237"),
-    ("negative", "sandhi-238"), ("negative", "sandhi-239"), ("negative", "sandhi-240"),
     ("negative", "typo-94"), ("negative", "typo-95"), ("negative", "typo-96"), ("negative", "typo-97"),
     ("negative", "typo-98"), ("negative", "typo-99"), ("negative", "typo-100"), ("negative", "typo-101"),
     ("negative", "typo-102"), ("negative", "typo-103"), ("negative", "typo-104"), ("negative", "typo-105"),
     ("negative", "typo-106"), ("negative", "typo-107"), ("negative", "typo-108"), ("negative", "typo-109"),
     ("negative", "typo-110"), ("negative", "typo-111"), ("negative", "typo-112"), ("negative", "typo-113"),
-    ("negative", "typo-114"), ("negative", "usfm-42"), ("negative", "usfm-43"), ("negative", "usfm-44"),
-    ("negative", "usfm-45"), ("negative", "usfm-46"), ("negative", "usfm-47"), ("negative", "usfm-48"),
-    ("negative", "usfm-49"), ("negative", "usfm-50"), ("negative", "usfm-51"), ("negative", "usfm-52"),
-    ("negative", "usfm-53"), ("negative", "usfm-54"), ("negative", "usfm-55"), ("negative", "usfm-56"),
-    ("positive", "sandhi-184"), ("positive", "sandhi-185"), ("positive", "sandhi-186"),
-    ("positive", "sandhi-187"), ("positive", "sandhi-188"), ("positive", "sandhi-189"),
-    ("positive", "sandhi-190"), ("positive", "sandhi-191"), ("positive", "sandhi-192"),
-    ("positive", "sandhi-193"), ("positive", "sandhi-194"), ("positive", "sandhi-195"),
-    ("positive", "sandhi-196"), ("positive", "sandhi-197"), ("positive", "sandhi-198"),
-    ("positive", "sandhi-199"), ("positive", "sandhi-200"), ("positive", "sandhi-201"),
-    ("positive", "sandhi-202"), ("positive", "sandhi-203"), ("positive", "sandhi-204"),
-    ("positive", "sandhi-205"), ("positive", "sandhi-206"), ("positive", "sandhi-207"),
-    ("positive", "sandhi-208"), ("positive", "sandhi-209"), ("positive", "sandhi-211"),
-    ("positive", "sandhi-212"), ("positive", "sandhi-213"), ("positive", "sandhi-214"),
-    ("positive", "sandhi-215"), ("positive", "sandhi-216"), ("positive", "sandhi-217"),
-    ("positive", "sandhi-218"), ("positive", "sandhi-219"), ("positive", "sandhi-220"),
+    ("negative", "typo-114"),
+}
+
+# False alarms the pack still raises, and no pack change can remove: the two
+# accusatives before a name (GEN 21:9 செய்கிறதை சாராள், GEN 35:4 அவைகளை சீகேம்).
+# Names block doubling in 8 of 25 reviewed cases, not 17, so there is no name
+# abstain to write. They are what keeps the accusative at 94.6%, not 100%.
+RESIDUAL: set[tuple[str, str]] = {
+    ("negative", "sandhi-81"), ("negative", "sandhi-83"),
 }
 
 
@@ -74,7 +54,9 @@ def examples(test: str = ""):
         for number, line in enumerate(lines, start=1):
             ident = f"{bucket}-{number}"
             marks = [pytest.mark.xfail(strict=True, reason="the pack disagrees with the 2026-09-28 reviewer")] \
-                if (test, ident) in PENDING_PACK_CHANGES else []
+                if (test, ident) in PENDING_PACK_CHANGES else \
+                [pytest.mark.xfail(strict=True, reason="residual false alarm before a name")] \
+                if (test, ident) in RESIDUAL else []
             params.append(pytest.param(bucket, json.loads(line), id=ident, marks=marks))
     return params
 
@@ -172,12 +154,19 @@ def test_a_positive_credited_to_a_rule_is_still_found_by_it(bucket, example):
             continue  # no current rule covers it; Phase 3+ will
         if expected["ruleId"].endswith("/tamil.wordlist-variant"):
             continue  # a book-wide audit, not a per-verse rule; the benchmark measures it
-        found = findings_of(example, expected["ruleId"])
+        if human(example) and "missed)" in example["origin"]:
+            # A context the pack skipped: the reviewer said "doubling needed",
+            # and the converter guessed the rule. Any sandhi rule may find it
+            # (கிழக்கு காற்று is the direction rule's, not the dative's).
+            found = [f for f in scan_text(example["text"], book="x", chapter="1", verse="1", tamil=True)["findings"]
+                     if f["ruleId"].startswith("ta-irv/sandhi.")]
+        else:
+            found = findings_of(example, expected["ruleId"])
         span = nfc(expected["span"])
         assert any(overlaps(f["originalText"], span) for f in found), (expected, [f["originalText"] for f in found])
         if human(example) and expected.get("fix"):
             # The reviewer confirmed this fix: where the finding covers exactly
             # the reviewed span, one of its suggestions must be it.
-            for finding in (f for f in found if nfc(f["originalText"]) == span):
-                assert nfc(expected["fix"]) in {nfc(s["text"]) for s in finding["suggestions"]}, \
+            for finding in (f for f in found if squeezed(f["originalText"]) == squeezed(span)):
+                assert squeezed(expected["fix"]) in {squeezed(s["text"]) for s in finding["suggestions"]}, \
                     (expected, finding["suggestions"])

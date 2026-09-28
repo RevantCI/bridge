@@ -129,7 +129,7 @@ describe("Language QA indicator per category", () => {
   });
 
   it("styles every category the engine can send", () => {
-    const categories: LanguageQaCategory[] = ["typo", "sandhi", "word-joining", "punctuation", "unicode", "spacing", "termbase", "name"];
+    const categories: LanguageQaCategory[] = ["typo", "sandhi", "word-joining", "punctuation", "unicode", "spacing", "termbase", "name", "usfm"];
     expect(Object.keys(LANGUAGE_QA_CATEGORY_MARKS).sort()).toEqual([...categories].sort());
   });
 });

@@ -131,7 +131,16 @@ A condition is an object. Every key in it must hold for the condition to match.
 | `minLength` | The token has at least this many code points. |
 | `initial` | The token's first code point is in the set. |
 | `prefix` | The token starts with one of these stems. |
-| `listRef` | The token is in a named list supplied at scan time. Today the only list is `housestyle.properNouns`. It is empty until Phase 6, and a missing list is empty. |
+| `notPrefix` | The token starts with none of these (with `prefix`: தேவ- but not தேவை "need"). |
+| `notSuffix` | The token ends with none of these literal endings. |
+| `notSuffixLexical` | The token is none of these words and does not end with one: a compound-final noun (`முறை` also excludes `ஒருமுறை`). |
+| `listRef` | The token is in a named list supplied at scan time (`housestyle.properNouns`). A missing list is empty. The bundled pack no longer uses it (a name does not block doubling, 2026-09-28 review); a project override may. |
+
+`notSuffix` and `notSuffixLexical` are both "ends with" tests. They are kept
+apart because they document different things: an ending, or a whole noun that
+ends a compound. Neither may be an ending that a real case form also has: `-மை`
+also ends உம்மை and எருசலேமை, and `-தரை` also ends கர்த்தரை, all accusatives. So
+`ta-irv` uses exact words for those roots (DECISIONS.md, 2026-09-28).
 
 This is a closed set on purpose: it is not a grammar engine (DECISIONS.md).
 
@@ -139,15 +148,21 @@ This is a closed set on purpose: it is not a grammar engine (DECISIONS.md).
 
 ```json
 "abstain": [
-  { "prev": { "lexical": ["அந்த"] }, "next": { "prefix": ["தேச", "தேவ"] },
-    "origin": "IRV corpus house form after அந்த: தேச- bare 31/doubled 8 …" }
+  { "next": { "prefix": ["தேவ"], "notPrefix": ["தேவை"] },
+    "origin": "House style (reviewer 2026-09-28): no doubling before தேவன்/தேவ- forms …" }
 ]
 ```
 
 An abstain has a `prev` condition, a `next` condition, or both, plus an `origin`.
 If a pair matches the rule and any one of its abstains, there is no finding. For
 `regex` rules only `next` is meaningful. Every abstain in `ta-irv` states the
-corpus counts behind it in its `origin`.
+evidence behind it in its `origin`.
+
+A pair that straddles a poetry line (`\q`) or lifted inline markup is not one
+piece of raw text, so the finding cannot cover it. It is raised on the **first
+word** instead, with the fix confined to that word (`யெகோவாவுக்கு` →
+`யெகோவாவுக்குச்`). Only when the first word is itself split by markup is it dropped
+and counted as a limitation.
 
 ### Fixes
 
@@ -237,25 +252,31 @@ every வல்லினம் rule inline on AI-agreement numbers was supersede
 (DECISIONS.md), and a rule file carrying `inlineSignOff` no longer loads. The
 builder's `INLINE` table records the human number behind each inline rule.
 
-## `ta-irv@1.0.0`
+## `ta-irv@1.1.0`
 
-| Rule | Replaces | Inline | Shape | Strict precision (2026-09-24) |
+Built from `D:\Claude Lab\IRV Tamil` and the 2026-09-28 human review. The
+human column is precision against the reviewer's labels; inline needs ≥ 90% on
+≥ 20 of them.
+
+| Rule | v | Inline | Shape | Human precision (2026-09-28) |
 |---|---|---|---|---|
-| `sandhi.vallinam.demonstrative` | B1 | no (8 human labels) | அந்த/இந்த/எந்த + bare hard consonant | 41.2% (80 findings) |
-| `sandhi.vallinam.manner-adverb` | B1 | no (1 human label) | அப்படி/இப்படி/எப்படி + bare | 15.4% (13) |
-| `sandhi.vallinam.accusative` | B2 | no (70% human, 50 labels) | -ஐ accusative + bare; root nouns abstain | 55.0% (500) |
-| `sandhi.vallinam.dative` | B2 | **yes (93.9% human, 49 labels)** | -க்கு dative + bare; root nouns and house names abstain | 49.8% (396) |
-| `sandhi.vallinam.wrong-consonant` | new | no (no human labels) | linked with the wrong hard consonant | no findings in the benchmark books |
-| `sandhi.clitic.fused` | new | no | manner adverb, -ஐ or -க்கு + தான்/கூட written apart | 0.0% (4) |
-| `typo.divine-name.vowel-drop` | new | no | யெகோவவ for யெகோவாவ | 100% (11) |
-| `typo.divine-name.dative-stem` | new | no | யெகோவாக்க (the dative is யெகோவாவுக்கு) | 69.2% (13) |
-| `typo.suffix.dropped-tha` | new | no | -வற்கு for -வதற்கு | 100% (2) |
-| `integrity.space-before-note-end` | new | no | space before `\f*` / `\x*` (raw) | 74.3% (74) |
-| `integrity.digits-in-text` | new | disabled | digits in verse text: an IRV house form (Pass 3 §5) | — |
+| `sandhi.vallinam.dative` | 2 | **yes** | -க்கு / -ற்கு dative + bare; root nouns, house names, directions abstain | 100% (46/46) |
+| `sandhi.vallinam.accusative` | 2 | **yes** | -ஐ accusative + bare; root nouns and compound-final nouns abstain | 94.6% (35/37) |
+| `sandhi.vallinam.demonstrative` | 2 | no (7 labels) | அந்த/இந்த/எந்த + bare hard consonant | 100% (7/7) |
+| `sandhi.vallinam.manner-adverb` | 2 | no (1 label) | அப்படி/இப்படி/எப்படி + bare | 100% (1/1) |
+| `sandhi.vallinam.wrong-consonant` | 2 | no | linked with the wrong hard consonant | not labelled |
+| `sandhi.compound.direction` | 1 | no | கிழக்கு/மேற்கு/வடக்கு/தெற்கு + bare (compound doubling) | not labelled |
+| `sandhi.clitic.fused` | 2 | no | manner adverb, -ஐ, -க்கு or -ற்கு + தான் written apart | not labelled |
+| `typo.divine-name.vowel-drop` | 1 | no | யெகோவவ for யெகோவாவ | 100% (1/1) |
+| `typo.divine-name.dative-stem` | 1 | no | யெகோவாக்க (the dative is யெகோவாவுக்கு) | not labelled |
+| `typo.suffix.dropped-tha` | 1 | no | -வற்கு for -வதற்கு | not labelled |
+| `integrity.space-before-note-end` | 2 | no | space before `\f*` / `\x*` (raw); category `usfm`, severity low | 0% as a text error (0/15): markup hygiene |
+| `integrity.digits-in-text` | 1 | disabled | digits in verse text: an IRV house form (Pass 3 §5) | — |
 
-The precision column measures agreement with the AI review, not accuracy. The
-inline column follows the human-labelled precision of the 2026-09-28 review
-(`docs/LANGUAGE_QA_BENCHMARK.md`).
+Every வல்லினம் rule abstains before a clitic or quotative and before தேவ- (not
+தேவை). None abstains on a proper noun. The in-code rules changed too:
+`tamil.repeated-word` is disabled (0/20: Tamil அடுக்குத்தொடர்), and
+`lexicon.known-misspelling` is inline (43/43).
 
 B1 and B2 share `legacyId: "tamil.vallinam-missing"`. Their finding ids, and so
 their existing decisions, carry over. Their `ruleVersion` changed, though, so an
@@ -268,16 +289,26 @@ The pack is generated from the corpus, and the generated JSON is committed:
 
 ```powershell
 engine\.venv\Scripts\python.exe scripts\build_ta_irv_pack.py `
-  --irv-dir "C:\Users\Benz\Documents\IRV Tamil" `
+  --irv-dir "D:\Claude Lab\IRV Tamil" `
   --reviews "D:\Claude Lab\Revant work\Claude outputs" "…\Philippians_Round2_QA_Issues.csv"
 ```
 
-The builder computes every corpus-derived part of the pack:
+`--human-labels` defaults to `benchmark/human/2026-09-28/human_labels.jsonl`.
+The builder computes:
 
-- the abstains: house forms from the bare/doubled counts per trigger and stem
-  (`MIN_CONTEXTS = 3`), and root nouns (a ை-word whose +யை form is attested; a
-  க்கு-word whose -க்கில் or -க்குக்கு form is attested);
-- the examples;
+- the root nouns, from the corpus: a ை-word whose +யை form is attested; a
+  க்கு- or ற்கு-word whose -க்கில் / -ற்கில் or -க்குக்கு form is attested. A
+  corpus that mostly writes a case form bare is no longer a reason to exclude
+  it: that is the defect the rules exist to find;
+- the reviewer's word verdicts, from the labels: root nouns and house forms
+  (sheet 3 `ROOT_KEEP`/`HOUSE`, and `FP_ROOT` findings) are added to
+  `notLexical`; confirmed case forms (`CASE_FORM_FLAG`) are removed from it,
+  whatever the corpus says;
+- the examples: corpus ones, plus every reviewer-confirmed finding as an
+  incorrect example and every reviewer false alarm its rule no longer raises
+  as a correct one. So each pack load re-checks the review. A confirmed finding
+  no rule finds fails the build; a still-raised false alarm is printed as a
+  residual (the accusative's two before a name);
 - `inline`, from the builder's `INLINE` table of human-measured rules.
 
 After a rebuild, run `pytest tests/service/test_language_pack.py` and the

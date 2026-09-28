@@ -58,6 +58,7 @@ CATEGORY_BUCKETS = {
     "spacing": {"punctuation", "usfm"},
     "termbase": {"name", "typo"},
     "name": {"name"},
+    "usfm": {"usfm"},
 }
 
 

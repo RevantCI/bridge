@@ -1,19 +1,23 @@
 """Build the bundled `ta-irv` Language QA rule pack from the IRV corpus.
 
-    python scripts/build_ta_irv_pack.py --irv-dir "C:/…/IRV Tamil" [--reviews DIR_OR_CSV …]
+    python scripts/build_ta_irv_pack.py --irv-dir "D:/Claude Lab/IRV Tamil" [--reviews DIR_OR_CSV …]
 
 The rule DEFINITIONS below are hand-written: match shapes, messages, fixes,
-and the reason for each abstain. The corpus supplies two things, and this
-script is how they were derived, so either can be rebuilt and reviewed.
+and the reason for each abstain. Three inputs supply the rest, and this
+script is how they were derived, so each can be rebuilt and reviewed.
 
-1. The exception lists. `notLexical` holds the -ஐ / -க்கு words IRV mostly
-   writes bare before a hard consonant: at least MIN_CONTEXTS such contexts,
-   with fewer doubled than bare. `prefix` abstains hold the next-word stems a
-   demonstrative or manner adverb is mostly bare before (e.g. இந்த தேச-:
-   bare 46, doubled 0). Each is recorded in the rule with its counts. These
-   are the corpus's own majority forms, which is also the method the Round 2
-   reviewers used ("doubled 178 times and bare 10 times").
-2. Each rule's examples, which run as tests every time the pack loads:
+1. The corpus (--irv-dir) supplies the root nouns: a -ஐ / -க்கு / -ற்கு word
+   whose ending is part of the noun, shown by the corpus inflecting it
+   (root_nouns). A corpus that writes a case form bare is the defect the
+   rules exist to find, so "IRV mostly writes it bare" is no longer a reason
+   to exclude a word (2026-09-28 review: 5 of 50 such words were real misses,
+   and the per-trigger house-form stems were 9 of 9).
+2. The human review (--human-labels, benchmark/human/<date>/human_labels.jsonl)
+   supplies the reviewer's word verdicts -- root nouns to keep excluded, case
+   forms to check -- and its confirmed findings and false alarms, which become
+   each rule's examples. Reviewer verdicts are data: this script reads them,
+   it never edits them.
+3. Each rule's corpus examples, which run as tests every time the pack loads:
    - incorrect examples are real IRV occurrences the rule flags, preferring
      those the Round 2 / Pass 3 review also flagged;
    - correct examples are real occurrences it must not flag (the doubled
@@ -44,32 +48,50 @@ from tc_ai_bridge.language_qa import WORD, lift_inline_usfm, scan_text  # noqa: 
 from tc_ai_bridge.project_import import imported_verse_text, parse_scripture_file  # noqa: E402
 
 PACK_DIR = REPO / "engine" / "tc_ai_bridge" / "language_packs" / "ta-irv"
-PACK_VERSION = "1.0.0"
+PACK_VERSION = "1.1.0"
+HUMAN_LABELS = REPO / "benchmark" / "human" / "2026-09-28" / "human_labels.jsonl"
 HARD = ["க", "ச", "த", "ப"]
-MIN_CONTEXTS = 3
 EXAMPLES = 12
 DEMONSTRATIVES = ["அந்த", "இந்த", "எந்த"]
 MANNER = ["அப்படி", "இப்படி", "எப்படி"]
-# After a trigger these begin a clitic or a quotative, never a doubling
-# site; the clitics get their own rule (sandhi.clitic.fused).
+DIRECTIONS = ["கிழக்கு", "மேற்கு", "வடக்கு", "தெற்கு"]
+# After a trigger these begin a clitic or a quotative, never a doubling site.
+# The 2026-09-28 reviewer: கூட, மட்டும், போல, என்று, என, எனும் are written
+# apart without doubling (house style); தான் and ஆவது are written fused.
 CLITICS_AND_QUOTATIVES = ["தான்", "கூட", "மட்டும்", "ஆவது", "போல", "என்று", "என", "எனும்"]
 HOUSE_NAMES_IN_KKU = ["ஈசாக்கு", "ஏனோக்கு"]  # IRV_Pass3_Handoff.md §5: nominatives, not datives
+# Compound-final nouns: a word ending in one is that noun, never a case form
+# (ஒருமுறை, நல்வினை). Only elements that end no real accusative in the corpus:
+# -மை and -தரை were measured and rejected -- உம்மை, எருசலேமை, கர்த்தரை and
+# மனிதரை are accusatives (BUILD_LOG 2026-09-28, step 3; maintainer's choice).
+COMPOUND_FINAL = ["முறை", "வினை", "வகை", "தொண்டை"]
+# Kept excluded although the corpus or the review could suggest otherwise:
+# `கை கோலில்` wants the compound கைக்கோலில், and `சு வரை` is a split word
+# (சுவரை). Neither is a missing linking consonant (reviewer, GEN 47:31, PSA 48:13).
+KEEP_EXCLUDED = ["கை", "வரை"]
+# Accusative pronouns before a fused தான் (அதைத்தான்): the clitic rule's examples
+# come from these, never from a verb whose stem ends in -ஐ (வைத்தான், அழைத்தான்).
+CLITIC_ACCUSATIVES = ["அதை", "இதை", "எதை", "என்னை", "உன்னை", "அவனை", "அவளை", "அவரை", "அவர்களை",
+                      "இவனை", "இவளை", "இவரை", "இவர்களை", "நம்மை", "உம்மை", "தம்மை", "எங்களை",
+                      "உங்களை", "தங்களை"]
+DEVA = {"next": {"prefix": ["தேவ"], "notPrefix": ["தேவை"]},
+        "origin": "House style (reviewer 2026-09-28): no doubling before தேவன்/தேவ- forms "
+                  "(11 of 13 'case form, no doubling here' verdicts). தேவை 'need' is still checked."}
 MISSING_MESSAGE = ('Possible missing வல்லினம் at this word boundary: "{prev} {initial}..." normally takes '
                    '"{prev}{initial}் {initial}...". Verify before editing.')
 MISSING_RATIONALE = '"{prev}" before a {initial}-initial word takes the linking {initial}்'
 # Inline is decided by human-labelled precision only: >= 0.90 on >= 20
 # findings a Tamil reviewer labelled (scripts/language_qa_benchmark.py
-# --human-labels; DECISIONS.md 2026-09-28). The 2026-09-24 sign-off that put
-# every வல்லினம் rule inline on AI-agreement numbers is superseded. Values:
-# the human precision that justifies each entry, and its sample.
+# --human-labels; DECISIONS.md 2026-09-28). Values: the human precision
+# measured on this pack, and its sample.
 INLINE = {
-    # 2026-09-28 review (GEN/PSA/JHN): 46 TP / 3 FP.
-    "sandhi.vallinam.dative": {"humanPrecision": 0.9388, "labelled": 49},
+    # ta-irv@1.1.0 on the 2026-09-28 review (GEN/PSA/JHN).
+    "sandhi.vallinam.dative": {"humanPrecision": 1.0, "labelled": 46},        # 46 TP / 0 FP
+    "sandhi.vallinam.accusative": {"humanPrecision": 0.9459, "labelled": 37},  # 35 TP / 2 FP (both before a name)
 }
-PROPER_NOUNS = {"next": {"listRef": "housestyle.properNouns"},
-                "origin": "A proper noun after the trigger: the project's house-style name list (Phase 6). "
-                          "Empty until then; the names adapter's majority forms were evaluated as a seed "
-                          "and rejected (BUILD_LOG, Phase 3)."}
+# Measured but below the 20-label sample, so panel-only until the next review
+# round: demonstrative 7/7, manner-adverb 1/1. Unlabelled: wrong-consonant,
+# compound.direction, clitic.fused, the typo.* rules.
 
 
 def nfc(text: str) -> str:
@@ -120,114 +142,107 @@ def root_nouns(verses) -> tuple[list[str], list[str]]:
     by Tamil morphology as the corpus attests it:
     - a root in -ஐ takes -யை as its own accusative (படை -> படையை,
       மலை -> மலையை); a real accusative never takes a second one (no அதையை);
-    - a root in -க்கு has a locative in -க்கில் or a dative -க்குக்கு
-      (கிழக்கு -> கிழக்கில்); a real dative has neither (no எனக்கில்)."""
+    - a root in -க்கு or -ற்கு has a locative in -க்கில் / -ற்கில் or a dative
+      -க்குக்கு (கிழக்கு -> கிழக்கில், மேற்கு -> மேற்கில்); a real dative has
+      neither (no எனக்கில்)."""
     tokens = {nfc(m.group()) for _, _, _, text in verses for m in WORD.finditer(text)}
     acc = sorted(t for t in tokens if t.endswith("ை") and t + "யை" in tokens)
-    dat = sorted(t for t in tokens if t.endswith("க்கு") and (t[:-1] + "ில்" in tokens or t + "க்கு" in tokens))
+    dat = sorted(t for t in tokens if t.endswith(("க்கு", "ற்கு"))
+                 and (t[:-1] + "ில்" in tokens or t + "க்கு" in tokens))
     return acc, dat
 
 
-def pair_stats(verses):
-    doubled, bare = collections.Counter(), collections.Counter()
-    pair_bare, pair_doubled = collections.Counter(), collections.Counter()
-    for _, _, _, text in verses:
-        words = list(WORD.finditer(text))
-        for a, b in zip(words, words[1:]):
-            if not text[a.end():b.start()].isspace():
-                continue
-            prev, nxt = nfc(a.group()), nfc(b.group())
-            if nxt[:1] not in HARD:
-                continue
-            base, link = loader._split(prev)
-            stem = nxt[:3]
-            if link == nxt[0]:
-                doubled[base] += 1
-                pair_doubled[(base, stem)] += 1
-            elif link is None:
-                bare[base] += 1
-                pair_bare[(base, stem)] += 1
-    return doubled, bare, pair_bare, pair_doubled
-
-
-def bare_majority(doubled, bare, ending: str) -> list[dict]:
-    rows = []
-    for base in set(doubled) | set(bare):
-        total = doubled[base] + bare[base]
-        if base.endswith(ending) and total >= MIN_CONTEXTS and doubled[base] < bare[base]:
-            rows.append({"word": base, "bare": bare[base], "doubled": doubled[base]})
-    return sorted(rows, key=lambda r: (-r["bare"], r["word"]))
-
-
-def stem_abstains(triggers, pair_bare, pair_doubled) -> list[dict]:
-    out = []
-    for trigger in triggers:
-        stems = sorted(
-            (stem for (base, stem) in set(pair_bare) | set(pair_doubled) if base == trigger
-             and pair_bare[(base, stem)] + pair_doubled[(base, stem)] >= MIN_CONTEXTS
-             and pair_bare[(base, stem)] > pair_doubled[(base, stem)]),
-            key=lambda s: (-pair_bare[(trigger, s)], s))
-        if stems:
-            counts = ", ".join(f"{s}- bare {pair_bare[(trigger, s)]}/doubled {pair_doubled[(trigger, s)]}" for s in stems)
-            out.append({"prev": {"lexical": [trigger]}, "next": {"prefix": stems},
-                        "origin": f"IRV corpus house form after {trigger}: {counts}"
-                                  + (" (also IRV_Pass3_Handoff.md §5)" if "தேச" in stems else "")})
+def reviewer_words(labels: list[dict]) -> dict[str, set[str]]:
+    """The reviewer's list verdicts, by rule family:
+    - `accRoots` / `datRoots`: words to keep excluded -- sheet 3 ROOT_KEEP or
+      HOUSE (a case form IRV writes bare as house style), and a flagged
+      finding judged FP_ROOT (its first word is not a case form);
+    - `accCaseForms` / `datCaseForms`: sheet 3 CASE_FORM_FLAG, real case forms
+      that must be checked, whatever the corpus says."""
+    out = {key: set() for key in ("accRoots", "datRoots", "accCaseForms", "datCaseForms")}
+    for label in labels:
+        if label.get("kind") == "word":
+            family = "acc" if label["cls"].startswith("acc") else "dat" if label["cls"].startswith("dat") else None
+            if family is None:
+                continue  # clitic policy and demonstrative house forms are rule-level, not lists
+            if label["verdict"] in {"ROOT_KEEP", "HOUSE"}:
+                out[f"{family}Roots"].add(nfc(label["word"]))
+            elif label["verdict"] == "CASE_FORM_FLAG":
+                out[f"{family}CaseForms"].add(nfc(label["word"]))
+        elif label.get("kind") == "flagged" and label.get("verdict") == "FP_ROOT":
+            first = nfc(label["original"]).split()[0]
+            out["accRoots" if label["rule"].endswith("accusative") else "datRoots"].add(first)
     return out
 
 
-def definitions(doubled, bare, pair_bare, pair_doubled, acc_roots, dat_roots) -> list[dict]:
-    accusative_exceptions = bare_majority(doubled, bare, "ை")
-    dative_exceptions = bare_majority(doubled, bare, "க்கு")
-    acc_words = sorted({r["word"] for r in accusative_exceptions} | set(acc_roots))
-    dat_words = sorted({r["word"] for r in dative_exceptions} | set(dat_roots) | set(HOUSE_NAMES_IN_KKU))
-    trigger_base = "^(?:" + "|".join(DEMONSTRATIVES + MANNER) + ")$|ை$|க்கு$"
-    clitic_base = "^(?:" + "|".join(MANNER) + ")$|ை$|க்கு$"
+def definitions(acc_roots, dat_roots, reviewed: dict[str, set[str]]) -> list[dict]:
+    acc_words = sorted((set(acc_roots) | reviewed["accRoots"] | set(KEEP_EXCLUDED)) - reviewed["accCaseForms"])
+    # The four directions stay out of the dative rule: கிழக்குக் காற்று is
+    # compound doubling (sandhi.compound.direction), not a dative.
+    dat_words = sorted((set(dat_roots) | reviewed["datRoots"] | set(HOUSE_NAMES_IN_KKU) | set(DIRECTIONS))
+                       - reviewed["datCaseForms"])
+    trigger_base = "^(?:" + "|".join(DEMONSTRATIVES + MANNER) + ")$|ை$|(?:க்கு|ற்கு)$"
+    clitic_base = "^(?:" + "|".join(MANNER) + ")$|ை$|(?:க்கு|ற்கு)$"
     common_abstain = [
         {"next": {"lexical": CLITICS_AND_QUOTATIVES},
-         "origin": "Clitic or quotative after the trigger: never the spaced doubled form; see sandhi.clitic.fused."},
-        PROPER_NOUNS,
+         "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 "
+                   "reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house "
+                   "style); தான்/ஆவது are written fused (sandhi.clitic.fused for தான்)."},
+        DEVA,
     ]
 
-    def missing(rule_id, title_ta, title_en, prev, extra_abstain, provenance, confidence="medium"):
+    def missing(rule_id, title_ta, title_en, prev, provenance, confidence="medium", version=2):
         return {
-            "id": rule_id, "version": 1, "legacyId": "tamil.vallinam-missing",
+            "id": rule_id, "version": version, "legacyId": "tamil.vallinam-missing",
             "category": "sandhi", "severity": "medium", "confidence": confidence, "inline": False,
             "title": {"ta": title_ta, "en": title_en},
             "message": {"en": MISSING_MESSAGE}, "rationale": MISSING_RATIONALE,
             "match": {"type": "token-context", "prev": prev, "gap": "whitespace",
                       "next": {"initial": HARD}, "link": "none"},
-            "abstain": common_abstain + extra_abstain, "fix": {"type": "insert-link"},
+            "abstain": list(common_abstain), "fix": {"type": "insert-link"},
             "provenance": provenance,
         }
 
+    review = ("2026-09-28 human review (GEN/PSA/JHN): proper nouns do not block doubling (17 of 25 needed "
+              "it), so the proper-noun abstain is gone; தேவ- forms do (house style).")
+    direction = missing("sandhi.compound.direction", "வல்லினம் மிகுதல் — திசைச் சொல்", "Vallinam doubling after a direction word",
+                        {"lexical": DIRECTIONS},
+                        "New (2026-09-28 review): the reviewer wants கிழக்குக் காற்று, கிழக்குத் தேசம் -- compound "
+                        "doubling after a direction word, which is not a dative (the dative rule excludes these "
+                        "four). Panel-only and medium confidence until benchmarked.", version=1)
+    direction.pop("legacyId")
     return [
         missing("sandhi.vallinam.demonstrative", "வல்லினம் மிகுதல் — சுட்டு", "Vallinam doubling after a demonstrative",
-                {"lexical": DEMONSTRATIVES}, stem_abstains(DEMONSTRATIVES, pair_bare, pair_doubled),
-                "B1 (BUILD_LOG 2026-09-22). IRV doubles after அந்த 89%, இந்த 84%, எந்த 86% of hard-initial contexts."),
+                {"lexical": DEMONSTRATIVES},
+                "B1 (BUILD_LOG 2026-09-22). IRV doubles after அந்த 89%, இந்த 84%, எந்த 86% of hard-initial "
+                "contexts. v2: the per-trigger house-form stems (தேச-, தண்-, தரி-, திர-, தீங-, தூண-) are gone -- "
+                f"the reviewer found all 9 sampled to be real errors. {review}"),
         missing("sandhi.vallinam.manner-adverb", "வல்லினம் மிகுதல் — விதம்", "Vallinam doubling after a manner adverb",
-                {"lexical": MANNER}, stem_abstains(MANNER, pair_bare, pair_doubled),
-                "B2 (BUILD_LOG 2026-09-23). IRV doubles after அப்படி 97%, இப்படி 92%, எப்படி 87%."),
+                {"lexical": MANNER},
+                f"B2 (BUILD_LOG 2026-09-23). IRV doubles after அப்படி 97%, இப்படி 92%, எப்படி 87%. v2: as the "
+                f"demonstrative rule, no per-trigger stems. {review}"),
         missing("sandhi.vallinam.accusative", "வல்லினம் மிகுதல் — இரண்டாம் வேற்றுமை", "Vallinam doubling after the accusative -ஐ",
-                {"suffix": "ை$", "minLength": 3, "notLexical": acc_words}, [],
-                "Generalises B4 (five pronouns) to the -ஐ ending, as the layered-rules brief asks. "
-                f"notLexical ({len(acc_words)} words) is two corpus tests: (1) root nouns, {len(acc_roots)} words "
-                "whose -ஐ is part of the noun, shown by their own accusative in -யை (படை -> படையை, மலை -> "
-                "மலையை, கை -> கையை); a real accusative never takes a second (no அதையை); (2) the "
-                f"{len(accusative_exceptions)} -ஐ words IRV writes bare in most of at least {MIN_CONTEXTS} "
-                "hard-initial contexts (bare/doubled): "
-                + "; ".join(f"{r['word']} {r['bare']}/{r['doubled']}" for r in accusative_exceptions[:40])
-                + ("; …" if len(accusative_exceptions) > 40 else "") + ". IRV overall: -ஐ doubled 14,496, bare 3,082."),
-        missing("sandhi.vallinam.dative", "வல்லினம் மிகுதல் — நான்காம் வேற்றுமை", "Vallinam doubling after the dative -க்கு",
-                {"suffix": "க்கு$", "minLength": 4, "notLexical": dat_words}, [],
-                "Generalises B3 (three datives) to the -க்கு ending. notLexical is (1) root nouns and names in "
-                f"-க்கு, {len(dat_roots)} words shown by a locative in -க்கில் or a dative -க்குக்கு "
-                "(கிழக்கு -> கிழக்கில், விளக்கு, வழக்கு, ஈசாக்கு, அபிமெலேக்கு); a real dative has "
-                "neither (no எனக்கில்); (2) IRV's bare-majority -க்கு words (bare/doubled): "
-                + "; ".join(f"{r['word']} {r['bare']}/{r['doubled']}" for r in dative_exceptions)
-                + "; (3) the names IRV_Pass3_Handoff.md §5 lists as nominatives. "
-                "-ற்கு is a different ending and is not matched."),
+                {"suffix": "ை$", "minLength": 3, "notLexical": acc_words, "notSuffixLexical": COMPOUND_FINAL},
+                "Generalises B4 (five pronouns) to the -ஐ ending. notLexical "
+                f"({len(acc_words)} words): (1) root nouns, {len(acc_roots)} words whose -ஐ is part of the noun, "
+                "shown by their own accusative in -யை (படை -> படையை, மலை -> மலையை, கை -> கையை); a real "
+                "accusative never takes a second (no அதையை); (2) the 2026-09-28 reviewer's root nouns and "
+                f"house forms ({len(reviewed['accRoots'])}); minus (3) the {len(reviewed['accCaseForms'])} "
+                "words the reviewer confirmed are real accusatives that need doubling (அசுத்தமானவைகளை, "
+                "யெகோவாவை, ஜீவனை …). notSuffixLexical: compound-final nouns (அநேகமுறை, தீவினை). v2 drops "
+                f"the corpus bare-majority list: a corpus writing a case form bare is the defect. {review}"),
+        missing("sandhi.vallinam.dative", "வல்லினம் மிகுதல் — நான்காம் வேற்றுமை", "Vallinam doubling after the dative -க்கு / -ற்கு",
+                {"suffix": "(?:க்கு|ற்கு)$", "minLength": 4, "notLexical": dat_words},
+                "Generalises B3 (three datives) to the -க்கு ending, and in v2 to -ற்கு (the reviewer "
+                "confirmed 17 of 17 sampled -ற்கு datives need doubling: அதற்குச் சித்னா). notLexical: (1) root "
+                f"nouns and names in -க்கு / -ற்கு, {len(dat_roots)} words shown by a locative in -க்கில் / "
+                "-ற்கில் or a dative -க்குக்கு (கிழக்கு -> கிழக்கில், விளக்கு, வழக்கு); a real dative has "
+                "neither (no எனக்கில்); (2) the reviewer's root nouns; (3) the names IRV_Pass3_Handoff.md §5 "
+                "lists as nominatives; (4) the four directions, which sandhi.compound.direction covers; minus "
+                f"(5) the {len(reviewed['datCaseForms'])} words the reviewer confirmed are real datives "
+                f"(சபைக்கு, யோபுக்கு …). v2 drops the corpus bare-majority list. {review}"),
         {
-            "id": "sandhi.vallinam.wrong-consonant", "version": 1,
+            "id": "sandhi.vallinam.wrong-consonant", "version": 2,
             "category": "sandhi", "severity": "medium", "confidence": "medium", "inline": False,
             "title": {"ta": "வல்லினம் — தவறான மெய்", "en": "Wrong linking consonant"},
             "message": {"en": 'The linking "{link}்" does not match the following "{initial}...": '
@@ -236,25 +251,28 @@ def definitions(doubled, bare, pair_bare, pair_doubled, acc_roots, dat_roots) ->
             "match": {"type": "token-context", "gap": "whitespace", "link": "mismatch",
                       "prev": {"regex": trigger_base, "notLexical": sorted(set(acc_words) | set(dat_words))},
                       "next": {"initial": HARD}},
-            "abstain": common_abstain, "fix": {"type": "replace-link"},
+            "abstain": list(common_abstain), "fix": {"type": "replace-link"},
             "provenance": "Only after a base the வல்லினம் rules cover (a demonstrative, a manner adverb, "
-                          "-ஐ or -க்கு). In IRV every other 'wrong link' is a name ending in a consonant "
-                          "(காத் Gad, மோவாப் Moab), which this must never touch.",
+                          "-ஐ, -க்கு or -ற்கு). In IRV every other 'wrong link' is a name ending in a "
+                          "consonant (காத் Gad, மோவாப் Moab), which this must never touch. v2: -ற்கு, and the "
+                          "exception lists of the rules it follows.",
         },
+        direction,
         {
-            "id": "sandhi.clitic.fused", "version": 1,
+            "id": "sandhi.clitic.fused", "version": 2,
             "category": "word-joining", "severity": "low", "confidence": "low", "inline": False,
             "title": {"ta": "இடைச்சொல் — சேர்த்து எழுதுதல்", "en": "Clitic written apart"},
             "message": {"en": '"{word} {next}" is normally written as one word, "{fix}". Verify before editing.'},
-            "rationale": "தான் / கூட are clitics: fused, with the linking consonant",
+            "rationale": "தான் is a clitic: written fused, with the linking consonant",
             "match": {"type": "token-context", "gap": "whitespace", "link": "any",
                       "prev": {"regex": clitic_base, "notLexical": sorted(set(acc_words) | set(dat_words))},
-                      "next": {"lexical": ["தான்", "கூட"]}},
+                      "next": {"lexical": ["தான்"]}},
             "abstain": [], "fix": {"type": "fuse-link"},
-            "provenance": "Layered-rules brief §3.3: shipped enabled, low confidence, panel-only; never the "
-                          "spaced form அதைத் தான். Its fate is the project's to decide through decisions "
-                          "(Phase 6 learner). Only after a manner adverb, -ஐ or -க்கு. Spaced கூட after "
-                          "the comitative -ஓடு (அவனோடு கூட) is the postposition 'with' and is not matched.",
+            "provenance": "Panel-only, low confidence. v2 (2026-09-28 review): தான் and ஆவது are written "
+                          "fused, and கூட is written apart, so கூட is no longer matched. ஆவது fuses by "
+                          "vowel sandhi (யாராவது), not by a linking consonant, so it has no fix this rule "
+                          "could offer and is not matched either. Only after a manner adverb, -ஐ, -க்கு or "
+                          "-ற்கு; never the spaced form அதைத் தான்.",
         },
         {
             "id": "typo.divine-name.vowel-drop", "version": 1,
@@ -303,15 +321,19 @@ def definitions(doubled, bare, pair_bare, pair_doubled, acc_roots, dat_roots) ->
                           "enabling is a pack change for the maintainer.",
         },
         {
-            "id": "integrity.space-before-note-end", "version": 1,
-            "category": "spacing", "severity": "low", "confidence": "medium", "inline": False,
-            "title": {"ta": "குறிப்பு முடிவுக்கு முன் இடைவெளி", "en": "Space before a note's end marker"},
-            "message": {"en": "Space before the closing note marker; the note's text carries a trailing space."},
+            "id": "integrity.space-before-note-end", "version": 2,
+            "category": "usfm", "severity": "low", "confidence": "medium", "inline": False,
+            "title": {"ta": "குறிப்பு முடிவுக்கு முன் இடைவெளி (குறியீட்டு வடிவமைப்பு)",
+                      "en": "Markup: space before a note's end marker"},
+            "message": {"en": "Markup formatting, not a text error: a space before the closing note marker. "
+                              "Removing it does not change the verse text."},
             "rationale": "No space before \\f* or \\x*",
             "match": {"type": "regex", "on": "raw", "pattern": r"(?P<span> +)\\[fx]\*"},
             "fix": {"type": "replace", "text": ""},
             "provenance": "Layered-rules brief §3.4 (integrity.space-before-footnote-end), extended to \\x*. "
-                          "Matched on the raw text, since notes are lifted out of the visible text. IRV: 214.",
+                          "Matched on the raw text, since notes are lifted out of the visible text. v2 "
+                          "(2026-09-28 review, 0 of 15 as a text error): USFM hygiene, so category usfm and "
+                          "severity low.",
         },
     ]
 
@@ -342,6 +364,10 @@ def reviewed_places(paths: list[str]) -> set[tuple[str, str, str]]:
     return {(r.book, r.chapter, r.verse) for r in bench.load_review_rows(files) if r.label in {"positive", "maybe"}}
 
 
+# Places the brief names as a rule's examples; included whenever the rule flags them.
+REQUIRED_PLACES = {"sandhi.compound.direction": {("psa", "48", "7"), ("psa", "78", "26"), ("gen", "29", "1")}}
+
+
 def choose_examples(pack, verses, reviewed) -> dict[str, dict[str, list]]:
     flagged = collections.defaultdict(list)
     for book, chapter, verse, text in verses:
@@ -355,8 +381,10 @@ def choose_examples(pack, verses, reviewed) -> dict[str, dict[str, list]]:
             continue
         hits = flagged.get(rule.id, [])
         hits.sort(key=lambda h: ((h[0], h[1], h[2]) not in reviewed, h[0], int(h[1]), h[2]))
-        chosen = spread([h for h in hits if (h[0], h[1], h[2]) in reviewed], EXAMPLES // 2)
-        chosen += [h for h in spread(hits, EXAMPLES) if h not in chosen][:EXAMPLES - len(chosen)]
+        required = [h for h in hits if (h[0], h[1], h[2]) in REQUIRED_PLACES.get(rule.id, set())]
+        chosen = required + [h for h in spread([h for h in hits if (h[0], h[1], h[2]) in reviewed], EXAMPLES // 2)
+                             if h not in required]
+        chosen += [h for h in spread(hits, EXAMPLES) if h not in chosen][:max(0, EXAMPLES - len(chosen))]
         incorrect = []
         for book, chapter, verse, text, finding in chosen:
             snippet = window(text, finding["start"], finding["end"])
@@ -368,38 +396,40 @@ def choose_examples(pack, verses, reviewed) -> dict[str, dict[str, list]]:
     return out
 
 
+CLITIC_FUSED = regex.compile(r"(?<![\p{L}\p{M}])(?:" + "|".join(MANNER + CLITIC_ACCUSATIVES)
+                             + r"|\p{L}[\p{L}\p{M}]*(?:க்கு|ற்கு))"
+                             r"த்தான்(?![\p{L}\p{M}])")
+
+
 def correct_examples(rule, verses, flagged) -> list[dict]:
     """Real snippets the rule must not flag."""
     found = []
     if rule.match_type == "token-context":
-        for book, chapter, verse, text in verses:
-            words = list(WORD.finditer(text))
-            for a, b in zip(words, words[1:]):
-                if not text[a.end():b.start()].isspace():
-                    continue
-                prev, nxt = nfc(a.group()), nfc(b.group())
-                base, link = loader._split(prev)
-                if rule.prev is not None and not rule.prev.matches(base, {}):
-                    continue
-                shape = None
-                if rule.id == "sandhi.clitic.fused":
-                    if prev.endswith(("த்தான்", "க்கூட")):
-                        shape = "fused clitic"
-                elif nxt[:1] in HARD and link == nxt[:1] and rule.link != "any":
-                    shape = "correctly linked"
-                elif nxt[:1] in HARD and link is None and any(
-                        (x.prev is None or x.prev.matches(base, {})) and (x.next is None or x.next.matches(nxt, {}))
-                        for x in rule.abstain if x.origin.startswith(("IRV corpus", "Clitic"))):
-                    shape = "house form"
-                if shape:
-                    found.append((shape, book, chapter, verse, window(text, a.start(), b.end(), 1)))
         if rule.id == "sandhi.clitic.fused":
-            found = []
             for book, chapter, verse, text in verses:
-                for m in regex.finditer(r"(?:அப்படி|இப்படி|எப்படி|\p{L}[\p{L}\p{M}]*ை|\p{L}[\p{L}\p{M}]*க்கு)(?:த்தான்|க்கூட)(?![\p{L}\p{M}])", text):
+                for m in CLITIC_FUSED.finditer(text):
                     found.append(("fused clitic", book, chapter, verse, window(text, m.start(), m.end(), 1)))
                 for m in regex.finditer(r"\p{L}[\p{L}\p{M}]*ஓடு கூட(?![\p{L}\p{M}])", text):
                     found.append(("comitative கூட", book, chapter, verse, window(text, m.start(), m.end(), 1)))
+        else:
+            for book, chapter, verse, text in verses:
+                words = list(WORD.finditer(text))
+                for a, b in zip(words, words[1:]):
+                    if not text[a.end():b.start()].isspace():
+                        continue
+                    prev, nxt = nfc(a.group()), nfc(b.group())
+                    base, link = loader._split(prev)
+                    if rule.prev is not None and not rule.prev.matches(base, {}):
+                        continue
+                    shape = None
+                    if nxt[:1] in HARD and link == nxt[:1] and rule.link != "any":
+                        shape = "correctly linked"
+                    elif nxt[:1] in HARD and link is None and any(
+                            (x.prev is None or x.prev.matches(base, {})) and (x.next is None or x.next.matches(nxt, {}))
+                            for x in rule.abstain if x.origin.startswith(("House style", "Clitic"))):
+                        shape = "house form"
+                    if shape:
+                        found.append((shape, book, chapter, verse, window(text, a.start(), b.end(), 1)))
     else:
         corrected = {"typo.divine-name.vowel-drop": r"யெகோவாவ[\p{L}\p{M}]*",
                      "typo.divine-name.dative-stem": r"யெகோவாவுக்கு",
@@ -443,8 +473,11 @@ def top_up(examples: dict[str, list], rule_id: str, verses) -> None:
     edits = {
         "typo.suffix.dropped-tha": (r"(\p{L}[\p{L}\p{M}]{2,}?)வதற்கு(?![\p{L}\p{M}])", r"\1வற்கு", "த removed from -வதற்கு"),
         "sandhi.vallinam.wrong-consonant": None,
-        "sandhi.clitic.fused": (r"(அப்படி|இப்படி|எப்படி|\p{L}[\p{L}\p{M}]*ை|\p{L}[\p{L}\p{M}]*க்கு)த்தான்(?![\p{L}\p{M}])",
+        "sandhi.clitic.fused": ("(?<![\\p{L}\\p{M}])(" + "|".join(MANNER + CLITIC_ACCUSATIVES)
+                                + "|\\p{L}[\\p{L}\\p{M}]*(?:க்கு|ற்கு))த்தான்(?![\\p{L}\\p{M}])",
                                 r"\1த் தான்", "fused தான் written apart"),
+        "sandhi.compound.direction": ("(?<![\\p{L}\\p{M}])(" + "|".join(DIRECTIONS) + ")([கசதப])் ",
+                                      r"\1 ", "linking consonant after the direction word removed"),
         "typo.divine-name.vowel-drop": (r"யெகோவாவ", "யெகோவவ", "ா removed"),
         "typo.divine-name.dative-stem": (r"யெகோவாவுக்க", "யெகோவாக்க", "வு removed"),
         "integrity.space-before-note-end": None,
@@ -456,7 +489,10 @@ def top_up(examples: dict[str, list], rule_id: str, verses) -> None:
             m = pattern.search(text)
             if not m or m.group(2) != m.group(3):
                 continue
-            wrong = f"{m.group(1)}{swap[m.group(2)]}் "
+            following = text[m.start(3):]
+            if following.startswith("தேவ") and not following.startswith("தேவை"):
+                continue  # before தேவ- the pack abstains (house style), so it would not be flagged
+            wrong =f"{m.group(1)}{swap[m.group(2)]}் "
             snippet = window(text, m.start(), m.end() + 4, 1).replace(m.group(0), wrong + m.group(3), 1)
             incorrect.append({"text": snippet, "span": None, "fix": None,
                               "origin": f"derived from {book.upper()} {chapter}:{verse} (linking consonant changed)"})
@@ -495,30 +531,102 @@ def fill_spans(pack, rule_id, examples) -> None:
             example["fix"] = findings[0]["suggestedReplacement"]
 
 
+def _squeezed(text: str) -> str:
+    return regex.sub(r"\s+", " ", nfc(text)).strip()
+
+
+def human_examples(pack, fixtures_dir: Path) -> tuple[dict[str, dict[str, list]], list[str], list[str]]:
+    """The reviewer's verdicts as rule examples, so every pack load re-checks
+    the review: a confirmed finding (`expect`) is an incorrect example of the
+    rule that now finds it, a confirmed false alarm (`negative`) a correct
+    example of its rule. Returns (examples by rule, problems, notes). A
+    confirmed finding no rule finds, or a false alarm its rule still raises,
+    is a problem: the build fails on it. Noted, not failed: a confirmed
+    finding whose right form differs from the rule's fix (TP_OTHER_FIX) --
+    still an example that it is flagged, with no fix asserted -- and a false
+    alarm the rule still raises, a residual the benchmark counts (the
+    accusative's two before a name: names block doubling in 8 of 25 reviewed
+    cases, not 17, so no name abstain exists to write)."""
+    out: dict[str, dict[str, list]] = collections.defaultdict(lambda: {"incorrect": [], "correct": []})
+    problems: list[str] = []
+    notes: list[str] = []
+    for line in (fixtures_dir / "sandhi.jsonl").read_text(encoding="utf-8").splitlines():
+        example = json.loads(line)
+        origin = example["origin"].replace("(human review 2026", "(human review 2026-09-28")
+        findings = scan_text(example["text"], book="x", chapter="1", verse="1", tamil=True, pack=pack)["findings"]
+        for expected in example["expect"]:
+            span = _squeezed(expected["span"])
+            hits = [f for f in findings if f["ruleId"].startswith("ta-irv/sandhi.")
+                    and (_squeezed(f["originalText"]) in span or span in _squeezed(f["originalText"]))]
+            if not hits:
+                problems.append(f"{origin}: the reviewer confirmed {expected['span']!r}; no rule finds it")
+                continue
+            hit = hits[0]
+            rule_id = hit["ruleId"].split("/", 1)[1]
+            fix = hit["suggestedReplacement"]
+            if expected.get("fix") and _squeezed(fix or "") != _squeezed(expected["fix"]):
+                notes.append(f"{origin}: {rule_id} suggests {fix!r}; the reviewer's form is {expected['fix']!r}")
+                fix = None
+            # Two words either side are all a pair rule reads: a snippet keeps the
+            # pack load cheap, and the load re-checks that it still gives this span.
+            out[rule_id]["incorrect"].append({"text": window(example["text"], hit["start"], hit["end"]),
+                                              "span": hit["originalText"], "fix": fix, "origin": origin})
+        for negative in example.get("negative", []):
+            rule_id = negative["ruleId"].split("/", 1)[1]
+            if pack.by_id(rule_id) is None:
+                continue  # an in-code rule (tamil.repeated-word): its test is the labelled fixture
+            span = _squeezed(negative["span"])
+            raised = [f for f in findings if f["ruleId"] == negative["ruleId"]
+                      and (_squeezed(f["originalText"]) in span or span in _squeezed(f["originalText"]))]
+            if raised:
+                notes.append(f"{origin}: residual false alarm {negative['span']!r} still raised by {rule_id}")
+                continue
+            where = regex.search(r"\s+".join(regex.escape(t) for t in negative["span"].split()), example["text"])
+            text = window(example["text"], where.start(), where.end()) if where else example["text"]
+            out[rule_id]["correct"].append({"text": text, "origin": f"{origin}; {negative['reason']}"})
+    return out, problems, notes
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--irv-dir", required=True, type=Path)
     parser.add_argument("--reviews", nargs="*", default=[])
+    parser.add_argument("--human-labels", type=Path, default=HUMAN_LABELS)
     args = parser.parse_args()
     verses = corpus(args.irv_dir)
     print(f"{len(verses)} verses", file=sys.stderr)
-    rules = definitions(*pair_stats(verses), *root_nouns(verses))
+    labels = bench.load_human_labels(args.human_labels)
+    reviewed_words = reviewer_words(labels)
+    print({k: len(v) for k, v in reviewed_words.items()}, file=sys.stderr)
+    rules = definitions(*root_nouns(verses), reviewed_words)
     for rule in rules:
         rule["inline"] = rule["id"] in INLINE
     meta = {"pack": "ta-irv", "version": PACK_VERSION, "language": "ta", "script": "Taml",
             "description": "Tamil IRV rule pack: sandhi (வல்லினம்) shape rules and known IRV defect shapes. "
-                           "Built by scripts/build_ta_irv_pack.py from the IRV corpus; see docs/LANGUAGE_QA_RULE_PACK.md.",
+                           "Built by scripts/build_ta_irv_pack.py from the IRV corpus and the 2026-09-28 "
+                           "human review; see docs/LANGUAGE_QA_RULE_PACK.md.",
             "rules": [f"rules/{rule['id']}.json" for rule in rules]}
     pack = loader._build(meta, rules)  # no examples yet: they are chosen with this pack
     examples = choose_examples(pack, verses, reviewed_places(args.reviews))
+    reviewer, problems, notes = human_examples(pack, args.human_labels.parent / "labelled")
+    for note in notes:
+        print(f"REVIEW (noted): {note}", file=sys.stderr)
+    if problems:
+        for problem in problems:
+            print(f"REVIEW: {problem}", file=sys.stderr)
+        raise SystemExit(f"{len(problems)} reviewer verdicts the pack does not satisfy")
     for rule in rules:
         rule_examples = examples[rule["id"]]
         if rule["match"].get("on") == "raw" and rule.get("enabled", True):
             rule_examples = examples[rule["id"]] = raw_note_examples(pack, rule["id"])
         top_up(rule_examples, rule["id"], verses)
         fill_spans(pack, rule["id"], rule_examples)
+        for kind in ("incorrect", "correct"):
+            rule_examples[kind] += reviewer[rule["id"]][kind] if rule["id"] in reviewer else []
         rule["examples"] = rule_examples
-        print(f"{rule['id']}: {len(rule_examples['incorrect'])} incorrect, {len(rule_examples['correct'])} correct",
+        print(f"{rule['id']}: {len(rule_examples['incorrect'])} incorrect, {len(rule_examples['correct'])} correct"
+              f" ({len(reviewer[rule['id']]['incorrect']) if rule['id'] in reviewer else 0} and "
+              f"{len(reviewer[rule['id']]['correct']) if rule['id'] in reviewer else 0} from the review)",
               file=sys.stderr)
     (PACK_DIR / "rules").mkdir(parents=True, exist_ok=True)
     for old in (PACK_DIR / "rules").glob("*.json"):

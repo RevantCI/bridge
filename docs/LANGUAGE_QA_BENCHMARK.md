@@ -67,21 +67,21 @@ in 61 labelled verses. `verses.jsonl` is built from the reviewer's copy.
 `verses.jsonl`.
 
 <!-- human-benchmark:start -->
-_Generated 2026-09-28T16:34:26 by scripts/language_qa_benchmark.py --human-labels benchmark/human/2026-09-28/human_labels.jsonl._
+_Generated 2026-09-28T17:20:13 by scripts/language_qa_benchmark.py --human-labels benchmark/human/2026-09-28/human_labels.jsonl._
 
-Pack version `language-qa-7+ta-irv@1.0.0`; books: GEN, JHN, PSA; 598 label rows.
+Pack version `language-qa-7+ta-irv@1.1.0`; books: GEN, JHN, PSA; 598 label rows.
 
 | Rule | Inline | Labelled | TP | FP | House form | Human precision | Lost TP | FP no longer produced |
 |---|---|---|---|---|---|---|---|---|
 | `common/spacing.extra` | no | 15 | 15 | 0 | 0 | 100.0% | 0 | 0 |
 | `ta-irv/integrity.space-before-note-end` | no | 15 | 0 | 15 | 0 | 0.0% | 0 | 0 |
-| `ta-irv/lexicon.known-misspelling` | no | 43 | 43 | 0 | 0 | 100.0% | 0 | 0 |
+| `ta-irv/lexicon.known-misspelling` | yes | 43 | 43 | 0 | 0 | 100.0% | 0 | 0 |
 | `ta-irv/lexicon.rare-near-common` | no | 21 | 0 | 21 | 0 | 0.0% | 0 | 0 |
-| `ta-irv/sandhi.vallinam.accusative` | no | 50 | 35 | 15 | 0 | 70.0% | 0 | 0 |
-| `ta-irv/sandhi.vallinam.dative` | yes | 49 | 46 | 3 | 0 | 93.9% | 0 | 0 |
-| `ta-irv/sandhi.vallinam.demonstrative` | no | 8 | 7 | 1 | 0 | 87.5% | 0 | 0 |
+| `ta-irv/sandhi.vallinam.accusative` | yes | 37 | 35 | 2 | 0 | 94.6% | 0 | 13 |
+| `ta-irv/sandhi.vallinam.dative` | yes | 46 | 46 | 0 | 0 | 100.0% | 0 | 3 |
+| `ta-irv/sandhi.vallinam.demonstrative` | no | 7 | 7 | 0 | 0 | 100.0% | 0 | 1 |
 | `ta-irv/sandhi.vallinam.manner-adverb` | no | 1 | 1 | 0 | 0 | 100.0% | 0 | 0 |
-| `ta-irv/tamil.repeated-word` | no | 20 | 0 | 20 | 0 | 0.0% | 0 | 0 |
+| `ta-irv/tamil.repeated-word` | no | 0 | 0 | 0 | 0 | — | 0 | 20 |
 | `ta-irv/typo.divine-name.vowel-drop` | no | 1 | 1 | 0 | 0 | 100.0% | 0 | 0 |
 
 Recall proxies over the contexts the pack skipped on purpose (a sample of the abstains, not of the text, so these are not recall):
@@ -89,11 +89,11 @@ Recall proxies over the contexts the pack skipped on purpose (a sample of the ab
 | Abstain class | Reviewer: missed | now flagged | Reviewer: correct skip | now flagged | House form | now flagged | Still-missed rate |
 |---|---|---|---|---|---|---|---|
 | A_ai_rootnoun | 1 | 0 | 29 | 1 | 0 | 0 | 3.3% |
-| B_ai_baremajority | 5 | 0 | 45 | 0 | 0 | 0 | 10.0% |
-| D_rku_dative | 17 | 0 | 0 | 0 | 0 | 0 | 100.0% |
-| E_kku_exception | 5 | 0 | 7 | 0 | 0 | 0 | 41.7% |
-| G_marker | 2 | 0 | 0 | 0 | 2 | 0 | 50.0% |
-| H_demonstrative_houseform | 9 | 0 | 0 | 0 | 0 | 0 | 100.0% |
+| B_ai_baremajority | 5 | 4 | 45 | 0 | 0 | 0 | 2.0% |
+| D_rku_dative | 17 | 17 | 0 | 0 | 0 | 0 | 0.0% |
+| E_kku_exception | 5 | 5 | 7 | 0 | 0 | 0 | 0.0% |
+| G_marker | 2 | 2 | 0 | 0 | 2 | 0 | 0.0% |
+| H_demonstrative_houseform | 9 | 9 | 0 | 0 | 0 | 0 | 0.0% |
 <!-- human-benchmark:end -->
 
 ## AI agreement: what the numbers mean — read this first

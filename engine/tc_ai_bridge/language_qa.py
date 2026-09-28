@@ -43,7 +43,9 @@ SIGNS = frozenset("ாிீுூெேைொோௌ்ௗ")
 # own `inline`). The engine alone decides: every finding carries `inline`,
 # languageQa.inline filters on it, and languageQa.status lists the drawn rule
 # names. The frontend only styles a finding by its category.
-INLINE_RULES = frozenset({"terminology.deprecated-form"})
+# Inline on human-labelled precision only (DECISIONS.md 2026-09-28):
+# lexicon.known-misspelling was 43/43 in the 2026-09-28 review.
+INLINE_RULES = frozenset({"terminology.deprecated-form", "lexicon.known-misspelling"})
 # Every Language QA finding carries this, and the frontend sends it back in the
 # `issue` of a verse.decide call. decide_verse keys on it to keep Language QA
 # decisions out of the review-progress rollup. Origin is never inferred from
@@ -68,15 +70,19 @@ class RuleMeta:
     measures each rule."""
     pack: str
     layer: str       # "pattern" | "lexicon" | "housestyle" | "integrity"
-    category: str    # "typo" | "sandhi" | "word-joining" | "punctuation" | "unicode" | "spacing" | "termbase" | "name"
+    category: str    # one of CATEGORIES
     confidence: str  # "high" | "medium" | "low"
     revision: int = 1
+    # False: not run by default. Only a pack or code change turns it back on
+    # (a project override may only narrow).
+    enabled: bool = True
 
 
 LAYERS = ("pattern", "lexicon", "housestyle", "integrity")
 # highlight.ts's LANGUAGE_QA_CATEGORY_MARKS must have exactly these keys
 # (test_category_marks_match_the_engine).
-CATEGORIES = ("typo", "sandhi", "word-joining", "punctuation", "unicode", "spacing", "termbase", "name")
+# "usfm": markup hygiene that does not change the text (2026-09-28 review).
+CATEGORIES = ("typo", "sandhi", "word-joining", "punctuation", "unicode", "spacing", "termbase", "name", "usfm")
 CONFIDENCES = ("high", "medium", "low")
 
 # What Language QA checks and what it never checks (layered-rules Phase 7).
@@ -94,6 +100,7 @@ _IN_SCOPE_LABELS = {
     "spacing": ("Spacing", "இடைவெளி"),
     "termbase": ("Approved key terms", "அங்கீகரிக்கப்பட்ட முக்கியச் சொற்கள்"),
     "name": ("Proper-name spelling", "பெயர்ச்சொல் எழுத்துக்கூட்டல்"),
+    "usfm": ("USFM markup formatting (not a text change)", "USFM குறியீட்டு வடிவமைப்பு (உரை மாற்றம் அல்ல)"),
 }
 _OUT_OF_SCOPE = (
     ("agreement", "Agreement: திணை, பால், எண் (subject–verb, person, gender, number)",
@@ -139,7 +146,10 @@ RULES: dict[str, RuleMeta] = {
     "spacing.extra": RuleMeta("common", "integrity", "spacing", "medium"),
     "punctuation.repeated": RuleMeta("common", "integrity", "punctuation", "medium"),
     "punctuation.space-before": RuleMeta("common", "integrity", "punctuation", "medium"),
-    "tamil.repeated-word": RuleMeta("ta-irv", "pattern", "typo", "low"),
+    # Disabled (2026-09-28 review: 0 of 20): every repeat was deliberate
+    # reduplication, அடுக்குத்தொடர் (தங்கள் தங்கள், கொஞ்சம் கொஞ்சம், ஆ ஆ), which a
+    # bare repeat check cannot tell from an error.
+    "tamil.repeated-word": RuleMeta("ta-irv", "pattern", "typo", "low", enabled=False),
     "tamil.dependent-sign": RuleMeta("ta-irv", "integrity", "unicode", "high"),
     "tamil.mixed-word": RuleMeta("ta-irv", "integrity", "typo", "medium"),
     # The within-book wordlist audit: the fallback when a pack has no lexicon.
@@ -425,8 +435,15 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
 
     def add_candidate(candidate: Any) -> None:
         pack_rule = candidate.rule
-        add(pack_rule.name, candidate.start, candidate.end, candidate.message, pack_rule.severity,
-            [suggestion(candidate.replacement, "rule", candidate.rationale)] if candidate.replacement else [],
+        start, end, replacement = candidate.start, candidate.end, candidate.replacement
+        if not candidate.raw and candidate.first_word_end is not None \
+                and lifted.raw_span(start, end) is None and lifted.raw_span(start, candidate.first_word_end):
+            # The pair straddles a poetry line (\q) or lifted markup, so the
+            # pair is not one piece of raw text. The first word is: flag it,
+            # with the fix confined to it (the linking consonant it needs).
+            end, replacement = candidate.first_word_end, candidate.first_word_fix
+        add(pack_rule.name, start, end, candidate.message, pack_rule.severity,
+            [suggestion(replacement, "rule", candidate.rationale)] if replacement else [],
             pack_rule=pack_rule, raw_offsets=candidate.raw)
 
     if tamil and pack is None:
@@ -464,7 +481,7 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
             if previous and text[previous.end():word.start()].isspace():
                 prev_norm = unicodedata.normalize("NFC", previous.group())
                 word_norm = unicodedata.normalize("NFC", word.group())
-                if prev_norm == word_norm:
+                if prev_norm == word_norm and RULES["tamil.repeated-word"].enabled:
                     add("tamil.repeated-word", *word.span(), "Adjacent repeated word; Tamil reduplication may be intentional.")
                 # The pack's word-pair rules (வல்லினம் and the rest). A fix is
                 # the whole flagged span with only the linking consonant

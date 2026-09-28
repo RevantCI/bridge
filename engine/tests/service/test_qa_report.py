@@ -172,7 +172,7 @@ def test_language_qa_rows_carry_their_rule_columns_and_follow_decisions(lqa_engi
     rows = [r for r in report["rows"] if r["category"] == CATEGORY_LANGUAGE_QA]
     [row] = [r for r in rows if r["ruleId"] == "ta-irv/sandhi.vallinam.demonstrative"]
     assert (row["languageQaCategory"], row["layer"], row["confidence"]) == ("sandhi", "pattern", "medium")
-    assert row["packVersion"] == "ta-irv@1.0.0" and row["suggestions"] == "அந்தக் காகம்"
+    assert row["packVersion"] == "ta-irv@1.1.0" and row["suggestions"] == "அந்தக் காகம்"
     assert row["issue"] == "அந்த காகம்" and row["resolution"] == "unresolved"
     book = report["books"][0]["checks"]["languageQa"]
     assert book["state"] == "partial" and book["open"] == len(rows) and book["byCategory"]["sandhi"]["open"] == 1

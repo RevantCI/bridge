@@ -1,16 +1,16 @@
 {
  "id": "integrity.space-before-note-end",
- "version": 1,
- "category": "spacing",
+ "version": 2,
+ "category": "usfm",
  "severity": "low",
  "confidence": "medium",
  "inline": false,
  "title": {
-  "ta": "குறிப்பு முடிவுக்கு முன் இடைவெளி",
-  "en": "Space before a note's end marker"
+  "ta": "குறிப்பு முடிவுக்கு முன் இடைவெளி (குறியீட்டு வடிவமைப்பு)",
+  "en": "Markup: space before a note's end marker"
  },
  "message": {
-  "en": "Space before the closing note marker; the note's text carries a trailing space."
+  "en": "Markup formatting, not a text error: a space before the closing note marker. Removing it does not change the verse text."
  },
  "rationale": "No space before \\f* or \\x*",
  "match": {
@@ -22,7 +22,7 @@
   "type": "replace",
   "text": ""
  },
- "provenance": "Layered-rules brief §3.4 (integrity.space-before-footnote-end), extended to \\x*. Matched on the raw text, since notes are lifted out of the visible text. IRV: 214.",
+ "provenance": "Layered-rules brief §3.4 (integrity.space-before-footnote-end), extended to \\x*. Matched on the raw text, since notes are lifted out of the visible text. v2 (2026-09-28 review, 0 of 15 as a text error): USFM hygiene, so category usfm and severity low.",
  "examples": {
   "incorrect": [
    {
@@ -68,7 +68,7 @@
     "fix": null
    },
    {
-    "text": "நூறுமுழமும்\\f + \\fr 27:18 \\ft 150 அடி நீளம், 75 அடி அகலம், 7 அல்லது2 அடி உயரம் \\f*",
+    "text": "நூறுமுழமும்\\f + \\fr 27:18 \\ft 150 அடி நீளம், 75 அடி அகலம், 7 அல்லது: 2 அடி உயரம் \\f*",
     "origin": "EXO 27:18",
     "span": " ",
     "fix": null
@@ -100,15 +100,15 @@
   ],
   "correct": [
    {
-    "text": "\\x - \\xo 1:3 \\xt 2கொரி 4:6\\x*",
+    "text": "\\x + \\xo 1:3 \\xt 2கொரி 4:6\\x*",
     "origin": "GEN 1:3"
    },
    {
-    "text": "\\x - \\xo 1:26 \\xt 1கொரி 11:7\\x*",
+    "text": "\\x + \\xo 1:26 \\xt 1கொரி 11:7\\x*",
     "origin": "GEN 1:26"
    },
    {
-    "text": "\\x - \\xo 2:2 \\xt யாத் 20:11\\x*",
+    "text": "\\x + \\xo 2:2 \\xt யாத் 20:11\\x*",
     "origin": "GEN 2:2"
    },
    {
@@ -116,15 +116,15 @@
     "origin": "GEN 2:12"
    },
    {
-    "text": "\\x - \\xo 3:1 \\xt வெளி 12:9; 20:2\\x*",
+    "text": "\\x + \\xo 3:1 \\xt வெளி 12:9; 20:2\\x*",
     "origin": "GEN 3:1"
    },
    {
-    "text": "\\x - \\xo 3:17 \\xt எபி 6:8\\x*",
+    "text": "\\x + \\xo 3:17 \\xt எபி 6:8\\x*",
     "origin": "GEN 3:17"
    },
    {
-    "text": "\\x - \\xo 4:8 \\xt மத் 23:35; லூக் 11:51; 1யோவா 3:12\\x*",
+    "text": "\\x + \\xo 4:8 \\xt மத் 23:35; லூக் 11:51; 1யோவா 3:12\\x*",
     "origin": "GEN 4:8"
    },
    {
@@ -136,15 +136,15 @@
     "origin": "GEN 5:12"
    },
    {
-    "text": "\\x - \\xo 6:4 \\xt எண் 13:33\\x*",
+    "text": "\\x + \\xo 6:4 \\xt எண் 13:33\\x*",
     "origin": "GEN 6:4"
    },
    {
-    "text": "\\x - \\xo 6:22 \\xt எபி 11:7\\x*",
+    "text": "\\x + \\xo 6:22 \\xt எபி 11:7\\x*",
     "origin": "GEN 6:22"
    },
    {
-    "text": "\\x - \\xo 7:11 \\xt 2பேது 3:6\\x*",
+    "text": "\\x + \\xo 7:11 \\xt 2பேது 3:6\\x*",
     "origin": "GEN 7:11"
    }
   ]

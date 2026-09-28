@@ -31,7 +31,7 @@ def test_a_status_request_never_loads_the_pack_and_concurrent_first_loads_share_
     monkeypatch.setattr(loader, "_LOADED", {})
     status = LanguageQaManager(debounce=0, yield_seconds=0).status()
     assert loaded_pack() is None
-    assert status["inlineRules"] == ["terminology.deprecated-form"]
+    assert status["inlineRules"] == ["lexicon.known-misspelling", "terminology.deprecated-form"]
     calls = []
     real = loader.load_pack
     monkeypatch.setattr(loader, "load_pack", lambda name: calls.append(name) or real(name))
@@ -45,7 +45,7 @@ def test_a_status_request_never_loads_the_pack_and_concurrent_first_loads_share_
 
 def test_the_bundled_pack_loads_and_every_example_passes():
     pack = load_pack("ta-irv")  # runs every example; raises on the first failure
-    assert pack.pack_version == "ta-irv@1.0.0"
+    assert pack.pack_version == "ta-irv@1.1.0"
     assert len({r.id for r in pack.rules}) == len(pack.rules)
 
 
@@ -74,7 +74,7 @@ def test_inline_rules_are_exactly_the_human_justified_ones():
     # Inline needs >= 0.90 human-labelled precision on >= 20 findings
     # (DECISIONS.md 2026-09-28); the benchmark's human gate enforces it in CI.
     inline = {r.id for r in default_pack().rules if r.inline}
-    assert inline == {"sandhi.vallinam.dative"}
+    assert inline == {"sandhi.vallinam.dative", "sandhi.vallinam.accusative"}
     assert not any("inlineSignOff" in r.source for r in default_pack().rules)
 
 
@@ -96,7 +96,6 @@ def test_the_generalised_case_rules_flag_real_case_forms(text, span, fix):
     "அவன் கை தட்டினான்",                 # கை: root (கையை)
     "கிழக்கு பக்கத்தில் இருந்தது",         # கிழக்கு "east": a root in -க்கு (கிழக்கில்), not a dative
     "ஈசாக்கு பதில் சொன்னான்",            # a name in -க்கு: a nominative (IRV_Pass3_Handoff §5)
-    "இந்த தேசத்தில் இருந்தான்",            # IRV house form இந்த தேச- (bare 46, doubled 0)
     "அதை தான் செய்தான்",                  # a clitic after the trigger: sandhi.clitic.fused's, not a missing link
 ])
 def test_roots_names_house_forms_and_clitics_are_not_missing_links(text):
@@ -155,11 +154,42 @@ def test_the_digits_rule_ships_disabled():
     assert not by_rule("அவன் 12 பேரை அழைத்தான்", "integrity.digits-in-text")
 
 
-def test_a_house_style_list_feeds_the_proper_noun_abstain():
+def test_a_proper_noun_no_longer_blocks_doubling_but_a_list_can_still_feed_an_abstain():
+    # 2026-09-28 review: after a case form, a name needed doubling in 17 of 25
+    # cases (அவனுக்குச் சேத் என்று பெயரிட்டான்), so the pack has no name abstain.
     text = "அவன் அவனை தாவீது கண்டான்"
-    assert [f["originalText"] for f in scan(text) if f["rule"] == "tamil.vallinam-missing"] == ["அவனை தாவீது"]
-    assert not [f for f in scan(text, lists={"housestyle.properNouns": frozenset({"தாவீது"})})
-                if f["rule"] == "tamil.vallinam-missing"]
+    names = {"housestyle.properNouns": frozenset({"தாவீது"})}
+    assert [f["originalText"] for f in scan(text, lists=names) if f["rule"] == "tamil.vallinam-missing"] \
+        == ["அவனை தாவீது"]
+    # The listRef mechanism still works for a project that narrows a rule with it.
+    narrowed = apply_overrides(default_pack(), {"rules": {"sandhi.vallinam.accusative": {
+        "abstain": [{"next": {"listRef": "housestyle.properNouns"}}]}}})
+    assert not [f for f in scan(text, lists=names, pack=narrowed) if f["rule"] == "tamil.vallinam-missing"]
+
+
+@pytest.mark.parametrize("text,span,fix", [
+    ("இந்த தேசத்தில் இருந்தான்", "இந்த தேசத்தில்", "இந்தத் தேசத்தில்"),     # house-form stems gone: 9 of 9 were errors
+    ("அதற்கு சித்னா என்று பெயரிட்டான்", "அதற்கு சித்னா", "அதற்குச் சித்னா"),  # -ற்கு datives: 17 of 17
+    ("கிழக்கு காற்றினால்", "கிழக்கு காற்றினால்", "கிழக்குக் காற்றினால்"),       # direction compound
+])
+def test_the_reviewed_misses_are_now_flagged(text, span, fix):
+    [finding] = [f for f in scan(text) if f["category"] == "sandhi"]
+    assert (finding["originalText"], finding["suggestedReplacement"]) == (span, fix)
+
+
+@pytest.mark.parametrize("text", [
+    "அவனுக்கு தேவன் தோன்றினார்",   # house style: no doubling before தேவ- (11 of 13)
+    "வெண்மை காணப்பட்டது",          # the reviewer's root noun, excluded exactly
+    "ஒருமுறை கண்டான்",              # a compound-final noun (notSuffixLexical)
+])
+def test_the_reviewed_false_alarms_are_not_flagged(text):
+    assert not [f for f in scan(text) if f["category"] == "sandhi"]
+
+
+def test_tevai_need_is_still_checked():
+    # notPrefix: தேவை "need" is not a தேவ- form, so the pair is still checked.
+    assert [f["originalText"] for f in scan("அவனுக்கு தேவை இருந்தது") if f["category"] == "sandhi"] \
+        == ["அவனுக்கு தேவை"]
 
 
 # ---- the loader refuses a broken pack -----------------------------------------

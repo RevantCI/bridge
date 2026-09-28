@@ -1,6 +1,6 @@
 {
  "id": "sandhi.vallinam.manner-adverb",
- "version": 1,
+ "version": 2,
  "legacyId": "tamil.vallinam-missing",
  "category": "sandhi",
  "severity": "medium",
@@ -48,32 +48,24 @@
      "எனும்"
     ]
    },
-   "origin": "Clitic or quotative after the trigger: never the spaced doubled form; see sandhi.clitic.fused."
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style); தான்/ஆவது are written fused (sandhi.clitic.fused for தான்)."
   },
   {
-   "next": {
-    "listRef": "housestyle.properNouns"
-   },
-   "origin": "A proper noun after the trigger: the project's house-style name list (Phase 6). Empty until then; the names adapter's majority forms were evaluated as a seed and rejected (BUILD_LOG, Phase 3)."
-  },
-  {
-   "prev": {
-    "lexical": [
-     "இப்படி"
-    ]
-   },
    "next": {
     "prefix": [
      "தேவ"
+    ],
+    "notPrefix": [
+     "தேவை"
     ]
    },
-   "origin": "IRV corpus house form after இப்படி: தேவ- bare 3/doubled 1"
+   "origin": "House style (reviewer 2026-09-28): no doubling before தேவன்/தேவ- forms (11 of 13 'case form, no doubling here' verdicts). தேவை 'need' is still checked."
   }
  ],
  "fix": {
   "type": "insert-link"
  },
- "provenance": "B2 (BUILD_LOG 2026-09-23). IRV doubles after அப்படி 97%, இப்படி 92%, எப்படி 87%.",
+ "provenance": "B2 (BUILD_LOG 2026-09-23). IRV doubles after அப்படி 97%, இப்படி 92%, எப்படி 87%. v2: as the demonstrative rule, no per-trigger stems. 2026-09-28 human review (GEN/PSA/JHN): proper nouns do not block doubling (17 of 25 needed it), so the proper-noun abstain is gone; தேவ- forms do (house style).",
  "examples": {
   "incorrect": [
    {
@@ -107,28 +99,34 @@
     "origin": "NEH 13:21 (also in the review reports)"
    },
    {
-    "text": "இப்படி தாவீதும், இஸ்ரவேலின் மூப்பர்களும்,",
-    "span": "இப்படி தாவீதும்",
-    "fix": "இப்படித் தாவீதும்",
-    "origin": "1CH 15:25"
+    "text": "மிகவும் பயப்பட்டதால் அப்படி செய்ய மாட்டேன் என்றான்.",
+    "span": "அப்படி செய்ய",
+    "fix": "அப்படிச் செய்ய",
+    "origin": "1CH 10:4"
    },
    {
-    "text": "எண்ணெயையும் கொடுத்தான்; இப்படி சாலொமோன் ஈராமுக்கு ஆண்டுதோறும்",
-    "span": "இப்படி சாலொமோன்",
-    "fix": "இப்படிச் சாலொமோன்",
-    "origin": "1KI 5:11"
+    "text": "புறப்பட்டுப் போனான்; இப்படி சீமேயி போய், தன்னுடைய",
+    "span": "இப்படி சீமேயி",
+    "fix": "இப்படிச் சீமேயி",
+    "origin": "1KI 2:40"
    },
    {
-    "text": "அப்படி செய்தால் தேவனிடமிருந்து வந்த",
-    "span": "அப்படி செய்தால்",
-    "fix": "அப்படிச் செய்தால்",
-    "origin": "1PE 5:4"
+    "text": "எந்த ராஜ்யத்திலும் இப்படி செய்யப்படவில்லை.",
+    "span": "இப்படி செய்யப்படவில்லை",
+    "fix": "இப்படிச் செய்யப்படவில்லை",
+    "origin": "1KI 10:20"
    },
    {
-    "text": "அது எனக்கு எப்படி புரியும் என்று சொல்லி;",
-    "span": "எப்படி புரியும்",
-    "fix": "எப்படிப் புரியும்",
-    "origin": "ACT 8:31"
+    "text": "தேவனுடைய சபையை எப்படி பராமரிப்பான்?",
+    "span": "எப்படி பராமரிப்பான்",
+    "fix": "எப்படிப் பராமரிப்பான்",
+    "origin": "1TI 3:5"
+   },
+   {
+    "text": "ஆனாலும் முழுமனதோடு அப்படி செய்யவில்லை.",
+    "span": "அப்படி செய்யவில்லை",
+    "fix": "அப்படிச் செய்யவில்லை",
+    "origin": "2CH 25:2"
    },
    {
     "text": "இப்படி காதேசிலே அநேக நாட்கள்",
@@ -143,10 +141,10 @@
     "origin": "ECC 2:21"
    },
    {
-    "text": "இப்படிப் புலம்புவார்கள்; இப்படி தேசத்தின் மகள்கள் புலம்புவார்கள்;",
-    "span": "இப்படி தேசத்தின்",
-    "fix": "இப்படித் தேசத்தின்",
-    "origin": "EZK 32:16"
+    "text": "இத்தனை சீக்கிரமாக எப்படி கிடைத்தது என்றான். அவன்:",
+    "span": "எப்படி கிடைத்தது",
+    "fix": "எப்படிக் கிடைத்தது",
+    "origin": "GEN 27:20 (human review 2026-09-28)"
    }
   ],
   "correct": [
@@ -175,28 +173,28 @@
     "origin": "1KI 6:33 (house form)"
    },
    {
-    "text": "ஆகையால், இப்படிச் செய்யும்படி நான்",
-    "origin": "DEU 24:22 (correctly linked)"
+    "text": "ஏன் இப்படிச் செய்தார்; இந்த",
+    "origin": "DEU 29:24 (correctly linked)"
    },
    {
-    "text": "நீ இப்படிக் கூட்டத்துடன் வருகிற",
-    "origin": "JDG 18:23 (correctly linked)"
+    "text": "என்னிடத்தில் எப்படிக் கேட்கலாம் என்றான்.",
+    "origin": "JDG 18:24 (correctly linked)"
    },
    {
-    "text": "நான் அப்படிச் செய்கிறது இல்லை",
-    "origin": "2SA 11:11 (correctly linked)"
+    "text": "அவரிடம் எப்படிச் சொல்லுவோம்? அதிகமாக",
+    "origin": "2SA 12:18 (correctly linked)"
    },
    {
-    "text": "முகத்தை எப்படித் திருப்புவாய்? இரதங்களோடு",
-    "origin": "2KI 18:24 (correctly linked)"
+    "text": "யோவாப் அப்படிச் சொல்லியும், ராஜாவின்",
+    "origin": "1CH 21:4 (correctly linked)"
    },
    {
-    "text": "கஷ்மூவும் அப்படிச் சொல்லுகிறான்; இப்போதும்",
-    "origin": "NEH 6:7 (correctly linked)"
+    "text": "அவனுக்கு இப்படிச் செய்ய வேண்டும்",
+    "origin": "EST 3:2 (correctly linked)"
    },
    {
-    "text": "நீர் அப்படிச் செய்ய மாட்டேன்",
-    "origin": "JOB 34:33 (correctly linked)"
+    "text": "சந்தோஷப்படாதபடி இப்படிச் செய்தருளும்.",
+    "origin": "PSA 13:4 (correctly linked)"
    }
   ]
  }

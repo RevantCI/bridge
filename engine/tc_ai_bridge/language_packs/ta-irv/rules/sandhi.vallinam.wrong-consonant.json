@@ -1,6 +1,6 @@
 {
  "id": "sandhi.vallinam.wrong-consonant",
- "version": 1,
+ "version": 2,
  "category": "sandhi",
  "severity": "medium",
  "confidence": "medium",
@@ -18,17 +18,15 @@
   "gap": "whitespace",
   "link": "mismatch",
   "prev": {
-   "regex": "^(?:அந்த|இந்த|எந்த|அப்படி|இப்படி|எப்படி)$|ை$|க்கு$",
+   "regex": "^(?:அந்த|இந்த|எந்த|அப்படி|இப்படி|எப்படி)$|ை$|(?:க்கு|ற்கு)$",
    "notLexical": [
     "அசட்டை",
-    "அசுத்தமானவைகளை",
     "அடிமை",
     "அணை",
     "அதிகாலை",
-    "அபிகாயிலை",
+    "அநேகமுறை",
     "அபிமெலேக்கு",
     "அமலேக்கு",
-    "அரசாட்சியை",
     "அரண்மனை",
     "அறிக்கை",
     "அறுவடை",
@@ -42,7 +40,6 @@
     "ஆணை",
     "ஆண்பிள்ளை",
     "ஆயுதசாலை",
-    "ஆயுதத்தை",
     "ஆராதனை",
     "ஆலை",
     "ஆலோசனை",
@@ -59,7 +56,6 @@
     "உடை",
     "உண்மை",
     "உரிமை",
-    "உரியதை",
     "உருளை",
     "உவமை",
     "எடை",
@@ -75,7 +71,6 @@
     "ஓசை",
     "கச்சை",
     "கடமை",
-    "கடுங்கோபத்தை",
     "கட்டளை",
     "கணக்கு",
     "கன்னிகை",
@@ -97,6 +92,7 @@
     "குதிரை",
     "குத்துவிளக்கு",
     "குறை",
+    "குற்றமில்லாமை",
     "குழந்தை",
     "கூடை",
     "கூலிவேலை",
@@ -106,32 +102,27 @@
     "கொலை",
     "கொள்ளை",
     "கோட்டை",
-    "கோட்டைகளை",
     "கோதுமை",
+    "கோபாக்கினை",
     "சணலாடை",
     "சணல்உடை",
     "சண்டை",
     "சதை",
-    "சந்ததிகளுக்கு",
     "சந்தை",
     "சபை",
-    "சபைக்கு",
     "சித்திரவேலை",
     "சிந்தனை",
     "சிந்தை",
     "சிறுபிள்ளை",
     "சிலுவை",
     "சிலை",
-    "சிலைகளுக்கு",
     "சுமை",
-    "சுருளை",
     "சூளை",
     "செய்கை",
     "சேனை",
     "சேவை",
     "சைகை",
     "சோதனை",
-    "ஜீவனை",
     "ஜூவாலை",
     "தடை",
     "தண்டனை",
@@ -143,13 +134,14 @@
     "தாடை",
     "தாழ்மை",
     "திசை",
-    "திராட்சைக்காய்களை",
     "திரைச்சீலை",
     "தீமை",
+    "தீவினை",
     "துணை",
     "தூக்கு",
-    "தூணுக்கு",
+    "தெற்கு",
     "தொகை",
+    "தொண்டை",
     "தொல்லை",
     "தோல்பை",
     "நடக்கை",
@@ -158,14 +150,11 @@
     "நன்மை",
     "நம்பிக்கை",
     "நிந்தை",
-    "நினைவுகளை",
     "நிறை",
     "நிலை",
     "நிலைமை",
-    "நீதிமானுக்கு",
     "நுரை",
     "பகை",
-    "படகை",
     "படுக்கை",
     "படை",
     "பணிவிடை",
@@ -209,18 +198,19 @@
     "முறை",
     "முற்றுகை",
     "முளை",
+    "முழுமை",
     "மூட்டை",
     "மெத்தை",
     "மெல்கிசேதேக்கு",
     "மேஜை",
     "மேட்டிமை",
     "மேன்மை",
+    "மேற்கு",
     "மேற்சட்டை",
     "மேலாடை",
-    "யெகோவாவை",
     "யோசனை",
-    "யோபுக்கு",
     "ராஜமேன்மை",
+    "வகை",
     "வஞ்சனை",
     "வடக்கு",
     "வரிசை",
@@ -234,7 +224,6 @@
     "வாசனை",
     "வாஞ்சை",
     "வாதை",
-    "வானராணிக்கு",
     "வார்த்தை",
     "வாற்கோதுமை",
     "வாழ்க்கை",
@@ -246,9 +235,9 @@
     "விலை",
     "விளக்கு",
     "வீணை",
-    "வெட்கத்தை",
+    "வெட்டாந்தரை",
+    "வெண்மை",
     "வெள்ளப்பெருக்கு",
-    "வெள்ளிக்காசை",
     "வேடிக்கை",
     "வேதனை",
     "வேலை",
@@ -278,23 +267,34 @@
      "எனும்"
     ]
    },
-   "origin": "Clitic or quotative after the trigger: never the spaced doubled form; see sandhi.clitic.fused."
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style); தான்/ஆவது are written fused (sandhi.clitic.fused for தான்)."
   },
   {
    "next": {
-    "listRef": "housestyle.properNouns"
+    "prefix": [
+     "தேவ"
+    ],
+    "notPrefix": [
+     "தேவை"
+    ]
    },
-   "origin": "A proper noun after the trigger: the project's house-style name list (Phase 6). Empty until then; the names adapter's majority forms were evaluated as a seed and rejected (BUILD_LOG, Phase 3)."
+   "origin": "House style (reviewer 2026-09-28): no doubling before தேவன்/தேவ- forms (11 of 13 'case form, no doubling here' verdicts). தேவை 'need' is still checked."
   }
  ],
  "fix": {
   "type": "replace-link"
  },
- "provenance": "Only after a base the வல்லினம் rules cover (a demonstrative, a manner adverb, -ஐ or -க்கு). In IRV every other 'wrong link' is a name ending in a consonant (காத் Gad, மோவாப் Moab), which this must never touch.",
+ "provenance": "Only after a base the வல்லினம் rules cover (a demonstrative, a manner adverb, -ஐ, -க்கு or -ற்கு). In IRV every other 'wrong link' is a name ending in a consonant (காத் Gad, மோவாப் Moab), which this must never touch. v2: -ற்கு, and the exception lists of the rules it follows.",
  "examples": {
   "incorrect": [
    {
-    "text": "இருந்து தண்ணீரைக் பிரிக்கட்டும் என்றும்",
+    "text": "அழைத்து: நாம் பஸ்காவைப் சாப்பிடுவதற்கு நீங்கள் போய்,",
+    "span": "பஸ்காவைப் சாப்பிடுவதற்கு",
+    "fix": "பஸ்காவைச் சாப்பிடுவதற்கு",
+    "origin": "LUK 22:8"
+   },
+   {
+    "text": "தண்ணீரிலிருந்து தண்ணீரைக் பிரிக்கட்டும் என்றும்",
     "span": "தண்ணீரைக் பிரிக்கட்டும்",
     "fix": "தண்ணீரைப் பிரிக்கட்டும்",
     "origin": "derived from GEN 1:6 (linking consonant changed)"
@@ -310,12 +310,6 @@
     "span": "விதையைச் கொடுக்கும்",
     "fix": "விதையைக் கொடுக்கும்",
     "origin": "derived from GEN 1:12 (linking consonant changed)"
-   },
-   {
-    "text": "உருவாக்கினார்,\nஅவனைப் தேவசாயலாகவே உருவாக்கினார்;",
-    "span": "அவனைப் தேவசாயலாகவே",
-    "fix": "அவனைத் தேவசாயலாகவே",
-    "origin": "derived from GEN 1:27 (linking consonant changed)"
    },
    {
     "text": "நிரப்பி, அதைச் கீழ்ப்படுத்தி, சமுத்திரத்தின்",
@@ -356,52 +350,52 @@
   ],
   "correct": [
    {
-    "text": "இருந்து தண்ணீரைப் பிரிக்கட்டும் என்றும்",
-    "origin": "GEN 1:6 (correctly linked)"
+    "text": "தேவன் வெளிச்சத்திற்குப் பகல் என்றும்,",
+    "origin": "GEN 1:5 (correctly linked)"
    },
    {
-    "text": "ஸ்தலமான சீனாயிலிருந்ததை போல அவைகளுக்குள்",
-    "origin": "PSA 68:17 (house form)"
+    "text": "நாளிலே அவனை தேவசாயலாக உண்டாக்கினார்.",
+    "origin": "GEN 5:1 (house form)"
    },
    {
-    "text": "என் முகத்தைக் காண்பதில்லை என்று",
-    "origin": "GEN 43:3 (correctly linked)"
+    "text": "போய், நமக்குக் கொஞ்சம் தானியம்",
+    "origin": "GEN 43:2 (correctly linked)"
    },
    {
-    "text": "மேல் மனிததோற்றத்தை போல ஒரு",
-    "origin": "EZK 1:26 (house form)"
+    "text": "அடியாரின் அக்கிரமத்தை தேவன் விளங்கச்",
+    "origin": "GEN 44:16 (house form)"
    },
    {
-    "text": "தோலுரித்து, அதைத் துண்டுதுண்டாக வெட்ட",
-    "origin": "LEV 1:6 (correctly linked)"
+    "text": "தொங்கு திரையைத் தூக்கிவைத்து,",
+    "origin": "EXO 40:28 (correctly linked)"
    },
    {
-    "text": "நீலரத்தினம்போன்ற சிங்காசனத்தை போல ஒரு",
-    "origin": "EZK 10:1 (house form)"
+    "text": "நான் உங்களுக்கு தேவனாக இருப்பதற்காக,",
+    "origin": "LEV 22:33 (house form)"
    },
    {
-    "text": "சொல்; அந்தத் தூபகலசங்கள் பரிசுத்தமானது.",
-    "origin": "NUM 16:37 (correctly linked)"
+    "text": "உண்டாக்கின அந்தப் பாவிகளின் தூபகலசங்களைப்",
+    "origin": "NUM 16:38 (correctly linked)"
    },
    {
-    "text": "துக்கங்கொண்டாடுகிறவர்களின் அப்பத்தை போல இருக்கும்;",
-    "origin": "HOS 9:4 (house form)"
+    "text": "உண்டாக்கும் ஆவியை தேவன் வரச்",
+    "origin": "JDG 9:23 (house form)"
    },
    {
-    "text": "மகன்களாகிய ஆசாரியர்களைத் தெரிந்துகொண்டதால், அவர்களும்",
-    "origin": "DEU 21:5 (correctly linked)"
+    "text": "தன் தலையைச் சிரைத்து, தன்",
+    "origin": "DEU 21:12 (correctly linked)"
    },
    {
-    "text": "திருடன் வருகிறதை போல எதிர்பாராதவிதமாக",
-    "origin": "1TH 5:2 (house form)"
+    "text": "செய்து, தங்களை தேவரீர் மனவருத்தப்படுத்தும்போது",
+    "origin": "1KI 8:35 (house form)"
    },
    {
-    "text": "வேலையாட்களில் பத்துப்பேரைச் சேர்த்து, யெகோவா",
-    "origin": "JDG 6:27 (correctly linked)"
+    "text": "நிலத்தின் விளைச்சலைக் கெடுத்து, இஸ்ரவேலிலே",
+    "origin": "JDG 6:4 (correctly linked)"
    },
    {
-    "text": "செய்ய விரும்புவதை போல செய்து",
-    "origin": "1PE 4:3 (house form)"
+    "text": "சுமக்கிற லேவியர்களுக்கு தேவன் தயவு",
+    "origin": "1CH 15:26 (house form)"
    }
   ]
  }

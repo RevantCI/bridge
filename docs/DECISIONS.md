@@ -273,4 +273,26 @@ An entry may hide findings, add list members, reorder suggestions, or propose a 
 **Revisit when:** a new human review round is added (a new dated folder beside the old one, never a replacement), or the reviewer's verdicts are shown to be inconsistent.
 **Supersedes:** 2026-09-24, "Every வல்லினம் rule is inline on the maintainer's sign-off, below the 90% floor".
 
+## 2026-09-28 — A root-noun exclusion is an exact word or a safe compound noun, never a case-form ending
+
+**Decision:** The reviewer's accusative false alarms on roots (வெண்மை, முழுமை, குற்றமில்லாமை, வெட்டாந்தரை, அநேகமுறை, தீவினை, தொண்டை, வகை) are excluded as exact words. `notSuffixLexical` is used only for compound-final nouns that end no accusative in the corpus: முறை, வினை, வகை, தொண்டை. The brief's `notSuffix: ["மை"]` and the `தரை` compound element are **not** applied. The loader supports `notSuffix`, `notSuffixLexical` and `notPrefix` for later use.
+**Because:** measured on the IRV corpus, `-மை` also ends the accusative pronouns உம்மை (9 bare / 166 doubled), நம்மை (6/58) and தம்மை (4/29), and every accusative of a `-ம்` name or noun (எருசலேமை, அப்சலோமை, ஆதாமை, முகாமை). Spelling cannot tell எருசலேமை from தீமை. `-தரை` ends கர்த்தரை (5/13) and மனிதரை. As endings they would stop checking real accusatives the reviewer never saw. The exact words fix the same labelled false alarms: the accusative reaches 94.6%, the brief's projected 95%. This was the maintainer's choice when asked (2026-09-28).
+**Rules out:** an ending-based exclusion unless the corpus shows it ends no case form; "the reviewer said X is a root, so every word ending like X is a root".
+**Revisit when:** a morphological analyser can separate a root's -ஐ from the case suffix.
+
+## 2026-09-28 — The pack is built from the reviewer's IRV copy; a pair across markup is flagged on its first word; markup hygiene is its own category
+
+**Decision:**
+- **The corpus.** `ta-irv@1.1.0` is built from `D:\Claude Lab\IRV Tamil`, the copy the 2026-09-28 reviewer labelled (all 224 flagged labels anchor there, 163 in `Documents\IRV Tamil`). The step-7 Bible run uses the same copy. The AI-agreement benchmark stays on the copy its reviews were made against.
+- **Pairs across markup.** A வல்லினம் pair that straddles a poetry line (`\q`) or lifted inline markup is flagged on its first word, with the fix confined to that word. Before, it was dropped and counted as a limitation. It is still dropped when the first word itself is split by markup.
+- **The `usfm` category.** A new category, `usfm` (layer integrity), holds `integrity.space-before-note-end`: severity low, panel-only, reworded as "markup formatting, not a text error".
+**Because:**
+- **The corpus:** the maintainer chose the corrected copy (2026-09-28).
+- **Pairs across markup:** the reviewer confirmed that both sampled poetry-line pairs (PSA 135:21, 143:11) need doubling.
+- **The category:** the reviewer rejected all 15 sampled note-end spaces as text errors ("USFM formatting").
+**Rules out:**
+- comparing the new Bible-wide finding count with the old 7,401 as like-for-like: the text changed too, so the before/after is also measured on the new copy;
+- drawing a finding over markup.
+**Revisit when:** the maintainer declares one IRV copy canonical for every tool.
+
 <!-- New entries go above this line. -->

@@ -21,7 +21,7 @@ SFM = "\n".join([
     "\\v 3 அவன் இந்த கல்லை எடுத்தான்.",          # vallinam on a Pass 3 house form (இந்த + bare), no row -> FP, house form
     "\\v 4 அவன் இந்த பட்டணம் போனான்.",          # vallinam; the row flagging it is house form -> maybe
     "\\v 5 அவர் அந்த சபையைக் கண்டார்.",          # vallinam; a human rejected the AI row -> maybe
-    "\\v 7 அவன் அந்த தேசத்தில் இருந்தான்.",       # the pack abstains: IRV house form அந்த தேச- -> no finding
+    "\\v 7 அவன் அந்த தேவன் வந்தார்.",           # the pack abstains: house style, no doubling before தேவ- -> no finding
     "\\v 6 இது முழவதும் சரி.",                   # typo row the engine cannot find -> FN
     "",
 ])
@@ -115,7 +115,7 @@ def test_findings_are_scored_against_compatible_rows_only(benchmark):
     assert vallinam["matched_maybe"] == 2             # 1:4 house form, 1:5 human-rejected: strict FP, lenient TP
     assert vallinam["matched_negative"] == 0
     assert vallinam["fp_strict"] == 4 and vallinam["tp_lenient"] == 3
-    assert vallinam["fp_house_form"] == 1             # 1:3 இந்த + bare (1:7 அந்த தேச- is abstained by the pack)
+    assert vallinam["fp_house_form"] == 1             # 1:3 இந்த + bare (1:7 அந்த தேவ- is abstained by the pack)
     assert vallinam["precision_strict"] == 0.2 and vallinam["precision_lenient"] == 0.6
     assert vallinam["inline"] is False  # panel-only until a human sample of >= 20 (2026-09-28)
     # The spacing row at 1:2 is not matched by the vallinam finding at the same verse.
@@ -182,15 +182,15 @@ def _human_inputs(benchmark):
         flagged("R2", "2", "அந்த பெண்", "FP_NODOUBLE"),
         flagged("R3", "3", "இந்த கல்லை", "HOUSE"),
         flagged("R4", "4", "இந்த பட்டணம்", "UNSURE"),
-        # v7: the pack abstains on அந்த தேச- (a house form), so there is no
-        # finding there; the reviewer says doubling was required.
+        # v7: the pack abstains before தேவ- (house style), so there is no
+        # finding there; this synthetic reviewer says doubling was required.
         {"id": "R5", "kind": "flagged", "cls": "flagged", "rule": "ta-irv/sandhi.vallinam.demonstrative",
          "book": "rut", "ch": "1", "v": "7", "start": text7.index("அந்த"),
-         "end": text7.index("அந்த") + len("அந்த தேசத்தில்"),
-         "original": "அந்த தேசத்தில்", "verdict": "TP"},
+         "end": text7.index("அந்த") + len("அந்த தேவன்"),
+         "original": "அந்த தேவன்", "verdict": "TP"},
         {"id": "R6", "kind": "abstained", "cls": "H_demonstrative_houseform", "rule": "(abstained)",
-         "book": "rut", "ch": "1", "v": "7", "start": -1, "end": -1, "original": "அந்த தேசத்தில்",
-         "prev": "அந்த", "next": "தேசத்தில்", "verdict": "MISSED"},
+         "book": "rut", "ch": "1", "v": "7", "start": -1, "end": -1, "original": "அந்த தேவன்",
+         "prev": "அந்த", "next": "தேவன்", "verdict": "MISSED"},
         {"id": "W1", "kind": "word", "cls": "acc_root", "word": "மலை", "verdict": "ROOT_KEEP"},
     ]
     return labels, scans, verses

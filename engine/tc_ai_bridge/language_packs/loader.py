@@ -21,7 +21,11 @@ engine:
   - regex: searched anywhere in the token;
   - minLength;
   - initial: the first character is in a set;
-  - prefix: the token starts with one of these stems;
+  - prefix / notPrefix: the token starts with one of these stems / with
+    none of these (தேவ- but not தேவை "need");
+  - notSuffix: the token ends with none of these literal endings;
+  - notSuffixLexical: the token is none of these words and does not end
+    with one (a compound-final element: முறை also excludes ஒருமுறை);
   - listRef: membership of a named list, e.g. a house-style list.
 
 A project may narrow a bundled rule, never widen it. An override can
@@ -48,12 +52,14 @@ CATEGORY_LAYERS = {
     "sandhi": "pattern", "word-joining": "pattern", "typo": "pattern",
     "punctuation": "integrity", "spacing": "integrity", "unicode": "integrity",
     "termbase": "housestyle", "name": "housestyle",
+    "usfm": "integrity",
 }
 SEVERITIES = ("high", "medium", "low")
 CONFIDENCES = ("high", "medium", "low")
 LINKS = ("none", "mismatch", "any")
 FIXES = ("insert-link", "replace-link", "fuse-link", "replace", "expand")
-CONDITION_KEYS = {"lexical", "notLexical", "suffix", "regex", "minLength", "initial", "prefix", "listRef"}
+CONDITION_KEYS = {"lexical", "notLexical", "suffix", "regex", "minLength", "initial", "prefix", "notPrefix",
+                  "notSuffix", "notSuffixLexical", "listRef"}
 RULE_KEYS = {"id", "version", "legacyId", "enabled", "category", "layer", "severity", "confidence",
              "inline", "title", "message", "rationale", "match", "abstain", "fix",
              "examples", "provenance"}
@@ -79,6 +85,8 @@ class Condition:
     initial: frozenset | None = None
     prefix: tuple = ()
     list_ref: str | None = None
+    not_prefix: tuple = ()
+    not_suffix: tuple = ()           # literal endings, and compound-final words (notSuffixLexical)
 
     def matches(self, token: str, lists: dict[str, frozenset]) -> bool:
         if self.lexical is not None and token not in self.lexical:
@@ -90,6 +98,10 @@ class Condition:
         if self.initial is not None and token[:1] not in self.initial:
             return False
         if self.prefix and not token.startswith(self.prefix):
+            return False
+        if self.not_prefix and token.startswith(self.not_prefix):
+            return False
+        if self.not_suffix and token.endswith(self.not_suffix):
             return False
         if self.suffix is not None and not self.suffix.search(token):
             return False
@@ -136,6 +148,10 @@ def _condition(raw: Any, where: str) -> Condition:
         lexical=words("lexical"), not_lexical=words("notLexical") or frozenset(),
         suffix=compiled("suffix", True), pattern=compiled("regex", False), min_length=min_length,
         initial=words("initial"), prefix=tuple(sorted(words("prefix") or ())), list_ref=list_ref,
+        not_prefix=tuple(sorted(words("notPrefix") or ())),
+        # A compound-final word excludes itself and any word ending in it, so
+        # both keys are "ends with" tests; they differ in what they document.
+        not_suffix=tuple(sorted((words("notSuffix") or frozenset()) | (words("notSuffixLexical") or frozenset()))),
     )
 
 
@@ -194,6 +210,10 @@ class Candidate:
     message: str
     rationale: str
     raw: bool = False
+    # Pair rules: where the first word ends, and the fix confined to it, for a
+    # pair that straddles a poetry line or lifted markup (scan_text).
+    first_word_end: int | None = None
+    first_word_fix: str | None = None
 
 
 class RulePack:
@@ -259,10 +279,13 @@ class RulePack:
             raw_gap = text[prev_match.end():next_match.start()]
             raw_next = text[next_match.start():next_match.end()]
             kind = (rule.fix or {}).get("type")
+            first_fix = None
             if kind == "insert-link":
                 replacement = raw_prev + initial + PULLI + raw_gap + raw_next
+                first_fix = raw_prev + initial + PULLI
             elif kind == "replace-link":
                 replacement = raw_prev[:-2] + initial + PULLI + raw_gap + raw_next
+                first_fix = raw_prev[:-2] + initial + PULLI
             elif kind == "fuse-link":
                 stem = raw_prev[:-2] if link is not None else raw_prev
                 replacement = stem + initial + PULLI + raw_next
@@ -271,7 +294,9 @@ class RulePack:
             values = {"prev": base, "word": prev_word, "next": next_word, "initial": initial,
                       "link": link or "", "fix": replacement or ""}
             out.append(Candidate(rule, prev_match.start(), next_match.end(), replacement,
-                                 rule.message.format(**values), rule.rationale.format(**values)))
+                                 rule.message.format(**values), rule.rationale.format(**values),
+                                 first_word_end=prev_match.end() if first_fix else None,
+                                 first_word_fix=first_fix))
         return out
 
     def regex_candidates(self, visible: str, raw: str) -> list[Candidate]:

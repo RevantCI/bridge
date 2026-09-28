@@ -166,7 +166,7 @@ def _hidden(findings: list[dict[str, Any]], decided: dict[str, str]) -> list[dic
 
 # Bump when the shape of a cached verse entry changes: persisted entries from
 # an older build are then rescanned rather than misread.
-SCAN_CACHE_VERSION = 2  # 2: `words` holds [count, start, end]; `firstSeen` is gone
+SCAN_CACHE_VERSION = 3  # 2: `words` holds [count, start, end]; `firstSeen` is gone. 3: in-code rules gained `enabled`, and a pair across a poetry line moved to its first word (2026-09-28)
 
 
 def verse_hash(text: Any) -> str:

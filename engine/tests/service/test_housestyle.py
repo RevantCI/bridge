@@ -196,7 +196,7 @@ def test_export_writes_a_ledger_of_language_qa_uses_and_gate_overrides(hs_engine
 
 # ---- 6.2 the name pack --------------------------------------------------------------
 
-def test_an_approved_name_abstains_vallinam_and_its_variant_is_a_minority_spelling(hs_engine):
+def test_an_approved_name_no_longer_abstains_vallinam_and_its_variant_is_a_minority_spelling(hs_engine):
     engine = hs_engine
     text = "அந்த பார்வோன் பேசினான்; பார்வொன் போனான்."
     assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": text})["success"]
@@ -205,9 +205,10 @@ def test_an_approved_name_abstains_vallinam_and_its_variant_is_a_minority_spelli
     call(engine, "housestyle.record", {"entry": {"scope": "word-in-book", "list": "properNouns",
                                                  "word": "பார்வோன்", "provenance": "curated"}})
     after = wait(engine._language_qa)
-    # The list feeds the pack's proper-noun abstain inside the cached verse scan:
-    # the cache key changed, so the verse was rescanned and the name abstains.
-    assert not any(f["originalText"] == "அந்த பார்வோன்" for f in after["findings"])
+    # A name does not block doubling (2026-09-28 review: 17 of 25 needed it), so
+    # the pack has no proper-noun abstain: the verse was rescanned (the list is
+    # in the cache key) and the vallinam finding stays.
+    assert any(f["originalText"] == "அந்த பார்வோன்" for f in after["findings"])
     [minority] = [f for f in after["findings"] if f["rule"] == "name.minority-spelling"]
     assert minority["originalText"] == "பார்வொன்" and minority["suggestions"][0]["text"] == "பார்வோன்"
     assert (minority["category"], minority["layer"]) == ("name", "housestyle")

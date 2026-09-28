@@ -29,6 +29,7 @@ export const LANGUAGE_QA_CATEGORY_MARKS: Record<LanguageQaCategory, string> = {
   unicode: "m-lqa-unicode",        // grey hatched background
   termbase: "m-term",              // purple double
   name: "m-term",
+  usfm: "m-lqa-spacing",           // markup hygiene, not a text change
 };
 
 /** The class for one Language QA finding. */

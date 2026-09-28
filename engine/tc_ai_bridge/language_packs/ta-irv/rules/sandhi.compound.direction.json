@@ -1,0 +1,213 @@
+{
+ "id": "sandhi.compound.direction",
+ "version": 1,
+ "category": "sandhi",
+ "severity": "medium",
+ "confidence": "medium",
+ "inline": false,
+ "title": {
+  "ta": "வல்லினம் மிகுதல் — திசைச் சொல்",
+  "en": "Vallinam doubling after a direction word"
+ },
+ "message": {
+  "en": "Possible missing வல்லினம் at this word boundary: \"{prev} {initial}...\" normally takes \"{prev}{initial}் {initial}...\". Verify before editing."
+ },
+ "rationale": "\"{prev}\" before a {initial}-initial word takes the linking {initial}்",
+ "match": {
+  "type": "token-context",
+  "prev": {
+   "lexical": [
+    "கிழக்கு",
+    "மேற்கு",
+    "வடக்கு",
+    "தெற்கு"
+   ]
+  },
+  "gap": "whitespace",
+  "next": {
+   "initial": [
+    "க",
+    "ச",
+    "த",
+    "ப"
+   ]
+  },
+  "link": "none"
+ },
+ "abstain": [
+  {
+   "next": {
+    "lexical": [
+     "தான்",
+     "கூட",
+     "மட்டும்",
+     "ஆவது",
+     "போல",
+     "என்று",
+     "என",
+     "எனும்"
+    ]
+   },
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style); தான்/ஆவது are written fused (sandhi.clitic.fused for தான்)."
+  },
+  {
+   "next": {
+    "prefix": [
+     "தேவ"
+    ],
+    "notPrefix": [
+     "தேவை"
+    ]
+   },
+   "origin": "House style (reviewer 2026-09-28): no doubling before தேவன்/தேவ- forms (11 of 13 'case form, no doubling here' verdicts). தேவை 'need' is still checked."
+  }
+ ],
+ "fix": {
+  "type": "insert-link"
+ },
+ "provenance": "New (2026-09-28 review): the reviewer wants கிழக்குக் காற்று, கிழக்குத் தேசம் -- compound doubling after a direction word, which is not a dative (the dative rule excludes these four). Panel-only and medium confidence until benchmarked.",
+ "examples": {
+  "incorrect": [
+   {
+    "text": "பயணம் செய்து, கிழக்கு தேசத்தாரிடத்தில் போய்ச் சேர்ந்தான்.",
+    "span": "கிழக்கு தேசத்தாரிடத்தில்",
+    "fix": "கிழக்குத் தேசத்தாரிடத்தில்",
+    "origin": "GEN 29:1 (also in the review reports)"
+   },
+   {
+    "text": "கிழக்கு காற்றினால் தர்ஷீசின் கப்பல்களை",
+    "span": "கிழக்கு காற்றினால்",
+    "fix": "கிழக்குக் காற்றினால்",
+    "origin": "PSA 48:7 (also in the review reports)"
+   },
+   {
+    "text": "வானத்திலே கிழக்கு காற்றை வீசச் செய்து,",
+    "span": "கிழக்கு காற்றை",
+    "fix": "கிழக்குக் காற்றை",
+    "origin": "PSA 78:26 (also in the review reports)"
+   },
+   {
+    "text": "இருக்கிற யோர்தானுடைய கிழக்கு பகுதியில் வனாந்திரத்தின் சமவெளிக்கு",
+    "span": "கிழக்கு பகுதியில்",
+    "fix": "கிழக்குப் பகுதியில்",
+    "origin": "DEU 1:2 (also in the review reports)"
+   },
+   {
+    "text": "அப்படியே வடக்கு பக்கத்தின் நீளத்திற்கும் நூறுமுழ",
+    "span": "வடக்கு பக்கத்தின்",
+    "fix": "வடக்குப் பக்கத்தின்",
+    "origin": "EXO 27:11 (also in the review reports)"
+   },
+   {
+    "text": "ஐப்பிராத்து நதிக்கு மேற்கு புறத்திலிருக்கிற தத்னாய் என்னும்",
+    "span": "மேற்கு புறத்திலிருக்கிற",
+    "fix": "மேற்குப் புறத்திலிருக்கிற",
+    "origin": "EZR 5:6 (also in the review reports)"
+   },
+   {
+    "text": "யோர்தான் நதிக்கு மேற்கு திசையிலுள்ள மலைகளிலும் பள்ளத்தாக்குகளிலும்",
+    "span": "மேற்கு திசையிலுள்ள",
+    "fix": "மேற்குத் திசையிலுள்ள",
+    "origin": "JOS 9:1 (also in the review reports)"
+   },
+   {
+    "text": "அப்பொழுது தெற்கு திசை ராஜா கடுங்கோபம்",
+    "span": "தெற்கு திசை",
+    "fix": "தெற்குத் திசை",
+    "origin": "DAN 11:11"
+   },
+   {
+    "text": "காலத்திலோ வென்றால், தெற்கு திசை ராஜா அவனுக்கு",
+    "span": "தெற்கு திசை",
+    "fix": "தெற்குத் திசை",
+    "origin": "DAN 11:40"
+   },
+   {
+    "text": "தெற்கு திசை ராஜா அவன்",
+    "span": "தெற்கு திசை",
+    "fix": "தெற்குத் திசை",
+    "origin": "DAN 11:9"
+   },
+   {
+    "text": "முகப்பில் இருந்தது; கிழக்கு திசையில் அவைகளுக்கு நுழையும்",
+    "span": "கிழக்கு திசையில்",
+    "fix": "கிழக்குத் திசையில்",
+    "origin": "EZK 42:12"
+   },
+   {
+    "text": "பங்கு மேற்கிலே மேற்கு பக்கமாகவும் கிழக்கிலே கிழக்கு",
+    "span": "மேற்கு பக்கமாகவும்",
+    "fix": "மேற்குப் பக்கமாகவும்",
+    "origin": "EZK 45:7"
+   },
+   {
+    "text": "பயணம் செய்து, கிழக்கு தேசத்தாரிடத்தில் போய்ச் சேர்ந்தான்.",
+    "span": "கிழக்கு தேசத்தாரிடத்தில்",
+    "fix": "கிழக்குத் தேசத்தாரிடத்தில்",
+    "origin": "GEN 29:1 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "கிழக்கு காற்றினால் தர்ஷீசின் கப்பல்களை",
+    "span": "கிழக்கு காற்றினால்",
+    "fix": "கிழக்குக் காற்றினால்",
+    "origin": "PSA 48:7 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "வானத்திலே கிழக்கு காற்றை வீசச் செய்து,",
+    "span": "கிழக்கு காற்றை",
+    "fix": "கிழக்குக் காற்றை",
+    "origin": "PSA 78:26 (human review 2026-09-28, missed)"
+   }
+  ],
+  "correct": [
+   {
+    "text": "பலத்த கிழக்குக் காற்றினால் கடல்",
+    "origin": "EXO 14:21 (correctly linked)"
+   },
+   {
+    "text": "பலிபீடத்தின் வடக்குப் பகுதியில் அதைக்",
+    "origin": "LEV 1:11 (correctly linked)"
+   },
+   {
+    "text": "அருகில் கிழக்குப் பகுதியில் சாம்பல்",
+    "origin": "LEV 1:16 (correctly linked)"
+   },
+   {
+    "text": "உங்களுக்குக் கிழக்குத் திசை எல்லைக்கு",
+    "origin": "NUM 34:10 (correctly linked)"
+   },
+   {
+    "text": "அதின் கிழக்குக் கரையோரமாக,",
+    "origin": "NUM 34:11 (correctly linked)"
+   },
+   {
+    "text": "நீ மேற்குத் திசையையும் தெற்குத்",
+    "origin": "DEU 33:23 (correctly linked)"
+   },
+   {
+    "text": "திசையையும் தெற்குத் திசையையும் சொந்தமாக்கிக்கொள்",
+    "origin": "DEU 33:23 (correctly linked)"
+   },
+   {
+    "text": "வனாந்திரத்திலும் தெற்குத் தேசத்திலும் இருக்கிறதும்,",
+    "origin": "JOS 12:7 (correctly linked)"
+   },
+   {
+    "text": "எரிகோவிற்கு வடக்குப் பக்கமாகச் சென்று,",
+    "origin": "JOS 18:12 (correctly linked)"
+   },
+   {
+    "text": "லூஸுக்குத் தெற்குப் பக்கமாகப் போய்,",
+    "origin": "JOS 18:13 (correctly linked)"
+   },
+   {
+    "text": "எல்லாக் கிழக்குப் பகுதி மக்களும்,",
+    "origin": "JDG 7:12 (correctly linked)"
+   },
+   {
+    "text": "தேசத்தைக் கிழக்குத் தேசத்தாருக்குத் திறந்துவைத்து,",
+    "origin": "EZK 25:9 (correctly linked)"
+   }
+  ]
+ }
+}

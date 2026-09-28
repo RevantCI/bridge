@@ -72,8 +72,10 @@ def test_identity_survives_unrelated_text_shift_but_hash_changes():
 def test_review_candidates_and_explicit_omissions():
     result = scan("மெல்ல மெல்ல தமிழ்a  ,,,\u200d\ue001")
     rules = {f["rule"] for f in result["findings"]}
-    assert {"tamil.repeated-word", "tamil.mixed-word", "punctuation.repeated",
+    assert {"tamil.mixed-word", "punctuation.repeated",
             "spacing.extra", "unicode.invisible", "unicode.private-use"} <= rules
+    # Disabled by default (2026-09-28 review, 0 of 20): மெல்ல மெல்ல is அடுக்குத்தொடர்.
+    assert "tamil.repeated-word" not in rules
     assert all(f["status"] == "review-needed" for f in result["findings"])
     wj = scan("\\wj அவர்\\wj*")  # inline USFM is lifted and scanned, not omitted
     assert wj["checked"] and not wj["limitations"]
@@ -1128,7 +1130,7 @@ def test_background_external_edits_and_no_writes(tmp_path):
     before = source.read_bytes()
     manager.bind(project)
     first = wait(manager)
-    assert first["totalFindings"] == 2
+    assert first["totalFindings"] == 1  # spacing.extra; the repeated word is deliberate reduplication
     assert first["findings"][0]["verse"] == "3a"
     assert source.read_bytes() == before
     assert list(tmp_path.rglob("*")) == [project.book_dir, source]
@@ -1232,7 +1234,7 @@ def test_paused_edits_remain_pending_until_resume(tmp_path):
     time.sleep(.06)
     assert manager.status()["state"] == "paused"
     manager.pause(False)
-    assert wait(manager)["totalFindings"] == 2
+    assert wait(manager)["totalFindings"] == 1
 
 
 @pytest.mark.parametrize("payload", [b"{bad json", b"\xff", b"[]", b" " * (MAX_CHAPTER_BYTES + 1),
@@ -1379,7 +1381,7 @@ def assert_finding_shape(finding):
 def test_every_scan_text_finding_has_the_layered_shape():
     text = "மெல்ல மெல்ல தமிழ்a  ,,,‍ அந்த காகம் க்்"
     findings = scan(text)["findings"]
-    assert {"tamil.repeated-word", "tamil.mixed-word", "punctuation.repeated", "spacing.extra",
+    assert {"tamil.mixed-word", "punctuation.repeated", "spacing.extra",
             "unicode.invisible", "unicode.private-use", "tamil.vallinam-missing"} <= {f["rule"] for f in findings}
     for finding in findings:
         assert_finding_shape(finding)
@@ -1575,12 +1577,24 @@ def test_markup_that_cannot_be_lifted_safely_skips_the_verse(text, reason):
     assert result["limitations"][0].startswith(reason)
 
 
-def test_a_candidate_crossing_a_marker_is_dropped_and_counted():
+def test_a_pair_across_lifted_markup_is_flagged_on_its_first_word():
     # Visible text reads "அந்த காகம்", but the raw span would contain \wj* --
-    # no raw span can hold that finding without covering markup.
-    result = scan("\\wj அந்த\\wj* காகம்")
+    # no raw span can hold the pair without covering markup. The first word
+    # can: it is flagged, with the fix confined to it (2026-09-28 review).
+    text = "\\wj அந்த\\wj* காகம்"
+    result = scan(text)
+    assert result["checked"] and not result["limitations"]
+    [finding] = vallinam_in(text)
+    assert finding["originalText"] == text[finding["start"]:finding["end"]] == "அந்த"
+    assert finding["suggestedReplacement"] == "அந்தக்"
+
+
+def test_a_pair_that_cannot_be_confined_to_its_first_word_is_still_dropped_and_counted():
+    # Here the first word itself is split by markup: nothing can be drawn safely.
+    text = "\\wj அ\\wj*ந்த காகம்"
+    result = scan(text)
     assert result["checked"]
-    assert not vallinam_in("\\wj அந்த\\wj* காகம்")
+    assert not vallinam_in(text)
     assert result["limitations"] == ["1 candidate(s) spanning inline USFM markup omitted."]
 
 
@@ -1624,10 +1638,14 @@ def test_a_line_break_still_separates_words():
     text = "அவன் அந்த\nகாகம் பார்த்தான்."
     [finding] = vallinam_in(text)
     assert finding["originalText"] == text[finding["start"]:finding["end"]] == "அந்த\nகாகம்"
-    # A \q marker between them makes it a crossing candidate: dropped and counted, never drawn over markup.
-    result = scan("அவன் அந்த\n\\q காகம் பார்த்தான்.")
-    assert not vallinam_in("அவன் அந்த\n\\q காகம் பார்த்தான்.")
-    assert result["limitations"] == ["1 candidate(s) spanning inline USFM markup omitted."]
+    # A \q marker between them: the pair crosses markup, so it is flagged on
+    # its first word, never drawn over the marker (PSA 135:21, 143:11 confirmed).
+    poetry = "அவன் அந்த\n\\q காகம் பார்த்தான்."
+    result = scan(poetry)
+    [finding] = vallinam_in(poetry)
+    assert finding["originalText"] == poetry[finding["start"]:finding["end"]] == "அந்த"
+    assert finding["suggestedReplacement"] == "அந்தக்"
+    assert not result["limitations"]
 
 
 def test_real_invisible_characters_are_still_reported():

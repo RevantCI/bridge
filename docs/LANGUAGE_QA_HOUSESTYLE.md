@@ -33,9 +33,10 @@ v5):
 - A **word** entry with a rule hides that rule's findings whose text is that
   word.
 - A **rule** entry hides the rule for the book.
-- A **list** entry adds the word to `housestyle.properNouns`, which the
-  வல்லினம் rules' proper-noun abstain reads (Phase 3). It also drives
-  `name.minority-spelling`.
+- A **list** entry adds the word to `housestyle.properNouns`, which drives
+  `name.minority-spelling`. The bundled வல்லினம் rules no longer abstain on
+  it: the 2026-09-28 reviewer found a name after a case form needed doubling
+  in 17 of 25 cases (அவனுக்குச் சேத் என்று பெயரிட்டான்).
 - A **learned preference** ranks a suggestion first (see below).
 
 **What an entry may never do:** add or widen a match pattern, change a

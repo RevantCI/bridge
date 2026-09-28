@@ -1,7 +1,7 @@
 /** Mirrors language_qa.RuleMeta (engine). */
 export type LanguageQaLayer = "pattern" | "lexicon" | "housestyle" | "integrity";
 export type LanguageQaCategory =
-  "typo" | "sandhi" | "word-joining" | "punctuation" | "unicode" | "spacing" | "termbase" | "name";
+  "typo" | "sandhi" | "word-joining" | "punctuation" | "unicode" | "spacing" | "termbase" | "name" | "usfm";
 export type LanguageQaConfidence = "high" | "medium" | "low";
 
 /** One ranked fix (language_qa.suggestion). */

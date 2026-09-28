@@ -12742,3 +12742,111 @@ is the only one that decides inline.
 
   Strict means each entry must start passing when its fix lands, and is then deleted.
   Result: 1914 passed, 111 xfailed.
+
+### Step 3 — the rule pack, `ta-irv@1.1.0`
+
+Built from `D:\Claude Lab\IRV Tamil` (the reviewer's copy, the maintainer's choice) and the
+labels, with the documented `--reviews`.
+
+**Mechanism.**
+- Loader:
+  - condition keys `notPrefix`, `notSuffix` and `notSuffixLexical`;
+  - category `usfm` (layer integrity);
+  - a pair candidate carries its first word's end and a first-word fix.
+- `scan_text`: a pair across a `\q` line or lifted markup is flagged on its first word
+  (`\wj அந்த\wj* காகம்` → `அந்த`, fix `அந்தக்`). It is dropped only when the first word
+  itself is split.
+- Built-in rules: `RuleMeta.enabled`; `tamil.repeated-word` is disabled.
+- `INLINE_RULES` gains `lexicon.known-misspelling`.
+- `SCAN_CACHE_VERSION` 3.
+- Frontend: `usfm` joins the category union and the mark table (drawn like spacing).
+
+**Pack, as the brief and `pack_changes.md` ask, with one deliberate deviation.**
+- **Every வல்லினம் rule.**
+  - It abstains before தேவ- (`notPrefix` தேவை) and before the clitics and quotatives.
+  - The proper-noun abstain is gone. The `listRef` still works for a project override.
+- **Lists.** The builder's bare-majority criterion (`pair_stats`, `bare_majority`,
+  `stem_abstains`, `MIN_CONTEXTS`) is gone. `notLexical` is now built from three sources:
+  1. the corpus root nouns (attested inflection, now also -ற்கு);
+  2. the reviewer's root nouns and house forms (accusative 202, dative 17), plus
+     `KEEP_EXCLUDED` கை and வரை (split words, not sandhi);
+  3. minus the reviewer's case forms (accusative 15, dative 7: யெகோவாவை, ஜீவனை, சபைக்கு, யோபுக்கு …).
+
+  The four directions stay excluded from the dative rule.
+- **Accusative.** `notSuffixLexical` holds முறை, வினை, வகை, தொண்டை only.
+  - **Deviation:** `notSuffix` மை and the தரை element are not applied. On the corpus,
+    -மை also ends உம்மை 9/166, நம்மை 6/58, தம்மை 4/29 and every -ம் name accusative
+    (எருசலேமை 1/23 …), and -தரை ends கர்த்தரை 5/13 and மனிதரை.
+  - The maintainer chose exact words (DECISIONS.md). The labelled result is the same
+    as the brief projected.
+- **Dative.** Suffix `(?:க்கு|ற்கு)$`.
+- **Demonstrative and manner-adverb.** No per-trigger stems.
+- **New rule.** `sandhi.compound.direction` v1: panel-only, medium confidence. Its 15
+  incorrect examples include PSA 48:7, 78:26 and GEN 29:1.
+- **`sandhi.clitic.fused` v2.**
+  - It matches தான் only. ஆவது fuses by vowel sandhi, which has no linking-consonant fix,
+    so it is not matched; கூட is house-style apart.
+  - Its correct examples come from accusative pronouns, manner adverbs and datives, no
+    longer from verbs (வைத்தான்).
+- **`integrity.space-before-note-end` v2.** Category `usfm`, severity low, reworded.
+- **Versions.** Every touched rule is at v2. The pack is 1.1.0, so ignores recorded under
+  1.0.0 come back once for re-check, as designed.
+
+**The review as pack examples.** Every reviewer-confirmed sandhi finding becomes an
+incorrect example of the rule that now finds it, and every false alarm a correct example.
+Each is a two-word window, and each pack load re-checks the review:
+- demonstrative 16 + 1;
+- accusative 40 + 13;
+- dative 66 + 3;
+- direction 3;
+- manner-adverb 1.
+
+A confirmed finding no rule finds fails the build. The two false alarms the accusative
+still raises are printed as residuals: GEN 21:9 செய்கிறதை சாராள் and GEN 35:4 அவைகளை
+சீகேம், both before a name. Names need doubling in 17 of 25 cases, so there is no rule to
+write.
+
+**Human numbers, step 0 → step 3.**
+
+| Rule | Step 0 | Step 3 | Inline |
+|---|---|---|---|
+| dative | 93.9% (46/49) | 100% (46/46) | yes |
+| accusative | 70.0% (35/50) | 94.6% (35/37) | **yes (new)** |
+| demonstrative | 87.5% (7/8) | 100% (7/7) | no, 7 labels |
+| manner-adverb | 100% (1/1) | 100% (1/1) | no |
+| `lexicon.known-misspelling` | 100% (43/43) | 100% (43/43) | **yes (new)** |
+| `tamil.repeated-word` | 0% (0/20) | disabled, 20 false alarms removed | — |
+
+Recall proxies, reviewer "missed" now found:
+
+| Class | Found |
+|---|---|
+| -ற்கு datives | 17/17 |
+| -க்கு exceptions | 5/5 |
+| poetry-line pairs | 2/2 |
+| demonstrative house forms | 9/9 |
+| bare-majority -ஐ | 4/5 (the fifth is the split word சு வரை, correctly left) |
+
+No confirmed finding was lost. `benchmark/human/baseline.json` is rewritten with the
+step-3 numbers.
+
+**Tests.**
+- The labelled fixtures:
+  - 84 of the 111 pending cases pass and are deleted;
+  - the 2 name residuals are a separate strict `RESIDUAL` set;
+  - the 21 left are `lexicon.rare-near-common`, for step 4;
+  - a "missed" item may be found by any sandhi rule, because the converter guessed the
+    rule and the reviewer judged only "doubling needed". கிழக்கு காற்று is the direction
+    rule's.
+- Tests that encoded the old pack are updated to the reviewed behaviour:
+  - repeated-word is off;
+  - a name does not block doubling;
+  - இந்த தேசத்தில் is flagged;
+  - a pair across markup is flagged on its first word;
+  - the pack is 1.1.0;
+  - the inline set is dative and accusative.
+- New tests: the reviewed misses and false alarms, and தேவை is still checked.
+
+**Performance.** The pack load (examples included) goes from 71 ms to 132 ms, median of 5.
+It is paid once per process, on the worker's first Tamil scan. A status poll never loads
+it (`loaded_pack`). Full verses made it 179 ms before the review examples were windowed.
