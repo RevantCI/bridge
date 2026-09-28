@@ -36,6 +36,7 @@ from greek_room_engine.adapters.names_adapter import NamesCheckError
 from greek_room_engine.models.finding import QaFinding, FindingCategory, Severity, FindingStatus, EvidenceItem
 from greek_room_engine.protocol import EngineRequest, EngineResponse
 
+from tc_ai_bridge.version import BRIDGE_VERSION as _BRIDGE_VERSION
 from tc_ai_bridge.tc_project import (
     TranslationCoreProject, ProjectError, peek_progress_totals, read_triage_records,
 )
@@ -134,8 +135,11 @@ from triage_jobs import (
     TriageJobNotFound,
 )
 
-# Kept in step with package.json by tests/service/test_version_consistency.py.
-BRIDGE_VERSION = "0.12.0"
+# Re-exported, not redefined: project_import stamps the same number into each
+# imported project's manifest (#176), and a second literal here is exactly how
+# 0.12.0 shipped a sidecar still reporting 0.11.0 (#170). Kept in step with
+# package.json by tests/service/test_version_consistency.py.
+BRIDGE_VERSION = _BRIDGE_VERSION
 
 # tc_ai_bridge's QAIssue.severity strings -> our shared Severity enum
 _SEVERITY_MAP = {

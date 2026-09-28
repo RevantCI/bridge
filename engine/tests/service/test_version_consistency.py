@@ -18,6 +18,7 @@ import pytest
 
 from bridge_service import BRIDGE_VERSION
 from greek_room_engine.engine import ENGINE_VERSION
+from tc_ai_bridge.version import BRIDGE_VERSION as CANONICAL_VERSION
 from tests.support.paths import REPO_ROOT
 
 
@@ -65,4 +66,38 @@ def test_versions_are_plain_release_numbers(version: str) -> None:
     """Guards against a placeholder or a dirty suffix reaching a release build."""
     assert re.fullmatch(r"\d+\.\d+\.\d+", version), (
         f"{version!r} is not a bare MAJOR.MINOR.PATCH release version."
+    )
+
+
+def test_bridge_service_reexports_the_canonical_version() -> None:
+    """`bridge_service.BRIDGE_VERSION` must not become a second literal again.
+
+    A frozen sidecar cannot read `package.json`, so the number has to exist as a
+    Python constant somewhere; the rule is that it exists exactly once (#176).
+    """
+    assert BRIDGE_VERSION is CANONICAL_VERSION, (
+        "bridge_service.BRIDGE_VERSION should re-export tc_ai_bridge.version."
+        "BRIDGE_VERSION, not redeclare it."
+    )
+    assert CANONICAL_VERSION == _package_json_version()
+
+
+def test_imported_manifests_are_stamped_with_the_current_version() -> None:
+    """The manifest's `generator.build` is provenance written into project files.
+
+    Asserted against the module source rather than by running an import: this is a
+    string-substitution check, and a real import needs fixtures and minutes, which
+    is exactly why the stale literal survived three releases unnoticed (#176).
+    """
+    source = (
+        REPO_ROOT / "engine" / "tc_ai_bridge" / "project_import.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"build": BRIDGE_VERSION' in source, (
+        "project_import.py should stamp the shared BRIDGE_VERSION into "
+        "manifest.json's generator block, not a hardcoded literal."
+    )
+    hardcoded = re.search(r'"build":\s*"[^"]*"', source)
+    assert hardcoded is None, (
+        f"project_import.py has a hardcoded manifest build string: {hardcoded.group(0) if hardcoded else ''}"
     )

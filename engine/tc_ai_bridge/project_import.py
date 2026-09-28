@@ -24,6 +24,7 @@ from .original_language_resources import (
 )
 from .tc_project import ProjectError, TranslationCoreProject, _write_json_atomic
 from .usfm import whitespace_tokens
+from .version import BRIDGE_VERSION
 
 
 SCRIPTURE_EXTENSIONS = {".usfm", ".sfm", ".txt"}
@@ -502,7 +503,7 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
     original_resource = resource_for_book(book.book_id)
     original_resource_info = resource_inventory(book.book_id)
     manifest = {
-        "generator": {"name": "Bridge", "build": "0.11.0"},
+        "generator": {"name": "Bridge", "build": BRIDGE_VERSION},
         "target_language": {
             "id": language_id, "name": language_name, "direction": language_direction,
             "book": {"name": book.book_name},

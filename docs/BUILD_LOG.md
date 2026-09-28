@@ -9732,3 +9732,36 @@ Nothing reads `generator.build` today.
 fail by reverting `BRIDGE_VERSION` to `0.11.0` and watching it report the
 mismatch. `tests/service`: 145 passed. Frozen-pair smoke NOT rerun — that needs a
 PyInstaller rebuild, and #130 still fails it at a later step regardless.
+
+## 2026-09-28 — One Bridge version constant, not three (#176)
+
+#170 aligned the two sidecar constants. Grepping for the old number while doing
+that turned up a third: `project_import.py` wrote
+`"generator": {"name": "Bridge", "build": "0.11.0"}` into the `manifest.json` of
+every imported project, so a project imported by a 0.12.0 build claimed on disk
+to have been made by 0.11.0. Nothing read `generator.build`, and no test or
+fixture referenced it, which is why it survived three releases.
+
+**Where the number lives now.** `engine/tc_ai_bridge/version.py` holds
+`BRIDGE_VERSION` once. `bridge_service.py` re-exports it (as a module-level name,
+so the existing `monkeypatch.setattr(bridge_service, "BRIDGE_VERSION", ...)` in
+`test_bridge_service.py` still works) and `project_import.py` imports it directly.
+It sits in `tc_ai_bridge` rather than in `bridge_service` because `bridge_service`
+imports `tc_ai_bridge`, so the other direction is a cycle.
+
+`package.json` is still the release source of truth, but the engine cannot read it
+at runtime — a frozen PyInstaller sidecar does not ship it — so the constant has
+to exist in Python. The rule enforced by the gate is that it exists *exactly
+once*.
+
+**Gate extended.** `test_version_consistency.py` grew two cases: that
+`bridge_service.BRIDGE_VERSION` is the same object as the canonical constant
+rather than a second literal, and that `project_import.py` stamps
+`BRIDGE_VERSION` with no hardcoded `"build": "..."` string left in the file.
+
+**Verified by writing a real manifest, not only by reading the source.** A
+throwaway import of a small Titus USFM produced
+`en_ulb_tit/manifest.json  generator={'name': 'Bridge', 'build': '0.12.0'}`.
+
+**Existing projects are left alone.** A project on disk records the build that
+actually imported it; rewriting that would falsify provenance. Nothing migrates.
