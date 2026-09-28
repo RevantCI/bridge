@@ -59,6 +59,9 @@ def sfm_by_book(irv_dir: Path) -> dict[str, Path]:
 
 
 def main() -> int:
+    # The tables carry Tamil text and "—"; a Windows pipe defaults to cp1252.
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--irv-dir", required=True, type=Path)
     parser.add_argument("--reviews", required=True, nargs="+")
