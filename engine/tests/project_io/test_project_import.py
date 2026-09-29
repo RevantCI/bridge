@@ -653,3 +653,57 @@ def test_a_project_without_headings_writes_no_sibling_file(tmp_path):
     # And the chapter files are still found: the sibling name must never be
     # mistaken for a chapter (stem "1.headings" is not a digit).
     assert TranslationCoreProject(str(project)).chapters() == ["1", "2"]
+
+
+def test_an_opened_external_project_is_an_exact_duplicate_of_itself(tmp_path):
+    """#130: `project.open` builds PassageSemanticRuntime, which writes under
+    `.apps/translationCoreAI/` *after* `ProjectRegistry.register()` snapshotted
+    the tree. The project then no longer matched its own fingerprint, so
+    `inspectImport` called it a `possibleDuplicate` of itself on
+    `bookLanguageBible` rather than an `exactDuplicate` on `sourceFingerprint`.
+
+    That is what made `scripts/smoke_sidecars.py` fail, and why the frozen-sidecar
+    smoke ran `continue-on-error` in `release.yml`. The project here is external —
+    no `.bridge/import.json` — which is the case that falls through to the tree
+    fingerprint.
+    """
+    from tests.persistence.test_workbench_repository import _build_minimal_project
+
+    root = _build_minimal_project(tmp_path / "rut")
+    (root / "rut" / "1.json").write_text(json.dumps({"1": "text"}), encoding="utf-8")
+    assert not (root / ".bridge" / "import.json").exists(), "fixture must be an external project"
+
+    engine = BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
+    assert _call(engine, "project.open", {"path": str(root)})["success"]
+    # Opening really does write Bridge state into the project; without that this
+    # test would pass even with the bug present.
+    assert (root / ".apps" / "translationCoreAI").is_dir()
+
+    duplicates = _call(engine, "project.inspectImport", {"path": str(root)})["result"]["duplicates"]
+    assert duplicates["classification"] == "exactDuplicate", duplicates
+    assert duplicates["matches"][0]["reason"] == "sourceFingerprint", duplicates["matches"][0]
+
+
+def test_bridge_private_state_never_changes_a_project_fingerprint(tmp_path):
+    """The whole `.apps/translationCoreAI/` tree is excluded, not just
+    `passageSemantic/` as #130 proposed: the workbench database changes on every
+    decision and `transactions/` on every edit, so either would break the same
+    comparison as soon as the project was used."""
+    from tc_ai_bridge.project_registry import _tree_fingerprint
+    from tests.persistence.test_workbench_repository import _build_minimal_project
+
+    root = _build_minimal_project(tmp_path / "rut")
+    before = _tree_fingerprint(root)
+
+    state = root / ".apps" / "translationCoreAI"
+    for relative in ("passageSemantic/run.json", "bridge-workbench.sqlite3",
+                     "transactions/tx-1.json", "backups/backup-1.sqlite3"):
+        target = state / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("state that is not the project", encoding="utf-8")
+
+    assert _tree_fingerprint(root) == before
+
+    # A real project file still moves it, or the fingerprint would be useless.
+    (root / "rut" / "1.json").write_text(json.dumps({"1": "edited"}), encoding="utf-8")
+    assert _tree_fingerprint(root) != before

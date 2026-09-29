@@ -544,10 +544,13 @@ to an AI-assisted session specifically:
    every PR; `docs/QA_TEST_MATRIX.md` is the release gate beyond that, and a
    feature is not release-ready just because its unit tests pass.
 7. **Don't trust the frozen build because source passed.** The two have diverged
-   before. `scripts/smoke_sidecars.py` checks the frozen pair, and it is
-   currently `continue-on-error` in `release.yml` because of a known,
-   pre-existing `project.inspectImport` classification mismatch — so a green
-   release build is not evidence the sidecars are healthy.
+   before. `scripts/smoke_sidecars.py` checks the frozen pair, and since #130
+   (2026-09-29) it is a **hard gate** in `release.yml` again — it had been
+   `continue-on-error` since 2026-09-07 over a `project.inspectImport`
+   self-duplicate mismatch, which is fixed. A green release build now does mean
+   the frozen sidecars were exercised. Run it locally after any change to the
+   engine, the spec files or the vendored trees; a source-only pass still proves
+   nothing about the frozen pair.
 
 ## Stop and ask before writing any code
 

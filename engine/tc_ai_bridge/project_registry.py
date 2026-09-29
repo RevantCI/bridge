@@ -29,6 +29,9 @@ from .workspace_repository import WorkspaceRepository
 REGISTRY_SCHEMA_VERSION = 1
 IDENTITY_SCHEMA_VERSION = 1
 _IDENTITY_PATH = Path(".bridge") / "project.json"
+# Bridge's own folder inside a translationCore project: derived state only, never
+# project content, and it changes as the project is used (#130).
+_BRIDGE_STATE_DIR = ".apps/translationCoreAI/"
 _IMPORT_PATH = Path(".bridge") / "import.json"
 _LAZY_IMPORT_PATH = Path(".bridge") / "lazy-import.json"
 _COLLECTION_PATH = Path(".bridge") / "collection.json"
@@ -80,13 +83,30 @@ def _sha256_file(path: Path) -> str:
 
 
 def _tree_fingerprint(root: Path, *, include_state: bool = True) -> str:
-    """Hash a project/source tree deterministically without Bridge-local identity."""
+    """Hash a project/source tree deterministically without Bridge-local identity.
+
+    `.apps/translationCoreAI/` is excluded because none of it is the project:
+    it holds Bridge's own derived state -- the workbench database, the
+    passage-semantic cache, transactions and backups. `project.open` builds
+    `PassageSemanticRuntime`, which writes there *after*
+    `ProjectRegistry.register()` has already snapshotted the tree, so a project
+    stopped matching its own fingerprint and `inspectImport` reported it as a
+    possible duplicate of itself (#130). That is also why the frozen-sidecar
+    smoke was `continue-on-error` in `release.yml`.
+
+    Excluding the whole directory rather than just `passageSemantic/` (which is
+    what #130 proposed as the smallest fix): the workbench database changes on
+    every decision and `transactions/` on every edit, so either would break the
+    same comparison as soon as anyone used the project.
+    """
     digest = hashlib.sha256()
     ignored = {_IDENTITY_PATH.as_posix(), ".bridge/collection.json"}
     paths = sorted((path for path in root.rglob("*") if path.is_file()), key=lambda p: p.as_posix().lower())
     for path in paths:
         relative = path.relative_to(root).as_posix()
         if relative in ignored or relative.startswith(".bridge-import-"):
+            continue
+        if relative.startswith(_BRIDGE_STATE_DIR):
             continue
         if not include_state and relative.startswith(".apps/"):
             continue

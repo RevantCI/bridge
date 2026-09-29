@@ -13547,3 +13547,47 @@ guard that the display name never becomes the actor id again.
 including three new tests (the users row follows the chosen name; a rename keeps
 the id; a write records an id that is neither the display name nor `"human"`).
 `npm run check` 0/0; Vitest 451 passed; `npm run build` clean.
+
+## 2026-09-29 — The frozen-sidecar smoke is a hard gate again (#130)
+
+`project.inspectImport` reported a project it had just opened as a
+`possibleDuplicate` of *itself* (`bookLanguageBible`) where the smoke expects
+`exactDuplicate` (`sourceFingerprint`). `scripts/smoke_sidecars.py` therefore
+failed on every release build, so `release.yml` had run it
+`continue-on-error: true` since 2026-09-07 — and, as CLAUDE.md said for three
+weeks, a green release build was not evidence the sidecars were healthy.
+
+**Cause**, already diagnosed on the issue: `project.open` builds
+`PassageSemanticRuntime`, which writes under `.apps/translationCoreAI/` *after*
+`ProjectRegistry.register()` has snapshotted the tree. A project with no
+`.bridge/import.json` falls through to `_tree_fingerprint()`, which hashed that
+directory, so the project no longer matched its own fingerprint.
+
+**Fixed wider than the issue proposed.** #130 suggested excluding
+`.apps/translationCoreAI/passageSemantic/`. The whole directory is excluded
+instead: it also holds `bridge-workbench.sqlite3`, which changes on every
+decision, `transactions/`, which changes on every edit, and `backups/`. Excluding
+only `passageSemantic/` would have left the identical bug reappearing the moment
+anyone used the project. None of that tree is the project; it is Bridge's own
+derived state.
+
+**The tests were confirmed to fail without the fix**, not merely to pass with it:
+disabling the exclusion reproduces `possibleDuplicate` on the first and a
+fingerprint mismatch on the second. The second also asserts the fingerprint still
+*moves* when a real project file changes, so the exclusion cannot quietly make it
+useless.
+
+**Verification, in the order that matters.** `tests/project_io` 47 passed. Then
+the part this issue exists for: both sidecars rebuilt with
+`scripts/build-sidecars.ps1` and `python scripts/smoke_sidecars.py
+engine/dist/bridge-engine.exe` run against the frozen pair — **exit 0**, first
+clean run:
+
+> Frozen sidecar smoke test passed: real Wildebeest/Uroman loaded; pinned UGNT
+> source tokens, versification, names/transliteration, alignment
+> statistics/proposal packaging, AI explain packaging, desktop connectors,
+> project registry/duplicate import, first-open live-review responsiveness,
+> alignment/export/undo, and duplicate/missing-verse checks succeeded.
+
+`continue-on-error` is gone from `release.yml` and CLAUDE.md's standing warning
+is updated to match.

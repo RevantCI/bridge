@@ -100,17 +100,15 @@ jobs:
         run: .\scripts\build-sidecars.ps1
 
       # Verifies the frozen pair, not the source tree — the two have diverged
-      # before (PyInstaller missing a dynamically-imported vendor tree). It
-      # clears the helper-version and project-open gates, then stops at a
-      # known, pre-existing assertion mismatch: project.inspectImport returns
-      # possibleDuplicate/bookLanguageBible where the script expects
-      # exactDuplicate/sourceFingerprint (documented in docs/BUILD_LOG.md's
-      # Beta 15 entry; reproduced against the local frozen exe 2026-09-07).
-      # Non-blocking until that is resolved — otherwise it fails every release
-      # build for a defect the release does not introduce. Flip this back to a
-      # hard gate (drop continue-on-error) once the classification is fixed.
+      # before (PyInstaller missing a dynamically-imported vendor tree).
+      #
+      # This was `continue-on-error: true` from 2026-09-07 to 2026-09-29 because
+      # project.inspectImport reported a just-opened project as a
+      # possibleDuplicate of itself where the script expects exactDuplicate
+      # (#130). That is fixed, the smoke passes end to end against a locally
+      # rebuilt frozen pair, and it is a hard gate again. A green release build
+      # now does mean the sidecars were exercised.
       - name: Smoke-test frozen sidecars
-        continue-on-error: true
         run: python scripts/smoke_sidecars.py engine/dist/bridge-engine.exe
 
       # After build-sidecars.ps1, not before: tauri-build resolves every
