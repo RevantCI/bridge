@@ -28,6 +28,10 @@ Writes engine/tc_ai_bridge/language_packs/ta-irv/lexicon.json:
   drawn inline.
 - Single-grapheme tokens are not words unless they are real monosyllables
   (MONOSYLLABLES): fragments such as சு, நே, சோ were counted as words.
+- `splits`: a curated phrase map of word pairs a reviewer confirmed are one
+  word written apart ("சு வரை" -> "சுவரை", "நே போ" -> "நேபோ"), for
+  `lexicon.known-split`. Only from human SPLIT verdicts; a split the reviewer
+  judged a word, name or interjection (சீ, சோ, நோ, பை) is protected instead.
 
 Tokens are the runtime's own: imported_verse_text -> lift_inline_usfm ->
 language_qa.word_occurrences (NFC keys; the text is never rewritten).
@@ -124,6 +128,28 @@ def curated_pairs(paths: list[str], counts: collections.Counter) -> tuple[dict[s
     return deprecated, dict(stats)
 
 
+def human_splits(labels_path: Path | None) -> tuple[dict[str, str], set[str]]:
+    """(confirmed split phrase -> joined form, protected tokens) from the
+    reviewer's split rows (round 2): SPLIT joins; WORD or PARTICLE protects the
+    one-grapheme token so no future rule joins it."""
+    if labels_path is None or not labels_path.exists():
+        return {}, set()
+    splits: dict[str, str] = {}
+    protected: set[str] = set()
+    labels, _ = bench.load_human_rounds(labels_path)
+    for label in labels:
+        if label.get("kind") != "split":
+            continue
+        phrase = " ".join(bench.nfc(label["original"]).split())
+        if label.get("verdict") == "SPLIT" and label.get("correctForm"):
+            if len(phrase.split()) != 2:
+                raise SystemExit(f"{label['id']}: a known split is a word pair, not {phrase!r}")
+            splits[phrase] = bench.nfc(label["correctForm"])
+        elif label.get("verdict") in {"WORD", "PARTICLE"}:
+            protected |= {token for token in phrase.split() if len(clusters(token)) == 1}
+    return splits, protected
+
+
 def human_lexicon(labels_path: Path | None) -> tuple[dict[str, str], set[str]]:
     """(confirmed wrong -> right, protected words) from the reviewer's labels,
     every round (a folder) or one (a file)."""
@@ -166,6 +192,8 @@ def main() -> int:
             buckets[key].append(index[word])
     deprecated, curated_stats = curated_pairs(args.curated, counts) if args.curated else ({}, {})
     confirmed, protected = human_lexicon(args.human_labels)
+    splits, split_protected = human_splits(args.human_labels)
+    protected |= split_protected
     for wrong, right in confirmed.items():
         if deprecated.get(wrong, right) != right:
             curated_stats["human confirmation overrides a review pair"] =                 curated_stats.get("human confirmation overrides a review pair", 0) + 1
@@ -184,13 +212,15 @@ def main() -> int:
         "humanConfirmed": sorted(w for w in confirmed if w in deprecated),
         "provenance": {w: ("human" if w in confirmed else "ai-review") for w in sorted(deprecated)},
         "protected": sorted(protected),
+        "splits": dict(sorted(splits.items())),
         "curatedStats": curated_stats,
     }
     OUT.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"{len(book_ids)} books, {verses} verses, {tokens} tokens, {len(counts)} distinct forms", file=sys.stderr)
     print(f"listed {len(listed)} (count >= {MIN_LISTED_COUNT}), common {len(common)} (>= {COMMON_MIN}), "
           f"{len(buckets)} bucket keys, {len(deprecated)} deprecated pairs {curated_stats}", file=sys.stderr)
-    print(f"human review: {len(confirmed)} confirmed pairs, {len(protected)} protected words", file=sys.stderr)
+    print(f"human review: {len(confirmed)} confirmed pairs, {len(protected)} protected words, "
+          f"{len(splits)} known splits", file=sys.stderr)
     print(f"{OUT} {OUT.stat().st_size / 2**20:.2f} MB", file=sys.stderr)
     return 0
 

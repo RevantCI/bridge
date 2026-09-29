@@ -354,4 +354,15 @@ The finding is medium confidence, with the message "தான்: பிரத�
 **Rules out:** choosing one form automatically; the clitic rule's fused-only suggestion.
 **Revisit when:** a review round labels a batch of the new தான் findings (the next sample); if the clitic reading turns out common, reorder the suggestions per context.
 
+## 2026-09-29 — Split words are curated pairs, not a heuristic
+
+**Decision:** `lexicon.known-split` matches the lexicon's `splits` map as adjacent word pairs in each verse and suggests the joined form. It is high confidence, category word-joining, and inline under rule (b).
+- **The map.** It holds only pairs a reviewer judged `SPLIT`: சு வரை → சுவரை (×4 in the Bible), நே போ → நேபோ (×7).
+- **Protected tokens.** One-grapheme tokens judged a word, name or interjection (சீ, சோ, நோ, பை) are `protected`.
+- **Retired.** The `word-joining.orphan-syllable` heuristic is retired.
+- **Cache.** The chapter cache key now includes the lexicon fingerprint, split map included, so a rebuilt map rescans.
+**Because:** the whole Bible has 23 single-grapheme non-words, of which 10 are real splits. The rest are names and interjections a heuristic would join.
+**Rules out:** joining a fragment by rule; adding a split without a human verdict.
+**Revisit when:** a review round finds splits of a different shape (more than two tokens, or not single-grapheme).
+
 <!-- New entries go above this line. -->

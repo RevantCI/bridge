@@ -108,6 +108,22 @@
     }
    }
   },
+  "ta-irv/lexicon.known-split": {
+   "labelled": 10,
+   "tp": 10,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": true,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 10,
+     "tp": 10,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
   "ta-irv/lexicon.rare-near-common": {
    "labelled": 0,
    "tp": 0,
@@ -318,8 +334,8 @@
   },
   "B_ai_baremajority": {
    "missed": 5,
-   "missed_now_flagged": 4,
-   "still_missed_rate": 0.02
+   "missed_now_flagged": 5,
+   "still_missed_rate": 0.0
   },
   "D_rku_dative": {
    "missed": 17,
@@ -347,9 +363,9 @@
    "still_missed_rate": 0.0
   },
   "split": {
-   "missed": 10,
+   "missed": 0,
    "missed_now_flagged": 0,
-   "still_missed_rate": 0.4348
+   "still_missed_rate": 0.0
   }
  }
 }

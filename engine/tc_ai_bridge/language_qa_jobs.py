@@ -176,8 +176,10 @@ def verse_hash(text: Any) -> str:
 
 def chapter_cache_key(language_pack: str, pack_fingerprint: str, raw_terms: Any, lists_fingerprint: str = "") -> str:
     """What a cached verse result depends on besides its own text."""
+    from .language_packs.lexicon import lexicon_fingerprint  # the known splits run in the verse scan
     return hashlib.sha1(json.dumps(
-        [SCAN_CACHE_VERSION, RULE_VERSION, language_pack, pack_fingerprint, raw_terms, lists_fingerprint],
+        [SCAN_CACHE_VERSION, RULE_VERSION, language_pack, pack_fingerprint, raw_terms, lists_fingerprint,
+         lexicon_fingerprint() if language_pack == "tamil" else ""],
         sort_keys=True, ensure_ascii=False, default=str,
     ).encode("utf-8")).hexdigest()
 

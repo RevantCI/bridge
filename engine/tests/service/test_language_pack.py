@@ -31,7 +31,8 @@ def test_a_status_request_never_loads_the_pack_and_concurrent_first_loads_share_
     monkeypatch.setattr(loader, "_LOADED", {})
     status = LanguageQaManager(debounce=0, yield_seconds=0).status()
     assert loaded_pack() is None
-    assert status["inlineRules"] == ["lexicon.known-misspelling", "spacing.extra", "terminology.deprecated-form"]
+    assert status["inlineRules"] == ["lexicon.known-misspelling", "lexicon.known-split", "spacing.extra",
+                                     "terminology.deprecated-form"]
     calls = []
     real = loader.load_pack
     monkeypatch.setattr(loader, "load_pack", lambda name: calls.append(name) or real(name))

@@ -13176,3 +13176,23 @@ figure.
     `test_bare_tan_offers_the_pronoun_first_and_the_clitic_second`.
   - A reviewed finding whose rule is now disabled may be found by any sandhi rule.
   - Service and jobs: 3499 passed.
+
+### Step 5 — known splits as data (`ta-irv-lexicon@4`)
+
+- **`lexicon.known-split`** (in-code, category word-joining, high).
+  - It flags an adjacent pair that the lexicon's `splits` map names, and suggests the
+    joined form.
+  - The builder takes the map only from the reviewer's `SPLIT` rows: சு வரை → சுவரை,
+    நே போ → நேபோ.
+  - The one-grapheme tokens judged a word, name or interjection (சீ, சோ, நோ, பை) are
+    added to `protected` (29 in all).
+- **Inline under rule (b).** The population file shows 11 of 11 findings confirmed: the
+  10 round-2 `SPLIT` rows, plus round 1's PSA 48:13 row, which overlaps the fourth
+  சு வரை. Its definition hash includes the split map.
+- **Cache.** The chapter cache key now includes `lexicon_fingerprint()`, which now
+  hashes the split map, so a rebuilt lexicon rescans the verse-level splits.
+- **The plan.** The `word-joining.orphan-syllable` entry is replaced by "split words:
+  curated pairs fed by review rounds".
+- **Tests.** `test_known_splits_are_curated_pairs_found_in_the_verse`. The 10 split
+  fixtures pass, and `PENDING_PACK_CHANGES` is empty. Only the 2 name residuals and
+  the 1 combined fix remain as strict xfail. Service and jobs: 3510 passed.

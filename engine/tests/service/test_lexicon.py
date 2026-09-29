@@ -76,9 +76,11 @@ def test_the_curated_map_only_keeps_safe_pairs():
         # confirmation is the one exception (IRV repeats some misspellings).
         assert lexicon.count(wrong) <= 2 or wrong in confirmed, wrong
         assert wrong != right
-    # The reviewer's false alarms are protected words: 21 rare-near-common (round 1)
-    # and 4 known-misspelling pairs that were meaning or style changes (round 2).
-    assert len(lexicon.protected) == 25 and not (lexicon.protected & set(lexicon.deprecated))
+    # The reviewer's false alarms are protected words: 21 rare-near-common (round 1),
+    # 4 known-misspelling pairs that were meaning or style changes, and the 4
+    # one-grapheme tokens judged a word, name or interjection (சீ, சோ, நோ, பை; round 2).
+    assert len(lexicon.protected) == 29 and not (lexicon.protected & set(lexicon.deprecated))
+    assert {"சீ", "சோ", "நோ", "பை"} <= lexicon.protected
     assert {"திடமனதாயிரு", "கவனிக்காதே", "பூட்டுக்களையும்", "பெருந்தொனியாய்"} <= lexicon.protected
     # Fragments are not words; real monosyllables are.
     assert lexicon.count("சு") == 0 and lexicon.count("நே") == 0 and lexicon.count("கை") > 0
@@ -136,6 +138,22 @@ def test_a_misspelling_is_high_confidence_and_inline_only_when_a_human_confirmed
         assert finding["severity"] == "medium" and finding["suggestions"][0]["text"] == lexicon.deprecated[wrong]
     assert "awaits human confirmation" in [f for f in findings_for({"1": f"அவன் {ai} வந்தான்."})
                                            if f["rule"] == "lexicon.known-misspelling"][0]["message"]
+
+
+def test_known_splits_are_curated_pairs_found_in_the_verse():
+    """lexicon.known-split (2026-09-29): only the pairs a reviewer judged SPLIT,
+    joined as the reviewer wrote them; names and interjections are left alone."""
+    from tc_ai_bridge.language_qa import scan_text
+    assert default_lexicon().splits == {"சு வரை": "சுவரை", "நே போ": "நேபோ"}
+
+    def splits(text):
+        return [(f["originalText"], f["suggestedReplacement"], f["inline"], f["category"])
+                for f in scan_text(text, book="x", chapter="1", verse="1", tamil=True)["findings"]
+                if f["ruleId"] == "ta-irv/lexicon.known-split"]
+    assert splits("அதின் சு வரை கவனித்து") == [("சு வரை", "சுவரை", True, "word-joining")]
+    assert splits("நே போ மலையின்மேல்") == [("நே போ", "நேபோ", True, "word-joining")]
+    for text in ("சீ என்று சொல்", "நோ பட்டணம்", "சோ என்பவனிடத்திற்கு", "பை இருக்கும்"):
+        assert splits(text) == [], text
 
 
 def test_the_ratio_guard_holds():

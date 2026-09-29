@@ -736,7 +736,11 @@ def rule_definition_hash(rule_id: str) -> str | None:
                   if k not in {"inline", "examples", "provenance", "title", "message", "rationale"}}
         return hashlib.sha1(json.dumps(source, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
     if name in RULES:
-        return hashlib.sha1(f"{RULE_VERSION}#{RULES[name].revision}#{name}".encode("utf-8")).hexdigest()
+        extra = ""
+        if name == "lexicon.known-split":  # the rule is its curated map
+            from .language_packs.lexicon import default_lexicon
+            extra = json.dumps(getattr(default_lexicon(), "splits", {}), ensure_ascii=False, sort_keys=True)
+        return hashlib.sha1(f"{RULE_VERSION}#{RULES[name].revision}#{name}#{extra}".encode("utf-8")).hexdigest()
     return None
 
 

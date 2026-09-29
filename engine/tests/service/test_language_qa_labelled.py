@@ -36,12 +36,7 @@ RULE_ALIASES = {"ta-irv/word-joining.orphan-syllable": "ta-irv/lexicon.known-spl
 # entry must start passing when its fix lands, and is then deleted here.
 # Round 2 (2026-09-29): the reviewer disagrees with the pack. Cleared by the
 # round-2 steps: roots (2), misspelling pairs (3), தான் (4), known splits (5).
-PENDING_PACK_CHANGES: set[tuple[str, str]] = {
-    ("positive", "word-joining-7"), ("positive", "word-joining-8"),
-    ("positive", "word-joining-9"), ("positive", "word-joining-11"), ("positive", "word-joining-12"),
-    ("positive", "word-joining-13"), ("positive", "word-joining-14"), ("positive", "word-joining-15"),
-    ("positive", "word-joining-16"), ("positive", "word-joining-17"),
-}
+PENDING_PACK_CHANGES: set[tuple[str, str]] = set()  # round 2 cleared by its steps 2-5 (2026-09-29)
 
 # False alarms the pack still raises, and no pack change can remove: the two
 # accusatives before a name (GEN 21:9 செய்கிறதை சாராள், GEN 35:4 அவைகளை சீகேம்).

@@ -40,7 +40,7 @@ from typing import Any
 
 from .tamil_distance import clusters, tamil_distance
 
-LEXICON_VERSION = "ta-irv-lexicon@3"  # 2: the 2026-09-28 review. 3: pair provenance, round 2 (2026-09-29)
+LEXICON_VERSION = "ta-irv-lexicon@4"  # 2: 2026-09-28. 3: pair provenance. 4: known splits (2026-09-29)
 # Build-time bounds (scripts/build_tamil_lexicon.py).
 MIN_LISTED_COUNT = 3   # a word seen fewer times is not listed: absent means rare
 COMMON_MIN = 6         # corpus count a suggestion needs
@@ -76,6 +76,8 @@ class Lexicon:
     protected: frozenset = frozenset()
     # wrong -> "human" | "ai-review"; a pair with none is ai-review.
     provenance: dict[str, str] = field(default_factory=dict)
+    # "word word" -> the one word it is (lexicon.known-split), human-confirmed only.
+    splits: dict[str, str] = field(default_factory=dict)
 
     def count(self, word: str) -> int:
         entry = self.forms.get(word)
@@ -101,7 +103,8 @@ def load_lexicon(path: Path | None = None) -> Lexicon | None:
                    common=list(data.get("common") or []), buckets=data.get("buckets") or {},
                    deprecated=data.get("deprecated") or {}, corpus=data.get("corpus") or {},
                    protected=frozenset(data.get("protected") or ()),
-                   provenance=dict(data.get("provenance") or {}))
+                   provenance=dict(data.get("provenance") or {}),
+                   splits=dict(data.get("splits") or {}))
 
 
 _LOADED: dict[str, Lexicon | None] = {}
@@ -197,4 +200,7 @@ def _finding(book, rule, word, chapter, verse, start, end, original, text_hash, 
 @functools.lru_cache(maxsize=1)
 def lexicon_fingerprint() -> str:
     lexicon = default_lexicon()
-    return f"{lexicon.version}:{len(lexicon.forms)}:{len(lexicon.deprecated)}" if lexicon else "none"
+    if not lexicon:
+        return "none"
+    splits = hashlib.sha1(json.dumps(lexicon.splits, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    return f"{lexicon.version}:{len(lexicon.forms)}:{len(lexicon.deprecated)}:{splits}"

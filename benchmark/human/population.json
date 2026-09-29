@@ -3,7 +3,7 @@
  "books": 66,
  "rules": {
   "common/punctuation.repeated": {
-   "definition": "a008f03613cc7677751bb3b7c86bae7c154da921",
+   "definition": "69470a8c7bfdd3cdf95315825844d6513200a295",
    "findings": [
     {
      "book": "jos",
@@ -16,7 +16,7 @@
    ]
   },
   "common/spacing.extra": {
-   "definition": "e2f299c6843370e8d02d20077c31f1c9b3377c0e",
+   "definition": "5e81911c543c32ec4d566f7d59c899156af35008",
    "findings": [
     {
      "book": "1ch",
@@ -749,7 +749,7 @@
    ]
   },
   "common/unicode.invisible": {
-   "definition": "6bacc433aa3bfb45e9223d9e4f8ce826238dc36d",
+   "definition": "76ca864eddb354846b646f116a6f360393235620",
    "findings": [
     {
      "book": "1ch",
@@ -758,6 +758,99 @@
      "start": 56,
      "end": 57,
      "text": "‌"
+    }
+   ]
+  },
+  "ta-irv/lexicon.known-split": {
+   "definition": "71b953ca71e1d1fcf4f09a20668b0b04067ab199",
+   "findings": [
+    {
+     "book": "1ch",
+     "chapter": "5",
+     "verse": "8",
+     "start": 92,
+     "end": 97,
+     "text": "நே போ"
+    },
+    {
+     "book": "deu",
+     "chapter": "34",
+     "verse": "1",
+     "start": 58,
+     "end": 63,
+     "text": "நே போ"
+    },
+    {
+     "book": "ezk",
+     "chapter": "13",
+     "verse": "5",
+     "start": 103,
+     "end": 109,
+     "text": "சு வரை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "22",
+     "verse": "30",
+     "start": 50,
+     "end": 56,
+     "text": "சு வரை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "41",
+     "verse": "5",
+     "start": 22,
+     "end": 28,
+     "text": "சு வரை"
+    },
+    {
+     "book": "isa",
+     "chapter": "46",
+     "verse": "1",
+     "start": 147,
+     "end": 152,
+     "text": "நே போ"
+    },
+    {
+     "book": "jer",
+     "chapter": "48",
+     "verse": "1",
+     "start": 171,
+     "end": 176,
+     "text": "நே போ"
+    },
+    {
+     "book": "neh",
+     "chapter": "7",
+     "verse": "33",
+     "start": 9,
+     "end": 14,
+     "text": "நே போ"
+    },
+    {
+     "book": "num",
+     "chapter": "32",
+     "verse": "3",
+     "start": 101,
+     "end": 106,
+     "text": "நே போ"
+    },
+    {
+     "book": "num",
+     "chapter": "32",
+     "verse": "38",
+     "start": 21,
+     "end": 26,
+     "text": "நே போ"
+    },
+    {
+     "book": "psa",
+     "chapter": "48",
+     "verse": "13",
+     "start": 54,
+     "end": 60,
+     "text": "சு வரை"
     }
    ]
   },

@@ -46,7 +46,9 @@ SIGNS = frozenset("ாிீுூெேைொோௌ்ௗ")
 # Inline on human-labelled precision only (DECISIONS.md 2026-09-28):
 # lexicon.known-misspelling was 43/43 in the 2026-09-28 review; spacing.extra
 # 23/23 over both rounds (2026-09-29).
-INLINE_RULES = frozenset({"terminology.deprecated-form", "lexicon.known-misspelling", "spacing.extra"})
+# lexicon.known-split: inline on its whole population (11 of 11 labelled, DECISIONS.md 2026-09-29).
+INLINE_RULES = frozenset({"terminology.deprecated-form", "lexicon.known-misspelling", "spacing.extra",
+                          "lexicon.known-split"})
 # Every Language QA finding carries this, and the frontend sends it back in the
 # `issue` of a verse.decide call. decide_verse keys on it to keep Language QA
 # decisions out of the review-progress rollup. Origin is never inferred from
@@ -160,6 +162,10 @@ RULES: dict[str, RuleMeta] = {
     # word); its reviewed false alarms are the lexicon's `protected` words.
     "lexicon.rare-near-common": RuleMeta("ta-irv", "lexicon", "typo", "medium", enabled=False),
     "lexicon.known-misspelling": RuleMeta("ta-irv", "lexicon", "typo", "high"),
+    # A word written apart that a reviewer confirmed is one word (the lexicon's
+    # `splits`: சு வரை -> சுவரை, நே போ -> நேபோ). Curated pairs fed by review
+    # rounds, not a heuristic (2026-09-29).
+    "lexicon.known-split": RuleMeta("ta-irv", "lexicon", "word-joining", "high"),
     # The project's approved proper nouns (house style, Phase 6.2).
     "name.minority-spelling": RuleMeta("project", "housestyle", "name", "medium"),
     "terminology.deprecated-form": RuleMeta("project", "housestyle", "termbase", "high"),
@@ -458,6 +464,10 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
         from .language_packs import default_pack  # loaded once, on first Tamil scan
         pack = default_pack()
     lists = lists or {}
+    splits: dict[str, str] = {}
+    if tamil and getattr(pack, "name", "") == "ta-irv":
+        from .language_packs.lexicon import default_lexicon  # loaded once, on first need
+        splits = getattr(default_lexicon(), "splits", None) or {}
 
     if not unicodedata.is_normalized("NFC", text):
         # Report a small exact span rather than copying an entire verse into a finding.
@@ -489,6 +499,12 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
             if previous and text[previous.end():word.start()].isspace():
                 prev_norm = unicodedata.normalize("NFC", previous.group())
                 word_norm = unicodedata.normalize("NFC", word.group())
+                joined = splits.get(f"{prev_norm} {word_norm}")
+                if joined:
+                    add("lexicon.known-split", previous.start(), word.end(),
+                        f'"{prev_norm} {word_norm}" is one word written apart; "{joined}" is expected. '
+                        f'Verify before editing.', "medium",
+                        [suggestion(joined, "lexicon", "A split a reviewer confirmed")])
                 if prev_norm == word_norm and RULES["tamil.repeated-word"].enabled:
                     add("tamil.repeated-word", *word.span(), "Adjacent repeated word; Tamil reduplication may be intentional.")
                 # The pack's word-pair rules (வல்லினம் and the rest). A fix is

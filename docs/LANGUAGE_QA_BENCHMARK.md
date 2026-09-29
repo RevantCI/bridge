@@ -89,7 +89,7 @@ in 61 labelled verses. `verses.jsonl` is built from the reviewer's copy.
 `verses.jsonl`.
 
 <!-- human-benchmark:start -->
-_Generated 2026-09-29T14:29:51 by scripts/language_qa_benchmark.py --human-labels benchmark/human._
+_Generated 2026-09-29T14:38:36 by scripts/language_qa_benchmark.py --human-labels benchmark/human._
 
 Pack version `language-qa-7+ta-irv@1.1.0`; 41 books; 818 label rows over 2 review round(s) (2026-09-28, 2026-09-29). The gate reads the combined numbers.
 
@@ -98,6 +98,7 @@ Pack version `language-qa-7+ta-irv@1.1.0`; 41 books; 818 label rows over 2 revie
 | `common/spacing.extra` | yes | 23 | 23 | 0 | 0 | 100.0% | 2026-09-28: 15/15; 2026-09-29: 8/8 | 0 | 0 |
 | `ta-irv/integrity.space-before-note-end` | no | 15 | 0 | 15 | 0 | 0.0% | 2026-09-28: 0/15 | 0 | 0 |
 | `ta-irv/lexicon.known-misspelling` | yes | 47 | 47 | 0 | 0 | 100.0% | 2026-09-28: 43/43; 2026-09-29: 4/4 | 0 | 4 |
+| `ta-irv/lexicon.known-split` | yes | 10 | 10 | 0 | 0 | 100.0% | 2026-09-29: 10/10 | 0 | 0 |
 | `ta-irv/lexicon.rare-near-common` | no | 0 | 0 | 0 | 0 | — | — | 0 | 21 |
 | `ta-irv/sandhi.clitic.fused` | no | 0 | 0 | 0 | 0 | — | — | 0 | 0 |
 | `ta-irv/sandhi.compound.direction` | yes | 25 | 25 | 0 | 0 | 100.0% | 2026-09-29: 25/25 | 0 | 0 |
@@ -116,18 +117,19 @@ Recall proxies over the contexts the pack skipped on purpose (a sample of the ab
 | Abstain class | Reviewer: missed | now flagged | Reviewer: correct skip | now flagged | House form | now flagged | Still-missed rate |
 |---|---|---|---|---|---|---|---|
 | A_ai_rootnoun | 1 | 0 | 29 | 1 | 0 | 0 | 3.3% |
-| B_ai_baremajority | 5 | 4 | 45 | 0 | 0 | 0 | 2.0% |
+| B_ai_baremajority | 5 | 5 | 45 | 0 | 0 | 0 | 0.0% |
 | D_rku_dative | 17 | 17 | 0 | 0 | 0 | 0 | 0.0% |
 | E_kku_exception | 5 | 5 | 7 | 0 | 0 | 0 | 0.0% |
 | G_marker | 2 | 2 | 0 | 0 | 2 | 0 | 0.0% |
 | H_demonstrative_houseform | 9 | 9 | 0 | 0 | 0 | 0 | 0.0% |
 | T_theva_abstain | 0 | 0 | 4 | 0 | 16 | 0 | 0.0% |
-| split | 10 | 0 | 13 | 0 | 0 | 0 | 43.5% |
+| split | 0 | 0 | 13 | 0 | 0 | 0 | 0.0% |
 
 Whole-population coverage for rules under 20 labels (inline rule (b): every finding in the collection confirmed, none wrong):
 
 - `common/punctuation.repeated`: 0 of 1 confirmed
 - `common/unicode.invisible`: 0 of 1 confirmed
+- `ta-irv/lexicon.known-split`: 11 of 11 confirmed
 - `ta-irv/sandhi.vallinam.wrong-consonant`: 1 of 1 confirmed
 - `ta-irv/typo.divine-name.dative-stem`: 4 of 13 confirmed
 - `ta-irv/typo.divine-name.vowel-drop`: 5 of 11 confirmed
