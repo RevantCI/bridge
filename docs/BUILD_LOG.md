@@ -9794,3 +9794,49 @@ B7 noted, also stay: `crossVerseSuggest.ts` now uses both.
 33 files; `npm run build` clean. The shell test was rewritten to assert the
 absence of any `tab`/`tablist` role and of the three removed labels, rather than
 deleted — the removal is the behaviour now.
+
+## 2026-09-29 — The alignment compatibility scan skips raw-import stubs (#99)
+
+`alignment_compatibility_scan` quarantined every alignment group whose
+`bottomWords` was `[]` as `LEGACY_EMPTY_BOTTOM_WORDS_AMBIGUOUS`. But that is
+exactly what a raw import writes for each not-yet-aligned source word —
+`blank_source_alignments` emits `{"topWords": [<one token>], "bottomWords": []}`
+per word — so a freshly imported book quarantined one row per word of a kind
+nothing ever reads. The maintainer answered the design question this issue held
+open: recognise the stub and skip it.
+
+**The skip is shape-exact, deliberately.** `_is_raw_import_stub` requires the
+group to have exactly the two keys, an empty bottom, and exactly one dict
+topWord. A real translationCore group that merely lost its target side, or one
+carrying a key we do not understand, is still something a human should see, so it
+keeps being quarantined. Matching on `bottomWords == []` alone would have
+silently swallowed those.
+
+**Measured on the real project**, not on a fixture:
+`hin_indian-revised-version_gen`'s `alignmentData` holds **20,588** groups of the
+stub shape, **0** other empty-bottom groups, and 23 groups with a target side. So
+the change drops 20,588 quarantine rows and loses nothing on that book.
+
+The scan reports `rawImportStubsSkipped` alongside the existing counters, so a
+skip is visible rather than merely absent.
+
+**Two existing tests asserted the old behaviour** and were updated rather than
+deleted, because the behaviour is what changed:
+`test_native_alignment_ambiguities_are_quarantined_without_rewrite` and
+`test_alignment_compatibility_scan_quarantines_in_one_batch` now build
+genuinely-ambiguous records (two topWords, empty bottom) so they still test
+quarantining and batching. `test_raw_import_stubs_are_skipped_but_real_empty_bottoms_are_not`
+is new and pins both halves of the rule.
+
+**Also in this commit, from the same issue.** `sidecar.rs` logged the `[trace]`
+per-phase timing lines that `project.open` and `import_project` emit on every
+successful call at `warn`, so a normal open read in the diagnostics panel as
+though something had gone wrong. They are `info` now.
+
+**Still open on #99**: verifying in a release build that a first open of a large
+unopened book (Exodus, Psalms) completes well inside 30 s, and accounting for the
+unexplained 43 s between the registry touch and the scan starting in the original
+trace. Both need an installed build, so neither is done here.
+
+**Verification.** `tests/semantic/test_passage_semantic_runtime.py` 32 passed;
+`cargo check` clean; `cargo test` 10 passed.

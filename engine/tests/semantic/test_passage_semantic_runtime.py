@@ -425,7 +425,14 @@ def test_native_alignment_ambiguities_are_quarantined_without_rewrite(
     payload["1"]["alignments"] = [
         {"topWords": [{"word": "א", "occurrence": 1, "occurrences": 1}], "bottomWords": [duplicate]},
         {"topWords": [{"word": "ב", "occurrence": 1, "occurrences": 1}], "bottomWords": [duplicate]},
-        {"topWords": [{"word": "ג", "occurrence": 1, "occurrences": 1}], "bottomWords": []},
+        # Two source words sharing one lost target side: a real translationCore
+        # group we cannot interpret, so it is still quarantined. (A single
+        # topWord with an empty bottom is the raw-import stub and is skipped --
+        # see test_raw_import_stubs_are_skipped_but_real_empty_bottoms_are_not.)
+        {"topWords": [
+            {"word": "ג", "occurrence": 1, "occurrences": 1},
+            {"word": "ד", "occurrence": 1, "occurrences": 1},
+        ], "bottomWords": []},
     ]
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     original = path.read_bytes()
@@ -434,6 +441,41 @@ def test_native_alignment_ambiguities_are_quarantined_without_rewrite(
     report = engine.passage_semantic_runtime.migration_report()
     assert report["quarantineByReason"]["DUPLICATE_ACTIVE_TOKEN_MEMBERSHIP"] == 1
     assert report["quarantineByReason"]["LEGACY_EMPTY_BOTTOM_WORDS_AMBIGUOUS"] == 1
+    assert path.read_bytes() == original
+
+
+def test_raw_import_stubs_are_skipped_but_real_empty_bottoms_are_not(
+    tmp_path: Path, stage4_project: Path,
+) -> None:
+    """#99: the raw importer writes one empty group per unaligned source word.
+
+    Quarantining those produced one row per word of the book (20,612 for
+    Genesis) recording nothing anyone reads. The skip is shape-exact, so a
+    genuine translationCore group that merely lost its target side still gets
+    quarantined.
+    """
+    path = stage4_project / ".apps" / "translationCore" / "alignmentData" / "rut" / "1.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["1"]["alignments"] = [
+        # Exactly what blank_source_alignments writes: skipped.
+        {"topWords": [{"word": "א", "occurrence": 1, "occurrences": 1}], "bottomWords": []},
+        {"topWords": [{"word": "ב", "occurrence": 1, "occurrences": 1}], "bottomWords": []},
+        # Same empty bottom, but carrying a key the stub never has: quarantined.
+        {"topWords": [{"word": "ג", "occurrence": 1, "occurrences": 1}],
+         "bottomWords": [], "alignmentIndex": 7},
+    ]
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    original = path.read_bytes()
+
+    engine = _engine(tmp_path)
+    _call(engine, "project.open", {"path": str(stage4_project)})
+    report = engine.passage_semantic_runtime.migration_report()
+
+    assert report["quarantineByReason"].get("LEGACY_EMPTY_BOTTOM_WORDS_AMBIGUOUS", 0) == 1
+    latest = report["runs"][-1]["report"]
+    assert latest["rawImportStubsSkipped"] == 2
+    assert latest["legacyEmptyBottomWords"] == 1
+    # Skipping is not rewriting: the file on disk is untouched either way.
     assert path.read_bytes() == original
 
 
@@ -482,8 +524,14 @@ def test_alignment_compatibility_scan_quarantines_in_one_batch(
     project.import; the scan must hand the repository one batch."""
     path = stage4_project / ".apps" / "translationCore" / "alignmentData" / "rut" / "1.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
+    # Two topWords, so these are genuinely-ambiguous records rather than
+    # raw-import stubs, which #99 now skips. What this test is about is that the
+    # scan hands the repository ONE batch however many there are.
     payload["1"]["alignments"] = [
-        {"topWords": [{"word": f"w{i}", "occurrence": 1, "occurrences": 1}], "bottomWords": []}
+        {"topWords": [
+            {"word": f"w{i}", "occurrence": 1, "occurrences": 1},
+            {"word": f"x{i}", "occurrence": 1, "occurrences": 1},
+        ], "bottomWords": []}
         for i in range(120)
     ]
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")

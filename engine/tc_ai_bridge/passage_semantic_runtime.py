@@ -85,6 +85,27 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_raw_import_stub(group: dict[str, Any]) -> bool:
+    """Is this the placeholder a raw import writes for an unaligned source word?
+
+    `original_language_resources.blank_source_alignments` writes exactly
+    ``{"topWords": [<one token>], "bottomWords": []}`` per source word, and
+    nothing else. That is a book nobody has aligned yet -- an ordinary state, not
+    a legacy record whose meaning cannot be recovered (#99).
+
+    Deliberately exact rather than "any empty bottomWords": a real
+    translationCore group that lost its target side, or one carrying extra keys
+    we do not understand, is still something a human should see, so it keeps
+    being quarantined. Matching loosely here would silently swallow those.
+    """
+    if set(group) != {"topWords", "bottomWords"}:
+        return False
+    if group.get("bottomWords") != []:
+        return False
+    top = group.get("topWords")
+    return isinstance(top, list) and len(top) == 1 and isinstance(top[0], dict)
+
+
 def _sha256_text(value: str) -> str:
     # One implementation, shared with Stage 8 persistence and Stage 9B
     # eligibility, so the same target verse string cannot hash differently
@@ -1066,13 +1087,11 @@ class PassageSemanticRuntime:
         report = {
             "filesScanned": len(paths), "groupsScanned": 0, "quarantined": 0,
             "legacyEmptyBottomWords": 0, "duplicateMembership": 0,
-            "malformedTokenIdentity": 0, "mutated": False,
+            "malformedTokenIdentity": 0, "rawImportStubsSkipped": 0, "mutated": False,
         }
-        # Collected and written in one transaction below. A raw import writes
-        # every unaligned source word as its own empty group, so this scan
-        # quarantines one record per word of the book -- 20,612 for Genesis --
-        # and one commit (one fsync) per record took 5m11s, past the import
-        # timeout. See quarantine_migration_records_bulk.
+        # Collected and written in one transaction below. See
+        # quarantine_migration_records_bulk: batching this was what brought a
+        # Genesis-sized scan back under the import timeout.
         pending: list[dict[str, Any]] = []
 
         def quarantine(*, source_kind: str, source_identity: str, reason_code: str, payload: dict[str, Any]) -> None:
@@ -1103,6 +1122,17 @@ class PassageSemanticRuntime:
                     report["groupsScanned"] += 1
                     bottom = group.get("bottomWords")
                     if bottom == []:
+                        # A raw import writes exactly this for every not-yet-aligned
+                        # source word (`blank_source_alignments`): one topWord, an
+                        # empty bottom, nothing else. That is the normal state of a
+                        # freshly imported book, not a legacy record whose meaning is
+                        # ambiguous -- so quarantining it produced one row per word of
+                        # the book (20,612 for Genesis) of a kind nothing ever reads.
+                        # Skip that exact shape; anything else with an empty bottom is
+                        # still a real translationCore record we cannot interpret.
+                        if _is_raw_import_stub(group):
+                            report["rawImportStubsSkipped"] += 1
+                            continue
                         report["legacyEmptyBottomWords"] += 1
                         report["quarantined"] += 1
                         quarantine(

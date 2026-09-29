@@ -362,8 +362,15 @@ impl EngineSidecar {
                         // "[unhandled]"); everything else is routine logging —
                         // still worth keeping for the diagnostics panel, just
                         // not worth alarming over.
+                        //
+                        // "[trace]" lines are the per-phase timings project.open
+                        // and import_project emit on every successful call (#99).
+                        // Logging a normal open as a warning made the diagnostics
+                        // panel read as though something had gone wrong each time.
                         let level = if line.contains("[unhandled]") || line.to_lowercase().contains("traceback") {
                             "error"
+                        } else if line.contains("[trace]") {
+                            "info"
                         } else {
                             "warn"
                         };
