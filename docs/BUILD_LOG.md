@@ -9765,3 +9765,32 @@ throwaway import of a small Titus USFM produced
 
 **Existing projects are left alone.** A project on disk records the build that
 actually imported it; rewriting that would falsify provenance. Nothing migrates.
+
+## 2026-09-29 — Alignment Review is the QA surface alone (#129)
+
+Audit B7 held `SemanticAlignmentMode.svelte`, `PassageAlignmentMode.svelte` and
+`VirtualPassageStream.svelte` "until the cross-verse alignment page is built and
+accepted; that page supersedes these views, so decide then". #116–#119 shipped in
+0.11.0, so the hold expired. The maintainer decided on 2026-09-29: remove them,
+and remove the Word tab with them.
+
+**What went.** The three components, their two test files, the `WordModeStub`
+the shell test used, and the whole tablist — one remaining mode needs no tabs, so
+`AlignmentReview.svelte` now mounts `AlignmentQaMode` directly and keeps only its
+title and Close button.
+
+**What deliberately stayed.** `AlignmentModal` — the translationCore-compatible
+editor the Word tab hosted — is untouched. The tab was a *second* entry point to
+it; it still opens as the Align Words popup from `ReviewPanel.svelte:744`. That
+matters beyond tidiness: the editor is the only thing that produces completed
+alignments, and completed alignments are the offline half of #146's cross-verse
+agreement gate. Removing it would have made the AI auto-link permanently
+impossible.
+
+`semanticLocationGetRange` and `targetSemanticGetRange`, the two client methods
+B7 noted, also stay: `crossVerseSuggest.ts` now uses both.
+
+**Verification.** `npm run check` 0 errors / 0 warnings; Vitest 447 passed across
+33 files; `npm run build` clean. The shell test was rewritten to assert the
+absence of any `tab`/`tablist` role and of the three removed labels, rather than
+deleted — the removal is the behaviour now.

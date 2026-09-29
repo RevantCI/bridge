@@ -26,69 +26,33 @@ vi.mock("../../api/bridgeClient", () => ({
   },
 }));
 
-// AlignmentModal reaches for Tauri and the project stores; Word mode is
-// covered by its own existing behaviour, and the shell only needs to prove
-// it mounts the real editor rather than a reimplementation.
-vi.mock("../AlignmentModal.svelte", async () => ({
-  default: (await import("./WordModeStub.svelte")).default,
-}));
-
 import AlignmentReview from "../AlignmentReview.svelte";
 
 describe("AlignmentReview shell", () => {
-  it("offers the four review modes as tabs", () => {
+  it("is the QA surface alone, with no mode tabs left to choose between", () => {
     render(AlignmentReview, { props: { chapter: "1", verse: "3" } });
-    const tabs = screen.getAllByRole("tab");
-    expect(tabs.map((tab) => tab.textContent?.trim().replace(/\s+.*/, ""))).toEqual([
-      "Word", "Semantic", "Passage", "QA",
-    ]);
+    // #129 removed Semantic, Passage and Word. One remaining mode needs no
+    // tablist, so there should be no tab or tabpanel roles at all.
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
   });
 
-  it("opens in QA mode, the Stage 9A work surface", () => {
+  it("does not offer the removed Semantic, Passage or Word modes", () => {
     render(AlignmentReview, { props: { chapter: "1", verse: "3" } });
-    expect(screen.getByRole("tab", { name: /QA/ })).toHaveAttribute("aria-selected", "true");
+    for (const label of [/^Semantic$/, /^Passage$/, /^Word$/]) {
+      expect(screen.queryByRole("button", { name: label })).not.toBeInTheDocument();
+    }
   });
 
-  it("mounts the existing word aligner rather than a replacement", async () => {
-    render(AlignmentReview, { props: { chapter: "1", verse: "3", mode: "word" } });
-    expect(screen.getByTestId("word-alignment-editor")).toBeInTheDocument();
+  it("still names itself, so the surface is identifiable", () => {
+    render(AlignmentReview, { props: { chapter: "1", verse: "3" } });
+    expect(screen.getByRole("heading", { name: /Alignment Review/i })).toBeInTheDocument();
   });
 
-  it("keeps the tablist a single tab stop and moves with arrow keys", async () => {
-    render(AlignmentReview, { props: { chapter: "1", verse: "3" } });
-    const qa = screen.getByRole("tab", { name: /QA/ });
-    expect(qa).toHaveAttribute("tabindex", "0");
-    expect(screen.getByRole("tab", { name: /Word/ })).toHaveAttribute("tabindex", "-1");
-
-    // Right from the last tab wraps to the first.
-    await fireEvent.keyDown(qa, { key: "ArrowRight" });
-    expect(screen.getByRole("tab", { name: /Word/ })).toHaveAttribute("aria-selected", "true");
-
-    await fireEvent.keyDown(screen.getByRole("tab", { name: /Word/ }), { key: "End" });
-    expect(screen.getByRole("tab", { name: /QA/ })).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("associates each panel with the tab that controls it", async () => {
-    render(AlignmentReview, { props: { chapter: "1", verse: "3" } });
-    const panel = screen.getByRole("tabpanel");
-    expect(panel).toHaveAttribute("aria-labelledby", "review-tab-qa");
-    expect(screen.getByRole("tab", { name: /QA/ })).toHaveAttribute(
-      "aria-controls", "review-panel-qa",
-    );
-  });
-
-  it("mounts Semantic and Passage modes, which follow the QA selection", async () => {
-    render(AlignmentReview, { props: { chapter: "1", verse: "3" } });
-
-    await fireEvent.click(screen.getByRole("tab", { name: /Semantic/ }));
-    // Nothing is selected in this test, so each mode says what it needs
-    // rather than rendering an empty frame.
-    expect(screen.getByText(/Select a possible issue/i)).toBeInTheDocument();
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "review-tab-semantic");
-
-    await fireEvent.click(screen.getByRole("tab", { name: /Passage/ }));
-    expect(screen.getByText(/to see its passage in context/i)).toBeInTheDocument();
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "review-tab-passage");
+  it("renders without a verse rather than failing", () => {
+    // Word mode was the only part that needed one; QA mode takes a null verse.
+    render(AlignmentReview, { props: { chapter: "1", verse: null } });
+    expect(screen.getByRole("heading", { name: /Alignment Review/i })).toBeInTheDocument();
   });
 
   it("closes on Escape and via the close button", async () => {
@@ -99,10 +63,5 @@ describe("AlignmentReview shell", () => {
 
     await fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(2);
-  });
-
-  it("asks for a verse rather than failing when Word mode has none", () => {
-    render(AlignmentReview, { props: { chapter: "1", verse: null, mode: "word" } });
-    expect(screen.getByText(/Select a verse to align its words/i)).toBeInTheDocument();
   });
 });

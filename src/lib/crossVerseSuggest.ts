@@ -36,8 +36,10 @@ export function versesForReferences(references: readonly string[]): { chapter: s
 }
 
 /** Verses of `chapter` that a location run's CROSS_VERSE relationships land
- *  in, found through the target tokens' displayed references (the same route
- *  PassageAlignmentMode takes: a relationship carries token ids, not verses). */
+ *  in, found through the target tokens' displayed references -- a relationship
+ *  carries token ids, not verses, so the inventory is the only route from one
+ *  to the other. (PassageAlignmentMode used to resolve them the same way; it
+ *  was removed in #129 and this is now the only caller of that route.) */
 export function crossVerseVersesFromRun(
   run: Pick<SemanticLocationRun, "relationships">,
   inventory: Pick<TargetSemanticInventory, "tokens"> | null,
