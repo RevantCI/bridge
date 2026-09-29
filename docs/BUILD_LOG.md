@@ -13196,3 +13196,103 @@ figure.
 - **Tests.** `test_known_splits_are_curated_pairs_found_in_the_verse`. The 10 split
   fixtures pass, and `PENDING_PACK_CHANGES` is empty. Only the 2 name residuals and
   the 1 combined fix remain as strict xfail. Service and jobs: 3510 passed.
+
+### Step 6 — re-measured after round 2
+
+**Human gate (combined, both rounds).** It passes.
+
+| Rule | Labelled | Human precision | Inline | On |
+|---|---|---|---|---|
+| `sandhi.vallinam.dative` | 87 | 100% (87/87) | yes | (a) |
+| `sandhi.vallinam.accusative` | 76 | 97.4% (74/76) | yes | (a) |
+| `sandhi.vallinam.demonstrative` | 24 | 100% | yes (new) | (a) |
+| `sandhi.vallinam.manner-adverb` | 21 | 100% | yes (new) | (a) |
+| `sandhi.compound.direction` | 25 | 100% | yes (new) | (a) |
+| `common/spacing.extra` | 23 | 100% | yes (new) | (a) |
+| `lexicon.known-misspelling` | 47 | 100% (human pairs only) | yes for human pairs | (a) |
+| `lexicon.known-split` | 10 | 100%; population 11/11 | yes (new) | (b) |
+| `typo.suffix.dropped-tha` | 2 | 100%; population 2/2 | yes (new) | (b) |
+| `sandhi.vallinam.wrong-consonant` | 1 | 100%; population 1/1 | yes (new) | (b) |
+| `typo.divine-name.vowel-drop` | 5 | 100%; population 5/11 | no, until labelled | — |
+| `typo.divine-name.dative-stem` | 4 | 100%; population 4/13 | no, until labelled | — |
+| `sandhi.clitic.fused` | — | disabled (தான் resolved in the வல்லினம் rules) | — | — |
+
+Every fixture passes, except three strict, documented xfails: the two accusatives before
+a name, and the 1CH 23:5 fix that combines two findings.
+
+**The same text, round 1 final (de6feef) against round 2.** Language QA alone, 66 books,
+D: copy.
+
+| Rule | Round 1 final | Round 2 | Change | Inline before → after |
+|---|---|---|---|---|
+| `ta-irv/sandhi.vallinam.accusative` | 1000 | 999 | -1 | 1000 → 999 |
+| `ta-irv/sandhi.vallinam.dative` | 789 | 790 | +1 | 789 → 790 |
+| `ta-irv/integrity.space-before-note-end` | 224 | 224 | +0 | 0 → 0 |
+| `ta-irv/sandhi.vallinam.demonstrative` | 210 | 210 | +0 | 0 → 210 |
+| `ta-irv/lexicon.known-misspelling` | 160 | 185 | +25 | 160 → 58 |
+| `ta-irv/sandhi.compound.direction` | 92 | 92 | +0 | 0 → 92 |
+| `common/spacing.extra` | 91 | 91 | +0 | 0 → 91 |
+| `ta-irv/sandhi.vallinam.manner-adverb` | 22 | 22 | +0 | 0 → 22 |
+| `ta-irv/typo.divine-name.dative-stem` | 13 | 13 | +0 | 0 → 0 |
+| `ta-irv/typo.divine-name.vowel-drop` | 11 | 11 | +0 | 0 → 0 |
+| `ta-irv/lexicon.known-split` | 0 | 11 | +11 | 0 → 11 |
+| `ta-irv/sandhi.clitic.fused` | 6 | 0 | -6 | 0 → 0 |
+| `ta-irv/typo.suffix.dropped-tha` | 2 | 2 | +0 | 0 → 2 |
+| `ta-irv/sandhi.vallinam.wrong-consonant` | 1 | 1 | +0 | 0 → 1 |
+| `common/unicode.invisible` | 1 | 1 | +0 | 0 → 0 |
+| `common/punctuation.repeated` | 1 | 1 | +0 | 0 → 0 |
+| **Total** | **2623** | **2653** | **+30** | **1949 → 2276** |
+
+- **Inline marks rise by 327**, from 1,949 to 2,276:
+  - demonstrative +210, direction +92, spacing +91, manner-adverb +22, known-split +11;
+  - known-misspelling falls from 160 to 58, because only human-confirmed pairs are
+    drawn now.
+- **The total rises by 30** where the brief expected a small fall. That is +25
+  known-misspelling findings from the 30 ai-review pairs in the five AI reports added to
+  the review folder on 2026-09-29. They are panel-only, "awaits confirmation".
+  Without those 25 the total would be 2,628, or +5 on 2,623: the 11 new known splits outweigh the 6 clitic findings removed.
+- **Removed:** clitic.fused's 6 findings.
+- **தான்:** the four clitic findings already written `Xத் தான்` are now correctly
+  silent. Only two bare `X தான்` exist in the Bible, ACT 7:46 and 1CH 23:5, both
+  already labelled.
+
+**The whole-Bible collection run.** Local + greekroom + languageQa, on the D: copy:
+- **Result:** 66/66 succeeded; import 7.4 s.
+- **Wall time:** 4,447.9 s.
+- **Language QA findings:** 2,653, exactly the same-text total.
+- **Final stage:** house-style propagation available, 0 proposals.
+
+The wall time is 12 min above round 1's 3,745.9 s, but the machine is slower today. The
+unchanged pre-task engine's Psalms pass rose from 2.52 s to 2.94–3.26 s. The clean
+comparison is the Psalms pass run alternately in one session:
+
+| | Round 1 final | Round 2 |
+|---|---|---|
+| Cold wall | 2.91–3.04 s | 3.03–3.14 s (≈ +2%, within the spread) |
+| Warm reopen | 0.45–0.55 s | 0.43–0.46 s |
+| Peak RSS | 61.4 MB | 68.7 MB (+7 MB) |
+
+The pack load, which now holds 523 examples, is 256 ms, once per process.
+
+**Housekeeping.** The measurement run registered one throwaway project (`coll3`) in the
+workspace registry. It was removed, and the registry was backed up first.
+
+**Next sample, for the reviewer.**
+- The 6 + 9 unlabelled divine-name findings: vowel-drop 6 of 11 and dative-stem 9 of 13.
+  Labelling them lets rule (b) put both inline.
+- The two unsure ai-review pairs: ஐபிரத் → ஐபிராத் (name spelling) and மகிழுகிறதுபோல
+  → மகிழ்கிறதுபோல (verb stem).
+- 20 or more of the 135 ai-review misspelling pairs. That is what stands between them
+  and `human` provenance, including the 30 from the five new reports.
+- தான்: no new bare `X தான்` findings exist beyond the two already labelled. The batch
+  can only come from future text.
+
+**Final gates (2026-09-29).**
+- **Full engine suite** (`-n auto`, slow tests included): 4637 passed, 3 xfailed, 1
+  failed. The failure was `test_unreadable_chapter_is_incomplete_not_clean`, a single
+  parameter, which waits on a background scan with a timeout.
+  - It then passed in isolation, and 15 of 15 times under `-n auto`.
+  - Round 2 does not touch its path.
+  - Recorded as a timing flake under a 12-minute parallel load, not fixed here.
+- **Frontend:** svelte-check 0/0; Vitest 556 passed; build ok.
+- **Human gate:** pass.
