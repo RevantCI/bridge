@@ -78,17 +78,18 @@ HUMAN_START, HUMAN_END = "<!-- human-benchmark:start -->", "<!-- human-benchmark
 def human_main(args: argparse.Namespace) -> int:
     """--human-labels: precision against the reviewer's verdicts. Needs no IRV
     corpus (the labelled verses are committed beside the labels), so CI runs it."""
-    labels = bench.load_human_labels(args.human_labels)
-    verses_path = bench.human_verses_path(args.human_labels)
+    # A labels file is one round; a folder (benchmark/human) is every round in it.
     if args.write_human_verses:
         if not args.irv_dir:
             raise SystemExit("--write-human-verses needs --irv-dir")
-        rows = bench.human_label_verses(labels, args.irv_dir)
-        with verses_path.open("w", encoding="utf-8", newline="\n") as handle:
-            for row in rows:
-                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        print(f"{len(rows)} verses written to {verses_path}", file=sys.stderr)
-    verses = bench.load_human_verses(verses_path)
+        for file in bench.human_label_files(args.human_labels):
+            rows = bench.human_label_verses(bench.load_human_labels(file), args.irv_dir)
+            verses_path = bench.human_verses_path(file)
+            with verses_path.open("w", encoding="utf-8", newline="\n") as handle:
+                for row in rows:
+                    handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            print(f"{len(rows)} verses written to {verses_path}", file=sys.stderr)
+    labels, verses = bench.load_human_rounds(args.human_labels)
     scans = {book: bench.scan_book(book, chapters) for book, chapters in verses.items()}
     result = bench.human_score(labels, scans, verses)
     result["generatedAt"] = dt.datetime.now().isoformat(timespec="seconds")

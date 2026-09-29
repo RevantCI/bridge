@@ -260,6 +260,35 @@ def test_the_committed_human_labels_anchor_in_their_verses():
         == ["R0102"]
 
 
+def test_every_round_anchors_and_the_rounds_load_together():
+    """Round 2 (2026-09-29): 220 new items from all 66 books, none seen in
+    round 1. Loaded together, every flagged or split label still anchors."""
+    labels, verses = bench.load_human_rounds(REPO_ROOT / "benchmark" / "human")
+    rounds = {}
+    for label in labels:
+        rounds[label["round"]] = rounds.get(label["round"], 0) + 1
+    assert rounds == {"2026-09-28": 598, "2026-09-29": 220}
+    for label in labels:
+        if label["kind"] in {"flagged", "split"}:
+            text = verses[label["book"]][label["ch"]][label["v"]]
+            assert bench.nfc(text[label["start"]:label["end"]]) == bench.nfc(label["original"]), \
+                (label["round"], label["id"])
+
+
+def test_the_human_gate_compares_each_round_with_itself():
+    """A new round changes the combined denominator (dative 46/46 then
+    85/86): not a regression. Round 1 falling is."""
+    result = {"mismatches": [], "rounds": ["r1", "r2"], "rules": {"x/rule": {
+        "inline": False, "labelled": 86, "precision": 0.988, "lost_tp": 0,
+        "rounds": {"r1": {"precision": 1.0}, "r2": {"precision": 0.975}}}}}
+    baseline = {"rounds": ["r1"], "rules": {"x/rule": {"precision": 1.0, "rounds": {"r1": {"precision": 1.0}}}}}
+    assert bench.human_gate(result, baseline) == []
+    # A baseline from before rounds holds its first round's numbers.
+    assert bench.human_gate(result, {"rules": {"x/rule": {"precision": 1.0}}}) == []
+    result["rules"]["x/rule"]["rounds"]["r1"]["precision"] = 0.97
+    assert bench.human_gate(result, baseline) == ["x/rule human precision in round r1 fell from 100.0% to 97.0%"]
+
+
 def test_baseline_holds_numbers_only(benchmark):
     _, result, _ = benchmark
     text = json.dumps(bench.baseline_of(result), ensure_ascii=False)
@@ -318,7 +347,7 @@ def test_cli_gate_exit_code_and_outputs(tmp_path):
 @pytest.mark.subprocess
 def test_cli_human_gate_runs_on_the_committed_labels_without_the_corpus():
     """What CI runs: no --irv-dir, the verses come from verses.jsonl."""
-    labels = REPO_ROOT / "benchmark" / "human" / "2026-09-28" / "human_labels.jsonl"
+    labels = REPO_ROOT / "benchmark" / "human"  # every round, as CI passes it
     command = [sys.executable, str(REPO_ROOT / "scripts" / "language_qa_benchmark.py"),
                "--human-labels", str(labels), "--gate"]
     gated = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")

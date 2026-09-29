@@ -265,7 +265,7 @@ jobs:
         # which stays local and diagnostic (DECISIONS.md 2026-09-28). ~10 s.
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python ../scripts/language_qa_benchmark.py --human-labels ../benchmark/human/2026-09-28/human_labels.jsonl --gate
+        run: python ../scripts/language_qa_benchmark.py --human-labels ../benchmark/human --gate
 
   # ---------------------------------------------------------------------------
   # Rust / Tauri shell.

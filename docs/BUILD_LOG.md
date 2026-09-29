@@ -13043,3 +13043,49 @@ figure.
 - svelte-check 0/0; Vitest 556 passed; `npm run build` ok.
 - Human gate pass. Latency gate pass.
 - Rust untouched, so cargo was not re-run in this task.
+
+## 2026-09-29 — Language QA, human-review round 2: promote, split the misspelling map, resolve தான், known splits (#169)
+
+**The data.** The same reviewer, Yesu Selva Benz, labelled 220 items on 2026-09-29.
+- **Scope.** They come from all 66 books of `D:\Claude Lab\IRV Tamil`, and none was seen
+  in round 1.
+- **Answers.** All 220 were answered, with a reason on every row.
+- **Where.** Committed as data in `benchmark/human/2026-09-29/`, with `verses.jsonl`
+  (211 verses from the D: copy).
+
+### Step 1 — merge round 2 into the benchmark
+
+- **Reading the rounds together.** `language_qa_benchmark.load_human_rounds()` reads every
+  `benchmark/human/*/human_labels.jsonl` and tags each row with its round. It refuses a
+  verse whose text differs between rounds.
+- **Scoring.** `human_score()` scores the new `split` rows (SPLIT = tp, WORD or
+  PARTICLE = fp, when a finding covers the span; otherwise a recall proxy) and reports
+  every rule per round and combined.
+- **The gate: inline and regression read different numbers.**
+  - Inline reads the combined figure.
+  - Regression is judged per round: a round may not fall below its own baseline.
+  - With round 2 added, the old single-round baseline would have "failed" dative
+    (100% → 98.8%) and known-misspelling (100% → 92.2%). Those are new data, not a
+    regression; round 1 is unchanged.
+  - `benchmark/human/baseline.json` now records rounds.
+  - CI passes `--human-labels ../benchmark/human`.
+- **Combined numbers.** They match the brief exactly:
+  - dative 85/86;
+  - accusative 74/77;
+  - demonstrative 24/24;
+  - manner-adverb 21/21;
+  - direction 25/25;
+  - spacing.extra 23/23;
+  - known-misspelling 47/51 (round 2: 4/8).
+
+  All 818 rows anchor.
+- **Fixtures.** Round-2 fixtures are appended (sandhi +165, typo +18, punctuation +8), and
+  `word-joining.jsonl` is a new bucket (23 rows). The labelled test reads it:
+  - the round-2 origin tag "(human review round 2)" counts as human;
+  - the converter's candidate rule name `word-joining.orphan-syllable` is an alias of
+    `lexicon.known-split`.
+- **18 strict pending cases**, each the pack disagreeing with the reviewer:
+  - 2 root nouns (step 2);
+  - 4 AI misspelling pairs (step 3);
+  - 2 தான் cases (step 4);
+  - 10 splits (step 5).

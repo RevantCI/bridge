@@ -502,10 +502,17 @@ HUMAN_EXCLUDED = {None, "", "UNSURE"}   # unanswered or "unsure": never scored
 _COUNTS = ("labelled", "tp", "fp", "house", "lost_tp", "removed_fp", "removed_house", "reattributed", "excluded")
 
 
+# Split rows (round 2): SPLIT is a real split to join; WORD and PARTICLE are a
+# word or an interjection (சீ என்று) that must not be joined.
+SPLIT_VERDICTS = {"SPLIT": "tp", "WORD": "fp", "PARTICLE": "fp"}
+
+
 def human_verdict(code: str | None) -> str | None:
     """"tp" | "fp" | "house" for a scored verdict; None when excluded."""
     if code in HUMAN_EXCLUDED:
         return None
+    if code in SPLIT_VERDICTS:
+        return SPLIT_VERDICTS[code]
     if code.startswith("TP"):
         return "tp"
     if code.startswith("FP"):
@@ -518,6 +525,32 @@ def human_verdict(code: str | None) -> str | None:
 def load_human_labels(path: Path) -> list[dict[str, Any]]:
     with Path(path).open(encoding="utf-8") as handle:
         return [json.loads(line) for line in handle if line.strip()]
+
+
+def human_label_files(path: Path) -> list[Path]:
+    """One round's labels (a file), or every round under a folder
+    (benchmark/human/<date>/human_labels.jsonl), oldest first."""
+    path = Path(path)
+    return [path] if path.is_file() else sorted(path.glob("*/human_labels.jsonl"))
+
+
+def load_human_rounds(path: Path) -> tuple[list[dict[str, Any]], dict[str, dict[str, dict[str, str]]]]:
+    """(labels tagged with their round, verses of every round). A round is
+    the labels file's folder name (its review date). Verse text is the same
+    IRV copy in every round; a verse labelled twice must read the same."""
+    labels: list[dict[str, Any]] = []
+    verses: dict[str, dict[str, dict[str, str]]] = defaultdict(lambda: defaultdict(dict))
+    for file in human_label_files(path):
+        round_name = file.parent.name
+        labels += [{**label, "round": round_name} for label in load_human_labels(file)]
+        for book, chapters in load_human_verses(human_verses_path(file)).items():
+            for chapter, items in chapters.items():
+                for verse, text in items.items():
+                    known = verses[book][chapter].get(verse)
+                    if known is not None and known != text:
+                        raise ValueError(f"{book.upper()} {chapter}:{verse} differs between rounds")
+                    verses[book][chapter][verse] = text
+    return labels, {book: dict(chapters) for book, chapters in verses.items()}
 
 
 def human_verses_path(labels_path: Path) -> Path:
@@ -587,18 +620,36 @@ def human_score(labels: list[dict[str, Any]], scans: dict[str, dict[str, Any]],
         for finding in scan["findings"]:
             findings_at[(book, finding["chapter"], finding["verse"])].append(finding)
     rules: dict[str, Counter] = defaultdict(Counter)
+    per_round: dict[str, dict[str, Counter]] = defaultdict(lambda: defaultdict(Counter))
     proxies: dict[str, Counter] = defaultdict(Counter)
     mismatches: list[str] = []
     for label in labels:
         kind = label.get("kind")
-        if kind not in {"flagged", "abstained"}:
+        if kind not in {"flagged", "abstained", "split"}:
             continue  # word rows (sheet 3) judge list membership, not a finding
-        where = f"{label['id']} {label['book'].upper()} {label['ch']}:{label['v']}"
+        round_name = label.get("round", "")
+        where = f"{round_name + ' ' if round_name else ''}{label['id']} {label['book'].upper()} {label['ch']}:{label['v']}"
         text = verses.get(label["book"], {}).get(label["ch"], {}).get(label["v"])
         if text is None:
             mismatches.append(f"{where}: verse not available")
             continue
         here = findings_at.get((label["book"], label["ch"], label["v"]), [])
+        if kind == "split":
+            # A candidate join the reviewer judged. Scored like a flagged item
+            # when a finding covers exactly its span; otherwise a recall proxy.
+            verdict = human_verdict(label.get("verdict"))
+            span = (label.get("start", -1), label.get("end", -1))
+            hit = next((f for f in here if (f["start"], f["end"]) == span), None)
+            if verdict is None:
+                proxies["split"]["excluded"] += 1
+            elif hit is not None:
+                for stats in (rules[hit["ruleId"]], per_round[hit["ruleId"]][round_name]):
+                    stats["labelled"] += 1
+                    stats[verdict] += 1
+            else:
+                stats = proxies["split"]
+                stats["missed" if verdict == "tp" else "correct_skip"] += 1
+            continue
         if kind == "flagged":
             verdict = human_verdict(label.get("verdict"))
             if verdict is None:
@@ -613,11 +664,11 @@ def human_score(labels: list[dict[str, Any]], scans: dict[str, dict[str, Any]],
             if hit is None:
                 rules[label["rule"]][{"tp": "lost_tp", "fp": "removed_fp", "house": "removed_house"}[verdict]] += 1
                 continue
-            stats = rules[hit["ruleId"]]
-            stats["labelled"] += 1
-            stats[verdict] += 1
+            for stats in (rules[hit["ruleId"]], per_round[hit["ruleId"]][round_name]):
+                stats["labelled"] += 1
+                stats[verdict] += 1
             if hit["ruleId"] != label["rule"]:
-                stats["reattributed"] += 1
+                rules[hit["ruleId"]]["reattributed"] += 1
         else:
             key = {"MISSED": "missed", "CORRECT_SKIP": "correct_skip", "HOUSE": "house"}.get(label.get("verdict"))
             stats = proxies[label.get("cls") or "unknown"]
@@ -640,7 +691,10 @@ def human_score(labels: list[dict[str, Any]], scans: dict[str, dict[str, Any]],
     rules_out = {}
     for rule_id, s in sorted(rules.items()):
         rules_out[rule_id] = {**{k: s.get(k, 0) for k in _COUNTS},
-                              "precision": ratio(s["tp"], s["tp"] + s["fp"]), "inline": rule_id in inline}
+                              "precision": ratio(s["tp"], s["tp"] + s["fp"]), "inline": rule_id in inline,
+                              "rounds": {name: {"labelled": r["labelled"], "tp": r["tp"], "fp": r["fp"],
+                                                "precision": ratio(r["tp"], r["tp"] + r["fp"])}
+                                         for name, r in sorted(per_round.get(rule_id, {}).items())}}
     proxies_out = {}
     for cls, s in sorted(proxies.items()):
         proxies_out[cls] = {
@@ -649,7 +703,8 @@ def human_score(labels: list[dict[str, Any]], scans: dict[str, dict[str, Any]],
             "still_missed_rate": ratio(s["missed"] - s["missed_now_flagged"],
                                        s["missed"] + s["correct_skip"] + s["house"]),
         }
-    return {"packVersion": pack_version_label(), "labels": len(labels),
+    rounds = sorted({label.get("round", "") for label in labels} - {""})
+    return {"packVersion": pack_version_label(), "labels": len(labels), "rounds": rounds,
             "books": sorted(scans), "rules": rules_out, "recallProxies": proxies_out,
             "mismatches": mismatches}
 
@@ -670,7 +725,10 @@ def human_gate(result: dict[str, Any], baseline: dict[str, Any] | None) -> list[
     """Failures, empty when the gate passes:
     - an inline rule below HUMAN_INLINE_MIN_PRECISION, or with fewer than
       HUMAN_INLINE_MIN_LABELLED labelled findings;
-    - a rule whose human precision fell below the committed baseline;
+    - a rule whose human precision in a review round fell below that
+      round's committed baseline. Each round is compared with itself: a new
+      round changes the combined denominator, which is not a regression, so
+      inline reads the combined figure and regression reads the rounds;
     - a human-confirmed finding the engine no longer produces;
     - a label that no longer anchors in its verse (the text or the offsets
       moved, so the score would shrink without anyone noticing)."""
@@ -686,31 +744,50 @@ def human_gate(result: dict[str, Any], baseline: dict[str, Any] | None) -> list[
                                 f"(< {_pct(HUMAN_INLINE_MIN_PRECISION)})")
         if s["lost_tp"]:
             failures.append(f"{rule_id}: {s['lost_tp']} human-confirmed finding(s) no longer produced")
-        before = (baseline or {}).get("rules", {}).get(rule_id, {}).get("precision")
-        if before is not None and precision is not None and precision < before:
-            failures.append(f"{rule_id} human precision fell from {_pct(before)} to {_pct(precision)}")
+        recorded = (baseline or {}).get("rules", {}).get(rule_id, {})
+        if not result.get("rounds"):
+            # Unnamed labels (one round): compare the combined figure.
+            before = recorded.get("precision")
+            if before is not None and precision is not None and precision < before:
+                failures.append(f"{rule_id} human precision fell from {_pct(before)} to {_pct(precision)}")
+            continue
+        before_rounds = recorded.get("rounds")
+        if not before_rounds and recorded.get("precision") is not None:
+            # A baseline from before rounds existed holds its first round only.
+            first = ((baseline or {}).get("rounds") or result["rounds"])[0]
+            before_rounds = {first: {"precision": recorded["precision"]}}
+        for name, before in (before_rounds or {}).items():
+            now = (s.get("rounds") or {}).get(name, {}).get("precision")
+            if before.get("precision") is not None and now is not None and now < before["precision"]:
+                failures.append(f"{rule_id} human precision in round {name} fell from "
+                                f"{_pct(before['precision'])} to {_pct(now)}")
     return failures
 
 
 def human_baseline_of(result: dict[str, Any]) -> dict[str, Any]:
     keep = ("labelled", "tp", "fp", "house", "precision", "inline")
-    return {"packVersion": result["packVersion"], "books": result["books"],
-            "rules": {rule: {k: s.get(k) for k in keep} for rule, s in result["rules"].items()},
+    return {"packVersion": result["packVersion"], "rounds": result.get("rounds") or [],
+            "books": result["books"],
+            "rules": {rule: {**{k: s.get(k) for k in keep}, "rounds": s.get("rounds") or {}}
+                      for rule, s in result["rules"].items()},
             "recallProxies": {cls: {k: s.get(k) for k in ("missed", "missed_now_flagged", "still_missed_rate")}
                               for cls, s in result["recallProxies"].items()}}
 
 
 def human_markdown(result: dict[str, Any]) -> str:
     lines = [
-        f"Pack version `{result['packVersion']}`; books: {', '.join(b.upper() for b in result['books'])}; "
-        f"{result['labels']} label rows.",
+        f"Pack version `{result['packVersion']}`; {len(result['books'])} books; "
+        f"{result['labels']} label rows over {len(result.get('rounds') or [1])} review round(s) "
+        f"({', '.join(result.get('rounds') or [])}). The gate reads the combined numbers.",
         "",
-        "| Rule | Inline | Labelled | TP | FP | House form | Human precision | Lost TP | FP no longer produced |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| Rule | Inline | Labelled | TP | FP | House form | Human precision (combined) | Per round (TP/labelled) "
+        "| Lost TP | FP no longer produced |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for rule_id, s in result["rules"].items():
+        rounds = "; ".join(f"{name}: {r['tp']}/{r['labelled']}" for name, r in (s.get("rounds") or {}).items()) or "—"
         lines.append(f"| `{rule_id}` | {'yes' if s['inline'] else 'no'} | {s['labelled']} | {s['tp']} | {s['fp']} "
-                     f"| {s['house']} | {_pct(s['precision'])} | {s['lost_tp']} | {s['removed_fp']} |")
+                     f"| {s['house']} | {_pct(s['precision'])} | {rounds} | {s['lost_tp']} | {s['removed_fp']} |")
     lines += [
         "",
         "Recall proxies over the contexts the pack skipped on purpose (a sample of the abstains, not of "

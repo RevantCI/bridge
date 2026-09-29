@@ -1,18 +1,74 @@
 {
  "packVersion": "language-qa-7+ta-irv@1.1.0",
+ "rounds": [
+  "2026-09-28",
+  "2026-09-29"
+ ],
  "books": [
+  "1ch",
+  "1ki",
+  "1pe",
+  "1sa",
+  "1ti",
+  "2ch",
+  "2co",
+  "2ki",
+  "2sa",
+  "act",
+  "amo",
+  "dan",
+  "deu",
+  "ecc",
+  "est",
+  "exo",
+  "ezk",
+  "ezr",
   "gen",
+  "heb",
+  "hos",
+  "isa",
+  "jas",
+  "jdg",
+  "jer",
   "jhn",
-  "psa"
+  "job",
+  "jon",
+  "jos",
+  "lam",
+  "lev",
+  "luk",
+  "mat",
+  "mrk",
+  "nam",
+  "neh",
+  "num",
+  "pro",
+  "psa",
+  "rev",
+  "zec"
  ],
  "rules": {
   "common/spacing.extra": {
-   "labelled": 15,
-   "tp": 15,
+   "labelled": 23,
+   "tp": 23,
    "fp": 0,
    "house": 0,
    "precision": 1.0,
-   "inline": false
+   "inline": false,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 15,
+     "tp": 15,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 8,
+     "tp": 8,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
   },
   "ta-irv/integrity.space-before-note-end": {
    "labelled": 15,
@@ -20,15 +76,37 @@
    "fp": 15,
    "house": 0,
    "precision": 0.0,
-   "inline": false
+   "inline": false,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 15,
+     "tp": 0,
+     "fp": 15,
+     "precision": 0.0
+    }
+   }
   },
   "ta-irv/lexicon.known-misspelling": {
-   "labelled": 43,
-   "tp": 43,
-   "fp": 0,
+   "labelled": 51,
+   "tp": 47,
+   "fp": 4,
    "house": 0,
-   "precision": 1.0,
-   "inline": true
+   "precision": 0.9216,
+   "inline": true,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 43,
+     "tp": 43,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 8,
+     "tp": 4,
+     "fp": 4,
+     "precision": 0.5
+    }
+   }
   },
   "ta-irv/lexicon.rare-near-common": {
    "labelled": 0,
@@ -36,39 +114,144 @@
    "fp": 0,
    "house": 0,
    "precision": null,
-   "inline": false
+   "inline": false,
+   "rounds": {}
+  },
+  "ta-irv/sandhi.clitic.fused": {
+   "labelled": 2,
+   "tp": 2,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 2,
+     "tp": 2,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/sandhi.compound.direction": {
+   "labelled": 25,
+   "tp": 25,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 25,
+     "tp": 25,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
   },
   "ta-irv/sandhi.vallinam.accusative": {
-   "labelled": 37,
-   "tp": 35,
-   "fp": 2,
+   "labelled": 77,
+   "tp": 74,
+   "fp": 3,
    "house": 0,
-   "precision": 0.9459,
-   "inline": true
+   "precision": 0.961,
+   "inline": true,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 37,
+     "tp": 35,
+     "fp": 2,
+     "precision": 0.9459
+    },
+    "2026-09-29": {
+     "labelled": 40,
+     "tp": 39,
+     "fp": 1,
+     "precision": 0.975
+    }
+   }
   },
   "ta-irv/sandhi.vallinam.dative": {
-   "labelled": 46,
-   "tp": 46,
-   "fp": 0,
+   "labelled": 86,
+   "tp": 85,
+   "fp": 1,
    "house": 0,
-   "precision": 1.0,
-   "inline": true
+   "precision": 0.9884,
+   "inline": true,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 46,
+     "tp": 46,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 40,
+     "tp": 39,
+     "fp": 1,
+     "precision": 0.975
+    }
+   }
   },
   "ta-irv/sandhi.vallinam.demonstrative": {
-   "labelled": 7,
-   "tp": 7,
+   "labelled": 24,
+   "tp": 24,
    "fp": 0,
    "house": 0,
    "precision": 1.0,
-   "inline": false
+   "inline": false,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 7,
+     "tp": 7,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 17,
+     "tp": 17,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
   },
   "ta-irv/sandhi.vallinam.manner-adverb": {
+   "labelled": 21,
+   "tp": 21,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 1,
+     "tp": 1,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 20,
+     "tp": 20,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/sandhi.vallinam.wrong-consonant": {
    "labelled": 1,
    "tp": 1,
    "fp": 0,
    "house": 0,
    "precision": 1.0,
-   "inline": false
+   "inline": false,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 1,
+     "tp": 1,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
   },
   "ta-irv/tamil.repeated-word": {
    "labelled": 0,
@@ -76,15 +259,62 @@
    "fp": 0,
    "house": 0,
    "precision": null,
-   "inline": false
+   "inline": false,
+   "rounds": {}
   },
-  "ta-irv/typo.divine-name.vowel-drop": {
-   "labelled": 1,
-   "tp": 1,
+  "ta-irv/typo.divine-name.dative-stem": {
+   "labelled": 4,
+   "tp": 4,
    "fp": 0,
    "house": 0,
    "precision": 1.0,
-   "inline": false
+   "inline": false,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 4,
+     "tp": 4,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/typo.divine-name.vowel-drop": {
+   "labelled": 5,
+   "tp": 5,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 1,
+     "tp": 1,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 4,
+     "tp": 4,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/typo.suffix.dropped-tha": {
+   "labelled": 2,
+   "tp": 2,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 2,
+     "tp": 2,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
   }
  },
  "recallProxies": {
@@ -117,6 +347,16 @@
    "missed": 9,
    "missed_now_flagged": 9,
    "still_missed_rate": 0.0
+  },
+  "T_theva_abstain": {
+   "missed": 0,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 0.0
+  },
+  "split": {
+   "missed": 10,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 0.4348
   }
  }
 }

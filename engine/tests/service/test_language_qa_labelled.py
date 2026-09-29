@@ -24,12 +24,26 @@ from tc_ai_bridge.language_qa_benchmark import BUCKETS, CATEGORY_BUCKETS
 from tests.support.paths import REPO_ROOT
 
 LABELLED = REPO_ROOT / "engine" / "tests" / "fixtures" / "language_qa" / "labelled"
+# The review buckets, plus the human review's split words (round 2).
+FIXTURE_BUCKETS = (*BUCKETS, "word-joining")
+# The round-2 converter named the split-word candidate rule; the curated rule
+# that implements it is lexicon.known-split (LANGUAGE_QA_PLAN.md).
+RULE_ALIASES = {"ta-irv/word-joining.orphan-syllable": "ta-irv/lexicon.known-split"}
 
 
 # (test, example id) the pack does not yet satisfy: the reviewer disagrees with
 # it, and the pack changes that follow the review fix them. Strict, so each
 # entry must start passing when its fix lands, and is then deleted here.
-PENDING_PACK_CHANGES: set[tuple[str, str]] = set()  # all cleared by the 2026-09-28 pack and lexicon changes
+# Round 2 (2026-09-29): the reviewer disagrees with the pack. Cleared by the
+# round-2 steps: roots (2), misspelling pairs (3), தான் (4), known splits (5).
+PENDING_PACK_CHANGES: set[tuple[str, str]] = {
+    ("negative", "sandhi-272"), ("negative", "sandhi-312"), ("negative", "typo-116"),
+    ("negative", "typo-117"), ("negative", "typo-121"), ("negative", "typo-123"), ("positive", "sandhi-241"),
+    ("positive", "sandhi-242"), ("positive", "word-joining-7"), ("positive", "word-joining-8"),
+    ("positive", "word-joining-9"), ("positive", "word-joining-11"), ("positive", "word-joining-12"),
+    ("positive", "word-joining-13"), ("positive", "word-joining-14"), ("positive", "word-joining-15"),
+    ("positive", "word-joining-16"), ("positive", "word-joining-17"),
+}
 
 # False alarms the pack still raises, and no pack change can remove: the two
 # accusatives before a name (GEN 21:9 செய்கிறதை சாராள், GEN 35:4 அவைகளை சீகேம்).
@@ -42,7 +56,7 @@ RESIDUAL: set[tuple[str, str]] = {
 
 def examples(test: str = ""):
     params = []
-    for bucket in BUCKETS:
+    for bucket in FIXTURE_BUCKETS:
         lines = (LABELLED / f"{bucket}.jsonl").read_text(encoding="utf-8").splitlines()
         for number, line in enumerate(lines, start=1):
             ident = f"{bucket}-{number}"
@@ -61,7 +75,7 @@ def squeezed(text):
 
 
 def human(example):
-    return "(human review 2026" in example["origin"]
+    return "(human review" in example["origin"]
 
 
 def nfc(text):
@@ -69,7 +83,7 @@ def nfc(text):
 
 
 def test_every_bucket_has_a_fixture_file():
-    assert sorted(p.stem for p in LABELLED.glob("*.jsonl")) == sorted(BUCKETS)
+    assert sorted(p.stem for p in LABELLED.glob("*.jsonl")) == sorted(FIXTURE_BUCKETS)
 
 
 @pytest.mark.parametrize("bucket,example", examples())
@@ -99,7 +113,8 @@ def lexicon_over(text):
 
 
 def findings_of(example, rule_id):
-    if "/lexicon." in rule_id:
+    rule_id = RULE_ALIASES.get(rule_id, rule_id)
+    if "/lexicon." in rule_id and rule_id != "ta-irv/lexicon.known-split":
         # The lexicon rules run over a book's word counts; over this verse
         # alone every word is "rare in the book", and a known misspelling
         # needs no book at all, so the verse is a book of one.
