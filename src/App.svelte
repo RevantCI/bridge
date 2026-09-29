@@ -1183,7 +1183,11 @@
   /* A 66-book table must not push the dashboard off screen: it scrolls. */
   .collection-qa-host { flex-shrink: 0; max-height: 40vh; overflow: auto; padding: 12px 16px 0; background: var(--bg); }
   .editor-col { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .editor-toolbar { height: 34px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: var(--fs-xs); color: var(--text-2); flex-shrink: 0; }
+  /* min-height + wrap, not a fixed height: on a narrow window the items used to
+     shrink, break their labels onto two lines and get clipped by the 34px box.
+     Now each item keeps its label on one line and the row wraps instead. */
+  .editor-toolbar { min-height: 34px; background: var(--surface-2); border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 4px 16px; font-size: var(--fs-xs); color: var(--text-2); flex-shrink: 0; }
+  .editor-toolbar > * { white-space: nowrap; flex-shrink: 0; }
   .whole-book-btn { font-size: var(--fs-xs); font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
   .whole-book-btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .grow { flex: 1; }
