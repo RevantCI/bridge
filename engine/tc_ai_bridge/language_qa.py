@@ -44,8 +44,9 @@ SIGNS = frozenset("ாிீுூெேைொோௌ்ௗ")
 # languageQa.inline filters on it, and languageQa.status lists the drawn rule
 # names. The frontend only styles a finding by its category.
 # Inline on human-labelled precision only (DECISIONS.md 2026-09-28):
-# lexicon.known-misspelling was 43/43 in the 2026-09-28 review.
-INLINE_RULES = frozenset({"terminology.deprecated-form", "lexicon.known-misspelling"})
+# lexicon.known-misspelling was 43/43 in the 2026-09-28 review; spacing.extra
+# 23/23 over both rounds (2026-09-29).
+INLINE_RULES = frozenset({"terminology.deprecated-form", "lexicon.known-misspelling", "spacing.extra"})
 # Every Language QA finding carries this, and the frontend sends it back in the
 # `issue` of a verse.decide call. decide_verse keys on it to keep Language QA
 # decisions out of the review-progress rollup. Origin is never inferred from

@@ -243,8 +243,11 @@ rescanned.
 
 ## Inline and the gate
 
-A rule is drawn inline only on its **human-labelled precision**: at least
-**0.90** on at least **20** findings a Tamil reviewer labelled
+A rule is drawn inline only on human labels (DECISIONS.md 2026-09-28 and
+2026-09-29): either (a) at least **0.90** on at least **20** labelled findings,
+combined over the review rounds, or (b) every finding it makes in the whole
+collection is labelled and none is wrong (`benchmark/human/population.json`).
+For (a), the labelled findings are ones a Tamil reviewer labelled
 (`scripts/language_qa_benchmark.py --human-labels … --gate`, run in CI; see
 `docs/LANGUAGE_QA_BENCHMARK.md`). AI-agreement precision is a lower bound and is
 diagnostic only. There is no sign-off waiver: the 2026-09-24 sign-off that drew

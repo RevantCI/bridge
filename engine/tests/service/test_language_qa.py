@@ -807,7 +807,7 @@ def vallinam_engine(fixture_project):
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
     # The dative rule: inline on its human precision, so the inline list sees it.
-    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அவனுக்கு பதில்  சொன்னான்."})["success"]
+    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அவனுக்கு பதில் சொன்னான்,,."})["success"]
     finding = next(f for f in wait(engine._language_qa)["findings"] if f["rule"] == "tamil.vallinam-missing")
     yield engine, finding, fixture_project
     engine._language_qa.unbind()
@@ -832,7 +832,8 @@ def test_a_false_positive_is_hidden_and_listed_on_its_own(vallinam_engine):
 
 def test_decisions_now_apply_to_every_rule_not_only_the_inline_two(vallinam_engine):
     engine, _, _ = vallinam_engine
-    spacing = next(f for f in wait(engine._language_qa)["findings"] if f["rule"] == "spacing.extra")
+    # A panel-only rule (the fixture's ",,"): decisions apply to every rule.
+    spacing = next(f for f in wait(engine._language_qa)["findings"] if f["rule"] == "punctuation.repeated")
     decide(engine, spacing, "ignored", **phase1_issue(spacing))
     assert spacing["id"] not in {f["id"] for f in wait(engine._language_qa)["findings"]}
 
@@ -1265,12 +1266,12 @@ def test_book_limits_and_status_page_are_bounded(tmp_path):
 def _three_chapter_project(root, verses_per_chapter=60):
     # Every verse yields one inline finding (the dative வல்லினம் rule,
     # "அவனுக்கு பதில்", inline on its human precision) and one panel-only
-    # finding (spacing.extra, the trailing double space), so the book holds 180
-    # inline findings -- well past one 100-finding page.
-    project = project_at(root, verses={str(n): "அவனுக்கு பதில்  " for n in range(1, verses_per_chapter + 1)})
+    # finding (punctuation.repeated, the ",,"), so the book holds 180 inline
+    # findings -- well past one 100-finding page.
+    project = project_at(root, verses={str(n): "அவனுக்கு பதில்,," for n in range(1, verses_per_chapter + 1)})
     for chapter in ("2", "3"):
         (project.book_dir / f"{chapter}.json").write_text(json.dumps(
-            {str(n): "அவனுக்கு பதில்  " for n in range(1, verses_per_chapter + 1)},
+            {str(n): "அவனுக்கு பதில்,," for n in range(1, verses_per_chapter + 1)},
             ensure_ascii=False), encoding="utf-8")
     return project
 
@@ -1307,7 +1308,8 @@ def test_inline_without_a_chapter_returns_the_whole_book_and_only_inline_rules(t
     assert inline["inlineRules"] == inline_rule_names()
     assert manager.status()["inlineRules"] == inline_rule_names()
     # The migrated வல்லினம் rules keep their legacy name.
-    assert set(inline_rule_names()) == INLINE_RULES | {"tamil.vallinam-missing"}
+    assert set(inline_rule_names()) == INLINE_RULES | {"tamil.vallinam-missing", "sandhi.vallinam.wrong-consonant",
+                                                       "sandhi.compound.direction", "typo.suffix.dropped-tha"}
 
 
 def test_category_marks_match_the_engine():
@@ -1411,7 +1413,7 @@ def test_terminology_and_wordlist_findings_have_the_layered_shape(tmp_path):
 
 def test_inline_rpc_filters_on_the_findings_own_flag(tmp_path):
     manager = LanguageQaManager(debounce=0, yield_seconds=0)
-    manager.bind(project_at(tmp_path, verses={"1": "அவனுக்கு பதில்  சொன்னான்"}))
+    manager.bind(project_at(tmp_path, verses={"1": "அவனுக்கு பதில் சொன்னான்,,"}))
     wait(manager)
     assert [f["rule"] for f in manager.inline()["findings"]] == ["tamil.vallinam-missing"]
     assert all(f["inline"] for f in manager.inline()["findings"])

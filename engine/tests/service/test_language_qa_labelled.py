@@ -37,7 +37,7 @@ RULE_ALIASES = {"ta-irv/word-joining.orphan-syllable": "ta-irv/lexicon.known-spl
 # Round 2 (2026-09-29): the reviewer disagrees with the pack. Cleared by the
 # round-2 steps: roots (2), misspelling pairs (3), தான் (4), known splits (5).
 PENDING_PACK_CHANGES: set[tuple[str, str]] = {
-    ("negative", "sandhi-272"), ("negative", "sandhi-312"), ("negative", "typo-116"),
+    ("negative", "typo-116"),
     ("negative", "typo-117"), ("negative", "typo-121"), ("negative", "typo-123"), ("positive", "sandhi-241"),
     ("positive", "sandhi-242"), ("positive", "word-joining-7"), ("positive", "word-joining-8"),
     ("positive", "word-joining-9"), ("positive", "word-joining-11"), ("positive", "word-joining-12"),

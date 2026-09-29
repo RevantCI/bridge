@@ -117,7 +117,7 @@ def test_findings_are_scored_against_compatible_rows_only(benchmark):
     assert vallinam["fp_strict"] == 4 and vallinam["tp_lenient"] == 3
     assert vallinam["fp_house_form"] == 1             # 1:3 இந்த + bare (1:7 அந்த தேவ- is abstained by the pack)
     assert vallinam["precision_strict"] == 0.2 and vallinam["precision_lenient"] == 0.6
-    assert vallinam["inline"] is False  # panel-only until a human sample of >= 20 (2026-09-28)
+    assert vallinam["inline"] is True  # 24 labelled at 100% over both rounds (2026-09-29)
     # The spacing row at 1:2 is not matched by the vallinam finding at the same verse.
     assert result["buckets"]["punctuation"]["found_positive"] == 0
 
@@ -289,6 +289,30 @@ def test_the_human_gate_compares_each_round_with_itself():
     assert bench.human_gate(result, baseline) == ["x/rule human precision in round r1 fell from 100.0% to 97.0%"]
 
 
+def test_a_rule_whose_whole_population_is_labelled_may_be_inline():
+    """Rule (b), DECISIONS.md 2026-09-29: under 20 labels, inline only when
+    every finding the rule makes in the collection is confirmed and none is
+    wrong -- and only while the rule is unchanged since the population."""
+    rule = "ta-irv/typo.suffix.dropped-tha"
+    population = {"rules": {rule: {"definition": bench.rule_definition_hash(rule), "findings": [
+        {"book": "1ch", "chapter": "6", "verse": "31", "start": 10, "end": 20, "text": "x"},
+        {"book": "1ch", "chapter": "23", "verse": "5", "start": 30, "end": 39, "text": "y"}]}}}
+    labels = [{"book": "1ch", "ch": "6", "v": "31", "start": 10, "end": 20, "verdict": "TP1"},
+              {"book": "1ch", "ch": "23", "v": "5", "start": 30, "end": 39, "verdict": "TP1"}]
+    result = {"mismatches": [], "rounds": ["r"], "rules": {rule: {
+        "inline": True, "labelled": 2, "tp": 2, "fp": 0, "precision": 1.0, "lost_tp": 0, "rounds": {}}},
+        "population": bench.population_coverage(population, labels)}
+    assert result["population"][rule] == {"total": 2, "confirmed": 2, "current": True}
+    assert bench.human_gate(result, None) == []
+    # One finding unconfirmed: not the whole population.
+    result["population"] = bench.population_coverage(population, labels[:1])
+    assert "1 of 2 findings are confirmed" in bench.human_gate(result, None)[0]
+    # The rule changed since the population was written: stale.
+    population["rules"][rule]["definition"] = "old"
+    result["population"] = bench.population_coverage(population, labels)
+    assert "the rule changed since" in bench.human_gate(result, None)[0]
+
+
 def test_baseline_holds_numbers_only(benchmark):
     _, result, _ = benchmark
     text = json.dumps(bench.baseline_of(result), ensure_ascii=False)
@@ -334,7 +358,7 @@ def test_cli_gate_exit_code_and_outputs(tmp_path):
                "--baseline", str(tmp_path / "baseline.json")]
     written = subprocess.run(command + ["--write-baseline"], capture_output=True, text=True, encoding="utf-8")
     assert written.returncode == 0, written.stderr
-    assert "| `ta-irv/sandhi.vallinam.demonstrative` | no | 5 |" in written.stdout
+    assert "| `ta-irv/sandhi.vallinam.demonstrative` | yes | 5 |" in written.stdout
     assert json.loads((tmp_path / "baseline.json").read_text(encoding="utf-8"))["books"] == ["rut"]
     [result_file] = out.glob("*.json")
     assert json.loads(result_file.read_text(encoding="utf-8"))["unmatchedFindings"]

@@ -72,6 +72,7 @@ def sfm_by_book(irv_dir: Path) -> dict[str, Path]:
 
 
 HUMAN_BASELINE = REPO / "benchmark" / "human" / "baseline.json"
+HUMAN_POPULATION = REPO / "benchmark" / "human" / "population.json"
 HUMAN_START, HUMAN_END = "<!-- human-benchmark:start -->", "<!-- human-benchmark:end -->"
 
 
@@ -90,8 +91,21 @@ def human_main(args: argparse.Namespace) -> int:
                     handle.write(json.dumps(row, ensure_ascii=False) + "\n")
             print(f"{len(rows)} verses written to {verses_path}", file=sys.stderr)
     labels, verses = bench.load_human_rounds(args.human_labels)
+    if args.write_population:
+        if not args.irv_dir:
+            raise SystemExit("--write-population needs --irv-dir")
+        corpus = {}
+        for sfm in sfm_by_book(args.irv_dir).values():
+            book, chapters = bench.book_verses(sfm)
+            corpus[book] = bench.scan_book(book, chapters)
+        population = bench.population_of(corpus)
+        population["corpus"] = args.irv_dir.name
+        HUMAN_POPULATION.write_text(json.dumps(population, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        print(f"population of {len(population['rules'])} rules written to {HUMAN_POPULATION}", file=sys.stderr)
     scans = {book: bench.scan_book(book, chapters) for book, chapters in verses.items()}
     result = bench.human_score(labels, scans, verses)
+    population = json.loads(HUMAN_POPULATION.read_text(encoding="utf-8")) if HUMAN_POPULATION.exists() else None
+    result["population"] = bench.population_coverage(population, labels)
     result["generatedAt"] = dt.datetime.now().isoformat(timespec="seconds")
     result["labelsFile"] = args.human_labels.as_posix()
     table = bench.human_markdown(result)
@@ -132,6 +146,10 @@ def main() -> int:
                              "that decides inline); verse text comes from verses.jsonl beside it")
     parser.add_argument("--write-human-verses", action="store_true",
                         help="with --human-labels and --irv-dir: write verses.jsonl from the SFM")
+    parser.add_argument("--write-population", action="store_true",
+                        help="with --human-labels and --irv-dir: scan every book and write "
+                             "benchmark/human/population.json, each small rule's whole-collection findings "
+                             "(inline rule (b), DECISIONS.md 2026-09-29)")
     parser.add_argument("--books", nargs="*", help="limit to these book codes")
     parser.add_argument("--out-dir", type=Path, default=REPO / "benchmark" / "results")
     parser.add_argument("--baseline", type=Path, default=REPO / "benchmark" / "baseline.json")

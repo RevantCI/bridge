@@ -49,7 +49,7 @@ from tc_ai_bridge.project_import import imported_verse_text, parse_scripture_fil
 
 PACK_DIR = REPO / "engine" / "tc_ai_bridge" / "language_packs" / "ta-irv"
 PACK_VERSION = "1.1.0"
-HUMAN_LABELS = REPO / "benchmark" / "human" / "2026-09-28" / "human_labels.jsonl"
+HUMAN_LABELS = REPO / "benchmark" / "human"  # every review round under it
 HARD = ["க", "ச", "த", "ப"]
 EXAMPLES = 12
 DEMONSTRATIVES = ["அந்த", "இந்த", "எந்த"]
@@ -85,13 +85,19 @@ MISSING_RATIONALE = '"{prev}" before a {initial}-initial word takes the linking 
 # --human-labels; DECISIONS.md 2026-09-28). Values: the human precision
 # measured on this pack, and its sample.
 INLINE = {
-    # ta-irv@1.1.0 on the 2026-09-28 review (GEN/PSA/JHN).
-    "sandhi.vallinam.dative": {"humanPrecision": 1.0, "labelled": 46},        # 46 TP / 0 FP
-    "sandhi.vallinam.accusative": {"humanPrecision": 0.9459, "labelled": 37},  # 35 TP / 2 FP (both before a name)
+    # Rounds 2026-09-28 + 2026-09-29 combined; (a) >= 20 labelled at >= 0.90.
+    "sandhi.vallinam.dative": {"humanPrecision": 0.9884, "labelled": 86},         # 85 TP / 1 FP
+    "sandhi.vallinam.accusative": {"humanPrecision": 0.961, "labelled": 77},      # 74 TP / 3 FP
+    "sandhi.vallinam.demonstrative": {"humanPrecision": 1.0, "labelled": 24},
+    "sandhi.vallinam.manner-adverb": {"humanPrecision": 1.0, "labelled": 21},
+    "sandhi.compound.direction": {"humanPrecision": 1.0, "labelled": 25},
+    # (b) the whole collection's findings are labelled and none was wrong
+    # (DECISIONS.md 2026-09-29; benchmark/human/population.json).
+    "typo.suffix.dropped-tha": {"populationLabelled": "2/2"},
+    "sandhi.vallinam.wrong-consonant": {"populationLabelled": "1/1"},
 }
-# Measured but below the 20-label sample, so panel-only until the next review
-# round: demonstrative 7/7, manner-adverb 1/1. Unlabelled: wrong-consonant,
-# compound.direction, clitic.fused, the typo.* rules.
+# Panel-only: typo.divine-name.vowel-drop (5 of 11 labelled) and dative-stem
+# (4 of 13) until the rest of their populations are labelled; clitic.fused.
 
 
 def nfc(text: str) -> str:
@@ -535,7 +541,7 @@ def _squeezed(text: str) -> str:
     return regex.sub(r"\s+", " ", nfc(text)).strip()
 
 
-def human_examples(pack, fixtures_dir: Path) -> tuple[dict[str, dict[str, list]], list[str], list[str]]:
+def human_examples(pack, fixture_dirs: list[Path]) -> tuple[dict[str, dict[str, list]], list[str], list[str]]:
     """The reviewer's verdicts as rule examples, so every pack load re-checks
     the review: a confirmed finding (`expect`) is an incorrect example of the
     rule that now finds it, a confirmed false alarm (`negative`) a correct
@@ -550,9 +556,12 @@ def human_examples(pack, fixtures_dir: Path) -> tuple[dict[str, dict[str, list]]
     out: dict[str, dict[str, list]] = collections.defaultdict(lambda: {"incorrect": [], "correct": []})
     problems: list[str] = []
     notes: list[str] = []
-    for line in (fixtures_dir / "sandhi.jsonl").read_text(encoding="utf-8").splitlines():
+    lines = [(folder.parent.name, line) for folder in fixture_dirs
+             for line in (folder / "sandhi.jsonl").read_text(encoding="utf-8").splitlines()]
+    for round_name, line in lines:
         example = json.loads(line)
-        origin = example["origin"].replace("(human review 2026", "(human review 2026-09-28")
+        # Each example names the review round it came from (the folder's date).
+        origin = regex.sub(r"\(human review (?:round \d+|2026)", f"(human review {round_name}", example["origin"], count=1)
         findings = scan_text(example["text"], book="x", chapter="1", verse="1", tamil=True, pack=pack)["findings"]
         for expected in example["expect"]:
             span = _squeezed(expected["span"])
@@ -595,7 +604,7 @@ def main() -> int:
     args = parser.parse_args()
     verses = corpus(args.irv_dir)
     print(f"{len(verses)} verses", file=sys.stderr)
-    labels = bench.load_human_labels(args.human_labels)
+    labels, _ = bench.load_human_rounds(args.human_labels)
     reviewed_words = reviewer_words(labels)
     print({k: len(v) for k, v in reviewed_words.items()}, file=sys.stderr)
     rules = definitions(*root_nouns(verses), reviewed_words)
@@ -608,7 +617,8 @@ def main() -> int:
             "rules": [f"rules/{rule['id']}.json" for rule in rules]}
     pack = loader._build(meta, rules)  # no examples yet: they are chosen with this pack
     examples = choose_examples(pack, verses, reviewed_places(args.reviews))
-    reviewer, problems, notes = human_examples(pack, args.human_labels.parent / "labelled")
+    reviewer, problems, notes = human_examples(
+        pack, [file.parent / "labelled" for file in bench.human_label_files(args.human_labels)])
     for note in notes:
         print(f"REVIEW (noted): {note}", file=sys.stderr)
     if problems:

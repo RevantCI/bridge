@@ -709,6 +709,73 @@ def human_score(labels: list[dict[str, Any]], scans: dict[str, dict[str, Any]],
             "mismatches": mismatches}
 
 
+# ---- (b) a whole population labelled (DECISIONS.md 2026-09-29) -------------
+#
+# A rule whose whole-collection population is under 20 can never reach
+# HUMAN_INLINE_MIN_LABELLED. It may be inline instead when every finding it
+# produces in the collection has a confirming human label and none of its
+# labels is wrong. The population is written locally from the full corpus
+# (--write-population), because CI has no corpus; each rule's entry carries a
+# hash of the rule's definition, and a changed definition makes it stale.
+
+POPULATION_MAX = 100          # rules with more findings than this are not recorded
+CONFIRMING = {"tp"}           # human_verdict()s that confirm a finding
+CONFIRMING_CODES = {"MISSED"}  # an abstained row that says "this needs changing"
+
+
+def rule_definition_hash(rule_id: str) -> str | None:
+    """What decides a rule's findings, without its inline flag, examples or
+    prose. A pack rule hashes its source; an in-code rule its revision."""
+    import hashlib
+    from .language_packs import default_pack
+    from .language_qa import RULES, RULE_VERSION
+    pack = default_pack()
+    pack_name, _, name = rule_id.partition("/")
+    if pack_name == pack.name and pack.by_id(name) is not None:
+        source = {k: v for k, v in pack.by_id(name).source.items()
+                  if k not in {"inline", "examples", "provenance", "title", "message", "rationale"}}
+        return hashlib.sha1(json.dumps(source, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+    if name in RULES:
+        return hashlib.sha1(f"{RULE_VERSION}#{RULES[name].revision}#{name}".encode("utf-8")).hexdigest()
+    return None
+
+
+def population_of(scans: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Every finding of each small rule (at most POPULATION_MAX) in the scans."""
+    found: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for book, scan in sorted(scans.items()):
+        for f in scan["findings"]:
+            found[f["ruleId"]].append({"book": book, "chapter": f["chapter"], "verse": f["verse"],
+                                       "start": f["start"], "end": f["end"], "text": f["originalText"]})
+    return {"packVersion": pack_version_label(), "books": len(scans),
+            "rules": {rule: {"definition": rule_definition_hash(rule), "findings": items}
+                      for rule, items in sorted(found.items()) if len(items) <= POPULATION_MAX}}
+
+
+def population_coverage(population: dict[str, Any] | None, labels: list[dict[str, Any]]) -> dict[str, Any]:
+    """Per recorded rule: its population size, how many findings a human label
+    confirms (a TP / SPLIT label, or an abstained MISSED row, overlapping it at
+    the same verse), and whether the entry is current."""
+    out: dict[str, Any] = {}
+    by_verse: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for label in labels:
+        if label.get("book"):
+            by_verse[(label["book"], label["ch"], label["v"])].append(label)
+    for rule, entry in ((population or {}).get("rules") or {}).items():
+        confirmed = 0
+        for f in entry["findings"]:
+            for label in by_verse.get((f["book"], f["chapter"], f["verse"]), []):
+                start, end = label.get("start", -1), label.get("end", -1)
+                overlaps = isinstance(start, int) and start >= 0 and start < f["end"] and f["start"] < end
+                confirms = human_verdict(label.get("verdict")) in CONFIRMING or label.get("verdict") in CONFIRMING_CODES
+                if overlaps and confirms:
+                    confirmed += 1
+                    break
+        out[rule] = {"total": len(entry["findings"]), "confirmed": confirmed,
+                     "current": entry.get("definition") == rule_definition_hash(rule)}
+    return out
+
+
 def human_inline_rules() -> set[str]:
     """ruleIds drawn inline, from the pack and the in-code rules. The
     project's own data (house style, termbase: pack "project") is not a rule
@@ -733,9 +800,19 @@ def human_gate(result: dict[str, Any], baseline: dict[str, Any] | None) -> list[
     - a label that no longer anchors in its verse (the text or the offsets
       moved, so the score would shrink without anyone noticing)."""
     failures = [f"label not scored: {m}" for m in result["mismatches"]]
+    population = result.get("population") or {}
     for rule_id, s in result["rules"].items():
         precision = s["precision"]
-        if s["inline"]:
+        whole = population.get(rule_id)
+        if s["inline"] and s["labelled"] < HUMAN_INLINE_MIN_LABELLED and whole is not None:
+            # (b): the whole collection's findings are labelled, and none is wrong.
+            if not whole["current"]:
+                failures.append(f"{rule_id} is inline on its whole population, but the rule changed since "
+                                f"benchmark/human/population.json was written (--write-population)")
+            elif whole["confirmed"] < whole["total"] or s["fp"]:
+                failures.append(f"{rule_id} is inline on its whole population, but {whole['confirmed']} of "
+                                f"{whole['total']} findings are confirmed and {s['fp']} labelled wrong")
+        elif s["inline"]:
             if s["labelled"] < HUMAN_INLINE_MIN_LABELLED:
                 failures.append(f"{rule_id} is inline with {s['labelled']} human-labelled findings "
                                 f"(< {HUMAN_INLINE_MIN_LABELLED})")
@@ -801,6 +878,13 @@ def human_markdown(result: dict[str, Any]) -> str:
         lines.append(f"| {cls} | {s['missed']} | {s['missed_now_flagged']} | {s['correct_skip']} "
                      f"| {s['correct_skip_now_flagged']} | {s['house']} | {s['house_now_flagged']} "
                      f"| {_pct(s['still_missed_rate'])} |")
+    covered = {rule: c for rule, c in (result.get("population") or {}).items()
+               if c["total"] and result["rules"].get(rule, {}).get("labelled", 0) < HUMAN_INLINE_MIN_LABELLED}
+    if covered:
+        lines += ["", "Whole-population coverage for rules under 20 labels (inline rule (b): every finding in the "
+                  "collection confirmed, none wrong):", ""]
+        lines += [f"- `{rule}`: {c['confirmed']} of {c['total']} confirmed" + ("" if c["current"] else " (stale)")
+                  for rule, c in sorted(covered.items())]
     if result["mismatches"]:
         lines += ["", "Labels not scored: " + "; ".join(result["mismatches"])]
     return "\n".join(lines)

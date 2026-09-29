@@ -305,4 +305,30 @@ An entry may hide findings, add list members, reorder suggestions, or propose a 
 **Rules out:** re-enabling rare-near-common by tuning `MAX_DISTANCE` or the rarity thresholds alone; learning protected words or pairs from decisions (the lexicon is still never updated from decisions).
 **Revisit when:** a morphology filter exists, or a project wants the audit as a panel-only report.
 
+## 2026-09-29 — A rule may be inline on its whole population, when that is under 20
+
+**Decision:** A Language QA rule may be drawn inline when either:
+- **(a)** at least 20 of its findings are human-labelled, at ≥ 0.90 combined precision over the review rounds; or
+- **(b)** every finding it produces in the whole collection has a confirming human label, and none of its labels is wrong.
+
+**How (b) is checked:**
+- **The population file.** `benchmark/human/population.json` is written locally from the full corpus (`--write-population --irv-dir`), because CI has no corpus. It records each small rule's findings and a hash of the rule's definition.
+- **The gate.** It fails a (b) rule whose definition changed since the file was written, or whose findings are not all confirmed.
+- **Confirming labels.** A TP or SPLIT label, or an abstained MISSED row, at the same verse, overlapping the finding.
+
+**Under (b) today:**
+- inline: `typo.suffix.dropped-tha` (2 of 2) and `sandhi.vallinam.wrong-consonant` (1 of 1);
+- panel-only: `typo.divine-name.vowel-drop` (5 of 11) and `dative-stem` (4 of 13), until the rest are labelled.
+
+**Promoted under (a)** with both rounds: demonstrative (24, 100%), manner-adverb (21), direction (25), `common/spacing.extra` (23).
+
+**Because:** the ≥ 20 rule cannot be met by a rule whose whole-Bible population is under 20. For such a rule, labelling everything is a stronger claim than a sample (brief, round 2).
+
+**Rules out:**
+- (b) on a sample;
+- (b) with a stale population;
+- (b) with any false positive among the labels.
+
+**Revisit when:** the collection grows beyond the IRV (a new book's findings are unlabelled, which the gate reports as incomplete coverage once the population is rewritten).
+
 <!-- New entries go above this line. -->

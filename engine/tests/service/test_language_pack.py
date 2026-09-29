@@ -31,7 +31,7 @@ def test_a_status_request_never_loads_the_pack_and_concurrent_first_loads_share_
     monkeypatch.setattr(loader, "_LOADED", {})
     status = LanguageQaManager(debounce=0, yield_seconds=0).status()
     assert loaded_pack() is None
-    assert status["inlineRules"] == ["lexicon.known-misspelling", "terminology.deprecated-form"]
+    assert status["inlineRules"] == ["lexicon.known-misspelling", "spacing.extra", "terminology.deprecated-form"]
     calls = []
     real = loader.load_pack
     monkeypatch.setattr(loader, "load_pack", lambda name: calls.append(name) or real(name))
@@ -74,7 +74,11 @@ def test_inline_rules_are_exactly_the_human_justified_ones():
     # Inline needs >= 0.90 human-labelled precision on >= 20 findings
     # (DECISIONS.md 2026-09-28); the benchmark's human gate enforces it in CI.
     inline = {r.id for r in default_pack().rules if r.inline}
-    assert inline == {"sandhi.vallinam.dative", "sandhi.vallinam.accusative"}
+    # (a) >= 20 labelled at >= 0.90 over both review rounds; (b) the whole
+    # collection's findings labelled, none wrong (wrong-consonant 1/1, dropped-tha 2/2).
+    assert inline == {"sandhi.vallinam.dative", "sandhi.vallinam.accusative", "sandhi.vallinam.demonstrative",
+                      "sandhi.vallinam.manner-adverb", "sandhi.compound.direction",
+                      "sandhi.vallinam.wrong-consonant", "typo.suffix.dropped-tha"}
     assert not any("inlineSignOff" in r.source for r in default_pack().rules)
 
 
@@ -106,7 +110,7 @@ def test_wrong_linking_consonant_is_replaced_not_added():
     [finding] = by_rule("அவன் அதைக் பார்த்தான்", "sandhi.vallinam.wrong-consonant")
     assert finding["originalText"] == "அதைக் பார்த்தான்"
     assert finding["suggestedReplacement"] == "அதைப் பார்த்தான்"
-    assert finding["inline"] is False  # no human-labelled sample yet (DECISIONS.md 2026-09-28)
+    assert finding["inline"] is True  # its whole population (1) labelled, none wrong (DECISIONS.md 2026-09-29)
 
 
 @pytest.mark.parametrize("text", [

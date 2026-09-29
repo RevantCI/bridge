@@ -54,7 +54,7 @@
    "fp": 0,
    "house": 0,
    "precision": 1.0,
-   "inline": false,
+   "inline": true,
    "rounds": {
     "2026-09-28": {
      "labelled": 15,
@@ -139,7 +139,7 @@
    "fp": 0,
    "house": 0,
    "precision": 1.0,
-   "inline": false,
+   "inline": true,
    "rounds": {
     "2026-09-29": {
      "labelled": 25,
@@ -150,11 +150,11 @@
    }
   },
   "ta-irv/sandhi.vallinam.accusative": {
-   "labelled": 77,
+   "labelled": 76,
    "tp": 74,
-   "fp": 3,
+   "fp": 2,
    "house": 0,
-   "precision": 0.961,
+   "precision": 0.9737,
    "inline": true,
    "rounds": {
     "2026-09-28": {
@@ -164,19 +164,19 @@
      "precision": 0.9459
     },
     "2026-09-29": {
-     "labelled": 40,
+     "labelled": 39,
      "tp": 39,
-     "fp": 1,
-     "precision": 0.975
+     "fp": 0,
+     "precision": 1.0
     }
    }
   },
   "ta-irv/sandhi.vallinam.dative": {
-   "labelled": 86,
+   "labelled": 85,
    "tp": 85,
-   "fp": 1,
+   "fp": 0,
    "house": 0,
-   "precision": 0.9884,
+   "precision": 1.0,
    "inline": true,
    "rounds": {
     "2026-09-28": {
@@ -186,10 +186,10 @@
      "precision": 1.0
     },
     "2026-09-29": {
-     "labelled": 40,
+     "labelled": 39,
      "tp": 39,
-     "fp": 1,
-     "precision": 0.975
+     "fp": 0,
+     "precision": 1.0
     }
    }
   },
@@ -199,7 +199,7 @@
    "fp": 0,
    "house": 0,
    "precision": 1.0,
-   "inline": false,
+   "inline": true,
    "rounds": {
     "2026-09-28": {
      "labelled": 7,
@@ -221,7 +221,7 @@
    "fp": 0,
    "house": 0,
    "precision": 1.0,
-   "inline": false,
+   "inline": true,
    "rounds": {
     "2026-09-28": {
      "labelled": 1,
@@ -243,7 +243,7 @@
    "fp": 0,
    "house": 0,
    "precision": 1.0,
-   "inline": false,
+   "inline": true,
    "rounds": {
     "2026-09-29": {
      "labelled": 1,
@@ -306,7 +306,7 @@
    "fp": 0,
    "house": 0,
    "precision": 1.0,
-   "inline": false,
+   "inline": true,
    "rounds": {
     "2026-09-29": {
      "labelled": 2,

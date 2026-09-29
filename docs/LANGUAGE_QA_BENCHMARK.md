@@ -64,9 +64,16 @@ in 61 labelled verses. `verses.jsonl` is built from the reviewer's copy.
   text, so they are not recall.
 
 **The gate** (`--human-labels … --gate`, run in CI) fails when:
-- an inline rule has human precision below **0.90**, or fewer than **20**
-  labelled findings. Project data (`project/*`: house style, the termbase)
-  is not a labelled rule and is not gated;
+- an inline rule meets neither condition (DECISIONS.md 2026-09-29):
+  - **(a)** human precision ≥ **0.90** on ≥ **20** labelled findings (combined
+    over the rounds);
+  - **(b)** every finding it makes in the whole collection is confirmed by a
+    label, none is wrong, and the rule is unchanged since
+    `benchmark/human/population.json` was written
+    (`--write-population --irv-dir …`, local only).
+
+  Project data (`project/*`: house style, the termbase) is not a labelled rule
+  and is not gated;
 - a rule's precision in any review round fell below that round's figure in
   `benchmark/human/baseline.json`;
 - a human-confirmed finding is no longer produced;
@@ -82,27 +89,27 @@ in 61 labelled verses. `verses.jsonl` is built from the reviewer's copy.
 `verses.jsonl`.
 
 <!-- human-benchmark:start -->
-_Generated 2026-09-29T11:42:53 by scripts/language_qa_benchmark.py --human-labels benchmark/human._
+_Generated 2026-09-29T12:02:49 by scripts/language_qa_benchmark.py --human-labels benchmark/human._
 
 Pack version `language-qa-7+ta-irv@1.1.0`; 41 books; 818 label rows over 2 review round(s) (2026-09-28, 2026-09-29). The gate reads the combined numbers.
 
 | Rule | Inline | Labelled | TP | FP | House form | Human precision (combined) | Per round (TP/labelled) | Lost TP | FP no longer produced |
 |---|---|---|---|---|---|---|---|---|---|
-| `common/spacing.extra` | no | 23 | 23 | 0 | 0 | 100.0% | 2026-09-28: 15/15; 2026-09-29: 8/8 | 0 | 0 |
+| `common/spacing.extra` | yes | 23 | 23 | 0 | 0 | 100.0% | 2026-09-28: 15/15; 2026-09-29: 8/8 | 0 | 0 |
 | `ta-irv/integrity.space-before-note-end` | no | 15 | 0 | 15 | 0 | 0.0% | 2026-09-28: 0/15 | 0 | 0 |
 | `ta-irv/lexicon.known-misspelling` | yes | 51 | 47 | 4 | 0 | 92.2% | 2026-09-28: 43/43; 2026-09-29: 4/8 | 0 | 0 |
 | `ta-irv/lexicon.rare-near-common` | no | 0 | 0 | 0 | 0 | — | — | 0 | 21 |
 | `ta-irv/sandhi.clitic.fused` | no | 2 | 2 | 0 | 0 | 100.0% | 2026-09-29: 2/2 | 0 | 0 |
-| `ta-irv/sandhi.compound.direction` | no | 25 | 25 | 0 | 0 | 100.0% | 2026-09-29: 25/25 | 0 | 0 |
-| `ta-irv/sandhi.vallinam.accusative` | yes | 77 | 74 | 3 | 0 | 96.1% | 2026-09-28: 35/37; 2026-09-29: 39/40 | 0 | 13 |
-| `ta-irv/sandhi.vallinam.dative` | yes | 86 | 85 | 1 | 0 | 98.8% | 2026-09-28: 46/46; 2026-09-29: 39/40 | 0 | 3 |
-| `ta-irv/sandhi.vallinam.demonstrative` | no | 24 | 24 | 0 | 0 | 100.0% | 2026-09-28: 7/7; 2026-09-29: 17/17 | 0 | 1 |
-| `ta-irv/sandhi.vallinam.manner-adverb` | no | 21 | 21 | 0 | 0 | 100.0% | 2026-09-28: 1/1; 2026-09-29: 20/20 | 0 | 0 |
-| `ta-irv/sandhi.vallinam.wrong-consonant` | no | 1 | 1 | 0 | 0 | 100.0% | 2026-09-29: 1/1 | 0 | 0 |
+| `ta-irv/sandhi.compound.direction` | yes | 25 | 25 | 0 | 0 | 100.0% | 2026-09-29: 25/25 | 0 | 0 |
+| `ta-irv/sandhi.vallinam.accusative` | yes | 76 | 74 | 2 | 0 | 97.4% | 2026-09-28: 35/37; 2026-09-29: 39/39 | 0 | 14 |
+| `ta-irv/sandhi.vallinam.dative` | yes | 85 | 85 | 0 | 0 | 100.0% | 2026-09-28: 46/46; 2026-09-29: 39/39 | 0 | 4 |
+| `ta-irv/sandhi.vallinam.demonstrative` | yes | 24 | 24 | 0 | 0 | 100.0% | 2026-09-28: 7/7; 2026-09-29: 17/17 | 0 | 1 |
+| `ta-irv/sandhi.vallinam.manner-adverb` | yes | 21 | 21 | 0 | 0 | 100.0% | 2026-09-28: 1/1; 2026-09-29: 20/20 | 0 | 0 |
+| `ta-irv/sandhi.vallinam.wrong-consonant` | yes | 1 | 1 | 0 | 0 | 100.0% | 2026-09-29: 1/1 | 0 | 0 |
 | `ta-irv/tamil.repeated-word` | no | 0 | 0 | 0 | 0 | — | — | 0 | 20 |
 | `ta-irv/typo.divine-name.dative-stem` | no | 4 | 4 | 0 | 0 | 100.0% | 2026-09-29: 4/4 | 0 | 0 |
 | `ta-irv/typo.divine-name.vowel-drop` | no | 5 | 5 | 0 | 0 | 100.0% | 2026-09-28: 1/1; 2026-09-29: 4/4 | 0 | 0 |
-| `ta-irv/typo.suffix.dropped-tha` | no | 2 | 2 | 0 | 0 | 100.0% | 2026-09-29: 2/2 | 0 | 0 |
+| `ta-irv/typo.suffix.dropped-tha` | yes | 2 | 2 | 0 | 0 | 100.0% | 2026-09-29: 2/2 | 0 | 0 |
 
 Recall proxies over the contexts the pack skipped on purpose (a sample of the abstains, not of the text, so these are not recall):
 
@@ -116,6 +123,16 @@ Recall proxies over the contexts the pack skipped on purpose (a sample of the ab
 | H_demonstrative_houseform | 9 | 9 | 0 | 0 | 0 | 0 | 0.0% |
 | T_theva_abstain | 0 | 0 | 4 | 0 | 16 | 0 | 0.0% |
 | split | 10 | 0 | 13 | 0 | 0 | 0 | 43.5% |
+
+Whole-population coverage for rules under 20 labels (inline rule (b): every finding in the collection confirmed, none wrong):
+
+- `common/punctuation.repeated`: 0 of 1 confirmed
+- `common/unicode.invisible`: 0 of 1 confirmed
+- `ta-irv/sandhi.clitic.fused`: 2 of 6 confirmed
+- `ta-irv/sandhi.vallinam.wrong-consonant`: 1 of 1 confirmed
+- `ta-irv/typo.divine-name.dative-stem`: 4 of 13 confirmed
+- `ta-irv/typo.divine-name.vowel-drop`: 5 of 11 confirmed
+- `ta-irv/typo.suffix.dropped-tha`: 2 of 2 confirmed
 <!-- human-benchmark:end -->
 
 ## AI agreement: what the numbers mean — read this first

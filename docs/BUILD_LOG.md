@@ -13089,3 +13089,40 @@ figure.
   - 4 AI misspelling pairs (step 3);
   - 2 தான் cases (step 4);
   - 10 splits (step 5).
+
+### Step 2 — promote on evidence; settle the small-population rules
+
+- **(a) Promoted: at least 20 labelled at ≥ 0.90, over both rounds.**
+  - `sandhi.vallinam.demonstrative` 24/24;
+  - `sandhi.vallinam.manner-adverb` 21/21;
+  - `sandhi.compound.direction` 25/25;
+  - `common/spacing.extra` 23/23, in `INLINE_RULES`.
+
+  The pack rules are set in the builder's `INLINE` table.
+- **(b) The whole population is labelled** (DECISIONS.md 2026-09-29).
+  - `benchmark/human/population.json` is written from the 66 books of the D: copy with
+    `--write-population`. It records 10 small rules and a definition hash for each.
+  - The gate checks coverage and staleness.
+  - Inline under it: `typo.suffix.dropped-tha` 2/2 and `sandhi.vallinam.wrong-consonant`
+    1/1.
+  - Panel-only, in the next sample: `typo.divine-name.vowel-drop` 5/11 and `dative-stem`
+    4/13.
+- **Reviewer fixes.** The builder now reads every round, for word verdicts and for
+  examples. So சேட்டை (accusative, `FP_ROOT`) and தோவேக்கு (the name Doeg,
+  dative, `FP_ROOT`) go into `notLexical`: accusative roots 203, dative 18.
+  - Every round-2 sandhi verdict is now a pack example as well: demonstrative +17, manner
+    +20, accusative +40, dative +40, direction +25, wrong-consonant +1. Each carries its
+    round's date in `origin`.
+  - **Not a change: the brief's "dropped-tha missed செய்வற்கு".** It does not hold. The
+    rule already flags செய்வற்கு at 1CH 23:5 with fix செய்வதற்கு, and that verse was
+    already one of its incorrect examples. Only the clitic rule also fired on the pair
+    (step 4).
+- **Human gate.** It passes.
+  - accusative 74/76 (97.4%; round 2 39/39 now that சேட்டை is excluded);
+  - dative 85/85.
+- **Tests.**
+  - The inline tests' panel-only finding is now `,,`, because `spacing.extra` is inline.
+  - The inline-set assertions are updated.
+  - New: `test_a_rule_whose_whole_population_is_labelled_may_be_inline` (confirmed,
+    incomplete, stale).
+  - Service and jobs: 3493 passed.

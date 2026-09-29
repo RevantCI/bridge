@@ -4,7 +4,7 @@
  "category": "typo",
  "severity": "medium",
  "confidence": "high",
- "inline": false,
+ "inline": true,
  "title": {
   "ta": "-வதற்கு — த விடுபட்டது",
   "en": "Dropped த in -வதற்கு"
