@@ -517,7 +517,8 @@ def test_verse_decide_ignored_actually_suppresses_a_vallinam_finding_through_the
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     try:
-        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        _r = call(engine, "project.open", {"path": str(fixture_project)})
+        assert _r["success"], _r
         edit = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})
         assert edit["success"]
         first = wait(engine._language_qa)
@@ -555,8 +556,10 @@ def test_language_qa_decision_is_not_counted_until_a_check_job_reported_the_find
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     try:
-        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
-        assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]
+        _r = call(engine, "project.open", {"path": str(fixture_project)})
+        assert _r["success"], _r
+        _r = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})
+        assert _r["success"], _r
         finding = next(f for f in wait(engine._language_qa)["findings"] if f["rule"] == "tamil.vallinam-missing")
         before = engine.project.load_progress_rollup()
 
@@ -584,11 +587,13 @@ def test_language_qa_decision_is_not_counted_until_a_check_job_reported_the_find
 @pytest.mark.parametrize("issue", [None, {}, {"source": "greekRoom", "rule": "spelling"}])
 def test_other_decisions_still_update_review_progress(fixture_project, issue):
     engine = BridgeEngine()
-    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    _r = call(engine, "project.open", {"path": str(fixture_project)})
+    assert _r["success"], _r
     params = {"chapter": "1", "verse": "1", "findingId": "greek-room-finding", "status": "accepted"}
     if issue is not None:
         params["issue"] = issue
-    assert call(engine, "verse.decide", params)["success"]
+    _r = call(engine, "verse.decide", params)
+    assert _r["success"], _r
     rollup = engine.project.load_progress_rollup()
     assert rollup["chapters"]["1"]["verses"]["1"]["findings"]["greek-room-finding"] == "accepted"
     assert rollup["totals"]["approvedFindingCount"] == 1
@@ -602,8 +607,10 @@ def staged_engine(fixture_project):
 
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
-    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
-    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]
+    _r = call(engine, "project.open", {"path": str(fixture_project)})
+    assert _r["success"], _r
+    _r = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})
+    assert _r["success"], _r
     wait(engine._language_qa)
 
     def run_job(checks, scope="book"):
@@ -693,7 +700,8 @@ def test_a_decision_rescans_nothing_yet_takes_effect(fixture_project):
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     try:
-        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        _r = call(engine, "project.open", {"path": str(fixture_project)})
+        assert _r["success"], _r
         first = wait(engine._language_qa)
         assert first["totalChapters"] == 2 and first["scannedVerses"] > 0
         finding = next(f for f in first["findings"] if f["chapter"] == "2" and f["rule"] == "tamil.vallinam-missing")
@@ -720,20 +728,23 @@ def test_results_persist_across_reopen_and_a_live_edit_rescans_only_that_verse(f
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     try:
-        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        _r = call(engine, "project.open", {"path": str(fixture_project)})
+        assert _r["success"], _r
         first = wait(engine._language_qa)
         assert first["scannedVerses"] == first["checkedVerses"] + first["skippedVerses"]
         assert engine.project.load_language_qa_cache().keys() == {"1", "2"}
         # Reopen: a new manager, nothing in memory, every verse from the workbench.
         engine._language_qa.unbind()
         engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
-        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        _r = call(engine, "project.open", {"path": str(fixture_project)})
+        assert _r["success"], _r
         reopened = wait(engine._language_qa)
         assert reopened["scannedVerses"] == 0 and reopened["storage"] == "Persisted in the project workbench."
         assert [f["id"] for f in reopened["findings"]] == [f["id"] for f in first["findings"]]
         # A live edit rescans the edited verse only (chapter 1 has alignment
         # data, so it is editable; chapter 2 here is text only).
-        assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]
+        _r = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})
+        assert _r["success"], _r
         edited = wait(engine._language_qa)
         assert edited["scannedVerses"] == 1 and edited["reusedChapters"] == 1
         assert [f["rule"] for f in edited["findings"] if (f["chapter"], f["verse"]) == ("1", "1")] == [
@@ -805,9 +816,11 @@ def phase1_issue(finding, chosen=None):
 def vallinam_engine(fixture_project):
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
-    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    _r = call(engine, "project.open", {"path": str(fixture_project)})
+    assert _r["success"], _r
     # The dative rule: inline on its human precision, so the inline list sees it.
-    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அவனுக்கு பதில் சொன்னான்,,."})["success"]
+    _r = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அவனுக்கு பதில் சொன்னான்,,."})
+    assert _r["success"], _r
     finding = next(f for f in wait(engine._language_qa)["findings"] if f["rule"] == "tamil.vallinam-missing")
     yield engine, finding, fixture_project
     engine._language_qa.unbind()
@@ -893,7 +906,8 @@ def test_history_lists_every_decision_on_a_finding_in_order(vallinam_engine):
     decide(engine, finding, "rejected", **phase1_issue(finding))
     decide(engine, finding, "accepted", **phase1_issue(finding, chosen))
     # A Greek Room decision on the same verse is not Language QA history.
-    assert call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": "gr-1", "status": "accepted"})["success"]
+    _r = call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": "gr-1", "status": "accepted"})
+    assert _r["success"], _r
     response = call(engine, "languageQa.history", {"projectPath": str(project), "chapter": "1", "verse": "1",
                                                    "findingId": finding["id"]})
     assert response["success"], response
@@ -925,7 +939,8 @@ def test_history_is_project_guarded(vallinam_engine):
 
 def test_terminology_record_refuses_to_replace_without_overwrite(fixture_project):
     engine = BridgeEngine()
-    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    _r = call(engine, "project.open", {"path": str(fixture_project)})
+    assert _r["success"], _r
     first = call(engine, "terminology.record", {"conceptId": "god", "approvedRenderings": ["இறைவன்"],
                                                 "rejectedRenderings": ["கடவுள்"]})
     assert first["success"] and "conflict" not in first["result"]
@@ -946,7 +961,8 @@ def test_terminology_record_refuses_to_replace_without_overwrite(fixture_project
 
 def test_verse_decide_rejects_a_non_object_issue(fixture_project):
     engine = BridgeEngine()
-    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    _r = call(engine, "project.open", {"path": str(fixture_project)})
+    assert _r["success"], _r
     response = call(engine, "verse.decide", {"chapter": "1", "verse": "1", "findingId": "x",
                                              "status": "ignored", "issue": "languageQa"})
     assert not response["success"]
@@ -1423,8 +1439,10 @@ def test_inline_rpc_is_project_guarded_and_validates_chapter(fixture_project):
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     try:
-        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
-        assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அவனுக்கு பதில் சொன்னான்."})["success"]
+        _r = call(engine, "project.open", {"path": str(fixture_project)})
+        assert _r["success"], _r
+        _r = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அவனுக்கு பதில் சொன்னான்."})
+        assert _r["success"], _r
         wait(engine._language_qa)
         path = str(fixture_project)
         assert not call(engine, "languageQa.inline", {"projectPath": "other", "chapter": "1"})["success"]
@@ -1441,15 +1459,18 @@ def test_real_dispatcher_auto_open_edit_and_project_guard(fixture_project):
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
     try:
-        assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+        _r = call(engine, "project.open", {"path": str(fixture_project)})
+        assert _r["success"], _r
         assert wait(engine._language_qa)["language"]["pack"] == "tamil"
         wrong = call(engine, "languageQa.pause", {"projectPath": "other", "paused": True})
         assert not wrong["success"]
-        assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "தமிழ் �"})["success"]
+        _r = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "தமிழ் �"})
+        assert _r["success"], _r
         assert wait(engine._language_qa)["totalFindings"] == 1
         response = call(engine, "languageQa.status", {"projectPath": str(fixture_project), "limit": 10})
         assert response["result"]["findings"][0]["rule"] == "unicode.corruption"
-        assert call(engine, "ping")["success"]
+        _r = call(engine, "ping")
+        assert _r["success"], _r
     finally:
         engine._language_qa.unbind()
 

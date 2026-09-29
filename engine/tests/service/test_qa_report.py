@@ -150,7 +150,8 @@ def test_check_job_leaves_a_finding_snapshot_the_report_reads(fixture_project, m
 
 def _language_qa_job(engine):
     """A book job with the Language QA stage over a verse with a vallinam finding."""
-    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})["success"]
+    _r = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "அந்த காகம் பறந்தது."})
+    assert _r["success"], _r
     started = call(engine, "checks.start", {"scope": "book", "checks": ["languageQa"]})["result"]
     assert wait_for_job(engine, started["jobId"], timeout=30)["state"] == "succeeded"
 
@@ -160,7 +161,8 @@ def lqa_engine(fixture_project):
     from tc_ai_bridge.language_qa_jobs import LanguageQaManager
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)
-    assert call(engine, "project.open", {"path": str(fixture_project)})["success"]
+    _r = call(engine, "project.open", {"path": str(fixture_project)})
+    assert _r["success"], _r
     yield engine
     engine._language_qa.unbind()
 
@@ -197,7 +199,8 @@ def test_a_high_high_language_qa_finding_blocks_the_gate_and_joins_the_exception
     from tc_ai_bridge.reporting import ReportService
     engine = lqa_engine
     engine.project.record_terminology_rule("god", ["இறைவன்"], rejected_renderings=["தேவன்"])
-    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "தேவன் பேசினார்."})["success"]
+    _r = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "தேவன் பேசினார்."})
+    assert _r["success"], _r
     started = call(engine, "checks.start", {"scope": "book", "checks": ["languageQa"]})["result"]
     assert wait_for_job(engine, started["jobId"], timeout=30)["state"] == "succeeded"
     # terminology.deprecated-form is severity high, confidence high.
@@ -230,7 +233,8 @@ def test_export_is_blocked_by_the_publication_gate_until_overridden_and_the_over
     assert first["success"], first
     assert first["result"]["written"] is True and not first["result"].get("overridden")  # nothing blocks yet
     engine.project.record_terminology_rule("god", ["இறைவன்"], rejected_renderings=["தேவன்"])
-    assert call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "தேவன் பேசினார்."})["success"]
+    _r = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "தேவன் பேசினார்."})
+    assert _r["success"], _r
     started = call(engine, "checks.start", {"scope": "book", "checks": ["languageQa"]})["result"]
     assert wait_for_job(engine, started["jobId"], timeout=30)["state"] == "succeeded"
     out = tmp_path / f"out{suffix}"
