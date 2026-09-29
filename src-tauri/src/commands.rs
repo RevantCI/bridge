@@ -67,6 +67,21 @@ pub async fn pick_import_file(app: tauri::AppHandle) -> Result<Option<String>, S
         .map_err(|e| format!("file picker cancelled unexpectedly: {e}"))
 }
 
+/// A JSON file to read, e.g. a house-style export from another book
+/// (layered-rules Phase 6.4, housestyle.import).
+#[tauri::command]
+pub async fn pick_json_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .pick_file(move |file| {
+            let _ = tx.send(file.map(|f| f.to_string()));
+        });
+    rx.await
+        .map_err(|e| format!("file picker cancelled unexpectedly: {e}"))
+}
+
 #[tauri::command]
 pub async fn pick_save_path(
     app: tauri::AppHandle,

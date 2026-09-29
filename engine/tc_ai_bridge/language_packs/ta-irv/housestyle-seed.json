@@ -1,0 +1,21 @@
+{
+ "schemaVersion": 1,
+ "source": "benchmark/human/2026-09-28/housestyle_import.json (2026-09-28 human review)",
+ "entries": [
+  {
+   "scope": "word-in-project",
+   "ruleId": "",
+   "list": "properNouns",
+   "word": "சேத்து",
+   "provenance": "curated",
+   "state": "active",
+   "evidence": [
+    {
+     "book": "gen",
+     "chapter": "4",
+     "verse": "24"
+    }
+   ]
+  }
+ ]
+}

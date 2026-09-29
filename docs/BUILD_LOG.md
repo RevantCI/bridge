@@ -9692,6 +9692,3610 @@ apart from Git's existing LF→CRLF notices. No engine, frontend, Rust, frozen, 
 installed-app test was run because this work changes documentation and project
 tracking only.
 
+## 2026-09-22 — offline Language QA foundation, Tamil first (#169)
+
+User requested a separate automatic offline language QA layer, starting with the
+supplied Tamil 56-check publication framework, with a small package footprint and
+background execution. Work is on the requested `language-qa` branch. The supplied
+framework is preserved in `LANGUAGE_QA_TAMIL_SPECIFICATION.md`; staged scope,
+budgets, coverage and limits are in `LANGUAGE_QA_PLAN.md`.
+
+LQA-1 adds two small Python modules and a separate collapsible frontend panel.
+Project open/import starts a debounced worker; committed Scripture edits invalidate
+its generation and schedule a recheck. The worker reads current chapter JSON,
+never preserved original USFM or a live database connection. One worker yields
+between verses, bounds input/output, and exits after each pass. Status polling
+schedules a refresh every 15 seconds for external edits. SHA-256 chapter hashes
+permit reuse without trusting timestamps/size; per-verse hashes and raw code-point
+spans accompany stable, occurrence-aware finding IDs. Old-project requests/results
+cannot affect a new book. Pause/resume and transaction-recovery blocks are explicit.
+Results are disposable session analysis, not persisted decisions or automatic edits.
+
+Detection combines metadata with a bounded script sample. It suggests Tamil when
+supported, exposes conflicts/mixed scripts, and does not infer Hindi from
+Devanagari. Tamil rules accept decomposed vowels and Grantha conjuncts and flag
+invalid dependent signs, repeated words and mixed Tamil/Latin words. Common rules
+cover Unicode corruption, private-use/invisible characters, normalization, spacing
+and repeated punctuation. Lone-surrogate JSON receives an ASCII-safe diagnostic.
+Inline-USFM verses, bad files and resource limits are reported as incomplete;
+unsupported grammar, source-fidelity and publication checks never count as passed.
+
+An initial load test exposed worker starvation under continuous foreground polls.
+Deferral is now limited to once per half-second, with a regression test. The source
+401-verse benchmark completed in 15.297 seconds including deliberate sleeps, with
+ping median/max 0.300/2.647 ms. Frozen: 15.328 seconds, ping 0.311/2.252 ms. Both
+verified pause/edit/resume, three reused chapters and unchanged Scripture before
+the explicit edit. Typical pure checks took about 0.8 ms; 20,000-character stress
+checks took 7.6–44.9 ms. These are local observations, not a zero-cost guarantee.
+
+Verification: full engine **1,313 passed** in 20m50s, serial because pytest-xdist was
+absent. Final focused engine **31 passed**, including recovery, starvation,
+same-timestamp/size external edits and malformed surrogates. Frontend **480 passed**;
+final panel **6 passed**; Svelte **0 errors / 0 warnings**; production build passed
+with the existing large-chunk notice. Both PyInstaller executables built under
+`engine/dist/language-qa/`; new module payload is approximately 16 KB compressed.
+No dependency, model, schema, vendor code, semantic golden or Scripture writer was
+added. Rust source was unchanged; generic RPC forwarding needed no Rust change.
+
+The standard frozen-pair smoke stopped at an existing version mismatch: package
+and Tauri 0.12.0 versus engine constants 0.11.0 (also confirmed at starting HEAD).
+Filed **#170** separately; the known #130 import-classification failure was not
+reached. The Language-QA-specific frozen benchmark passed independently. Installed
+visual acceptance remains **NOT RUN**: no browser automation surface was available.
+The temporary preview server and its fixture files were cleaned up. No installed
+app was replaced, release published, commit made or branch pushed.
+
+Later stages need approved Tamil spelling/style/terminology/name data and reviewed
+morphology/sandhi examples. Source judgments, comprehension, typesetting and human
+sign-off remain separate gates. LQA-1 covers technical target-text checks on the
+open book, not all 56 publication checks or whole-collection grammar certification.
+
+Final post-hardening source/frozen reruns also passed: 401 verses in 15.328/15.484 s,
+ping maxima 0.831/1.321 ms; both reused three unchanged chapters after the explicit
+edit. Final compressed module payload: 15,788 bytes. `git diff --check` is clean
+apart from the repository's existing LF-to-CRLF notices. The full-suite count above
+precedes the last five focused cases; all 31 focused cases passed on the final code.
+
+### 2026-09-22 desktop smoke follow-up — idle rescan loop
+
+The first real desktop check showed a completed Language QA pass returning to
+queued/running every 15 seconds. `status()` was scheduling a complete pass whenever
+the refresh interval elapsed, even when no chapter had changed. Idle refresh now
+compares a bounded `(filename, mtime, size)` chapter signature and schedules work
+only when it differs. A worker still hashes every bounded chapter it reads, so an
+explicit Bridge edit/invalidation never reuses changed content merely because an
+editor preserved metadata. Focused regressions pin both no idle restart and normal
+external-edit discovery. This follow-up came directly from installed-app evidence.
+The focused Language QA suite is now **33 passed**.
+
+### 2026-09-22 desktop smoke follow-up — pause/resume restarted the whole book
+
+Retesting the rebuilt sidecars (with the idle-rescan fix above) surfaced a second,
+related defect: the installed-app checklist item "resume continues from where
+paused" failed — resume visibly restarted the whole book (a 150-chapter Psalms-like
+project, `completed · 19/150 chapters`) instead of continuing. Root cause was the
+same class of bug as the idle-rescan one, in a different call path: `pause()` called
+the shared `_schedule()` helper unconditionally on both pause and resume, which
+always wipes `findings`/`completedChapters`/`totalChapters` back to empty/zero and
+starts a fresh pass — even when nothing on disk changed while paused. It is worse
+than a cosmetic reset for a book where most/every chapter carries a per-verse
+limitation (here, inline USFM markers in the target JSON): `_scan()` deliberately
+never caches a chapter that produced any limitation (so a later pass can retry it if
+the book-wide finding budget frees up), so an unconditional reschedule redoes the
+exact same, unchanged per-verse work for the exact same result on every resume.
+
+Fix: `pause()` now (1) keeps the last completed summary on screen while paused,
+only flipping `state` to `"paused"`, instead of blanking it, and (2) on resume,
+reuses the same bounded chapter-signature check the idle-rescan fix introduced —
+if nothing changed while paused, it restores `"completed"` directly, synchronously,
+with no worker thread and no rescan. An edit made while paused (verified with a
+direct external-file write, not just `invalidate()`) still produces a signature
+mismatch and rescans normally on resume. Two new focused regressions cover both
+paths. The focused Language QA suite is now **35 passed**.
+
+### 2026-09-22 LQA-2, first slice: whole-Bible wordlist audit (item 49)
+
+First LQA-2 delivery. Scope was narrowed deliberately across two rounds of
+questions with the maintainer: most of LQA-2 (items 1-10 grammar/morphology,
+20-21/50 termbase) needs either a real Tamil dictionary/morphological analyzer or
+expert-labelled examples neither of which exist yet, so this slice covers only
+the part of item 49 that's pure corpus statistics needing no external data —
+same word two ways, one-character variants, pulli presence/absence, and a rare
+form paired with a much more common near-duplicate. Per the LQA-2 scope note's
+own guardrail ("Rare words or spelling similarity alone are never errors"), the
+rule requires *both* rarity and similarity together; neither alone is ever a
+finding. Compound joined/split and name/theological-term variants are explicitly
+**not** covered — item 49 is not fully closed by this slice.
+
+`language_qa.py` gained `word_occurrences()` (reuses the existing `WORD`
+tokenizer, does not add a second one) and `wordlist_findings()` (pure function:
+counts + first-occurrence locations in, findings out). Near-duplicate matching
+uses SymSpell-style deletion-neighbor buckets rather than naive length bucketing
+(which is genuinely quadratic on Tamil's clustered word-length distribution) —
+this doubles as the pulli-variant case for free, since inserting/deleting one
+pulli is just an ordinary edit-distance-1 case under this scheme; an early
+version of this code only handled same-length substitutions and silently never
+caught the insertion/deletion case including the pulli example itself, caught by
+the first real test run, not by review — fixed by also checking each word's own
+deletion-neighbors against the vocabulary directly.
+
+`language_qa_jobs.py`'s `_scan()` now accumulates a book-wide word-frequency
+table and first-occurrence map alongside the existing per-chapter cache (a
+cache-hit chapter contributes without re-tokenizing); a verse that produced any
+limitation (inline USFM, corrupted, oversize) is excluded from word-counting so
+it can't manufacture spurious rare forms; a truncated pass (either book-finding
+or diagnostic-limit cap, or the pre-existing MAX_CHAPTERS cap) skips the audit
+entirely with an explicit limitation, since a word genuinely common in an unread
+tail chapter would otherwise look artificially rare. The finding id is
+`sha1(book:tamil.wordlist-variant:rare:common)` — word-pair only, no
+chapter/verse — so it survives an unrelated later edit that moves or removes the
+rare word's anchor occurrence elsewhere in the book; a focused regression pins
+this by moving the anchor and checking the id is unchanged.
+
+**Constants are an unvalidated starting point, not a calibrated default** —
+mirrored from `bridge_service.py`'s existing `_CONSISTENCY_MIN_OCCURRENCES`/
+`_MIN_RENDERINGS`/`_DOMINANCE_THRESHOLD` precedent for the same class of
+whole-book statistical check. This environment has no real, previously-reviewed
+Tamil Bible book to run a false-positive calibration against (only small
+synthetic fixtures exist in the test suite) — that calibration is still
+outstanding and should happen against a real project before this rule is
+trusted at scale. What *was* measured: a synthetic 20,000-distinct-word
+vocabulary (the `MAX_WORDLIST_TERMS` cap) runs in ~0.25s; realistic single-book
+sizes (2,000-5,000 distinct words, closer to what a real book's vocabulary is
+likely to be) run in 20-50ms. That whole pass runs as one atomic call at the end
+of `_scan()` with no internal yield point, so a pause/cancel request arriving
+during it can wait up to that ~0.25s worst case before taking effect — a known,
+minor responsiveness gap, not fixed here since real single-book sizes are far
+below the cap.
+
+9 new focused tests (5 pure-function unit tests on `wordlist_findings`, 4
+integration tests through `LanguageQaManager` covering end-to-end detection,
+limitation-verse exclusion, truncation skip, and id stability across a moved
+anchor). Focused Language QA suite: 35 -> 44. Full engine suite reran clean:
+1111 passed, 1 skipped, 0 failed (up from 1102 before this change, matching the
+9 new tests). No frontend changes needed or made — `LanguageQaPanel.svelte`
+already renders any finding generically by iterating `status.findings`, with no
+rule-id-specific handling, confirmed by reading the render loop directly.
+
+Grammar checks (item 3, சந்தி வல்லினம் doubling) remain blocked pending the
+maintainer's labelled examples and a precise rule statement, per the approved
+plan; not started in this slice.
+
+### 2026-09-22 LQA-2 Part B1: closed-class வல்லினம் மிகுதல் after அந்த/இந்த/எந்த
+
+First real grammar rule. The maintainer supplied a precise, bounded rule
+statement rather than general sandhi: demonstrative அந்த/இந்த/எந்த immediately
+followed (pure whitespace only) by a word beginning க/ச/த/ப must carry the
+matching linking consonant + pulli at the end of the demonstrative, e.g.
+அந்த + காகம் → அந்தக் காகம். New rule id `tamil.vallinam-missing`, merged into
+`scan_text`'s existing previous/current word walk (the same one
+`tamil.repeated-word` already does) rather than a third pass over the text.
+
+Every abstention the maintainer listed falls out of the existing design with no
+extra code: "linking consonant already present" is excluded because the
+previous token would then literally be `"அந்தக்"`, not `"அந்த"` — the exact-match
+check itself is the abstention. Punctuation/other boundaries reuse the same
+pure-whitespace gap `tamil.repeated-word` already requires. Verse/chapter
+boundaries and USFM markup are excluded by `scan_text`'s existing one-verse,
+early-bail-out signature — no new code needed for either. "Merely similar to"
+அந்த/இந்த/எந்த (e.g. a fused compound like அந்தநாள்) is excluded by exact-string
+membership, not a prefix match. அது/இது/எது are simply never in the trigger
+set — confirmed by an explicit regression, per the maintainer's strongest
+warning not to let this generalize.
+
+Span covers the whole two-word phrase (not just one token, unlike
+`tamil.repeated-word`'s convention) so the evidence line in the panel shows the
+actual boundary. Severity `medium` (identifiable pattern needing human
+judgement, not a certain structural defect); message is hedged
+("Possible... Verify before editing") matching the maintainer's own wording.
+`RULE_VERSION` bumped `language-qa-1` -> `language-qa-2` (confirmed
+informational only — not part of the in-memory chapter cache key, and the one
+hardcoded `"language-qa-1"` string in the frontend is an arbitrary mock-fixture
+literal in `LanguageQaPanel.test.ts`, not a comparison against this constant,
+so the bump needs no frontend change).
+
+23 new focused tests, directly against every example the maintainer gave
+(6 incorrect forms flagged, 6 correct forms not flagged) plus non-trigger
+initials, punctuation boundaries, exact-token matching (including a fused
+compound), and the explicit அது/இது/எது non-generalization regression. Focused
+Language QA suite: 44 -> 67. Full engine suite reran clean: 1134 passed, 1
+skipped, 0 failed (up from 1111, matching the 23 new tests).
+
+Scope: this is Part B1 only, one closed-class environment. Accusative -ஐ,
+dative -க்கு, compounds, adjectival compounds, verbal participles,
+குற்றியலுகரம், and general noun+noun joining are explicitly not covered and
+would each need their own rule and fixtures, per the maintainer's own scope
+note.
+
+### 2026-09-22 Part B1 installed desktop acceptance -- confirmed PASS
+
+Rebuilt sidecars and the dev app at `358ab9f` (clean tree at that commit) and
+ran a guided installed-app acceptance, the same discipline used for the two
+earlier scheduling fixes. Controlled test project (`vallinam-test`, book
+Philippians, one chapter, ten verses) built and imported through Bridge's
+normal Import-a-file flow rather than modifying any real translation
+project -- import always copies the source, so this carried zero risk to
+existing project data. Verses 1/3/5/7 covered all four consonant classes with
+an incorrect boundary; 2/4/6/8 were the same phrases already correctly
+linked; 9 used a non-trigger initial (வ); 10 put a comma at the boundary.
+
+Result: all four incorrect boundaries flagged as `tamil.vallinam-missing`
+with exactly the expected wording, raw-text span, verse anchor and `medium`
+severity -- message text matched the code's output character-for-character
+(e.g. `"அந்த க..." normally takes "அந்தக் க..."`). All six negative cases
+(correct forms, non-trigger initial, punctuation boundary) produced zero
+findings -- "4 review candidates" total, matching exactly the four verses
+meant to flag. Verse text unchanged in the editor, confirming no auto-edit.
+Findings survived verse navigation, Pause checks (stayed visible, state
+flipped to `paused` without blanking), Resume checks (returned directly to
+`completed`, no restart flash), and a 15+ second idle wait (stayed
+`completed`) -- exercising both earlier scheduling fixes together with B1 and
+finding no regression. One unrelated observation noted and dismissed: a
+`எந்த¹,²` superscript in the verse-7 editor view, traced to the separate
+tN/tW/Alignment check system's own "15 open findings" (a standard import-time
+artifact), not Language QA.
+
+No code changes made during this verification -- none were needed. Per the
+maintainer's sequencing: LQA-2 sandhi work pauses here. Next track is
+termbase/proper-name infrastructure (framework items 20-21/50), to be scoped
+separately once requested. If sandhi work resumes later, the next rule should
+again be narrowly bounded and validated before implementation, the same way
+B1 was.
+
+### 2026-09-22 LQA-2 termbase v1: explicit exact-match deprecated-form consistency (items 20-21/50)
+
+First implementation slice of the termbase track, following the architecture
+document accepted this session (four explicit maintainer decisions overrode
+two of that document's own recommendations):
+
+- **Pipeline**: routed through the existing, already-disposable Language QA
+  flow (`language_qa.py`/`language_qa_jobs.py`), not a new Greek-Room-style
+  adapter with its own persistence/review lifecycle as the architecture doc
+  had recommended. No second findings model, no parallel job manager.
+- **Storage**: the termbase itself (the curated data, as opposed to the
+  findings it produces) is durable, DB-backed — finishing the orphaned
+  `record_terminology_rule`/`terminology_rules()` write path in
+  `tc_project.py` (`human_decisions`, `kind='terminology'`), which already
+  existed with almost the right shape but zero callers anywhere. Extended,
+  not replaced: added `category` (person_name/place_name/key_term/other),
+  `provenance` (human/imported), a real `status` enum
+  (approved/provisional/imported, replacing a single hardcoded literal), and
+  validation (concept id required, at least one rendering list non-empty,
+  enum values checked, book-scope-only for now). Kept the existing
+  `approvedRenderings`/`allowedAlternatives`/`rejectedRenderings` field names
+  unchanged — `analytics.py`'s `translation_words_book_analytics()` is an
+  *active* reader of `approvedRenderings` specifically, and renaming it for
+  cosmetic clarity would have silently broken that consumer for no v1
+  benefit. `schemaVersion` bumped 1->2 inside the payload only; no SQL
+  migration, `WORKBENCH_SCHEMA_VERSION` stays at 3 — the payload column is
+  schema-less JSON and there was no production data anywhere to migrate
+  (zero prior callers, confirmed).
+
+**Authority, not frequency** (the maintainer's own framing): only entries
+with `status == "approved"` are ever matchable. A `provisional`/`imported`
+entry's `rejectedRenderings` are inert until something explicitly promotes
+them — including a pre-existing payload from before this change that has no
+`status` key at all, which degrades to "not approved" (the safe default),
+never silently authoritative. Automatic discovery/promotion is not built in
+this slice; `record_terminology_rule` represents explicit human/API
+curation and defaults to `approved` for that reason alone.
+
+**New domain module** `engine/tc_ai_bridge/terminology.py` — pure matching
+logic, no I/O, no orchestration, per the maintainer's explicit "keep
+terminology/domain logic separate from orchestration" instruction.
+`TermIndex` builds a phrase->term lookup from raw `terminology_rules()` rows
+(sorted by `conceptId` first, so two entries that happen to register the
+same phrase resolve deterministically rather than by loader iteration-order
+luck); `find_deprecated_forms()` does word/phrase-boundary-aware exact
+matching (multi-word phrases supported, whitespace-only gaps, same
+discipline as `tamil.vallinam-missing`'s two-token boundary check) — never a
+naive substring search. `language_qa.py` gained one small, behavior-preserving
+refactor: `add()`'s inline id-hashing formula was extracted to a top-level
+`stable_finding_id()` so the new rule can mint ids identically without
+duplicating the formula; full suite reran green immediately after, confirming
+no behavior change from the extraction alone.
+
+**Integration** (`language_qa_jobs.py`'s `_scan()`): the termbase is loaded
+fresh every scan pass (a single lightweight read, not worth caching across
+passes) via a loader reference captured at `bind()` time
+(`getattr(project, "terminology_rules", None)`) — the `SimpleNamespace` test
+fixture never has to provide one unless a test opts in, which is what makes
+"no termbase installed" degrade to zero findings with no code path change.
+A loader exception is caught and degrades to an empty termbase plus a
+"Terminology unavailable" limitation, never a crash. New rule
+`terminology.deprecated-form`, severity `high` (a curated fact, not a
+heuristic — deliberately distinct from `tamil.wordlist-variant`'s `low`
+corpus-suspicion tier, per the maintainer's explicit instruction to keep
+those two confidence classes separate), hedged message wording ("is marked
+deprecated... Verify this occurrence" — never an automatic-correction
+command). A curated term changing must invalidate every cached chapter's
+findings, not just whatever chapter's edit triggered the pass — the
+per-chapter cache key gained a third component, a hash of the raw termbase,
+alongside the existing content-digest and language-pack — proven by a
+dedicated regression that edits chapter 2 only and confirms chapter 1's
+stale-but-uncached finding still appears.
+
+**Tests**: 26 new, `engine/tests/service/test_terminology.py` — 10 pure
+`TermIndex`/`find_deprecated_forms` unit tests (approved-only authority,
+malformed/overlong-phrase defensive skipping, single- and multi-word
+matching, whitespace-only boundary, raw-span-vs-normalized-comparison,
+deterministic conflict resolution, pre-existing-payload backward
+compatibility), 5 real `TranslationCoreProject` storage round-trip tests
+(record/read, restart/reopen, upsert-by-concept-id, empty-entry and
+unknown-enum validation), 8 `LanguageQaManager` integration tests (clean on
+preferred/allowed forms, stable id across an unrelated rescan, finding
+clears on edit and on verse removal, no-termbase and malformed-loader
+graceful degradation, the cross-chapter cache-invalidation regression above),
+1 full real-project-to-manager end-to-end test. Existing suites unaffected:
+`test_language_qa.py` (67) and the full engine suite both reran green.
+Full engine suite: **1160 passed, 1 skipped** (up from 1134, matching the 26
+new tests exactly).
+
+**Performance** (synthetic, no real Tamil termbase or reviewed book
+available in this environment, same caveat as item 49's): 300 concepts /
+602 rejected forms against 30,000 generated verses (a generous whole-Bible
+upper bound) — 0.048 ms/verse, 1.45s total. The benchmark's "3204 incidental
+matches" is a synthetic-data artifact (both the termbase and verse text were
+generated by sampling the same small random-letter alphabet, producing
+coincidental collisions no real termbase against real Scripture would show)
+— not a false-positive-rate measurement, and not claimed as one.
+
+**Deferred, not built**: fuzzy/near-spelling suggestions, automatic
+variant/rendering promotion, general spelling correction, inferred preferred
+forms, full proper-name discovery, theological semantic inference, Tamil
+morphological parsing (case-suffix/sandhi-aware matching), whole-project/
+whole-Bible scope, any curation UI (this is backend/storage/domain only, by
+design), cross-entry write-time conflict validation (conflicts resolve
+deterministically at match time instead, per the dedicated regression — not
+rejected at write time).
+
+Desktop acceptance **not yet run** — this entry documents source-level
+verification only; the maintainer will test the actual build directly per
+`docs/QA_TEST_MATRIX.md`'s A45 row before this is called accepted.
+
+### 2026-09-22 termbase v1 installed desktop acceptance -- confirmed PASS
+
+Rebuilt sidecars at the two commits above and ran a guided installed-app
+check reusing the existing `vallinam-test` project from Part B1's
+acceptance run rather than building a new one -- this slice has no curation
+UI yet, so seeding was one `record_terminology_rule` call against the real
+project's workbench DB (concept `god`, preferred `இறைவன்`, rejected
+`கடவுள்`), then a single verse edited through Bridge's own editor (verse 9,
+previously a Part B1 non-trigger case, its job already verified) to contain
+the deprecated form.
+
+Result: `PHP 1:9` flagged as `terminology.deprecated-form`, severity `high`,
+evidence `கடவுள்`, message text matching the code's output exactly --
+`"கடவுள்" is marked deprecated for god. Preferred form: இறைவன். Prefer
+இறைவன். Verify this occurrence.` Findings count went 4 -> 5 (the four B1
+வல்லினம் findings, unaffected, plus this one) and back to 4 the moment the
+verse was corrected to `இறைவன் இருக்கிறார்.` -- confirming the finding
+clears on a genuine fix, coexists cleanly with an unrelated rule already in
+the same panel, and Scripture itself was never auto-edited (the verse text
+in the editor was exactly what was typed, nothing rewritten by the check).
+
+No code changes made during this verification -- none were needed. This
+closes A45's "desktop acceptance NOT YET RUN" note in
+`docs/QA_TEST_MATRIX.md`.
+
+### 2026-09-22 termbase v2: inline double-underline + right-click suggest/edit/ignore
+
+Backend and frontend for the UI slice the maintainer asked for next,
+explicitly scoped to `terminology.deprecated-form` only (not வல்லினம்/
+wordlist-variant) and built almost entirely out of existing machinery --
+the architecture-discovery pass before implementation found a full
+"right-click flagged span -> apply a suggested replacement -> durably
+recorded" flow already shipped for other finding types, plus a generic,
+finding-type-agnostic context menu and a generic, opaque-string-keyed
+decision store. The one real gap: nothing in Language QA's scan loop
+consulted any decision store, so recording an "ignore" would have done
+nothing -- the same finding would have reappeared on the very next pass.
+
+**Backend** (`terminology.py`, `language_qa_jobs.py`): match results now
+carry `suggestedReplacement` (the term's first `approvedRendering`, or
+`null` when only rejected forms are recorded -- never invented).
+`LanguageQaManager` gained a second loader mirroring the termbase one
+exactly, `project_qa_decisions()` (already existed, already the same
+`kind='qa'` bucket `verse.decide` writes into -- no new backend endpoint).
+Suppression is scoped narrowly: only the terminology-matching block checks
+decisions, nowhere else in `_scan()` -- not a general Language QA decision
+framework. The per-chapter cache key gained a fourth component (a hash of
+decisions, alongside the existing termbase-version hash) so a review
+decision invalidates every cached chapter's findings the same way an edited
+chapter or a changed term does, proven by a dedicated cross-chapter
+regression mirroring the termbase-version one from v1. Occurrence
+numbering for stable ids still advances even for a suppressed match, so a
+later undecided occurrence of the same word in the same verse never shifts
+onto an unstable id once an earlier one is ignored -- pinned by a dedicated
+test.
+
+**Frontend**: `buildSegments()` gained a fourth parameter
+(`languageQaFindings`), mapped into its span model the same way
+`nativeChecks`/`aiReviews` already are -- never cast into a fake `QaFinding`,
+keeping Language QA's disposable data model separate from `QaFinding`'s
+persistent one at the data layer, unified only at the render call site. New
+`.m-term` mark (double `border-bottom-style`, its own `--term` colour,
+distinct from the four existing Greek Room/tN/tW/alignment sources -- this
+is a different confidence class, a curated fact rather than an engine's
+suspicion). A new shared store, `languageQaFindingsByVerse`, is the one
+piece that didn't already exist: `LanguageQaPanel.svelte` was the only
+Language QA poller and kept its data entirely local, and -- a real gap
+found during design, not assumed -- it only ever fetched real finding
+objects when the panel was manually expanded (`limit=0` while collapsed).
+Fixed by requesting a real page (100) even collapsed, so inline decoration
+works without the reviewer ever opening the side panel; the panel's own
+50-per-page pagination text is untouched when expanded. A third
+`FindingContextMenu` instance offers `Use "<preferred>"` (omitted, not
+disabled, when there's no suggestion), `Edit`, `Ignore` -- reusing the
+existing menu component verbatim. `Use` calls a new
+`applyLanguageQaSuggestedFix()` (verseEditor.ts), the same splice/save/
+re-check sequence as the existing `applySuggestedFindingFix`, adapted for
+`start`/`end` field names, calling `bridge.decideVerse(..., "accepted")`
+directly afterward since Language QA has no `onSaved`-hook equivalent of
+its own. `Ignore` calls `bridge.decideVerse(..., "ignored")` and removes
+the finding from the store optimistically; the next real scan pass
+independently confirms the suppression server-side.
+
+**Tests**: 9 new backend (`test_terminology.py`, 26 -> 35): ignored/accepted
+decisions suppress a finding, a decision on one occurrence never suppresses
+another in the same verse, no-decisions-loader shows everything, a
+malformed decisions loader degrades gracefully (never a crash), a decision
+change invalidates an unrelated cached chapter, `suggestedReplacement`
+present/absent. Full engine suite: **1169 passed, 1 skipped** (up from
+1160, matching exactly). 7 new frontend (Vitest, 480 -> 487): the store
+populates from only `terminology.deprecated-form` entries grouped by verse
+key; `buildSegments` produces the `.m-term` mark for a terminology finding
+and nothing for any other Language QA rule; `applyLanguageQaSuggestedFix`'s
+edit/re-check/decide sequence, its staleness guard, its no-suggestion
+refusal, and that a decision-recording failure doesn't turn an already-
+successful text fix into a reported failure. One existing test updated
+(`LanguageQaPanel.test.ts`) to expect the new collapsed-state fetch
+behaviour rather than the old count-only one -- a deliberate behaviour
+change, not a regression fix. `npm run check` 0/0, `npm run build` clean
+(pre-existing large-chunk notice only).
+
+**Performance**: synthetic only, same caveat as every Language QA
+performance number so far -- 5,000 decided findings hashed 50 times (a
+generous whole-book, long-session estimate): 4.1 ms/pass, negligible
+against a full scan.
+
+Desktop acceptance not yet run -- awaiting the maintainer testing the
+actual build, same discipline as every prior slice this session.
+
+### 2026-09-23 termbase v2: two more bugs from the same desktop retest, both fixed
+
+The retest of `3dd074a` (the accepted-decision fix) surfaced two further,
+real bugs in the same feature, not hypothetical:
+
+**"Ignore" never actually took effect.** Recording an "ignored" decision has
+no text change for Language QA to notice on its own the way an edit does --
+`bridge_service.py`'s `decide_verse()` only ever wrote the decision and
+updated the progress rollup; nothing told `LanguageQaManager` to invalidate
+and rescan. The frontend's optimistic local removal (from `29c17a7`) did
+work, but the panel's very next poll (2-5s later) refetched the *old,
+unssuppressed* summary, since Language QA truly never rescanned, and
+silently undid the optimistic removal -- so the double underline reliably
+came back, indefinitely, not as a transient flicker. Fixed by having
+`decide_verse()` also call `self._language_qa.invalidate(chapter)`,
+mirroring exactly what `edit_verse()` already does. Unconditional, same as
+`edit_verse` -- `invalidate()` is a no-op when Language QA isn't bound, and
+the manager's own debounce coalesces a burst of decisions into one rescan.
+New real-dispatcher test (`test_verse_decide_ignored_actually_takes_effect_through_the_real_dispatcher`)
+proves the full RPC path end to end: record a term, get flagged, decide
+"ignored" through `verse.decide`, confirm the next scan no longer shows it
+-- not just that the backend function was called.
+
+**A stale double-underline briefly appeared on the *fixed* word after
+"Use".** `edit_verse()` already invalidates Language QA (unlike decide, this
+path was never broken), so the fix eventually self-corrected -- but
+`languageQaFindingsByVerse` still held the pre-edit finding with its
+now-stale offsets until the next poll caught up, and rendering that stale
+span against the *new* verse text put the mark on whatever text happened to
+fall in the old range -- often overlapping the just-applied preferred word.
+Fixed on the frontend: after a successful "Use", the whole verse's entry in
+`languageQaFindingsByVerse` is cleared immediately (not just the one
+finding id -- every offset in that verse is suspect once the text changes),
+the same way the existing `QaFinding` accept-flow replaces
+`findingsByVerse` wholesale after a recheck rather than waiting on a poll.
+
+Both fixes are small and were caught by actually driving the feature in the
+installed app, not by the test suite -- worth naming plainly, since neither
+gap would have been obvious from source review alone. Full engine suite
+reran clean. Same discipline as every fix this session: commit once
+verified, desktop-retest before calling it done.
+
+### 2026-09-23 "not getting the double underline on the new verse" -- investigated, no code defect
+
+A third desktop report on the same retest ("i am not getting the double
+underline on the new verse" after ignoring verse 9's occurrence, then editing
+verse 10 to introduce a fresh one) looked at first like a third real bug in
+the same run. Two new regression tests were written to reproduce the exact
+sequence and both passed cleanly: `test_verse_edit_after_an_ignore_still_detects_a_new_occurrence_elsewhere`
+(real `BridgeEngine` dispatcher, ignore one verse then edit a different one
+in the same chapter) and a matching `LanguageQaPanel.test.ts` case simulating
+two consecutive polls. Full engine suite (1385 passed) and frontend gate all
+green with both added -- committed as `7ed01e9` regardless, since they're
+real coverage of a sequence that was previously untested.
+
+The maintainer retested with a longer wait and the underline still never
+appeared, even on a freshly typed, never-touched verse (verse 8) -- ruling
+out both of the leading hypotheses (a logic bug in the ignore-then-edit path,
+and simple poll latency). Direct inspection of the live project's
+`bridge-workbench.sqlite3` (`human_decisions` table) showed the real cause:
+**zero rows, zero `change_log` history for that table, ever**, in this
+project instance. The `vallinam-test` project had been freshly reimported
+earlier that session (created 04:32:52 the same day), and the termbase rule
+(concept `god`, preferred `இறைவன்`, rejected `கடவுள்`) that made every earlier
+round of testing work was never re-seeded into the new instance -- because,
+per the 2026-09-22 entry above, there is still no UI to add one; it has
+always been a one-off `record_terminology_rule()` script call. With zero
+termbase rows, no text was ever going to be flagged, on any verse, ignored
+or not -- which is exactly what was observed once the actual data was
+checked instead of the code.
+
+Reseeded the identical rule directly against the live project via the real
+`TranslationCoreProject.record_terminology_rule()` API (SQLite WAL mode
+makes this safe with the app still running against the same file). The
+running `LanguageQaManager` doesn't notice a termbase change on its own --
+its idle-refresh check only watches chapter file mtimes/sizes, not termbase
+state -- so a project reopen (fresh `bind()`, full rescan) was needed to
+pick it up. After reopening: all three verses (8, 9, 10) showed the double
+underline, panel count went 4 -> 7 (4 வல்லினம் + 3 terminology), matching
+expectations exactly.
+
+No code changes were needed for the actual reported symptom -- the pipeline,
+cache invalidation, and decision suppression all check out. Filed #171
+separately for the real underlying gap this surfaced: no UI (and no
+"termbase is empty" signal anywhere) makes an empty termbase indistinguishable
+from "checked, nothing found," which is what made a data-seeding gap look
+like a live regression. Worth naming as its own lesson: two passing,
+faithful regression tests were necessary but not sufficient here -- they
+correctly proved the *code* had no defect, but only inspecting the actual
+live project data surfaced what was really different about the failing
+case.
+
+### 2026-09-23 #171: minimal termbase curation UI -- add a rule without a script
+
+The gap filed as #171 (above) got fixed the same day it was found. Two new
+thin RPC methods, `terminology.list`/`terminology.record`
+(`bridge_service.py`), wrap the already-built and already-tested
+`tc_project.py` storage API (`terminology_rules()`/`record_terminology_rule()`
+from termbase v1) with the same `_require_project()` gate and
+`ProjectError` -> `project_error` handling every other book-scoped method
+already has -- no new error-handling pattern, no schema change.
+
+Frontend: a new "Terminology" pane in `SettingsModal.svelte`, placed there
+rather than as a new top-level workspace (the maintainer's call, explicitly
+revisiting the original termbase v1 Decision 3 for this minimal first slice
+only -- Settings already hosts project-scoped content this way, via the
+existing "Resources & licenses" pane). Lists existing rules read-only
+(concept id, joined preferred/rejected renderings) and a 3-field add form
+(concept id, preferred renderings, rejected renderings -- the latter two as
+comma-separated text, split client-side into the `string[]` the backend
+expects). Deliberately does not expose edit, delete, `allowedAlternatives`,
+`category`, `sourceLemma`, `strong`, `note`, or `status` -- those all stay at
+their existing defaults; the backend already supports them if a later slice
+needs to expose them. Rules load lazily (only once the pane is opened, and
+only when `$project` is set, mirroring the Resources pane's own
+`{#if $project}` gate) rather than eagerly on every Settings open, since
+they're book-scoped and the RPC would otherwise reject with `project_error`
+on the common "Settings opened before any project" path.
+
+Tests: 6 new backend dispatcher-level tests (`test_terminology.py`,
+37 -> 43) covering both methods with no project open, list-when-empty,
+record-then-list round trip, both validation failures (missing concept id,
+no renderings at all), and -- directly reproducing what #169's incident
+actually needed -- a rule added through `terminology.record` being picked up
+by the very next `LanguageQaManager` scan pass with no script involved. Full
+engine suite 1391 passed / 1 skipped (up from 1385). 6 new frontend tests
+(`SettingsModal.test.ts`, 9 -> 15): empty-project message instead of a failed
+fetch, rendering existing rules, the empty-termbase message, adding a rule
+with comma-split renderings and the list refreshing from the response value
+(no second round trip), and the RPC's own validation error surfacing in the
+pane rather than being swallowed. Full Vitest suite 493 passed (up from 488).
+`npm run check` 0/0, `npm run build` clean (pre-existing large-chunk notice
+only).
+
+Desktop acceptance not yet run -- awaiting the maintainer testing the actual
+build, same discipline as every prior slice this session.
+
+### 2026-09-23 #171 desktop retest: terminology.record never told Language QA to rescan
+
+First desktop retest of A47 found a real bug immediately: added a "water"
+rule (preferred நீர், rejected தண்ணீர்) through the new Terminology pane,
+confirmed it appeared in the list, but the pre-existing occurrences of
+தண்ணீர் at verses 5-6 (already on screen from Part B1's fixture) never grew
+a double underline, and the panel's total stayed unchanged.
+
+Root cause, confirmed the same way as the earlier `decide_verse` bug
+(2026-09-23, above): `terminology_record()` wrote the rule through the real
+storage API but never invalidated `LanguageQaManager`. Unlike an edit, a
+termbase-only change touches no chapter file, so nothing else notices --
+the idle-refresh check only watches chapter file mtimes/sizes
+(`_chapter_signature`), never termbase state. The rule sits correctly
+persisted and correctly readable, just invisible to the running scan until
+something unrelated (an edit, a decision) happens to trigger a fresh pass.
+
+The test written for exactly this scenario
+(`test_terminology_record_through_the_dispatcher_is_picked_up_by_the_next_language_qa_scan`)
+had passed anyway -- a real process gap, not a false negative caught later.
+It called `terminology.record` immediately after `project.open`, before
+that open's own initial scan had settled; a fast test process let the
+initial pass happen to run *after* the record call and pick up the rule by
+luck of thread timing, never proving the RPC itself invalidated anything.
+Rewritten to `wait()` for the initial scan to fully complete first --
+matching how a translator actually uses this (open a project, let it settle
+to "completed", *then* add a rule) -- and it correctly failed against the
+unfixed code before the fix below.
+
+Fixed with a new `LanguageQaManager.invalidate_all()`
+(`language_qa_jobs.py`): clears the *whole* per-chapter cache rather than
+one chapter's entry, since a termbase change is book-wide by nature, unlike
+`verse.decide`/`verse.edit`'s existing chapter-scoped `invalidate(chapter)`.
+Called from `terminology_record()` right after the write. Full engine suite
+reran clean (1391 passed / 1 skipped).
+
+Verified the fix directly against the rebuilt frozen binary and the real
+`vallinam-test` project before asking for a second desktop retest, not just
+the source-level test suite -- a raw JSON-lines session against
+`bridge-engine.exe`: open the project, poll `languageQa.status` until the
+initial scan settles to `completed`, call `terminology.record` with a
+rejected form (`செய்தி`) that actually appears in the fixture text, then
+poll again with no manual intervention. Picked up the new occurrence
+cleanly, `totalFindings` 7 -> 9. (The first attempt at this same check used
+"தேவன்" as the rejected form, copied from a different test fixture's
+convention -- this project's text never contains that word, so it produced
+a false failure. Worth naming: a script-level smoke check is exactly as
+easy to get wrong as a unit test's fixture data, and needs the same
+scrutiny before trusting its result either way.) Cleaned up both throwaway
+rules from the project's database afterward via the proper
+`WorkbenchRepository._delete` API (journaled through `change_log`, not a
+raw `DELETE`), the same way the earlier #169 seed/cleanup was done.
+
+Second desktop retest 2026-09-23 confirmed clean end to end: added a
+`water` rule (preferred நீர், rejected தண்ணீர்) through the Terminology
+pane, both pre-existing occurrences (verses 5-6) grew the double underline
+immediately with no extra step; "Use" on verse 5 applied நீர் and
+re-checked the verse ("Fix applied and verse re-checked"); verse 6 stayed
+correctly flagged; the earlier-ignored கடவுள் occurrence at verse 9 (from
+#169's own testing) correctly stayed suppressed while a different
+occurrence at verse 10 stayed flagged, confirming the fix didn't disturb
+existing decision-suppression behavior. #171 closed.
+
+### 2026-09-23 LQA-2 Part B2: வல்லினம் மிகுதல் after அப்படி/இப்படி/எப்படி
+
+A second maintainer-specified bounded rule, in the same closed-class family
+as Part B1 (2026-09-22, above): அப்படி/இப்படி/எப்படி (manner-adverbs, "in
+that way / in this way / how") followed by a க/ச/த/ப-initial word needs the
+matching linking consonant, exactly like B1's demonstratives.
+
+Reuses B1's mechanism with zero new logic -- the maintainer's explicit
+instruction was to inspect and reuse B1's implementation rather than build a
+second tokenizer or a parallel sandhi engine, and the actual change is one
+line: `VALLINAM_TRIGGERS` gained the three new words. Every abstention case
+in the spec turned out to already be covered by the existing exact-match-
+against-the-bare-trigger-token check, with no new exclusion logic:
+
+- A token that already carries the linking consonant (`அப்படிக்`) tokenizes
+  as one word, distinct from the bare trigger `அப்படி` -- never matches.
+- Look-alike words that merely contain a trigger as a prefix
+  (அப்படித்தான், இப்படியும், எப்படியோ, அப்படியான், இப்படிப்பட்ட) are each
+  one glued token (letters+marks, no internal whitespace) -- also never
+  equal to the bare trigger.
+- Punctuation and verse/USFM boundaries were already handled by the
+  existing whitespace-only-adjacency check and `scan_text()`'s own early
+  abstention on inline USFM markers.
+
+`RULE_VERSION` bumped `language-qa-2` -> `language-qa-3` (informational
+only, same as B1's own bump).
+
+**Tests**: 45 new focused cases in `test_language_qa.py`, directly against
+every example in the maintainer's spec -- all 12 missing-form combinations
+(3 triggers x 4 consonant classes) flagged with exact wording/span, all 12
+corrected forms clean, non-trigger-initial words clean, a punctuation
+boundary for each trigger, all 5 named look-alike/suffixed forms clean,
+trigger-at-end-of-verse (3 cases, no crash/no flag), inline-USFM
+abstention, NFD-decomposed input still matches with the raw span preserved,
+finding identity stable across repeated scans, the input text is never
+mutated, B1 and B2 triggers coexist correctly in one verse, and an explicit
+direct check that B1's own behavior is unaffected (B1's existing test
+functions were left untouched, satisfying "B1 regression tests remain
+unchanged" as specified). Full engine suite: **1436 passed / 1 skipped**,
+up from 1391 -- the delta is exactly the 45 new tests, confirming nothing
+else moved. No frontend files touched.
+
+Desktop acceptance 2026-09-23 confirmed against the real `vallinam-test`
+project, all live through the panel list (this rule was never meant to be
+inline-decorated -- see the next entry): all three triggers flagged
+positively across representative consonant classes (அப்படி/க, அப்படி/த,
+அப்படி/ப, அப்படி and இப்படி/ச, எப்படி/க, எப்படி/ப -- ச and the remaining
+combinations already covered by the 45 focused tests), and every negative
+case tried live stayed clean (அப்படித்தான் கூறினான் look-alike, அப்படி,
+கூறினான் punctuation boundary, எப்படி முடியும் non-trigger-initial).
+Multiple findings coexisting in one verse rendered and listed correctly.
+B1's own findings (verse 1, verse 3) stayed correct throughout. Part B2
+closed.
+
+### 2026-09-23 Extend inline highlight + suggest/edit/ignore to வல்லினம் (#173)
+
+After confirming B1/B2 work through the panel, the maintainer asked for the
+same inline treatment termbase v2 built (#171's predecessor): a flagged
+span shown directly in the verse editor, right-click offering the suggested
+fix, Edit, and Ignore. Termbase v2 had deliberately scoped that mechanism
+to `terminology.deprecated-form` only when it shipped -- this extends it to
+`tamil.vallinam-missing`, the second rule to ever get it.
+
+Style: a filled yellow highlight (`--vallinam`/`--vallinam-bg`,
+`mark.m-vallinam`), not another colored underline -- every existing mark,
+termbase's double underline included, is border-only. Confirmed with the
+maintainer via a side-by-side comparison (yellow highlight vs. a wavy
+grammar-checker-style underline) before writing any code.
+
+Traced the whole mechanism end to end before touching anything, per the
+maintainer's own standing instruction to reuse existing patterns rather
+than build a parallel one: `applyLanguageQaSuggestedFix`
+(`src/lib/verseEditor.ts`), `FindingContextMenu`, `bridge.decideVerse`, and
+the per-chapter cache's `decisions_version` were all already fully generic
+-- `term_decisions` in `language_qa_jobs.py` (despite its name) is built
+from every `kind='qa'` decision in the project, not scoped to terminology
+by construction, only by which code paths chose to consult it. That left
+exactly two real gaps to close, both narrow:
+
+1. **A structured suggested fix.** `add()` (`language_qa.py`) gained an
+   optional `suggested_replacement` parameter; the வல்லினம் block now
+   computes the *whole* corrected span (raw trigger text + the inserted
+   linking consonant + the untouched original whitespace and following
+   word, exactly as written) rather than only interpolating `corrected`
+   into the message string, which is all it did before.
+2. **Ignore-suppression.** `_scan()`'s வல்லினம் merge point had no
+   `term_decisions` check at all, unlike the terminology block just above
+   it -- an "Ignore" on this rule would have recorded a decision that
+   nothing ever consulted. Added the same `== "ignored"` check, scoped
+   narrowly to `tamil.vallinam-missing` -- deliberately not a general
+   suppression framework for every `scan_text` rule (wordlist-variant and
+   the rest stay exactly as disposable as before, matching how termbase v2
+   itself was scoped).
+
+`RULE_VERSION` bumped `language-qa-3` -> `language-qa-4` (informational
+only, same as the last two bumps -- finding *shape* changed, not matching
+logic). Renamed the termbase-specific menu plumbing in `VerseList.svelte`
+(`termContextMenu` -> `langQaContextMenu`, etc.) since "term" was actively
+misleading once a second rule used it -- `Settings > Terminology` (#171) is
+a different, unrelated feature. Purely mechanical; the logic inside was
+already keyed off `finding.suggestedReplacement`/`finding.id`, never
+`finding.rule`.
+
+**Tests**: the existing B1/B2 parametrized flagged-form tests gained one
+more assertion each (`suggestedReplacement` equals the text with the
+linking consonant inserted, derived from the existing `flagged`/`initial`
+params -- no new parametrize table). New: every other `scan_text` rule
+still defaults `suggestedReplacement` to `None`; an "ignored" decision on a
+வல்லினம் finding suppresses it on the next scan pass; a decision on one
+occurrence doesn't suppress a different one; a real-dispatcher test
+mirroring `test_terminology.py`'s own (`verse.decide` "ignored" through the
+actual `BridgeEngine`, not just the manager). Full engine suite: **1440
+passed / 1 skipped** (up from 1436). Frontend: a `tamil.vallinam-missing`
+finding now produces `.m-vallinam`; `applyLanguageQaSuggestedFix` proven
+explicitly rule-agnostic with a வல்லினம்-shaped finding rather than left
+merely inferred. Full Vitest suite: **495 passed** (up from 493). `npm run
+check` 0/0, `npm run build` clean.
+
+Desktop acceptance not yet run -- awaiting the maintainer testing the
+actual build.
+
+### 2026-09-23 #173 desktop retest: LanguageQaPanel had its own, separate copy of the rule filter
+
+First desktop retest found no yellow highlight anywhere, on any verse, even
+though the backend was independently verified correct beforehand (a raw
+JSON-lines session against the rebuilt frozen `bridge-engine.exe`, not just
+the source test suite -- confirmed a structured `suggestedReplacement`
+computed correctly and ignore-suppression working end to end). What
+appeared instead were red single-underline marks on இப்படி/எப்படி in one
+test verse -- the same coincidental, unrelated Greek Room "spelling
+similarity" finding pattern identified earlier during #169's own
+investigation, not வல்லினம் at all (`எப்படி முடியும்` is a confirmed
+negative case; it can never produce a வல்லினம் mark).
+
+Root cause: `buildSegments()` (`highlight.ts`) was correctly extended
+earlier today to handle both `terminology.deprecated-form` and
+`tamil.vallinam-missing`, but `LanguageQaPanel.svelte`'s
+`updateInlineStore()` -- which populates `languageQaFindingsByVerse`, the
+store `buildSegments` actually reads from -- had its own separate,
+hardcoded `rule !== "terminology.deprecated-form"` filter, missed entirely
+during today's earlier research pass. It dropped every வல்லினம் finding
+before it ever reached the store, so `buildSegments` never even saw one to
+decorate, despite handling the rule correctly itself. Two independently
+maintained copies of the same rule list, and they had already drifted the
+moment the first one was written.
+
+Fixed by exporting `INLINE_LANGUAGE_QA_MARKS` from `highlight.ts` as the
+one source of truth and having `LanguageQaPanel`'s filter check membership
+in it (`finding.rule in INLINE_LANGUAGE_QA_MARKS`) instead of keeping a
+second, driftable copy. Swept the rest of `src/` for any other hardcoded
+`"terminology.deprecated-form"` checks afterward -- none remained outside
+this shared map and doc comments, confirmed by grep, not assumed. Extended
+the existing `LanguageQaPanel.test.ts` coverage (previously titled "...only
+terminology.deprecated-form entries...", now proven to also include
+வல்லினம்) rather than adding a parallel test. Full Vitest suite reran clean
+(495 passed, same count -- an existing test grew stronger rather than a new
+one being added). Commit `b72b75f`.
+
+### 2026-09-23 Researched and rejected external Tamil dictionary/morphology libraries for LQA-2 items 1/2/6
+
+Surveyed the full 56-item framework (`docs/LANGUAGE_QA_TAMIL_SPECIFICATION.md`)
+against what LQA-2 actually covers so far: items 1 (spelling), 2 (morphology),
+4-8 (word division/case/agreement/syntax/completeness), 10 (register) are all
+unstarted and explicitly blocked on "dictionary and morphology feasibility
+measured offline" (LQA-2's own scope note in issue #169). Investigated whether
+an external Tamil NLP library could unblock that, following this project's
+standing discipline for every external dependency so far: install it, run it
+against real input, don't trust the docs.
+
+**Open-Tamil** (`pip install open-tamil`, MIT): installed and tested three
+components against real vallinam-test vocabulary and B1's own hand-verified
+correct/incorrect pairs.
+- `solthiruthi.dictionary.TamilVU` (bundled 63,896-word dictionary): only has
+  root forms. Ordinary inflected verbs (கூறினான், பறந்தது, இருந்தது, செய்தான்,
+  இருக்கிறார்) all return `isWord() == False` despite being perfectly correct
+  Tamil.
+- `tamilstemmer.TamilStemmer`: tried to fix the above by stemming before
+  lookup. Makes it worse, not better -- mis-stems கடவுள் (correct, already a
+  dictionary word on its own) to கட (not a word, false positive), and
+  மொ-stems இருக்கிறார் to இர் (a *different*, unrelated dictionary word --
+  an accidental match for the wrong reason, not evidence of correctness).
+- `tamilsandhi.check_sandhi`: the component most relevant to further B-series
+  sandhi rules. Tested directly against B1's own known-correct sentence
+  ("அந்தக் காகம் பறந்தது") -- it reports 2 separate spurious errors on text
+  we already know is correct, and its own "fixed" output is always identical
+  to the input (never actually corrects anything). Its source has ~24 named
+  rules (விதி 1, விதி 2, ...) covering similar territory to B1/B2
+  (சுட்டு/வினா-derived words, numerals, specific word-final patterns) --
+  possibly useful as *reading material* for hand-verifying a future B3 spec,
+  never as a component to run.
+
+**AI4Bharat / `indic-nlp-library`** (`pip install indic-nlp-library` +
+a separate 258 MB resource download, MIT, from IIT Madras -- a real academic
+lab, not a hobby package): its `UnsupervisedMorphAnalyzer` (morfessor-based)
+is genuinely better-behaved than Open-Tamil's stemmer -- it never mangled a
+correctly-spelled word into an unrelated wrong root in this testing. But
+combined with the same TamilVU dictionary for a spell-check signal (whole
+word or any segment matches a dictionary entry), coverage is still the
+blocker, not segmentation quality: of 17 real test words, 9 correctly-spelled
+ordinary words got no dictionary signal at all, and one real misspelling
+(கடவுல்) slipped through as looking fine because it coincidentally segmented
+into a dictionary-valid piece.
+
+**Conclusion: rejected, not integrated.** A general-purpose 64K-root Tamil
+dictionary -- classical/academic in origin, not Biblical-register -- doesn't
+have adequate coverage of ordinary running Tamil text regardless of which
+segmentation/stemming algorithm sits in front of it. Wiring either library in
+as an automated spelling/morphology check would produce a real stream of
+false positives on correctly-spelled text, exactly the trust-eroding failure
+mode this project has been careful to avoid with every rule shipped so far
+(B1/B2 only landed after validation against the maintainer's own
+hand-supplied correct/incorrect pairs). Both packages uninstalled, the 258 MB
+resource clone removed, engine venv confirmed clean and fully functional
+afterward (`pytest tests/service/test_language_qa.py`, 116 passed) -- nothing
+was ever added to `pyproject.toml` or vendored.
+
+**Direction going forward, per the maintainer:** build a corpus-internal
+vocabulary baseline instead of relying on an external dictionary --
+extending item 49's wordlist-audit approach (already built, already proven)
+using the Tamil IRV project's own already-translated text as the vocabulary
+source, rather than a generic dictionary that doesn't match this project's
+register. Explicit caution from the maintainer, worth recording permanently:
+**the IRV project's own existing text has known quality problems -- that is
+the whole reason Bridge exists.** Any corpus-derived resource built from it
+needs human curation/review layered on top, not automatic ingestion, or it
+will enshrine the project's existing errors as "valid vocabulary" instead of
+catching them. Not yet scoped as concrete work; no code changed in this
+session.
+
+### 2026-09-24 LQA-2 Part B3: வல்லினம் மிகுதல் after explicit dative -க்கு
+
+A third maintainer-specified bounded rule, again reusing B1/B2's mechanism
+with zero new logic -- `VALLINAM_TRIGGERS` gained three more words:
+எனக்கு, உங்களுக்கு, தேவனுக்கு (explicit fourth-case/நான்காம் வேற்றுமை விரி
+surface forms), each followed by a க/ச/த/ப-initial word requiring the
+matching linking consonant, exactly like B1's demonstratives and B2's
+manner-adverbs.
+
+**How the candidate rule was found.** #169's own checklist had items 1/2/6
+blocked on "dictionary and morphology feasibility measured offline" since
+the 2026-09-23 external-library rejection (previous entry). The maintainer
+asked to research an authoritative source for B3 rather than requiring
+hand-supplied examples from scratch. Web research (Tamil Virtual Academy,
+Tamil Wikipedia's வல்லினம் மிகும் இடங்கள் article, cross-checked against
+independent grammar sites including an 8th-standard textbook chapter --
+same rule, same canonical examples, not a one-source claim) found
+"நான்காம் வேற்றுமை விரியில் வல்லினம் மிகும்" as a real, textbook-documented
+rule, directly quoted (not paraphrased) from the Wikipedia article:
+தந்தைக்குக் கொடுத்தான், தாய்க்குச் சொன்னான், தங்கைக்குத் தந்தான். The same
+research explicitly did *not* find equivalent support for genitive -உடைய or
+the quantifier எல்லா as general phrase-boundary rules -- the documented
+genitive rule only covers a fused compound (நாய்க்குட்டி, one word), not a
+spelled-out phrase like அவர்களுடைய + a separate following word, and no
+source addressed எல்லா at all. Reported back to the maintainer with an
+explicit caveat that a Wikipedia summary is a claim to verify, not a rule
+to ship from directly -- same discipline as every other external source
+this project has used.
+
+**The maintainer's actual spec (2026-09-24) is what B3 implements**, and it
+corrected two things the web research alone got wrong or left open:
+
+1. **-உடைய is the *opposite* direction, not merely "unconfirmed."** Standard
+   modern Tamil does *not* geminate after உடைய (அவர்களுடைய பெயர்கள் is
+   correct; அவர்களுடையப் பெயர்கள் is not) -- a candidate future "excess
+   வல்லினம்" rule if ever built, never folded into B3. This directly
+   concerns the 2026-09-24 Philippians Round 2 QA state doc's 3:19 row,
+   marked "Disputed" there for an unrelated reason (a live-file-content
+   contradiction, not a rule question) -- worth the maintainer knowing this
+   rule question and that factual dispute are two separate things about the
+   same verse.
+2. **The morphological guard.** `token.endswith("க்கு")`-style suffix
+   matching is explicitly unsafe -- ordinary Tamil lexical words can
+   themselves end in க்கு without being a fourth-case form, and Bridge has
+   no morphological analyzer to disambiguate. B3 ships as an allowlist of
+   three independently verified dative surface forms, the same
+   exact-match-against-the-bare-trigger-token mechanism B1/B2 already use
+   for their own closed trigger sets -- not a new mechanism, just a
+   pre-existing one applied to a third list. A new dative form gets added
+   to the allowlist only when its case analysis is independently verified,
+   same bar as B1/B2's own trigger words.
+
+**Explicitly out of scope for B3** (per the maintainer's spec, not to be
+inferred back in later without a fresh bounded rule statement): உடைய
+genitive, எல்லா, accusative -ஐ, any other case suffix, compounds,
+inferred/hidden fourth-case தொகை forms, general words merely ending in
+க்கு, morphology guessing, automatic Scripture correction.
+
+**Round 2 QA re-review.** The maintainer's spec explicitly warned against
+treating the Philippians Round 2 QA pass's own "Rejected"/"Fixed"
+dispositions as linguistic ground truth for this question -- that pass
+recorded human review outcomes on a different, broader question (is this
+inconsistency worth an editorial fix), not a validated grammatical rule.
+Three of the pass's dative-sandhi rows are exact instances of this rule:
+php 1:29 (உங்களுக்கு கொடுக்கப்பட்டிருக்கிறது, previously "Rejected"), php
+4:15 (தேவனுக்கு ... சுகந்த, the bare comparison point behind the already-
+"Rejected" 4:18 row), and php 1:12 (எனக்கு சம்பவித்தவைகள், the one row the
+maintainer had already marked "Fixed" -- consistent with this rule, not
+contradicting it). B3's own tests include a dedicated parametrized case
+(`test_vallinam_b3_matches_the_maintainers_philippians_fixtures`) against
+the maintainer's exact fixture text for these three, tied back to their
+verse references rather than left as synthetic examples. The Round 2 QA
+workbook/state doc themselves were not edited in this session -- that is
+tracked separately in `Claude outputs/philippians-round2-qa-state.md`, not
+part of the Bridge repository.
+
+`RULE_VERSION` bumped `language-qa-4` -> `language-qa-5` (informational
+only, same as B1->B2's own bump).
+
+**Tests**: 45 new focused cases -- 12 against every trigger x initial
+combination (3 triggers x 4 consonant classes), reusing only vocabulary
+already attested either in the maintainer's own spec or the existing B1/B2
+test suite (கொடு, தெரியும், பயன், சம்பவித்தவைகள், செய்தான், சுகந்த,
+கொடுக்கப்பட்டிருக்கிறது) rather than inventing new Tamil text -- same
+caution as everywhere else in this project about not trusting unverified
+linguistic judgment, including its own. Plus: the 3 maintainer-fixture cases
+above, correct-forms-not-flagged (12 cases), non-trigger-initial abstention
+(3), punctuation-boundary abstention (3), look-alike/suffixed-form
+abstention (3: எனக்குள், உங்களுக்குள், தேவனுக்குரிய -- the concrete
+demonstration of the morphological guard), trigger-at-end-of-verse (3),
+inline-USFM abstention, NFD-decomposed input, finding-identity stability, no
+input mutation, B1+B2+B3 coexistence in one verse, and an explicit
+B1/B2-regression-unaffected check. `test_language_qa.py` alone: **161
+passed**, up from 116 -- the delta is exactly the 45 new cases, confirming
+nothing else moved. Full engine suite (serial, ~19 minutes): **1491 passed,
+0 failed, 0 skipped**.
+
+**Round 2 QA re-audit, done immediately after (2026-09-24).** Per the
+maintainer's explicit instruction not to treat the Philippians Round 2 QA
+pass's own dispositions as linguistic ground truth, ran a systematic B3-rule
+re-scan of every எனக்கு/உங்களுக்கு/தேவனுக்கு occurrence in that book (same
+tokenizer as production, run against the same `staged/parsed.json` used for
+the original pass) rather than relying on the earlier manual read. Found 3
+genuine violations the original verse-by-verse read never caught -- php
+1:10 and 2:11 (both தேவனுக்கு + க-initial, bare), php 4:15 (எனக்கு +
+க-initial, bare) -- and one wrong citation in the original workbook: its
+4:18 row cited "bare at 4:15" as the comparison point, but 4:15 contains no
+தேவனுக்கு at all. php 1:29 changed from "Rejected" to "Confirmed" on this
+basis. All of this lives in `Claude outputs/philippians-round2-qa-state.md`
+and the regenerated workbook, not in the Bridge repository -- noted here
+only because it is the concrete evidence that B3 is a real, previously-
+undetected gap, not a synthetic example.
+
+No frontend changes needed or made: `INLINE_LANGUAGE_QA_MARKS` in
+`highlight.ts` keys on `finding.rule` (`"tamil.vallinam-missing"`), never on
+which trigger word fired, so B3 findings get the same yellow inline
+highlight, suggest/edit/ignore, and panel listing as B1/B2 automatically --
+confirmed by reading the mechanism, not assumed from B2's own precedent.
+
+Desktop acceptance not yet run -- awaiting the maintainer testing the actual
+build, same as every rule so far.
+
+### 2026-09-24 LQA-2 Part B4: வல்லினம் மிகுதல் after explicit accusative -ஐ
+
+A fourth maintainer-specified bounded rule, again reusing B1/B2/B3's
+mechanism with zero new logic -- `VALLINAM_TRIGGERS` gained five more words:
+என்னை, உங்களை, அவனை, அதை, எதை (explicit second-case/accusative,
+இரண்டாம் வேற்றுமை விரி surface forms), each followed by a க/ச/த/ப-initial
+word requiring the matching linking consonant.
+
+**How this candidate was actually found is worth recording precisely,
+because the process itself surfaced two real citation/verification
+failures worth remembering.** After B3, the maintainer asked for another
+researched B4 candidate. A first web-research pass proposed single-letter
+words (கை/தீ/தை/பூ/மை) and confirmed they are real vல்லினம் rules -- but
+they turned out to be *compound-word formation* (கை + குழந்தை = one fused
+word கைக்குழந்தை), not the *adjacent-word* sandhi B1-B3's mechanism handles;
+dropped as the wrong structural type, not wrong grammar. Accusative -ஐ and
+ஈறுகெட்ட எதிர்மறைப் பெயரெச்சம் were then identified as candidates with the
+right structural shape, but a scan of Philippians found zero real
+occurrences of either -- the book is short enough that not every sandhi
+environment shows up in it.
+
+The maintainer then supplied an extensive external research package (a
+133-rule catalogue, 42 sources, and a claimed local Psalms corpus archive
+at `D:\GPT Lab\...`) arguing for both candidates. Two things in it needed
+independent verification before use, same discipline as every source this
+project has ever used:
+
+1. **One citation was wrong.** The package's citation for accusative -ஐ's
+   `கண்ணனைக் கண்டான்` example pointed at a real TVA page that, when fetched
+   directly, turned out to be about அரை/பாதி instead -- a genuine citation
+   error. A second round from the maintainer supplied a *different*, correct
+   URL for the same claim, which was independently fetched and does contain
+   `கண்ணனைக் கண்டான்` under இரண்டாம் வேற்றுமை. Net effect: the underlying
+   grammar claim holds; "fabricated" (this session's first word for it) was
+   an overstatement of what was actually a wrong citation, corrected on
+   review -- worth recording as its own small calibration lesson.
+2. **The Psalms corpus evidence could not be verified and was not used.**
+   `D:\GPT Lab\...` is not a path on this machine, was never referenced
+   anywhere else in this session, and there is no way to confirm the claimed
+   archive, its SHA-256 hashes, or its extracted examples (E01-E06) are
+   genuine rather than constructed to look genuine. Separately, it was
+   Psalms, not Philippians -- the wrong book for this review regardless.
+   None of that corpus evidence was used for B4; it is not cited anywhere in
+   this rule's tests or specification.
+
+**What actually grounds B4 is a third, independently-verified pass**: the
+maintainer supplied three specific Philippians line/verse claims
+(php 2:28, 3:14, 4:18) against `Claude outputs/staged/51PHPIRVTam.SFM` --
+a real, local, directly-readable file from earlier this session. All three
+were read directly (not trusted from the claim) and confirmed byte-for-byte
+correct: php 2:28 (`அவனை சீக்கிரமாக`, bare, a pronoun -- in scope), php 3:14
+(`பரிசை பெற்றுக்கொள்ள`, bare, an ordinary noun -- correctly excluded from
+B4's scope, would need a noun/participle recognizer Bridge doesn't have),
+php 4:18 (`அனுப்பப்பட்டவைகளை தேவனுக்குச்`, bare, a participial noun --
+also correctly excluded, and a *second*, previously-uncaught boundary in
+the same verse already covered once by B3 for `தேவனுக்குச் சுகந்த`). Only
+php 2:28 is inside B4's actual scope, and it is the rule's real fixture.
+
+**Explicitly out of scope for B4**, same as every case-suffix rule so far:
+ordinary nouns/participles ending in bare ஐ (பரிசை, அனுப்பப்பட்டவைகளை --
+real, confirmed bare boundaries in Philippians, but excluded because
+distinguishing "accusative noun" from "any word ending in ஐ" needs a real
+morphological analyzer, not an allowlist), -உடைய, எல்லா, any other case
+suffix, compounds, தொகை forms, ஈறுகெட்ட எதிர்மறைப் பெயரெச்சம் (real grammar,
+zero verified Philippians occurrences, not pursued further this round),
+அரை/பாதி (same), and general words that merely end in ஐ.
+
+`RULE_VERSION` bumped `language-qa-5` -> `language-qa-6` (informational
+only, same as every earlier bump).
+
+**Tests**: 63 new focused cases -- 20 against every trigger x initial
+combination (5 triggers x 4 consonant classes), reusing only vocabulary
+already attested in the maintainer's own B3 spec or the existing B1/B2/B3
+test suite; 1 tied directly to the real, independently-verified php 2:28
+text (not a synthetic fixture); 20 correct-forms-not-flagged; 5
+non-trigger-initial abstention; 3 punctuation-boundary abstention; 3
+look-alike/suffixed-form abstention (என்னைவிட, அதைவிட, அவனைப்போல -- real
+Tamil comparative/similative constructions, each tokenizing as one word);
+5 trigger-at-end-of-verse; inline-USFM abstention; NFD-decomposed input;
+finding-identity stability; no input mutation; B1+B2+B3+B4 coexistence in
+one verse; and an explicit B1/B2/B3-regression-unaffected check.
+`test_language_qa.py` alone: **224 passed**, up from 161 -- the delta is
+exactly the 63 new cases. Full engine suite (serial, ~19 minutes): **1554
+passed, 0 failed, 0 skipped** (up from 1491, confirming nothing else moved).
+
+No frontend changes needed or made, same reasoning as B3: `finding.rule`
+stays `"tamil.vallinam-missing"` regardless of which trigger fired.
+
+Desktop acceptance not yet run -- awaiting the maintainer testing the
+actual build, same as every rule so far.
+
+## 2026-09-24 — Language QA review fixes: inline coverage, footnoted verses, rollup isolation, offsets
+
+A review of the inline வல்லினம்/termbase work found four defects. They are
+fixed in order, one commit each. None of them changes a finding id, a rule,
+a trigger list, the CSS or the termbase format.
+
+### 1. Inline marks now cover the whole book, not the panel's first page
+
+**Defect.** `LanguageQaPanel.svelte` filled `languageQaFindingsByVerse` (the
+store `VerseList` reads for the double-underline and the yellow வல்லினம்
+highlight) from its own `languageQa.status` page. That page is `limit=100`
+(50 once expanded), ordered book → chapter → verse, and mixes in every rule.
+In a book with more than 100 Language QA findings, any inline finding past
+the first page got no mark and no right-click menu. It still showed in the
+panel once the panel was paged far enough. Chapter 1 looked fine; later
+chapters silently lost their marks.
+
+**Cause.** One store fed two consumers with different needs. The panel
+wants a bounded, paged list. The editor wants every inline finding for the
+chapter on screen. The panel's page was the only source of both.
+
+**Fix.**
+- Engine: a new `languageQa.inline` method (`Methods.LANGUAGE_QA_INLINE`,
+  project-guarded like every other `languageQa.*` method; `chapter` must be
+  a string when given). It returns every finding of an inline rule for one
+  chapter, or the whole book without a chapter, from the current summary.
+  It is unpaged. It stays bounded by the existing `MAX_VERSE_FINDINGS` and
+  `MAX_BOOK_FINDINGS`, which are unchanged. The inline rules are one engine
+  constant, `language_qa.INLINE_RULES`, and `languageQa.status` now reports
+  them as `inlineRules`. The idle-refresh probe `status()` already ran was
+  factored into `_refresh_if_due()`, so `inline()` runs it too.
+- Frontend: new `src/lib/languageQaInline.ts`. It polls `languageQa.inline`
+  for `$currentChapter` every 5 s and immediately on a chapter change. It
+  groups by exact `chapter:verse`, keeping verse bridges, and is the only
+  writer of `languageQaFindingsByVerse`. A sequence ticket means only the
+  newest request writes the store or schedules the next poll. An answer for
+  another project or an old chapter is discarded. A failed poll keeps the
+  last marks, and stopping the poller clears them. `App.svelte` starts it
+  when a project is open and stops it on a project change or teardown.
+- `LanguageQaPanel.svelte` no longer imports the store. While collapsed it
+  goes back to `limit=0` (count only).
+- `INLINE_LANGUAGE_QA_MARKS` in `highlight.ts` now only maps a rule to a CSS
+  class. `test_inline_rules_match_the_frontend_class_map` parses it out of
+  the TypeScript source and asserts its keys equal `INLINE_RULES`, so the
+  two cannot drift the way the panel's filter and `buildSegments`' did in
+  #173.
+
+**Verification.**
+- Engine (`test_language_qa.py`):
+  - A three-chapter project has 360 findings, 180 of them inline. Asking
+    for chapter 3 returns all 60 of chapter 3's inline findings, even though
+    they sit past offset 100. `status(offset=0, limit=100)` still returns a
+    100-item page.
+  - With no chapter, `inline()` returns the whole book and only inline rules.
+  - The class-map parity test above.
+  - Through the real dispatcher, the method refuses a wrong project path and
+    an integer chapter.
+- Frontend: `languageQaInline.test.ts` is new, with six tests.
+  - 150 findings reach the store, and `buildSegments` marks the 150th verse.
+  - Verse bridges are grouped exactly.
+  - A late answer for the previous chapter is discarded.
+  - A finding that moves verse on a later pass is tracked.
+  - An answer for another project is ignored.
+  - A failed poll keeps the marks, and stopping clears them and ends
+    polling.
+- `LanguageQaPanel.test.ts`:
+  - Collapsed now asserts `(path, 0, 0)`.
+  - The two tests that asserted the panel populates the store were replaced
+    by one that asserts it never writes the store while paging.
+- Gates: `npm run check` 0/0; `npx vitest run` 500 passed; `npm run build`
+  ok; engine `pytest -n auto` 1558 passed,
+  up from 1554 by exactly the four new tests.
+- Desktop acceptance not yet run.
+
+### 2 (and 4). Verses containing inline USFM are scanned, and a fix after a footnote lands on the right word
+
+**Defect 2.** `scan_text` returned early for any verse containing a
+backslash: "Inline USFM verse omitted from this text-only pass". Every
+footnoted or cross-referenced verse, and every `\wj` verse, got no Language
+QA at all. That meant no வல்லினம், no termbase and no character checks, and
+their words were missing from the book-wide wordlist.
+
+**Defect 4.** In `VerseList.svelte` the right-click menu received the
+*display* copy of each Language QA finding, whose offsets had been shifted
+onto the notes-lifted text for drawing. `applyLanguageQaSuggestedFix`
+splices the *raw* verse, so on a verse with a footnote before the flagged
+span it cut at the wrong place. Its own `originalText` guard then refused
+the fix as "stale". This could only be reached once defect 2 was fixed,
+which is why the two fixes are in one commit.
+
+**Cause.** The engine had no notion of visible text, so bailing out was the
+only way to keep spans exact over raw text. The frontend used one mapped
+list for two jobs with different coordinate systems: drawing needs display
+offsets, splicing needs raw ones.
+
+**Fix (engine, `language_qa.py`).**
+- New `lift_inline_usfm(raw)` returns `(LiftedVerse | None, reason)`.
+  `LiftedVerse` is the visible text built by deletion only, plus
+  `raw_index`, the raw offset of every kept code point. What it lifts:
+  - `\f … \f*` and `\x … \x*` with their contents. The pattern and the
+    swallow-one-space rule are the frontend's `parseVerseNotes`, pinned by
+    one shared table in `test_language_qa.py` and `usfmNotes.test.ts`. The
+    table also records one inherited quirk: `"a \f…\f*"` at the end of a
+    verse keeps its trailing space, exactly as the frontend does.
+  - Character markers, closers, nested `\+…` and milestones. Content is
+    kept, and an opener's one following space goes with the opener.
+  - `|…` attributes up to a closing marker.
+- `lift_inline_usfm` refuses the verse, with a named reason, when:
+  - markers are unbalanced (`usfm.marker_balance_issues`, e.g.
+    `Unbalanced \f: 1 open, 0 close; verse not checked.`);
+  - `\f`/`\x`-family markup sits outside a complete note (`\fig` is
+    exempt);
+  - a backslash is not a marker;
+  - an attribute bar survives lifting.
+- The last guard came from running the lifter read-only over the two local
+  Tamil projects. `ta_irv_phm_book`, a development import, carries a custom
+  `\zsem-s |x-content="δέσμιος…" x-note="…"*` milestone closed by a bare `*`.
+  Without the guard, 131 `unicode.nfc` and dozens of other "findings" came
+  from its Greek and English attribute text. With it, those verses are
+  refused by name.
+- `scan_text` keeps the length and surrogate guards on the raw text, lifts
+  the verse, then runs every rule on the visible text.
+  - `add()` translates each span through `raw_span()`. A span that would
+    cross lifted markup returns `None`. That candidate is dropped before any
+    id or occurrence number is assigned, and it is counted in the verse
+    limitation `N candidate(s) spanning inline USFM markup omitted.`
+  - Every finding's `start`/`end` is raw, and
+    `originalText == raw[start:end]`.
+  - The result gains `checked`, which is False only when the verse was not
+    scanned.
+  - A verse without markup lifts to itself, so its findings, ids and
+    offsets are unchanged (pinned by a test).
+
+**Fix (engine, `language_qa_jobs.py`).**
+- A verse is counted as skipped only when `checked` is False. Before, *any*
+  limitation, including the per-verse finding limit, made it skipped and
+  dropped its terminology and wordlist input. That no longer happens,
+  because a crossing drop would otherwise have silently removed the
+  termbase check from every footnoted verse. Such limitations are still
+  reported, still mark the pass incomplete, and still keep the chapter out
+  of the cache.
+- Terminology matching and the wordlist counts run on the same visible text
+  and are mapped back to raw. A terminology match that crosses markup is
+  dropped and counted. A word split by markup is not counted.
+- The language-detection sample uses visible text instead of skipping
+  marked verses.
+
+**Fix (frontend).** `VerseList.svelte` passes the store's raw findings to
+the menu and to `onMarkContextMenu`. Only `buildSegments` gets the display
+copies, now `displayLanguageQaFindings`. `applyLanguageQaSuggestedFix` and
+its staleness guard are unchanged.
+
+**Verification.**
+- Engine: 286 passed in `test_language_qa.py` plus `test_terminology.py`.
+  - The five tests that pinned the old bail-out now pin the new contract.
+    B2/B3/B4 inside `\wj` are found with raw offsets. The wordlist exclusion
+    test uses an unbalanced `\wj`. A `\wj` word is counted at raw offsets.
+  - New cases:
+    - a footnote after `அந்த பட்டணம்`, and a finding after a footnote at
+      its raw offset;
+    - `\wj அவனை கொன்றார்கள்`;
+    - a doubled space inside a footnote gives no finding, while a doubled
+      space inside `\wj` is found;
+    - an unbalanced `\f` is skipped with its named reason, as are note
+      markup outside a note, a stray backslash and the real unclosed
+      milestone shape;
+    - a crossing candidate is dropped and counted;
+    - `\w` and `\zaln` attributes are lifted;
+    - the shared swallow table;
+    - a plain verse is unchanged;
+    - through the manager, a footnoted verse is checked, not skipped, and
+      its வல்லினம் and termbase findings carry raw offsets.
+- Frontend:
+  - `VerseList.test.ts`: right-click Use on a vallinam mark after a
+    footnote calls `editVerse` with exactly the manual raw splice. This test
+    fails on the previous `VerseList.svelte`, where the fix was refused as
+    stale. It also checks the mark is drawn on the flagged words.
+  - `verseEditor.test.ts`: the fix on a footnoted verse keeps the note
+    byte-identical.
+  - `usfmNotes.test.ts`: the shared table.
+- Real data, read-only, scratch script:
+  - `ta_irvv_phm_book` (the IRV import): all 8 verses with notes are now
+    checked, every `originalText == raw[start:end]`, and no crossings.
+  - `ta_irv_phm_book`: 25 malformed-milestone verses refused by name, 1
+    checked.
+- Gates: `npm run check` 0/0; `npx vitest run` 503 passed; `npm run build`
+  ok; engine `pytest -n auto` 1573 passed.
+- Desktop acceptance not yet run.
+
+**Remaining limitation, documented in `LANGUAGE_QA_PLAN.md`.** A candidate
+that crosses markup cannot be reported. A வல்லினம் boundary between two
+`\w`-wrapped words is the common case, although translationCore imports
+normally flatten `\w`. Footnote text itself is not checked.
+
+**Observed, not changed.** `parseVerseNotes`' `mapOffset` indexes UTF-16
+code units while engine offsets are code points. The two agree for Tamil
+and every other BMP script, but would drift for astral-plane text on the
+display path. This is pre-existing and out of scope here.
+
+### 3. Language QA decisions no longer move the review-progress totals
+
+**Defect.** Use and Ignore on a Language QA mark call `verse.decide`, which
+went straight to `_apply_decision_to_progress`. So every வல்லினம் or
+termbase decision became a finding row in the book's progress rollup, and
+moved `findingCount`, `approvedFindingCount` and `reviewedVerseCount`, plus
+the dashboard's cached copy of those totals. Language QA findings are
+disposable text-only review candidates. They are not the checked QaFindings
+those totals measure, so an "ignored" vallinam made a verse look reviewed.
+
+**Cause.** `verse.decide` had no way to know what kind of finding it was
+deciding, and nothing told it.
+
+**Fix.**
+- Every Language QA finding carries `"source": "languageQa"`
+  (`language_qa.FINDING_SOURCE`). That covers `scan_text`'s findings,
+  terminology findings and wordlist findings.
+- `decide_verse` takes an optional `issue` dict. The dispatcher rejects a
+  non-object value. `issue` is stored as the decision's payload through the
+  existing `record_qa_decision(issue=…)`, which needs no storage change.
+- The rollup update is skipped when `issue.source == "languageQa"`. Origin
+  comes only from `issue`, never from the finding id.
+- The decision is still recorded in `human_decisions` and `change_log`, and
+  the chapter is still invalidated.
+- Semantics are unchanged: "ignored" still suppresses, and "accepted" still
+  does not.
+- Frontend: `findingActions.ts` gains `languageQaDecisionIssue(finding)`
+  and `decideLanguageQaFinding`. The issue is `{source, rule, ruleVersion,
+  originalText, suggestedReplacement, message, start, end}`, and its
+  `source` is always `"languageQa"`, whatever the finding object carries.
+  `bridge.decideVerse` gains an optional `issue`. VerseList's Ignore and
+  `applyLanguageQaSuggestedFix`'s accepted both use the helper.
+
+**Verification.**
+- Engine:
+  - Through the real dispatcher, accepting and then ignoring a vallinam
+    finding leaves `load_progress_rollup()` exactly equal to before: no
+    finding row, no totals change, no verse entry. This test fails without
+    the `decide_verse` change.
+  - The payload records `issue.source`, `issue.rule` and
+    `issue.originalText`.
+  - "accepted" leaves the finding in place, and the next scan suppresses
+    the ignored one.
+  - Greek Room regression, parametrized over no issue, an empty issue and an
+    issue with another source: the rollup still records the decision and
+    counts it.
+  - A non-object `issue` is refused and nothing is recorded.
+  - Every Language QA producer's findings carry `source`.
+- Frontend: `verseEditor.test.ts` asserts the exact issue sent on Use.
+  `VerseList.test.ts` asserts it on Ignore, and that the mark disappears.
+- Gates: `npm run check` 0/0; `npx vitest run` 504 passed; `npm run build`
+  ok; engine `pytest -n auto` 1579 passed.
+- Desktop acceptance not yet run.
+
+### 4. Offset consistency, stale marks after any edit, and a decision cache key that only Language QA can move
+
+**Offset consistency (defect 4).** Its regression test landed with its fix
+in commit 2 (`VerseList.test.ts`). With a footnote before the flagged span,
+right-click Use calls `editVerse` with exactly the manual raw splice. This
+commit adds two smaller items the review asked for in the same PR.
+
+**`saveVerseEdit` now clears `languageQaFindingsByVerse[verseKey]` on
+success.**
+- Defect: only VerseList's own Use handler cleared a verse's Language QA
+  marks. After a typed edit, or a Greek Room fix applied through the same
+  save path, the old marks kept their old offsets, and drew on the wrong
+  words until the next inline poll replaced them.
+- Fix: the verse's entry is cleared right after `editVerse` succeeds, next
+  to the other per-verse derived stores that are already cleared there. A
+  failed save leaves the marks alone.
+
+**`decisions_version` counts only decisions that may concern Language QA.**
+- Defect: the key was a hash of *every* QA decision in the book, and it is
+  part of every chapter's cache key. So any Greek Room accept anywhere
+  forced a full-book Language QA rescan.
+- Fix: the key is built only from rows whose `issue.source == "languageQa"`,
+  plus legacy rows whose `issue` has no `source` key at all. Those are kept
+  rather than guessed away (`_may_concern_language_qa`).
+- To make a new non-Language-QA decision distinguishable from a legacy row,
+  `decide_verse` now stamps `issue.source = "unspecified"`
+  (`language_qa.UNSPECIFIED_DECISION_SOURCE`) when its caller names none.
+  That records that the caller did not say. It is not an inference from the
+  id.
+- Suppression still reads every decision, so an "ignored" from any caller
+  keeps working, and `decide_verse` still invalidates its own chapter.
+- Nothing else reads `issue`: checked by grep before relying on it.
+
+**Verification.**
+- Engine: a two-chapter project through the real dispatcher.
+  - A Greek Room decision on chapter 1 leaves chapter 2 reused. This test
+    fails on the previous `language_qa_jobs.py` with 0 reused, expected 1.
+  - The recorded issue is `{"source": "unspecified"}`.
+  - A Language QA decision on chapter 2 rescans chapter 1.
+  - A legacy row with no source rescans; a row stamped "unspecified" does
+    not.
+- Frontend: `verseEditor.test.ts`:
+  - A successful save clears only that verse's marks. This fails without
+    the change.
+  - A failed save keeps them.
+- Gates: `npm run check` 0/0; `npx vitest run` 506 passed; `npm run build`
+  ok; engine `pytest -n auto` 1580 passed.
+- Desktop acceptance not yet run.
+
+### Audit follow-up: two test gaps closed, RULE_VERSION bumped, acceptance guide added
+
+An item-by-item audit of the four commits against the review brief found
+every fix present and behaving as specified. It also found two places where
+the tests fell short of the brief's wording. Both are closed here, with no
+behaviour change:
+
+- **The brief's exact footnote example is now a test.** The input is
+  `அந்த பட்டணம்\f + \fr 1:1 \ft note\f* வந்தான்`, `\fr` reference included.
+  The suite previously covered only a close variant. The finding is at raw
+  `[0, 12)` and is exact.
+- **A hand-typed save now has a test.** The flow is `startVerseEdit`, typed
+  text, `saveVerseEdit`, with no Use involved. It must clear that verse's
+  marks until the next poll. The earlier test reached the same save
+  function only through the suggested-fix path. The new test fails against
+  `verseEditor.ts` as of `bfd717f` and passes now.
+- **`RULE_VERSION` is `language-qa-6` → `language-qa-7`.** This is
+  informational, as with every earlier bump. Findings gained `source`, and
+  verses with inline USFM are now scanned. Finding ids do not include the
+  version, so they are unchanged. The frontend test fixtures still say
+  `language-qa-6`, but those are fixture data, not assertions against the
+  engine.
+- **`docs/LANGUAGE_QA_REVIEW_FIXES_ACCEPTANCE.md`** gives step-by-step
+  desktop cases for A52–A55. It includes a generated Titus fixture, because
+  real IRV Philippians has only 31 findings and no `\wj`. Every expected
+  number and text in it comes from importing that fixture in a scratch
+  folder and scanning it: 244 findings, chapter 3's first mark at item 162,
+  and the exact raw text after each Use.
+
+~~Also noted by the audit: the brief asks for `docs/DECISIONS.md` to be read,
+but that file does not exist in the repository.~~
+
+**Correction (Phase 2 entry, below).** That was wrong. `docs/DECISIONS.md`
+exists and always did; the check that "found" it missing ran from `engine/`
+and looked for `engine/docs/`. It had not been read during the review fixes.
+It has been read since, and none of its decisions bear on Language QA.
+
+- Gates: `npm run check` 0/0; `npx vitest run` 507 passed; `npm run build`
+  ok; engine `pytest -n auto` 1581 passed.
+- Desktop acceptance not yet run.
+
+### Regression from `ca4dc5f`: poetry line breaks were reported as control characters
+
+**How it was found.** The layered-rules brief asks for a Psalms wall-time
+and memory baseline before its Phase 1. The first measurement showed
+something wrong: IRV Psalms produced 3,000 findings, 2,977 of them
+`unicode.invisible`, and the book cap stopped the pass at chapter 87.
+**Chapters 88–150 were never checked.** The Psalms SFM contains no
+invisible characters at all; a survey of all 66 IRV books found one ZWNJ, in
+1 Chronicles.
+
+**Cause.** Chapter JSON keeps a verse's USFM line structure. Poetry is
+stored like Psalm 23:1:
+`யெகோவா என் மேய்ப்பராக இருக்கிறார்;\n\q நான் தாழ்ச்சி அடையமாட்டேன்.\n\q`.
+Before `ca4dc5f` every such verse was skipped, because it contains a
+backslash. Once it was lifted and scanned, the `\q` markers were removed,
+but the line feeds stayed. `unicode.invisible` then reported each line feed,
+because it is category `Cc`. I introduced this regression in the
+inline-USFM fix, and nothing in its tests had poetry.
+
+**Fix.** In USFM a line break is whitespace, so `\n` and `\r` are no longer
+reported as control or unusual-space characters (`USFM_LINE_BREAKS`). A
+line break still separates words, as any whitespace does:
+- `அந்த\nகாகம்` is still a வல்லினம் candidate.
+- `அந்த\n\q காகம்` is a crossing candidate, dropped and counted like any
+  other.
+
+**Verification.**
+- New tests:
+  - the Psalm 23:1 shape gives no control or unusual-space finding, and no
+    limitation;
+  - a bare line break still separates words;
+  - `\q` between the two words is a counted crossing;
+  - ZWSP, ZWNJ and BEL are still reported.
+- Read-only rescan of all 66 IRV books, each imported into a scratch folder:
+  - 0 skipped verses anywhere;
+  - no floods;
+  - 119.7 s for the whole Bible, imports included.
+- Psalms: 2,461 of 2,461 verses checked, 226 findings, no limitations. That
+  is 2.0 s wall and 68 MB peak working set; before the fix it was 1.1 s,
+  but only because the pass stopped at chapter 87.
+- Totals across the Bible:
+
+  | Rule | Findings |
+  |---|---|
+  | `tamil.wordlist-variant` | 5,025 |
+  | `tamil.vallinam-missing` | 523 |
+  | `tamil.repeated-word` | 87 |
+  | `spacing.extra` | 14 |
+  | `punctuation.repeated` | 1 |
+  | `unicode.invisible` | 1 (the real ZWNJ) |
+
+- The only remaining limitations are crossing candidates, where `\wj`
+  sits between two words. There are about 120 verses in Matthew, Mark,
+  Luke, John, Acts and Revelation.
+- Gates: `npm run check` 0/0; `npx vitest run` 507 passed; `npm run build`
+  ok; engine `pytest -n auto` 1584 passed.
+
+**Found, not fixed (reported).** `wordlist_findings` stops at
+`MAX_WORDLIST_FINDINGS` (200) without adding a limitation. Larger books,
+Psalms among them, reach exactly 200, so the cut is invisible to the
+reviewer. It should become a reported limitation like every other cap.
+
+## 2026-09-24 — Layered-rules Phase 1: finding model, category marks, menu, history, ignore-expiry
+
+This is Phase 1 of the layered, data-driven Tamil rule brief. It closes the
+gaps in the current model that every later layer depends on. It adds no new
+linguistic rule, and changes no finding id and no rule's matching.
+Prerequisites: the four review fixes, `e74eb2d`…`0887ce5`, plus the
+line-break regression fix `ec9b55b`.
+
+**Performance baseline (the brief measures it before Phase 1).** Measured
+on this machine; IRV Psalms is imported to a scratch folder and given a full
+Language QA pass:
+
+| When | Wall | Peak working set | Verses checked | Findings |
+|---|---|---|---|---|
+| Before the line-break fix | 1.1 s | 46 MB | 1,364, truncated at chapter 87 | 3,000 |
+| After `ec9b55b` (the real baseline) | 2.0 s | 68 MB | 2,461 | 226 |
+| After Phase 1 | 2.0 s | 68 MB | 2,461 | 226 |
+
+Phase 1 adds no measurable time or memory.
+
+### 1.1 Finding model
+
+- `language_qa.RULES` gives every existing rule a `RuleMeta`: pack
+  (`common` / `ta-irv` / `project`), layer, category, confidence and its
+  own `revision`. `rule_fields()` stamps these on every finding, from
+  `scan_text`, the terminology pass and the wordlist audit alike.
+- Each finding now carries:
+  - `source`, `layer`, `category`, `confidence`;
+  - `suggestions[]`, ranked, at most 5, each `{text, rank, source,
+    rationale}`;
+  - `ruleId`, pack-qualified, e.g. `ta-irv/tamil.vallinam-missing`;
+  - `packVersion`, `ruleRevision` and `inline`.
+- `rule` and `suggestedReplacement` stay for one release as aliases;
+  `suggestedReplacement` is `suggestions[0].text` or None.
+- `packVersion` is `RULE_VERSION` until the Phase 3 pack exists.
+- `unicode.invisible` and `spacing.unusual` are at revision 2, because the
+  line-break fix changed what they match.
+- Confidence labels are categorical and provisional until the Phase 2
+  benchmark measures each rule. They are not calibrated probabilities.
+- `ruleRevision` is not in the brief's field list. Ignore-expiry (1.5)
+  needs the rule's own version, and `ruleVersion` already means the pack
+  version, so this was the least confusing name.
+
+### 1.2 Inline indicator per category
+
+- Each finding's `inline` flag, set by the engine from `INLINE_RULES`, is
+  now the only authority on what is drawn; `languageQa.inline` filters on
+  it.
+- `highlight.ts` maps category → class through
+  `LANGUAGE_QA_CATEGORY_MARKS`. A parity test checks it against the
+  engine's `CATEGORIES`, and another checks `languageQa.ts`'s unions
+  against `LAYERS` / `CATEGORIES` / `CONFIDENCES`.
+- CSS, every style told apart by line style as well as colour:
+
+  | Findings | Style |
+  |---|---|
+  | typo, high confidence | red wavy (`m-lqa-typo-high`) |
+  | typo otherwise, and any lexicon finding | amber dotted |
+  | sandhi / word-joining | green dashed |
+  | punctuation / spacing | grey thin solid |
+  | unicode | grey hatch |
+  | termbase / name | purple double (`m-term`, unchanged) |
+
+- **The yellow வல்லினம் highlight chosen in #173 is replaced by the green
+  dashed underline.** The brief's table requires it. Flagged here because
+  the yellow was a maintainer choice.
+- Overlap: a segment keeps every finding id and every non-Language-QA
+  class, but only one Language QA class, chosen by severity and then the
+  table's category order (`languageQaMarkRank`). Language QA ids follow in
+  rank order, so the menu opens on the primary finding. This replaces the
+  stale "first-match-wins" comment.
+
+### 1.3 Context menu
+
+- The menu offers:
+  - one `Use "<suggestion>"` per ranked suggestion, at most 5, with the
+    rationale as tooltip;
+  - **Edit…**, which opens the editor with the flagged span selected. Code
+    points are converted to UTF-16 by `codePointToUtf16`, tested with an
+    astral-plane character before the span;
+  - **Ignore this occurrence**;
+  - **Mark as false positive**.
+- A false positive is decision `rejected`. It is hidden like an ignore and
+  listed in the panel's own **False positives** list.
+- Decisions now apply to every rule's findings, not only the two inline
+  ones (`apply_decisions` / `decision_effect`). It is one code path.
+- The decision payload carries source, rule, ruleId, pack version, rule
+  revision, layer, category, original text, the chosen suggestion and its
+  rank, message and span.
+- **No click waits on the engine.**
+  - Ignore and False positive drop the mark first and restore it only if
+    recording fails (`decideLanguageQaFindingOptimistically`).
+  - Use shows the corrected verse and closes the editor before
+    `verse.edit` answers (`saveVerseEdit({optimistic: true})`). It rolls
+    back the text and everything derived from it if the save fails.
+  - A typed save still waits, so a refused save can be fixed in place.
+- **Ignore ▸ this word in this book / this rule for this project are not
+  built yet.** They need Phase 6's house-style store, so the item is a
+  plain "Ignore this occurrence" until then. A one-item submenu, or two
+  disabled items, would be worse for translators.
+
+### 1.4 Decision history
+
+- New `languageQa.history(projectPath, chapter, verse, findingId?)`,
+  project-guarded, with parameters validated. It reads each Language QA
+  decision row's append-only `change_log` images
+  (`TranslationCoreProject.language_qa_decision_history`) and returns
+  every decision in order: verdict, chosen suggestion and rank, time,
+  revision, ruleId.
+- The panel shows it under each finding (History toggle); the verse
+  right-click menu has **Language QA history…**. Both load in the
+  background behind a placeholder.
+- Decisions recorded before issues carried a source are not listed; they
+  cannot be told apart from Greek Room ones.
+
+### 1.5 Ignore-expiry
+
+- An "ignored" or "rejected" decision recorded under a different
+  `packVersion` or `ruleRevision` is not re-applied. The finding comes
+  back with `previouslyIgnored: true` and is listed in the panel's
+  **Re-check** list; `languageQa.status` gains `view`.
+- Decisions from before Phase 1 recorded the pack version as `ruleVersion`,
+  and that is compared too.
+- A decision with no version at all still suppresses, because it cannot be
+  compared.
+- **Consequence to know about:** every `RULE_VERSION` bump now sends every
+  existing ignore back for re-checking, as the brief specifies. The ignores
+  recorded before this commit, under `language-qa-6`/`-7`, are listed for
+  re-check where their version differs.
+
+### 1.6 Termbase and cache scope
+
+- `decisions_version` was already scoped to Language QA decisions
+  (`0da441a`).
+- `terminology.record` from the Settings pane no longer replaces an
+  existing concept silently. Without `overwrite: true` it writes nothing
+  and returns the existing rule as `conflict`; the pane asks inline
+  (Replace / Keep existing).
+- `TranslationCoreProject.record_terminology_rule` itself still upserts, as
+  its own test pins; the guard is on the Settings path.
+
+### Performance contract
+
+- Delivered in this phase:
+  - no Language QA menu action waits on the engine;
+  - the inline poller patches the store per verse
+    (`patchInlineFindings`). An unchanged verse keeps its array, and an
+    unchanged poll writes nothing. A Svelte store notifies on every object
+    write, same reference or not, so an unchanged answer now wakes no
+    subscriber.
+- **Not yet done, and not claimed:**
+  - one status channel in place of three pollers;
+  - the p95 foreground-RPC and click-to-paint measurements;
+  - their CI gates.
+
+  They need the Phase 2 measurement harness and are scheduled there.
+
+### Verification
+
+- Engine (`test_language_qa.py` with `test_terminology.py`: 326 passed).
+  New tests cover:
+  - finding shape for every producer, and the metadata registry;
+  - category and type parity with the frontend;
+  - the inline flag;
+  - `decision_effect` over twelve cases;
+  - `apply_decisions`;
+  - false positives, hidden and listed;
+  - decisions applying to a non-inline rule;
+  - pack-version and rule-revision expiry, and re-deciding;
+  - status view validation;
+  - history order, chosen suggestion, revisions, filtering, validation and
+    project guard;
+  - terminology conflict and overwrite.
+- Frontend (535 passed, up from 507). New or updated tests cover:
+  - class per category, all 11 cases;
+  - overlap priority in both orders, and the tie-break order;
+  - coexistence with other sources' classes;
+  - the menu with 0, 1 and 5+ suggestions, Use of the second suggestion
+    recording its rank, Use changing the verse before the engine answers,
+    Use rolling back on failure, and a false positive restored on failure;
+  - Edit… selection past an astral character;
+  - verse-menu history;
+  - the panel's re-check and false-positive lists, and history loading
+    lazily;
+  - per-verse store patching;
+  - the Settings conflict flow.
+- The fixtures now come from one builder, `languageQaFixture.ts`.
+- Gates: `npm run check` 0/0; `npx vitest run` 535 passed; `npm run build`
+  ok; engine `pytest -n auto` 1613 passed.
+- Desktop acceptance not yet run. `LANGUAGE_QA_REVIEW_FIXES_ACCEPTANCE.md`
+  is updated for the new mark style and menu labels.
+- Also fixed: the audit follow-up's gate lines had been left after the
+  regression entry in `ec9b55b`; they are moved back to their own section.
+
+## 2026-09-24 — Layered-rules Phase 2: benchmark harness, latency gate, one status channel
+
+This is Phase 2 of the layered-rules brief. It measures before any rule
+changes. No rule logic changed in this phase.
+
+### Inputs, and a maintainer decision about them
+
+The reports: `D:\Claude Lab\Revant work\Claude outputs`, 16 Round 2 CSVs
+and 5 Pass 3 CSVs, 9,334 rows in total.
+- The Round 2 CSVs cover GEN–2CH, EZR, RUT and PSA.
+- The Pass 3 CSVs cover GEN, EXO, LEV, NUM and DEU.
+- `v1-before-split/` is not read: superseded.
+
+Also used: the human-reviewed Philippians CSV, and all 66 IRV books.
+
+The maintainer ruled that every AI proposal is reliable and to be used, and
+that contradicting results are "maybe". So:
+- positives are all in-scope AI rows;
+- "maybe" covers:
+  - rows at one place proposing different fixes;
+  - reversals;
+  - rows flagging a form `IRV_Pass3_Handoff.md` §5 confirms is house style
+    (`இந்த` + bare, `அந்த தேச-` bare, `-விட` bare, names in `-க்கு`, and
+    numerals spelt out);
+  - any human verdict against a row;
+- there are no negatives.
+
+The brief suggested seeding negatives from leads recorded as rejected
+(php 1:29, 4:18). That does not hold:
+- php 1:29 later went from Rejected to Confirmed;
+- php 3:14 and 4:18 are real bare boundaries that B4 excludes only for
+  scope;
+- the maintainer had already said the Philippians dispositions are not
+  linguistic ground truth.
+
+So Philippians Rejected rows are "maybe" too. **Precision is therefore
+agreement with the AI review, not accuracy**, and
+`docs/LANGUAGE_QA_BENCHMARK.md` says so first.
+
+### Harness
+
+**Code.** `engine/tc_ai_bridge/language_qa_benchmark.py` holds the harness,
+tested; `scripts/language_qa_benchmark.py` is the command line.
+
+**Scanning.** Each reviewed book is parsed with `parse_scripture_file` and
+`imported_verse_text`, the latter a new public wrapper around the import's
+own flattening. It is then scanned by the app's own `LanguageQaManager`
+over temporary chapter JSON. There is no second copy of the rules.
+
+**Matching.** A finding is a true positive when it overlaps a positive row
+at the same verse and the row's type is one the rule can find
+(`RULE_BUCKETS`).
+
+**Counting.** Per rule: precision strict and lenient, and false positives on
+house forms. Per bucket: recall over anchored rows, with unanchored rows
+counted separately.
+
+**Outputs.**
+- The full result goes to `benchmark/results/` (git-ignored): it quotes
+  Scripture and review text, and lists every unmatched finding and row for a
+  human to label.
+- Aggregate numbers go to `benchmark/baseline.json`.
+- The table goes into the doc between generated markers.
+
+**`--gate`** fails when:
+- an inline rule's strict precision is below 0.90;
+- a rule falls more than 2 points below the baseline (rules with 10 or more
+  findings only).
+
+It runs locally only, by maintainer decision, recorded in `DECISIONS.md`.
+
+**Labelled fixtures (2.4).** `engine/tests/fixtures/language_qa/labelled/`
+holds five JSONL files, one per bucket, about 155 KB. Each has every
+"maybe" row plus a strided sample of 40 positives, with verse text, span,
+fix and origin. `test_language_qa_labelled.py` checks the format, and checks
+that every positive credited to a current rule is still found by it: a
+regression guard in CI.
+
+### Baseline, before any Phase 3 change
+
+| Rule | Inline | Findings | Strict precision | False positives on a house form |
+|---|---|---|---|---|
+| `tamil.vallinam-missing` | yes | 311 | **37.9%** (lenient 43.4%) | 77 of 193 |
+| `tamil.wordlist-variant` | no | 2,473 | **2.0%** | — |
+| `tamil.repeated-word` | no | 33 | 0% | — |
+| `punctuation.repeated` | no | 1 | 100% | — |
+| `unicode.invisible` | no | 1 | 100% | — |
+
+- **The gate fails on the baseline.** The only inline rule is far below
+  0.90. That is the finding Phase 3 exists to act on: house-form abstains
+  and a proper-noun abstain are the obvious first levers, since 77 of its
+  193 false positives are house forms.
+- Recall, strict: typo 6.3%, sandhi 6.8%, punctuation 2.0%, name 0%, usfm 0%.
+  Name and usfm have no rules yet.
+- The wordlist audit is mostly sandhi variants (`அதைச்`/`அதைக்`) and
+  proper names flagged as spelling variants. Phase 5's lexicon replaces it.
+- All `tamil.repeated-word` findings are distributive reduplication, which
+  the reviews treat as house style.
+
+### Performance contract
+
+**Latency benchmark.** `scripts/benchmark_language_qa.py` now times
+foreground RPCs while a pass runs, on a synthetic 400-verse project. It
+has:
+- `--cores N`, which pins the engine to N cores via the Windows affinity
+  API. RAM and disk throttling are **not** emulated.
+- `--without-scan`, which samples the same RPCs with Language QA paused.
+- `--gate`.
+
+**Results, pinned to 2 cores, p95:**
+
+| RPC | During a scan | Without a scan |
+|---|---|---|
+| `verse.decide` on a Language QA finding | 16.6 ms | 17.6 ms |
+| `verse.get` | 3.4 ms | 2.1 ms |
+| `languageQa.status` | 0.3 ms | 0.5 ms |
+| `languageQa.inline` | 0.4 ms | 0.4 ms |
+| `ping` | 0.5 ms | 0.1 ms |
+| `verse.decide` on another finding | 85 ms | 121 ms |
+| `verse.edit` | 412 ms | 247 ms |
+| `project.open` | 174 ms | 195 ms |
+
+- The gate covers the first five, which are the RPCs Language QA owns or
+  runs beside. They pass, and run in CI (`ci.yml`, engine job).
+- **The shared write paths are over the 50 ms budget with or without a
+  scan, so the scan is not the cause.** Moving the scanner into a worker
+  process, the brief's remedy, would not fix them.
+- A cProfile of `verse.decide` puts the cost in the progress rollup. It
+  opens a fresh SQLite connection per query (45 closes: 124 ms over 10
+  calls) and commits, with an fsync, several times per decision (25
+  commits: 156 ms).
+- `verse.edit` is the journalled Scripture write.
+- Both are outside Language QA and involve durable-write design, so they
+  are **reported, not changed** (candidate follow-up issue). The Language QA
+  UI does not wait on them anyway: Use is optimistic since Phase 1.
+- `checks.status` needs a running check job; it is measured once Language
+  QA is a check stage (Phase 4).
+
+**Click budget.** A new `VerseList` test fires Use, Ignore and False positive
+with the engine never answering. It asserts the screen changed in under
+100 ms: this is the DOM change, since jsdom does not paint. It runs in CI.
+
+**One status channel.**
+- The engine cannot push: `sidecar.rs` drops a stdout line with no pending
+  request id. So the brief's fallback applies.
+- `languageQaInline.ts` is now Language QA's only poller. It makes one
+  count-only `languageQa.status` call, published as `languageQaChannel`, at
+  500 ms while a pass is queued or running and 10 s when idle. A local edit,
+  decision or pause nudges it (`nudgeLanguageQa`).
+- `LanguageQaPanel` no longer polls. It reads the channel, and fetches a
+  page only when opened, paged, switched to another list, or when a new
+  generation or state lands.
+- Marks are fetched only for a completed pass not yet drawn, or on a
+  chapter change. They no longer blink out during every rescan, which the
+  old 5 s inline poll made them do.
+- Two idle pollers every 2–5 s became one every 10 s.
+- **Not Language QA, not changed:** `App.svelte`'s 800 ms navigation-sync
+  poll runs whenever the app is open. The brief's "zero pollers awake when
+  idle" cannot hold while it does; reported.
+
+### Correction
+
+My review-fix audit said `docs/DECISIONS.md` did not exist. It does: that
+check globbed from `engine/`. The false claim in the audit follow-up entry
+is struck through with the correction beside it. The file has been read
+now: nothing in it bears on Language QA. It gains four entries: the
+benchmark's labels, the local accuracy gate versus the CI latency gate, the
+polled channel, and ignore-expiry.
+
+### Verification
+
+- Engine: `test_language_qa_benchmark.py` (9 tests, on a synthetic book and
+  report), covering:
+  - labels by scope, verdict and contradiction;
+  - the three contradiction kinds, including digits;
+  - matching against compatible rows only;
+  - recall over anchored rows;
+  - listing of unmatched findings with their house form;
+  - the gate's two conditions and small-rule skip;
+  - that the baseline carries no text;
+  - that labelled examples quote their verse;
+  - the CLI's exit codes and outputs.
+
+  `test_language_qa_labelled.py` adds 489 parametrized checks over the
+  committed fixtures.
+- Frontend:
+  - the channel tests: marks redrawn only for a new completed pass and kept
+    mid-pass, active versus idle cadence, a nudge, errors on the channel, no
+    refetch for an unchanged pass, per-verse patching;
+  - the panel tests, driven by the channel: no request while collapsed, a
+    page refetched only for a new generation;
+  - the click-budget test.
+- Gates:
+  - `npm run check` 0/0;
+  - `npx vitest run` 540 passed;
+  - `npm run build` ok;
+  - engine `pytest -n auto` 2111 passed, previously 1613: 9 harness tests,
+    489 fixture checks, 0 new warnings;
+  - `benchmark_language_qa.py --gate --cores 2` passes;
+  - `language_qa_benchmark.py --gate` **fails**: the baseline finding above.
+- Desktop acceptance not yet run.
+
+## 2026-09-24 — Layered-rules Phase 3: the `ta-irv` rule pack, B1–B4 migrated, IRV defect rules
+
+This is Phase 3 of the layered-rules brief. The Tamil rules move out of Python
+into a data pack. The single B1–B4 rule becomes shape rules with corpus
+abstains, and the known IRV defect shapes from the reports become rules. The
+schema is in `docs/LANGUAGE_QA_RULE_PACK.md`.
+
+### The pack
+
+- **Location.** `engine/tc_ai_bridge/language_packs/`: the loader, plus
+  `ta-irv/pack.json` and 11 rule files, about 84 KB.
+- **Loading.** The pack loads lazily, once per process (`default_pack`,
+  `lru_cache`): 162 ms, within the 200 ms budget.
+- **Self-test.** Every rule's examples run through the real `scan_text` at
+  load, and a failure raises `PackError` naming the rule and the example's
+  origin.
+- **Validation.** Unknown keys, bad regexes, a raw-text match outside the
+  integrity layer, and an `inlineSignOff` without `by`/`date` are all refused.
+- **Primitives.** The closed set: token-context (a word pair across
+  whitespace only, with the previous word split into base and link, and
+  `link` = none/mismatch/any) and regex (visible text or raw text). Fixes
+  are insert-link, replace-link, fuse-link, replace and expand.
+- **Generation.** `scripts/build_ta_irv_pack.py` builds the pack from the 66
+  IRV books and the review reports, and the output is committed.
+  - Abstains carry their corpus counts in `origin`.
+  - Examples are real verses, preferring places the reviews also flagged.
+  - Where a shape has fewer than twelve real occurrences (wrong-consonant,
+    clitic, vowel-drop, dropped-tha), the rest are derived from a real verse
+    and labelled "derived from …".
+- **Wiring.**
+  - `scan_text(..., pack=, lists=)` calls `pack.pair_candidates` in its word
+    loop and `pack.regex_candidates` once per verse.
+  - `VALLINAM_TRIGGERS` and the hard-coded B1–B4 block are removed.
+    `INLINE_RULES` keeps only `terminology.deprecated-form`; pack rules carry
+    their own `inline`.
+  - `language_qa_jobs.project_rule_pack` applies the project overrides. The
+    pack fingerprint is appended to the per-chapter cache key.
+  - The summary gains `rulePack` and `inlineRules`.
+- **Frozen build.** `engine/bridge-engine.spec` lists the pack as `datas`,
+  because import analysis cannot see JSON. Verified on a scratch PyInstaller
+  build of the spec: the frozen exe opened a Tamil project and completed a
+  pass reporting `rulePack: ta-irv@1.0.0`. It flagged `அந்த காகம்` →
+  `அந்தக் காகம்` and abstained on `அந்த தேசத்தில்`.
+
+### The rules
+
+| Rule | From | Inline | Strict precision | Findings |
+|---|---|---|---|---|
+| `sandhi.vallinam.demonstrative` | B1 | yes, signed off | 41.2% (lenient 55.0%) | 80 |
+| `sandhi.vallinam.manner-adverb` | B1 | yes, signed off | 15.4% | 13 |
+| `sandhi.vallinam.accusative` | B2/B4, generalised to any -ஐ form | yes, signed off | 55.0% | 500 |
+| `sandhi.vallinam.dative` | B3, generalised to any -க்கு form | yes, signed off | 49.8% | 396 |
+| `sandhi.vallinam.wrong-consonant` | new | yes, signed off | no benchmark findings | 0 |
+| `sandhi.clitic.fused` | new | no | 0% (0 of 4) | 4 |
+| `typo.divine-name.vowel-drop` | Round 2 defect | no | 100% | 11 |
+| `typo.divine-name.dative-stem` | Round 2 defect | no | 69.2% | 13 |
+| `typo.suffix.dropped-tha` | Round 2 defect | no | 100% | 2 |
+| `integrity.space-before-note-end` | Round 2/Pass 3 USFM rows | no | 74.3% | 74 |
+| `integrity.digits-in-text` | — | disabled | — | — |
+
+**Before and after, on the four migrated vallinam rules taken together:**
+
+| | Findings | Strict TP | Strict precision | Sandhi recall |
+|---|---|---|---|---|
+| Phase 2 baseline | 311 | 118 | 37.9% | 6.8% |
+| Phase 3 | 989 | 507 | 51.3% | 28.3% |
+
+House-form false positives on the demonstrative rule fell from 77 to 13.
+Recall rose in other buckets too: typo 6.3% → 8.9%, punctuation 2.0% → 18.0%,
+usfm 0% → 24.4%. Name recall is still 0%.
+
+### The maintainer's decisions in this phase, and how each was applied
+
+**All வல்லினம் rules inline.** The maintainer said: "Can we keep all
+வல்லினம் inline. if it is false possitive the user will click ignore. then
+the system will lean from its mistake."
+
+- Every vallinam rule carries an `inlineSignOff` with the precision it was
+  signed off at.
+- The benchmark gate now holds a signed-off rule to within 2 points of that
+  figure, rather than to the 90% floor.
+- The 90% floor still applies to any unsigned inline rule.
+- A sign-off with no measured precision fails the gate. None does today:
+  wrong-consonant records `null` precision and has no findings, so the gate
+  has nothing to hold it to. It must be measured once it has findings.
+- Learning from ignores is Phase 6.4, which the maintainer approved here.
+
+**"Army is a plain noun": a rule, not a list.** The maintainer asked for a
+rule that tells root nouns from case forms, as the வல்லினம் decision about
+படை had done. The root-noun test (`root_nouns` in the builder) is a
+morphological one, run on the corpus:
+
+- A word ending in ை is a root if its +யை accusative is attested
+  (படை→படையை, மலை→மலையை). A real accusative never takes a second one: there
+  is no அதையை.
+- A word ending in க்கு is a root if its -க்கில் locative or -க்குக்கு dative
+  is attested (கிழக்கு→கிழக்கில்). A real dative has neither: there is no
+  எனக்கில்.
+
+The resulting words are a `notLexical` condition on the accusative, dative,
+wrong-consonant and clitic rules. `ஈசாக்கு` and `ஏனோக்கு` are added from
+Pass 3 §5 (names in -க்கு are nominatives).
+
+**Also abstaining:**
+
+- house forms, from the bare/doubled counts per trigger and stem (at least 3
+  contexts, bare majority): for example அந்த தேச- (bare 31, doubled 8) and
+  அந்த தேவ- (3/0);
+- clitics and quotatives (தான், கூட, மட்டும், ஆவது, போல, என்று, என,
+  எனும்);
+- `housestyle.properNouns`.
+
+### Rejected, and why
+
+- **Seeding `housestyle.properNouns` from the names adapter.** Its majority
+  forms include common words, and it takes about 15 s per book. The list
+  ships empty until Phase 6 (DECISIONS.md).
+- **Enabling `integrity.digits-in-text`.** Pass 3 §5 confirms digits are IRV
+  house form, and IRV has 2,423 of them. The rule ships disabled, and an
+  override cannot enable it.
+- **A new rule for ZWNJ.** It stays under `common/unicode.invisible`, with
+  no pack duplicate.
+
+### A bug found and fixed on the way
+
+`decision_effect` split a pack `ruleVersion` (`ta-irv@1.0.0#1`) the way it
+splits a legacy one (`language-qa-7#2`). It therefore read a decision made a
+moment earlier as recorded under another version, and a **fresh ignore
+immediately came back as `previouslyIgnored`**. It now parses both shapes. A
+regression test ignores a pack finding and checks that it stays suppressed.
+
+### Behaviour change a translator will see
+
+Existing B1–B4 findings keep their `rule` (`tamil.vallinam-missing`, through
+`legacyId`) and their finding ids, so their decisions still match. Their
+`ruleVersion` changed, though, so **every existing வல்லினம் ignore comes back
+once for re-check**, flagged as previously ignored. This is the Phase 1
+ignore-expiry working as designed. There are no users yet, but it is recorded
+here so it is not mistaken for a regression.
+
+### Docs
+
+- New: `docs/LANGUAGE_QA_RULE_PACK.md`, the schema.
+- `docs/LANGUAGE_QA_TAMIL_SPECIFICATION.md` is replaced by an owned version.
+  The six gates and 56 items are kept as tables with Status, Owner and pack
+  ids. The 20 `utm_source` links are removed, and the sources are listed
+  once.
+- DECISIONS.md gains five entries: rules as data; overrides only narrow; the
+  inline sign-off; the root-noun test; the proper-noun seed rejected.
+- Also updated: `LANGUAGE_QA_PLAN.md` phase table; the
+  `LANGUAGE_QA_BENCHMARK.md` history row and regenerated results;
+  `ARCHITECTURE.md` §9; QA matrix A63–A66.
+- Labelled fixtures and `benchmark/baseline.json` are regenerated against
+  the pack. These are benchmark data, not goldens, and neither golden moved.
+
+### A latency regression caught by the gate, and fixed
+
+The first run of `benchmark_language_qa.py --gate --cores 2` on the pack
+**failed**. `languageQa.status` p95 was 82 ms, where Phase 2 measured 0.3 ms.
+
+**Cause.** `status()` asked `inline_rule_names()`, which called the lazy
+`default_pack()`. That was an `lru_cache`, which does not serialise
+concurrent first calls. A poll arriving during the worker's first load
+therefore ran a second full load itself, including every example (about
+160 ms).
+
+**Fix.**
+- `default_pack` is now a lock-guarded load-once.
+- A new `loaded_pack()` returns the pack only if it is already loaded.
+- The manager's `_inline_rules` never loads the pack. Before the pass has
+  loaded it, no pack finding exists, so the non-pack list is the right
+  answer.
+- The pass publishes its `inlineRules` as soon as it has the pack.
+
+**After:** `languageQa.status` 0.34 ms. A regression test covers both
+halves: a status request loads nothing, and four concurrent first calls load
+once.
+
+### Verification
+
+- **Engine.**
+  - `test_language_pack.py`: 41 tests, covering:
+    - the pack loads, and every example passes;
+    - legacy names and ids;
+    - inline rules are exactly the signed-off ones;
+    - the case rules on real case forms;
+    - roots, names, house forms and clitics abstain;
+    - wrong-consonant, and consonant-final names left alone;
+    - clitic fusion;
+    - the defect shapes;
+    - the raw-offset note rule;
+    - digits disabled;
+    - the house-style list abstain;
+    - eleven malformed-rule refusals;
+    - failing and wrong-fix examples refuse the pack;
+    - override narrowing and refusal, and an override file honoured by the
+      manager;
+    - the latency regression above.
+  - `test_language_qa.py` / `test_language_qa_benchmark.py` /
+    `test_language_qa_labelled.py` were updated for the pack's rule ids and
+    sign-off.
+  - Language QA files: 868 passed.
+  - Full `pytest -n auto`: 2155 passed after the latency fix (2154 before
+    it), 0 warnings.
+- **Frontend** (no frontend change in this phase):
+  - `npm run check` 0 errors / 0 warnings;
+  - `npx vitest run` 540 passed;
+  - `npm run build` ok.
+- **Gates.**
+  - `language_qa_benchmark.py --gate` **passes** (exit 0) on the sign-offs.
+  - `benchmark_language_qa.py --gate --cores 2` **passes** after the fix. p95:
+    `verse.decide` (Language QA) 15.5 ms, `verse.get` 4.0 ms,
+    `languageQa.status` 0.34 ms, `languageQa.inline` 0.3 ms, `ping` 0.44 ms.
+  - The shared write paths are still over budget, as in Phase 2 and outside
+    Language QA: another `verse.decide` 262 ms, `verse.edit` 238 ms,
+    `project.open` 180 ms. These numbers are noisy on a loaded machine.
+- **Frozen.** A scratch PyInstaller build of `bridge-engine.spec` finds the
+  pack and produces the வல்லினம் finding (above).
+  `scripts/smoke_sidecars.py` was not run: the USFM checker exe was not
+  rebuilt.
+- **Desktop acceptance: not run.** Watch in particular for existing
+  வல்லினம் ignores coming back once for re-check, which is expected.
+
+## 2026-09-24 — Layered-rules Phase 4.1: Language QA as a check-job stage, persisted
+
+This is Phase 4.1 of the layered-rules brief. Language QA stops being a
+side-car: its findings are produced by a stage of the ordinary check job,
+count in the progress rollup, and persist across reopen.
+
+### One scan, one cache, two callers
+
+**The scan.** `language_qa_jobs.scan_verse` is the pure per-verse scan,
+factored out of the old `_scan` loop. It returns a verse's raw findings
+(before decisions), its coverage notes, and its word counts for the
+wordlist audit. A pass then:
+1. reuses a verse's entry while its text hash and the chapter key are
+   unchanged. The chapter key covers `SCAN_CACHE_VERSION`, `RULE_VERSION`,
+   the detected language, the pack fingerprint (overrides included) and the
+   termbase;
+2. rescans the verses that changed;
+3. assembles the book, applying decisions and the book finding cap afresh
+   every time.
+
+**The persisted cache.**
+- It lives in the new workbench table `language_qa_cache`, one row per
+  chapter (**workbench v3 → v4**, forward block `_MIGRATION_V4`, plus a
+  v3→v4 test).
+- It does not use `check_cache`: every reader of that table loads all of a
+  book's rows, and 150 chapter payloads would ride along. See DECISIONS.md.
+- The manager keeps an in-memory mirror, read once per bind in one query.
+- Rescanned chapters are written in one transaction per pass. With more than
+  50 chapters (`FLUSH_CHAPTERS`) the write is chunked.
+- A cancelled pass still flushes what it computed, because each entry is
+  keyed by its own text.
+- `status.storage` now reads "Persisted in the project workbench."
+
+**What changes for decisions and edits.**
+- Decisions are no longer part of any cache key, so **a decision rescans
+  nothing**. Previously any Language QA decision rescanned the whole book
+  (`decisions_version`).
+- A live edit rescans **only the edited verse**, which is the brief's
+  verse-level live path. `invalidate()` no longer discards anything; it only
+  schedules a pass.
+
+**The job stage.**
+- `checks.start` accepts `languageQa`. `check_jobs._stages` adds a
+  "Language QA" stage after "QA".
+- The preflight runs `LanguageQaManager.run_pass`: the same scan and cache
+  as the background worker, on the job's thread, serialised with the worker
+  by a pass lock.
+- Even a chapter job passes the whole book, because the wordlist audit needs
+  every chapter. Unchanged verses come from the cache.
+- Each verse's share (`{findings, decided}`) goes into the job result under
+  **`languageQa`, not `findings`**, so everything that reads `findings` as
+  QaFinding dicts is unaffected.
+- `checks.status` gains a `languageQa` block (state, chapters, findings,
+  limitations).
+- The pass publishes a new generation, and the frontend nudges the status
+  channel when a job ends, so the marks redraw from the job's result.
+- The app's chapter and book jobs now request `["local", "greekroom",
+  "languageQa"]`.
+
+**Two departures from the brief, both recorded in DECISIONS.md.**
+- The stage does not hold `_checker_lock`. The dispatcher takes that lock
+  for `verse.runChecks`, and a save must not wait on a book pass.
+- `_run_verse_checks_for_project` does not run Language QA. It returns
+  `QaFinding`s, and a verse-level Language QA check is already the live
+  path.
+
+### Progress rollup
+
+- `_on_check_job_complete` now counts Language QA findings: open ones as
+  `open`, decided ones with their decision.
+- The Phase 1 skip in `decide_verse` is replaced, as the brief requires.
+  A Language QA decision now updates the rollup **when the rollup already
+  has that finding**, that is, once a job has reported it.
+- A decision on a finding no job has reported still adds nothing. Without
+  that guard, a decision alone would add a finding row, and a verse could
+  look reviewed on the strength of findings that were never counted. That
+  was the original bug.
+
+### Performance
+
+**Psalms full pass**, measured with the Phase 1 script on this machine:
+
+| When | Wall | Peak working set | Findings |
+|---|---|---|---|
+| Phase 3 | 2.2 s | 68 MB | 309 |
+| Phase 4.1, first try: one transaction per chapter | **5.3 s** | 73 MB | 309 |
+| Phase 4.1, one transaction per pass | 3.4 s | 74 MB | 309 |
+| Phase 4.1, compact word map (final) | **2.45 s** cold | 70.5 MB | 309 |
+| Phase 4.1, reopen (all from the cache) | **0.47 s** | 72 MB | 309 |
+
+**Two budget misses, both fixed before commit.**
+- **One fsync'd commit per chapter.** It more than doubled the pass, which
+  breaks the "no phase may double wall time" rule. The fix is one
+  transaction per pass.
+- **The payload.** It was 3.45 MB for Psalms, and 2.64 MB of that was the
+  wordlist's full first-seen location per word per verse. It is now
+  `word → [count, start, end]`, with the text sliced from the verse at
+  assembly: 1.18 MB, `SCAN_CACHE_VERSION` 2.
+
+**Known cost, not fixed.** Every cache write also appends a `change_log`
+row, as `check_cache` writes already do. A cache is regenerable, so that
+history is not needed, but the workbench has one write path. Candidate
+follow-up.
+
+**Latency gate** (`--cores 2`): passes. Language QA `verse.decide` 18.2 ms,
+`verse.get` 2.8 ms, `languageQa.status` 0.38 ms, `languageQa.inline`
+0.32 ms, `ping` 0.41 ms. The 400-verse background pass takes 15.6 s, against
+15.3 s recorded before.
+
+### Verification
+
+- **New engine tests.**
+  - A decision rescans nothing, yet takes effect. This replaces the
+    `decisions_version` test, whose premise is gone.
+  - Results persist across reopen with nothing rescanned, and a live edit
+    rescans exactly one verse.
+  - The stage runs in a book job:
+    - its findings sit under `languageQa`, and `findings` stays clean;
+    - `checks.status` has the block;
+    - the rollup holds the finding as `open`;
+    - an ignore moves the open count down by one;
+    - a re-run reports the finding as `decided`.
+  - A Language QA decision never marks a verse reviewed while another
+    finding is open.
+  - The job path and the live path produce identical finding ids, and the
+    job pass rescans nothing after a live pass.
+  - A job without the stage carries no `languageQa`.
+  - Workbench v3→v4 migration.
+- **Suites and gates.**
+  - `tests/service tests/jobs tests/persistence`: 1230 passed.
+  - `npm run check` 0/0; `npx vitest run` 540 passed.
+- **Not covered by a test:** the App's `beginChecks` list and the post-job
+  nudge. There is no App-level test harness.
+
+## 2026-09-24 — Layered-rules Phase 4.2: Language QA in the reports, the exception queue and the publication gate
+
+This is Phase 4.2 of the layered-rules brief.
+
+### One reader
+
+**What a job leaves behind.**
+- A job with the Language QA stage leaves each chapter's Language QA
+  findings beside its QaFinding snapshot, in
+  `check_findings.payload.languageQa`.
+- This includes the findings decisions hide, each carrying its `decision`.
+  The stage now returns them as `hidden`.
+- A job without the stage keeps the chapter's previous Language QA share
+  rather than erasing it.
+
+**`language_qa_jobs.reported_language_qa(project)`** is the one reader of
+that snapshot. It gives each finding its current status: the rollup's
+status first (a decision made since the job updates it), then the decision
+that hid it, then `open`. The QA report, the exception queue and the
+publication gate all read through it, so they cannot disagree. Like the rest
+of the report, it reads persisted state only and never scans.
+
+### Where it shows up
+
+**QA report** (`qa_report.py`).
+- A new category, `languageQa`, and a `languageQa` block in each book's
+  `checks`: open, resolved, blocking and open-medium counts, plus
+  `byCategory` sub-rows (typo, sandhi, ...).
+- The block is advisory, like AI review. It is not a scored family, so the
+  collection's pass/fail totals are unchanged.
+- Rows gain these columns, empty on non-Language-QA rows:
+  `languageQaCategory`, `ruleId`, `packVersion`, `layer`, `confidence`,
+  `suggestions` (joined with ` | `), and `houseStyleSuppressed`. The last is
+  always empty until Phase 6.
+- The CSV/TSV defaults and the report screen's export columns include them.
+
+**Exception queue** (`analytics.py`).
+- A verse with an open Language QA finding of severity high **or**
+  confidence high enters the queue.
+- The row carries `languageQa` (the count) and `languageQaFindings`.
+- Ranking is `(-critical, -high, -languageQa, -invalidChecks, ...)`. The
+  brief says "after AI critical issues, before tN/tW invalid checks";
+  placing it after `high` as well keeps AI high issues above it.
+
+**Publication gate** (`reporting.py`).
+- Open Language QA findings with severity high **and** confidence high are
+  a blocking input (`languageQaBlocking`). Today that is
+  `terminology.deprecated-form` and nothing else.
+- More than N open medium findings adds an advisory line (`advisories`) and
+  never blocks. N comes from the `language_qa_medium_advisory` setting and
+  defaults to 50. There is no Settings UI for it yet.
+- The gate stays labelled advisory.
+- The book report gains `languageQa`: totals, by category, and the blocking
+  findings.
+- The HTML report gains a Language QA section.
+- `ReportService.export` also writes `<book>_translation_qa_report_language_qa.csv`.
+- `collection.report` sums the Language QA totals and lists them per book.
+
+**Frontend.**
+- `ReportCategory` gains `languageQa`, with a label, a long label, a colour
+  (`--lqa`) and a place in the legend order.
+- `ReportRow` and `BookChecks` are typed for the new fields.
+
+### Verification
+
+- **Engine** (`test_qa_report.py`):
+  - Language QA rows carry the rule columns and the CSV header;
+  - an ignore through `verse.decide` resolves the row with no new job;
+  - a termbase finding (high/high) blocks the gate and enters the exception
+    queue;
+  - the advisory line appears at 51 open medium findings, not at 50, and
+    never blocks;
+  - a job without the stage keeps the previous snapshot.
+- **Frontend.** `reportStats` legend order includes `languageQa`.
+  `npm run check` 0/0, report tests pass, `npm run build` ok.
+- **Not covered by a test:**
+  - The exception queue's ranking position for Language QA was verified by
+    reading the code only. A queue with AI high issues and invalid checks
+    needs AI review fixtures that no test here builds.
+  - The HTML section was checked only by the report tests building without
+    error. Nobody has looked at it rendered.
+
+## 2026-09-24 — Layered-rules Phase 4.3: one review surface
+
+This is Phase 4.3 of the layered-rules brief: a Language QA finding can be
+acted on where every other finding is.
+
+- **ReviewPanel: a "Language QA" tab.** It lists the selected verse's
+  Language QA findings, inline or panel-only, from a new RPC,
+  `languageQa.verse`.
+  - That RPC returns one verse's share of the last completed pass: open
+    findings, and `hidden` ones with the decision that hides them.
+  - Each finding offers **Use "…"** for each ranked suggestion,
+    **Ignore** and **False positive**. Use goes through
+    `applyLanguageQaSuggestedFix`; Ignore and False positive go through
+    `decideLanguageQaFindingOptimistically`, so a decision from either
+    surface is the same `verse.decide` call with the same `issue` payload.
+  - A finding leaves the list the moment its button is clicked, and comes
+    back only if recording fails.
+  - A "Decided (n)" section lists the hidden ones.
+  - The tab refetches when the verse changes and when a new **completed**
+    generation lands on the status channel, never on every tick.
+  - `LanguageQaPanel` keeps the book-level lists and is no longer the only
+    place a panel-only finding can be acted on.
+- **A span with findings from two sources.** A right-click now opens one
+  menu with a section per finding (for example "wildebeest: Mixed script",
+  or "Language QA: அந்த காகம் — …"). Each section's submenu holds that
+  finding's own actions. Before this, the QaFinding won and the Language QA
+  finding on the same words could not be reached. A span with only one
+  source keeps its old menu.
+- **Keyboard.** Left/Right now walk Language QA marks too, in reading order
+  with the other findings by display offset. Shift+F10 opens the Language
+  QA menu on the store's raw finding (not the display copy), because the
+  fix splices the raw verse.
+- **✓ indicator.** A drawn Language QA mark counts as open, so a verse is not
+  shown as clean while one is on it.
+- The `highlight.ts` "first-match-wins" comment the brief names had already
+  been corrected in Phase 1. The stale comment in `findingActions.ts`
+  ("keeps the decision out of the rollup") is corrected for Phase 4.1.
+
+### Verification
+
+- **Engine.** `languageQa.verse` lists a verse's open findings. After a
+  false-positive decision, the finding moves to `hidden` with `rejected`.
+  The RPC refuses another project's path and a non-string chapter.
+- **Frontend.**
+  - New `ReviewPanelLanguageQa.test.ts` (3 tests):
+    - a panel-only finding is listed, and Ignore removes it before the
+      engine answers, sending the Language QA issue;
+    - the tab refetches only on a new completed generation;
+    - a failed decision puts the finding back and shows the error.
+  - VerseList (3 new tests): the mixed-source menu reaches the Language QA
+    action; Shift+F10 opens a Language QA mark's menu; no ✓ while a mark is
+    drawn.
+  - `npm run check` 0/0; `npx vitest run` 546 passed; `npm run build` ok.
+- **Not verified:** how the new tab and the mixed menu look at 1366×768.
+  jsdom does not lay out, so that needs the desktop app.
+
+## 2026-09-24 — Layered-rules Phases 4.4 and 4.5: collection runner and export gate
+
+### 4.4 `collection.runChecks`
+
+**The runner** (`engine/collection_jobs.py`) follows the `check_jobs.py`
+pattern:
+- one active run, on a worker thread, with JSON snapshots;
+- it owns ordering, skipping, pause, cancel and timing.
+
+**The engine supplies the work.** `_run_collection_book` handles one book:
+1. it materializes a lazy sibling;
+2. it builds a fresh `TranslationCoreProject` and a Language QA manager bound
+   with `autostart=False`;
+3. it runs the ordinary whole-book check job on a **private
+   `CheckJobManager`**, through the same `_start_check_job_from_spec`, now
+   parametrised with its Language QA manager and job manager;
+4. it waits, then releases the book.
+
+The editor's open project, its Language QA and its check job are never
+touched. The job's own completion hook writes the book's rollup and
+snapshots as usual.
+
+**Resumable.**
+- Each finished book is upserted into the opened project's
+  `.bridge/collection.json` → `qaRuns[]` as `{bookId, state, completedAt,
+  jobId, contentHash, checks, elapsedSeconds, findingsByCategory,
+  checkedVerses}`.
+- The next run skips a book whose recorded run is `done`, whose content hash
+  (sha256 of its chapter JSON files) is unchanged, and whose recorded checks
+  cover the requested ones.
+- `force` re-runs everything.
+- A cancelled book records nothing, so a crash or cancel resumes at that
+  book.
+
+**Controls.**
+- Pause holds the next book, not the one in flight.
+- Cancel stops the book in flight after its current verse, through the
+  check job's own cancellation.
+- `checks.start` is refused while a run is active.
+- One failing book does not stop the others.
+
+**Final stage.** It runs once, after every book, and writes reports only:
+- **termbase coverage** per book: approved renderings never used, and
+  rejected ones still present. This is a substring count, because Tamil
+  inflects the rendering.
+- **cross-book name consistency**: the names adapter over the union of every
+  book's tokens.
+- **house-style propagation**: reported as unavailable until Phase 6.
+
+Its summary is kept in `collection.json` → `qaFinalStage`.
+
+**RPCs.** `collection.runChecks {checks?, force?}`,
+`collection.qaStatus {jobId?}`, `collection.pauseChecks {paused}` and
+`collection.cancelChecks`. With no run in the session, `qaStatus` returns an
+idle snapshot built from `qaRuns[]`, so the screen shows each book's last
+run after a restart.
+
+**UI.**
+- `CollectionQaPanel` appears on the dashboard for any collection with more
+  than one book. It shows one row per book: state, verses checked, open
+  findings by source, last run, time, and an Open-book link.
+- It also shows elapsed time and an estimate from the measured books, plus
+  Pause/Resume/Cancel and "Run all again" (force).
+- `collectionQa.ts` polls once a second, and only while a run is active.
+- While a run is active, `checkingProgress.running` is held (so editing,
+  alignment and AI review are disabled) and `switchBook` refuses.
+
+**The import offer.** The brief asks for "Run QA on all N books" from the
+import summary. A multi-book import already lands on the dashboard, so the
+panel's button is that offer. It is never started automatically
+(DECISIONS.md).
+
+**Whole-Bible wall time: 6031.8 s (1 h 41 min).** The run imports all 66
+IRV books (6.8 s) and runs `collection.runChecks` with the default checks on
+this machine.
+- **Result:** `state=succeeded` on 2026-09-24; 66/66 books; no book error.
+- **Size:** 31,092 verses and 7,401 open Language QA findings.
+- **Time split:** the books took 5946 s, and the final stage (termbase
+  coverage, cross-book names) about 80 s.
+- Genesis took 260 s with the machine otherwise idle.
+- Exodus took 650 s, and several other books ran slower, while the engine
+  test suite and gates ran beside the collection. The figure is therefore
+  an upper bound for an idle machine.
+- After two books the runner estimated 5 to 8 hours. Its estimate fell as
+  the shorter books ran.
+
+This confirms the brief's "run-overnight operation" and the no-auto-start
+decision. Most of the per-book time is the pre-existing checks, not
+Language QA: a full Language QA pass on Psalms is 2.45 s cold.
+
+The process started before Phase 6 was committed. Its final stage therefore
+reported house-style propagation as "not built yet", so the Phase 6
+proposals across 66 books are still unmeasured (see the Phase 6.2–6.5
+entry).
+
+### 4.5 Export gate
+
+`reporting.publication_gate(project)` is the single definition of what
+blocks an export:
+- open AI critical issues;
+- open Language QA findings with severity high **and** confidence high;
+- tN/tW checks marked needs-discussion.
+
+It reads persisted state only, because export runs on the dispatcher and the
+full book report takes minutes. The book report embeds it as
+`publicationGate.exportBlocking`.
+
+`export.aligned` and `export.nonAligned` consult it first:
+- With blocking items and no `override`, nothing is written. The answer is
+  `{written: false, blocked: true, gate}`, a success response, because
+  `EngineResponse.fail` cannot carry the items.
+- With `override: true`, the export proceeds, and a `kind='qa'` decision
+  with key `export.override` records the items open at that moment. It lands
+  in `change_log` for the Phase 6.5 export ledger.
+
+`ExportModal` lists the blocking items. "Export anyway" stays disabled until
+the override box is ticked, then reuses the chosen path.
+
+### Verification
+
+- **Engine.**
+  - `tests/jobs/test_collection_jobs.py` (7 tests):
+    - every book runs in order, each is recorded, and the final stage runs
+      once;
+    - an unchanged book is skipped, while a changed book, fewer recorded
+      checks or `force` all rerun;
+    - cancel records nothing and skips the final stage;
+    - pause holds the next book, and a second start is refused;
+    - one failing book does not stop the rest;
+    - a real three-book run records `qaRuns` and the final stage, and an
+      edited book reruns while the others are skipped;
+    - `checks.start` is refused during a run.
+  - `test_qa_report.py`, export gate for both formats (2 tests): not blocked
+    when nothing is open; blocked with nothing written; override writes the
+    file and records the decision with its open items; the report's gate
+    lists the same items.
+- **Frontend.** `CollectionQaPanel.test.ts` (2 tests): last runs shown, never
+  auto-started; the app is held read-only during a run and released after.
+  `ExportModal.test.ts` (1 test).
+- **Not covered by a test:** the App-level wiring (the panel's placement, and
+  `switchBook` refusing during a run). There is no App test harness.
+
+## 2026-09-24 — Layered-rules Phase 5: corpus lexicon, confusion-set distance, ranked suggestions
+
+### 5.2 `tamil_distance`
+
+`language_packs/tamil_distance.py` is a weighted edit distance over grapheme
+clusters (`regex` `\X`), with NFC comparison keys. The text itself is never
+normalised.
+
+Each of these confusions costs 0.5; everything else costs 1:
+- ர/ற, ல/ள/ழ, ண/ன/ந, with the same vowel sign;
+- the independent vowels எ/ஏ, ஒ/ஓ, இ/ஈ, உ/ஊ;
+- the same pairs as vowel signs (ெ/ே, ொ/ோ, ி/ீ, ு/ூ), which the brief did
+  not list but is where most length confusions occur;
+- ஐ/அய் and ஔ/அவ் (one cluster against two);
+- pulli present or absent, and ா present or absent.
+
+The brief's Round 2 typos come out at 1.0 (`உடன்பட்டிக்கையை`, one cluster
+deleted) and 0.5 (`ராஜ்யாபாரமும்`, an ா).
+
+The ai/அய் equivalence is between whole clusters only. A sign-level ை
+against ய் inside a syllable (கை against கய்) is not modelled.
+
+### 5.1 The lexicon
+
+`scripts/build_tamil_lexicon.py` builds `language_packs/ta-irv/lexicon.json`
+from all 66 IRV books, using the runtime's own tokens (`imported_verse_text`
+→ `lift_inline_usfm` → `word_occurrences`):
+
+| | |
+|---|---|
+| Verses / tokens / distinct forms | 31,092 / 470,413 / 79,208 |
+| Listed (≥ 3 occurrences) | 19,618 |
+| Common (≥ 6), with one-cluster deletion buckets precomputed | 9,515 words, 55,018 keys |
+| Curated pairs (`--curated`, the Round 2 / Pass 3 reports) | 151 |
+| Size / parse time / resident memory once loaded | 3.0 MB / ~150 ms / ~15 MB |
+
+The curated pairs come from positive typo rows whose Original and Suggested
+differ in exactly one word. Candidates were dropped in these cases:
+
+| Dropped because | Pairs |
+|---|---|
+| the wrong form is common in the corpus (more than 2 occurrences) | 158 |
+| the right form is unattested | 166 |
+| the reviews disagree | 6 |
+| the two are more than distance 2 apart | 20 |
+| the row changed more than one word | 196 |
+
+Some kept pairs are style or grammar edits rather than typos, for example
+இதயத்தில் → இருதயத்தில். They are kept because the maintainer ruled every AI
+proposal reliable. The rule's name and message call them "reviewed
+corrections", not misspellings of fact.
+
+The lexicon ships inside the pack directory, which `bridge-engine.spec`
+already bundles, so there is no spec change. The data budget is recorded in
+DECISIONS.md.
+
+### 5.3 The rules
+
+`language_packs/lexicon.py` defines two rules.
+
+**`lexicon.rare-near-common`** (typo, confidence medium, severity low,
+panel-only):
+- It flags a word at most twice in the book and at most twice in the corpus
+  (absent from the lexicon counts as rare) that is within **0.5** of a word
+  occurring at least 6 times in the corpus and at least 5 times as often.
+- It offers up to 5 suggestions, ranked by distance, then corpus count, then
+  same-book count. Each carries its evidence: "occurs 1007× in the corpus,
+  0× in this book (distance 0.5)".
+
+**`lexicon.known-misspelling`** (typo, confidence high, severity medium):
+it applies the curated map with the correction as the suggestion. Severity
+is medium, so it never blocks the publication gate, which blocks only
+high/high.
+
+**Where the rules run.** In `_scan`, the lexicon audit replaces
+`wordlist_findings` for the `ta-irv` pack. The within-book audit remains
+the fallback for a pack without a lexicon, and its tests pin that fallback
+with the lexicon switched off.
+
+**The threshold was chosen by measurement.** At distance 1.0 (any
+one-cluster edit), Tamil inflection flooded the rule: 2,931 findings at
+0.8%. At 0.5 it gives 76 at 2.6%, against the old wordlist's 2,473 at 2.0%.
+
+**A capping bug, found and fixed.** The two rules first shared one
+200-finding cap, and the noisy rule consumed it: known-misspelling showed 59
+findings instead of 140. Each rule is now capped separately.
+
+### 5.4 Feedback, bounded
+
+`scripts/lexicon_feedback_report.py` lists every Language QA decision on a
+`lexicon.*` finding, across the project folders given: the Use choice, or a
+false positive. It writes CSV for a person to fold into `--curated`. It never
+writes the lexicon, and a test checks the file's bytes are unchanged
+(DECISIONS.md).
+
+### Benchmark (`--gate` passes; baseline and labelled fixtures regenerated)
+
+| Rule | Findings | Strict precision |
+|---|---|---|
+| `lexicon.rare-near-common` | 76 | 2.6% |
+| `lexicon.known-misspelling` | 140 | 92.9%, **not independent**: built from these reviews |
+| `tamil.wordlist-variant` (Phase 4, replaced) | 2,473 | 2.0% |
+
+Typo recall is 20.9%, up from 8.9%, mostly through known-misspelling, which
+carries the same caveat. Sandhi, punctuation and usfm are unchanged.
+
+### Performance
+
+These are Psalms full passes, measured while a whole-Bible collection run
+was also using the CPU. They are comparable with each other, not with
+earlier, unloaded figures.
+
+| | Cold | Reopen | RSS after | Findings |
+|---|---|---|---|---|
+| Lexicon off | 3.16 s | 0.60 s | 51 MB | 309 |
+| Lexicon on | 3.19 s | 0.56 s | 66 MB | 149 |
+
+The lexicon adds no measurable wall time and about 15 MB RSS, within the
+contract's 50 MB.
+
+### Verification
+
+- **Engine.** `test_lexicon.py` (30 tests):
+  - each confusion pair costs 0.5 in both directions;
+  - other edits cost 1;
+  - the Round 2 typos come out at 1.0 and 0.5;
+  - distance is measured over clusters;
+  - the lexicon is bounded, and its buckets are precomputed;
+  - the curated map keeps only safe pairs;
+  - it loads within budget;
+  - ranked suggestions carry evidence;
+  - a common word is never flagged;
+  - a known misspelling is high confidence;
+  - the ratio guard holds;
+  - the manager uses the lexicon for a Tamil book;
+  - the feedback report lists decisions and does not change the lexicon.
+- `test_language_qa.py` and `test_language_qa_benchmark.py` run with the
+  lexicon off, as the fallback and synthetic-harness tests they are.
+- `test_language_qa_labelled.py`: the regenerated fixtures now credit five
+  typo positives to the lexicon rules. These are book-level, so the test
+  runs them through `lexicon_findings` over the example verse (a book of
+  one) instead of `scan_text`. This was caught by the first full run: 5
+  failed, 2202 passed.
+- Full engine suite: 2202 passed, plus the 489 labelled checks, which pass
+  after that fix.
+
+## 2026-09-24 — Layered-rules Phase 6.1: termbase v3
+
+`record_terminology_rule` writes **`schemaVersion` 3**, which adds two
+fields:
+- `inflectedForms`: a rejected rendering → its forms.
+- `matchMode`: `exact` (the default) or `prefix`.
+
+The `terminology.record` RPC takes both, plus `allowedAlternatives`, and
+refuses an unknown mode. A v2 row reads as `exact` with no forms, so there
+is no migration and no data change.
+
+**Matching** (`terminology.TermIndex`, pure).
+- **Listed forms** are indexed as exact tokens and are as authoritative as
+  the rendering: confidence high.
+- **`prefix`** generates each rejected rendering's inflected forms from a
+  closed list, `CASE_SUFFIXES`: ஐ, க்கு, உக்கு, இல், ஆல், ஓடு, உடன், இன்,
+  உம், இடம், இலிருந்து, கள், களை, களுக்கு, களின், களால், களோடு, களும்.
+  - `join_suffix` joins them as written Tamil does: a pulli-final stem and a
+    vowel-initial ending fuse into one syllable, so தேவன் + ஐ = தேவனை and
+    தேவன் + உக்கு = தேவனுக்கு. A multi-word rendering inflects at its last
+    word.
+  - Such a match is marked **confidence medium**, and its message names the
+    ending, so the reviewer confirms it.
+  - The suggestion is the preferred form with the **same ending**: தேவனை →
+    இறைவனை.
+  - A generated form never displaces a listed one.
+  - This generates forms rather than stripping suffixes from the text, so a
+    match is still an exact token. Nothing matches by guesswork, and a form
+    the closed list cannot produce is added by hand.
+- **Suggestions.** They are ranked: preferred renderings first (so
+  `approvedRenderings[1:]` now appear), then allowed alternatives, each with
+  its rationale and each inflected alike.
+
+**Settings → Terminology.**
+- Each rule shows its allowed alternatives, its inflected forms, and
+  "also with case endings".
+- **Edit** loads a rule into the form, including its inflected forms (one
+  line per rendering: `rendering: form, form`) and the prefix checkbox.
+  Saving an edited rule replaces it.
+- Adding a new concept that collides with an existing rule still asks first
+  (Phase 1.6).
+
+### Verification
+
+- **Engine.** `test_terminology.py` has 52 tests:
+  - `join_suffix` on five real joins;
+  - a prefix match of தேவனை at medium confidence, with suggestions
+    இறைவனை / கடவுளை / ஆண்டவனை;
+  - exact mode leaves case forms alone;
+  - a listed form matches at high confidence;
+  - the RPC round trip, with an unknown mode refused;
+  - schemaVersion 3 in the round-trip test.
+- **Frontend.** `SettingsModal.test.ts` (17 tests): editing shows the v3
+  fields and saves them with `overwrite`. Three existing expectations were
+  updated for the new fifth argument.
+
+## 2026-09-24 — Layered-rules Phases 6.2–6.5: house style as data, the learner, the name pack, the export ledger
+
+The design is in `docs/LANGUAGE_QA_HOUSESTYLE.md` and the two DECISIONS.md
+entries of this date.
+
+### Storage: workbench v4 → v5
+
+House-style entries are `human_decisions` rows of a new kind, `housestyle`.
+
+**The migration.** `kind` carried a CHECK constraint, which SQLite cannot
+alter, so `_MIGRATION_V5` rebuilds the table:
+- the widened CHECK is on a new table;
+- every row is copied with its columns named;
+- the old table is dropped and the new one renamed;
+- the one index is recreated.
+
+It gets a **data-preservation test** (v4→v5), because a rebuild is exactly
+what a reader should not take on trust. The test checks:
+- every column and revision of a planted row survives;
+- the natural unique key still holds;
+- `housestyle` is writable;
+- an unknown kind is still refused.
+
+`tc_project.record_housestyle_entry` writes the entry;
+`housestyle_entries` reads them. Remove, Undo and confirm-imported write a
+new state onto the same row, with no delete, and change_log keeps each
+state.
+
+### Applying it (`housestyle.house_style`, in `_scan`)
+
+**At assembly** (like decisions), so no change rescans:
+- word entries hide the rule's findings on that text;
+- rule entries hide the rule;
+- a learned preference ranks a suggestion first, never adding one.
+
+A hidden finding goes to the verse's `hidden` list with
+`houseStyleSuppressed`, and counts as decided in the rollup. The status
+carries `houseStyleSuppressed` per rule.
+
+**The lists** (`housestyle.properNouns`) feed the pack's proper-noun abstain
+inside the verse scan. So the lists' fingerprint joins the chapter cache
+key, and a change to them rescans.
+
+### The learner (`HouseStyleLearner`)
+
+**Incremental.** Each Language QA `verse.decide` recomputes only its (rule,
+word) pair. The pair map is built once per book from its decisions and
+forgotten on `project.open`.
+
+**Learning.** 3 ignores or false positives with no Use since create a
+learned `word-in-book` entry at once. The decision's answer carries
+`houseStyle.learned`, and the verse list shows "Learned: … — Undo". An undone
+or removed pair is never learned again.
+
+**Proposals** (`project_proposals`). These are computed when Settings opens
+and in the collection run's final stage, which now reports real proposals
+instead of "not built yet":
+- word-in-project, once a pair is learned in 2 books;
+- rule-in-project, at 20 or more decisions with 80% or more ignored.
+
+**Preferences** (`preferences_from`) come from 3 Uses of the same
+suggestion.
+
+### RPCs and UI
+
+**RPCs.** `housestyle.list`, `housestyle.record` (a project scope is written
+to every materialized book), `housestyle.setState`,
+`housestyle.nameSuggestions`, `housestyle.export`, `housestyle.import`.
+
+**UI.**
+- Verse menu: a new **Ignore more widely ▸** submenu offers the four scopes.
+  The occurrence is ignored at once, and the explicit entry is recorded
+  after.
+- Settings → Terminology → **House style**:
+  - entries with a provenance badge (or "imported"), scope, evidence count,
+    Remove and Confirm;
+  - proposals with Accept and Dismiss (Dismiss records `removed`, so it is
+    not proposed again);
+  - "Add a proper noun";
+  - suggested names from the names check, each approved one by one;
+  - Export… and Import….
+- **A new Tauri command, `pick_json_file`**, for Import. `cargo check`
+  passes.
+
+### The name pack (6.2)
+
+- The approved `properNouns` list is **curated**. Names are added in
+  Settings, or approved from the names check's **cached** majority spellings
+  (`name_suggestions` reads `check_cache` and never runs the adapter). The
+  Phase 3 finding stands: those majority forms include common words, so
+  none is added unreviewed.
+- The list abstains the வல்லினம் rules.
+- A new rule, `project/name.minority-spelling` (category name, housestyle,
+  medium, panel-only), flags a word at most twice in the book that is within
+  distance 1.0 of an approved name, and suggests that name.
+
+### The benchmark (`--housestyle`)
+
+`scripts/language_qa_benchmark.py --housestyle <project>` applies a
+project's style.
+- Hidden findings are reported per rule, and never counted as a true or
+  false positive.
+- The project's false-positive marks are exported as reviewer-labelled
+  negatives, `benchmark/results/<date>-reviewer-negatives.jsonl`.
+
+### The export ledger (6.5)
+
+Both exports now write `<book>.language-qa-changes.csv` beside the file. It
+lists each Language QA Use (chapter, verse, rule, original, replacement, time,
+actor) and each export made over the gate. It is built from change_log, so
+a Use of a finding decided again later is still listed.
+
+### Verification
+
+- **Engine.**
+  - `test_housestyle.py` (13 tests): validation; application;
+    preferences; the thresholds at their boundaries (2 vs 3 ignores, a Use
+    resetting the streak, a false positive counting, 1 vs 2 books, 19 vs 20
+    decisions, 0.75 vs 0.80, 2 vs 3 Uses); undone never re-learned; the
+    scoped ignore through the engine; the learner through `verse.decide`
+    with Undo; export/import marking entries imported until confirmed; the
+    ledger; the name pack.
+  - `test_language_qa_benchmark.py`: suppressions are reported, not scored.
+  - Workbench v4→v5 test.
+  - `test_collection_jobs.py`: propagation proposals.
+  - `test_qa_report.py`: the ledger records an export override.
+- **Frontend.**
+  - `SettingsModal.test.ts` (19 tests): house style shows provenance and
+    evidence; Accept, Remove, curated name.
+  - `VerseList.test.ts` (59 tests): the scoped Ignore records house style;
+    the learned notice's Undo.
+- **Not covered by a test:** proposals across 66 real books. Settings opens
+  every materialized sibling's workbench to compute them, on the dispatcher.
+  That is fine for a few books and unmeasured for a Bible.
+- **Full gates:**
+  - engine suite: 2230 passed;
+  - svelte-check: 0 errors, 0 warnings;
+  - Vitest: 554 passed;
+  - `npm run build`: ok;
+  - `cargo check`: ok, and `cargo test`: 10 passed.
+
+## 2026-09-24 — Layered-rules Phase 7: what Language QA does and does not check
+
+**What changed.** `languageQa.status` used to carry `coverage` as a single
+sentence. It now carries `language_qa.coverage()`, a structured statement
+with four fields:
+- `inScope`: one row per engine category (`CATEGORIES`), with an English and
+  a Tamil label;
+- `outOfScope`: agreement (திணை/பால்/எண்), pronoun and number shifts, meaning
+  shifts, omissions and additions, textual basis, and theology. Each row has
+  a label and a reason in both languages;
+- `handOff`: the path `docs/LANGUAGE_QA_REVIEW_HANDOFF.md`;
+- `summary`: the old sentence.
+
+**In the panel.** The open Language QA panel shows "Checks / சரிபார்ப்பவை"
+and "Does not check / சரிபார்க்காதவை" directly under the language line. The
+block is not behind a disclosure, and it is there whether or not the book
+has findings. A clean result can therefore not be read as a review.
+
+**Where the boundary is recorded.** `LANGUAGE_QA_PLAN.md` LQA-3 now records
+that these items must never be checked by the offline engine. A request to
+add one is an architecture question to raise, not a rule to write.
+
+**Tamil strings: pending native review.** The Tamil labels and reasons were
+written by an AI assistant. A native Tamil reviewer must check them before
+release. They live in one place, `_IN_SCOPE_LABELS` and `_OUT_OF_SCOPE` in
+`language_qa.py`.
+
+**The hand-off doc is a placeholder.** The project's own Round 2 procedure
+should be linked there. The doc path is shown as text, because the desktop
+app has no in-app doc viewer.
+
+**Verification.**
+- `test_status_states_what_language_qa_does_and_does_not_check` checks four
+  things:
+  - `inScope` equals `CATEGORIES`;
+  - the key out-of-scope items are present;
+  - every row is bilingual, and no category is both in and out of scope;
+  - the hand-off file exists.
+- A `LanguageQaPanel.test.ts` test checks that the block is visible with no
+  findings, holds both languages and the reason, and is not inside a
+  `<details>`.
+
+## 2026-09-28 — Language QA on human labels: benchmark, rule pack, lexicon, house style (#169)
+
+**The data.** Yesu Selva Benz, a Tamil reviewer, labelled a stratified sample of the
+engine's own findings on Genesis, Psalms and John:
+- 598 items, 597 answered: R0102, PSA 119:54, is unanswered and excluded;
+- none "unsure", with a grammatical reason on every row.
+
+The reviewer's workbook was converted by `ta_irv_labels_to_candidate.py`. The output is
+committed as data in `benchmark/human/2026-09-28/`, and never regenerated.
+
+Before this, "precision" was agreement with the Round 2 AI review rows. The 15–55% that
+put the வல்லினம் rules inline were therefore lower bounds. From now on the human number
+is the only one that decides inline.
+
+### Step 1 — the human labels become the authoritative score
+
+- **Scorer.** `language_qa_benchmark.human_score()`:
+  - a flagged item is scored when a current finding sits at exactly its book, chapter,
+    verse, start and end, with the same NFC text, credited to the finding's own rule;
+  - precision = TP ÷ (TP + FP) over labelled findings; house forms are reported apart;
+  - lost TPs and removed FPs are reported;
+  - the abstained items give recall *proxies* per abstain class.
+- **Gate.** `human_gate()` fails in four cases:
+  - an inline rule below 0.90 human precision, or with fewer than 20 labelled findings;
+  - any rule below `benchmark/human/baseline.json`;
+  - a lost human-confirmed finding;
+  - a label that no longer anchors.
+- **CI.** The gate runs in `ci.yml` after the latency gate, in 1.6 s locally. It needs no
+  IRV corpus, because `verses.jsonl` (the 332 labelled verses) is committed beside the
+  labels. The engine path filter now includes `benchmark/**`.
+- **Scorer check.** On the unchanged pack it reproduces the converter's `summary.json`
+  exactly for every rule (TP/FP), and the recall proxies match `pack_changes.md`. This
+  is the check that the scorer is the reviewer's scorer.
+- **The two IRV copies differ.** The labels anchor 224/224 in `D:\Claude Lab\IRV Tamil`,
+  the copy the reviewer used, but only 163/224 in `C:\Users\Benz\Documents\IRV Tamil`,
+  which the pack builder and the AI-agreement benchmark read. The two copies differ in
+  61 labelled verses (for example GEN 6:7: `பூமியின்மேல்` against `பூமியின் மேல`).
+  `verses.jsonl` is built from the reviewer's copy. The builder is left on its
+  documented corpus, so that the pack changes only where the brief asks. Which copy is
+  canonical is a question for the maintainer.
+- **The waiver is removed.** `inlineSignOff` is gone from `gate()`, the loader (a rule
+  file carrying it now fails to load as an unknown key) and every rule file. The
+  builder's `SIGN_OFF` table becomes `INLINE`, which holds the human number behind each
+  inline rule. The AI-agreement `gate()` keeps only its regression check. DECISIONS.md
+  2026-09-28 supersedes the 2026-09-24 sign-off.
+- **Inline at step 1, on the human numbers.**
+  - Only `sandhi.vallinam.dative` qualifies: 93.9%, 46/49.
+  - Off inline: accusative (70.0%, 35/50), demonstrative (8 labels), manner-adverb
+    (1 label) and wrong-consonant (0 labels).
+- **Rebuild.** The pack was rebuilt with the documented command. Per rule, with the
+  examples set aside, the only differences from HEAD are `inline` and the removed
+  `inlineSignOff`. The examples differ, because the builder picked different real
+  verses. It prefers verses the reviews also flagged, and this machine's review folder
+  differs from the one the original build saw.
+- **Also fixed on the way.**
+  - `bba1275`: the engine's version strings were at 0.11.0 inside a 0.12.0 app, which
+    stopped `smoke_sidecars.py` at its first check.
+  - `e885f55`: the benchmark script now writes UTF-8 to stdout. Its `—` crashed a UTF-8
+    reader on a Windows pipe.
+- **Tests.**
+  - `test_language_qa_benchmark.py`:
+    - the human scorer (TP/FP/house/excluded/lost TP/recall proxy);
+    - the human gate (sample size, floor, baseline, lost TP);
+    - a label that no longer anchors;
+    - every committed label anchors in `verses.jsonl`;
+    - the CI command itself;
+    - the AI gate is regression-only.
+  - Tests that used a demonstrative pair as their "inline" example now use a dative pair.
+  - Fast engine suite: 2022 passed.
+
+| Rule (human precision, step 0) | Labelled | TP | FP | Precision |
+|---|---|---|---|---|
+| `sandhi.vallinam.dative` | 49 | 46 | 3 | 93.9% |
+| `sandhi.vallinam.accusative` | 50 | 35 | 15 | 70.0% |
+| `sandhi.vallinam.demonstrative` | 8 | 7 | 1 | 87.5% |
+| `sandhi.vallinam.manner-adverb` | 1 | 1 | 0 | 100% |
+| `lexicon.known-misspelling` | 43 | 43 | 0 | 100% |
+| `common/spacing.extra` | 15 | 15 | 0 | 100% |
+| `typo.divine-name.vowel-drop` | 1 | 1 | 0 | 100% |
+| `lexicon.rare-near-common` | 21 | 0 | 21 | 0% |
+| `tamil.repeated-word` | 20 | 0 | 20 | 0% |
+| `integrity.space-before-note-end` | 15 | 0 | 15 | 0% |
+
+### Step 2 — the reviewer's fixtures
+
+- **Merge.** `benchmark/human/2026-09-28/labelled/*.jsonl` is appended to
+  `engine/tests/fixtures/language_qa/labelled/`:
+  - sandhi 73 → 240;
+  - typo 50 → 115;
+  - punctuation 40 → 55;
+  - usfm 41 → 56.
+
+  The fixtures are unedited. `--write-labelled` now keeps every human-review line, so a
+  future regeneration of the Phase 2.4 sample cannot delete the reviewer's data.
+- **Test.** `test_language_qa_labelled.py` gains:
+  - a `negative` span must yield no finding of its `ruleId`.
+    `integrity.space-before-note-end` is the one reading of "not a text error": it is
+    satisfied by a low-severity `usfm` markup finding, which is what step 3 makes it;
+  - a human-review `maybe` (a split word: கை கோலில், சு வரை) must not be claimed by any
+    sandhi finding;
+  - where a finding covers exactly a human-confirmed span, the reviewer's fix must be
+    among its suggestions.
+
+  Anchoring collapses whitespace, because the reviewer writes a pair across a poetry
+  line with a space. A category the benchmark scores against the bucket is accepted
+  (`spacing` in the punctuation bucket).
+- **111 failures, each one the pack disagreeing with the reviewer.** They are recorded
+  as strict `xfail` in `PENDING_PACK_CHANGES`:
+  - 75 confirmed false alarms: `tamil.repeated-word` 20, `lexicon.rare-near-common` 21,
+    `integrity.space-before-note-end` 15, accusative 15, dative 3, demonstrative 1;
+  - 36 missed positives: dative 23 (the `-ற்கு` datives, the `-க்கு` exception words
+    and a poetry boundary), demonstrative 9 (the house-form prefixes) and accusative 4.
+
+  Strict means each entry must start passing when its fix lands, and is then deleted.
+  Result: 1914 passed, 111 xfailed.
+
+### Step 3 — the rule pack, `ta-irv@1.1.0`
+
+Built from `D:\Claude Lab\IRV Tamil` (the reviewer's copy, the maintainer's choice) and the
+labels, with the documented `--reviews`.
+
+**Mechanism.**
+- Loader:
+  - condition keys `notPrefix`, `notSuffix` and `notSuffixLexical`;
+  - category `usfm` (layer integrity);
+  - a pair candidate carries its first word's end and a first-word fix.
+- `scan_text`: a pair across a `\q` line or lifted markup is flagged on its first word
+  (`\wj அந்த\wj* காகம்` → `அந்த`, fix `அந்தக்`). It is dropped only when the first word
+  itself is split.
+- Built-in rules: `RuleMeta.enabled`; `tamil.repeated-word` is disabled.
+- `INLINE_RULES` gains `lexicon.known-misspelling`.
+- `SCAN_CACHE_VERSION` 3.
+- Frontend: `usfm` joins the category union and the mark table (drawn like spacing).
+
+**Pack, as the brief and `pack_changes.md` ask, with one deliberate deviation.**
+- **Every வல்லினம் rule.**
+  - It abstains before தேவ- (`notPrefix` தேவை) and before the clitics and quotatives.
+  - The proper-noun abstain is gone. The `listRef` still works for a project override.
+- **Lists.** The builder's bare-majority criterion (`pair_stats`, `bare_majority`,
+  `stem_abstains`, `MIN_CONTEXTS`) is gone. `notLexical` is now built from three sources:
+  1. the corpus root nouns (attested inflection, now also -ற்கு);
+  2. the reviewer's root nouns and house forms (accusative 202, dative 17), plus
+     `KEEP_EXCLUDED` கை and வரை (split words, not sandhi);
+  3. minus the reviewer's case forms (accusative 15, dative 7: யெகோவாவை, ஜீவனை, சபைக்கு, யோபுக்கு …).
+
+  The four directions stay excluded from the dative rule.
+- **Accusative.** `notSuffixLexical` holds முறை, வினை, வகை, தொண்டை only.
+  - **Deviation:** `notSuffix` மை and the தரை element are not applied. On the corpus,
+    -மை also ends உம்மை 9/166, நம்மை 6/58, தம்மை 4/29 and every -ம் name accusative
+    (எருசலேமை 1/23 …), and -தரை ends கர்த்தரை 5/13 and மனிதரை.
+  - The maintainer chose exact words (DECISIONS.md). The labelled result is the same
+    as the brief projected.
+- **Dative.** Suffix `(?:க்கு|ற்கு)$`.
+- **Demonstrative and manner-adverb.** No per-trigger stems.
+- **New rule.** `sandhi.compound.direction` v1: panel-only, medium confidence. Its 15
+  incorrect examples include PSA 48:7, 78:26 and GEN 29:1.
+- **`sandhi.clitic.fused` v2.**
+  - It matches தான் only. ஆவது fuses by vowel sandhi, which has no linking-consonant fix,
+    so it is not matched; கூட is house-style apart.
+  - Its correct examples come from accusative pronouns, manner adverbs and datives, no
+    longer from verbs (வைத்தான்).
+- **`integrity.space-before-note-end` v2.** Category `usfm`, severity low, reworded.
+- **Versions.** Every touched rule is at v2. The pack is 1.1.0, so ignores recorded under
+  1.0.0 come back once for re-check, as designed.
+
+**The review as pack examples.** Every reviewer-confirmed sandhi finding becomes an
+incorrect example of the rule that now finds it, and every false alarm a correct example.
+Each is a two-word window, and each pack load re-checks the review:
+- demonstrative 16 + 1;
+- accusative 40 + 13;
+- dative 66 + 3;
+- direction 3;
+- manner-adverb 1.
+
+A confirmed finding no rule finds fails the build. The two false alarms the accusative
+still raises are printed as residuals: GEN 21:9 செய்கிறதை சாராள் and GEN 35:4 அவைகளை
+சீகேம், both before a name. Names need doubling in 17 of 25 cases, so there is no rule to
+write.
+
+**Human numbers, step 0 → step 3.**
+
+| Rule | Step 0 | Step 3 | Inline |
+|---|---|---|---|
+| dative | 93.9% (46/49) | 100% (46/46) | yes |
+| accusative | 70.0% (35/50) | 94.6% (35/37) | **yes (new)** |
+| demonstrative | 87.5% (7/8) | 100% (7/7) | no, 7 labels |
+| manner-adverb | 100% (1/1) | 100% (1/1) | no |
+| `lexicon.known-misspelling` | 100% (43/43) | 100% (43/43) | **yes (new)** |
+| `tamil.repeated-word` | 0% (0/20) | disabled, 20 false alarms removed | — |
+
+Recall proxies, reviewer "missed" now found:
+
+| Class | Found |
+|---|---|
+| -ற்கு datives | 17/17 |
+| -க்கு exceptions | 5/5 |
+| poetry-line pairs | 2/2 |
+| demonstrative house forms | 9/9 |
+| bare-majority -ஐ | 4/5 (the fifth is the split word சு வரை, correctly left) |
+
+No confirmed finding was lost. `benchmark/human/baseline.json` is rewritten with the
+step-3 numbers.
+
+**Tests.**
+- The labelled fixtures:
+  - 84 of the 111 pending cases pass and are deleted;
+  - the 2 name residuals are a separate strict `RESIDUAL` set;
+  - the 21 left are `lexicon.rare-near-common`, for step 4;
+  - a "missed" item may be found by any sandhi rule, because the converter guessed the
+    rule and the reviewer judged only "doubling needed". கிழக்கு காற்று is the direction
+    rule's.
+- Tests that encoded the old pack are updated to the reviewed behaviour:
+  - repeated-word is off;
+  - a name does not block doubling;
+  - இந்த தேசத்தில் is flagged;
+  - a pair across markup is flagged on its first word;
+  - the pack is 1.1.0;
+  - the inline set is dative and accusative.
+- New tests: the reviewed misses and false alarms, and தேவை is still checked.
+
+**Performance.** The pack load (examples included) goes from 71 ms to 132 ms, median of 5.
+It is paid once per process, on the worker's first Tamil scan. A status poll never loads
+it (`loaded_pack`). Full verses made it 179 ms before the review examples were windowed.
+
+### Step 4 — the lexicon, `ta-irv-lexicon@2`
+
+- **Rebuild.** Rebuilt from `D:\Claude Lab\IRV Tamil` with
+  `--curated "D:\Claude Lab\Revant work\Claude outputs" benchmark/human/2026-09-28/lexicon_curated.csv`.
+  The current `@1` was built from the review folder alone: rebuilding it that way
+  reproduces it, except for 2 pairs from rows added to the folder since. So the
+  reviewer's CSV is added to the AI-review pairs rather than replacing them. Dropping
+  the ~107 pairs the review never sampled would lose coverage.
+- **Result.** 156 pairs (151 + 5). All 43 human-confirmed pairs are in, listed as
+  `humanConfirmed`. They skip the "wrong form is rare in the corpus" filter: a
+  person confirmed them, and IRV repeats some misspellings (கர்ச்சிக்கிற). 21
+  `protected` words. The file is 3.09 MB.
+- **`lexicon.rare-near-common`** is disabled (`RuleMeta.enabled=False`, passed to
+  `lexicon_findings(rare_near_common=)`): 0/21. `protected` words are never flagged by
+  either lexicon rule. It can be re-enabled only with a morphology filter and a new
+  human sample ≥ 0.90 (DECISIONS.md).
+- **`lexicon.known-misspelling`** is inline (step 3's `INLINE_RULES`): 43/43. It is
+  still reported once per book at the first occurrence, so the inline mark is on that
+  occurrence only.
+- **Human gate.** It passes. rare-near-common now shows 21 false alarms no longer
+  produced. The labelled fixtures' `PENDING_PACK_CHANGES` is empty; only the 2 name
+  residuals remain as strict xfail.
+- **Tests.** `test_lexicon.py`:
+  - the curated map holds the 43 confirmed pairs and 21 protected words;
+  - the frequency guard exempts only confirmed pairs;
+  - the manager leaves rare-near-common off by default and still uses the corpus
+    lexicon when it is enabled.
+
+  Service tests: 2619 passed, 2 xfailed.
+
+### Step 5 — house style
+
+- **Curated house style in the pack.** The தேவ- rule and the clitic policy are curated
+  project house style, and they live in the pack as abstains on every வல்லினம் rule
+  (step 3). `LANGUAGE_QA_HOUSESTYLE.md` records them as such. No per-word entries.
+- **The bundled seed.** `language_packs/ta-irv/housestyle-seed.json` is the review's
+  `housestyle_import.json`: one `properNouns` entry, சேத்து.
+  - `housestyle.bundled_seed()` reads it, validated and marked `seed`.
+  - `with_seed()` merges it under a project's entries: an own entry with the same key
+    replaces it, whatever its state.
+  - The scan applies the merge for a Tamil project. `housestyle.list` returns the seed
+    apart (`seed`), without the keys a project has overridden.
+  - Settings shows seed rows as **bundled**, with a Remove that records the project's
+    own removed entry.
+  - Nothing is written into a workbench on open. The seed ships in the frozen sidecar,
+    because `bridge-engine.spec` bundles the whole `ta-irv` folder.
+- **No name abstains from the sandhi rows.** The seed carries only the lexicon's
+  `FP_NAME`, as the brief says.
+- **Tests.**
+  - `test_housestyle.py`: the seed is read-only and merged; the list returns it; a
+    removal replaces it.
+  - `SettingsModal.test.ts`: the bundled row, and its Remove.
+
+### Step 6 — the split-word check is scoped, not built
+
+Two reviewer corrections were joins, not sandhi: `கை கோலில்` → கைக்கோலில் and
+`சு வரை` → சுவரை. `LANGUAGE_QA_PLAN.md` now scopes `word-joining.orphan-syllable`:
+- the shape: a 1–2 cluster token that is not a known word, and that joins with its
+  neighbour into a known word;
+- the guardrails;
+- the requirement for its own labelled sample (≥ 20) before any precision claim.
+
+Nothing is implemented. The plan also lists the rules flagged for the next review round:
+demonstrative 7, manner-adverb 1 and spacing.extra 15 labels.
+
+### Found while re-measuring: the seed name made `name.minority-spelling` noisy
+
+The same-text Bible scan showed `project/name.minority-spelling` going from 0 to 86. The
+new trigger is the bundled seed name சேத்து (step 5). A three-cluster name is one cluster
+(distance 1.0) away from ordinary words. It flagged காத்து, செத்து, சேர்த்து, பத்து,
+சொத்து, பூத்து, தைத்து, சேராது and சேமித்து as misspellings of it.
+
+Two guards fix it:
+1. A word the corpus uses commonly (lexicon count ≥ `COMMON_MIN`) is never a misspelt
+   name. This is the lexicon's own rule, and the scan passes `corpus_count=lexicon.count`.
+   That alone left 6.
+2. A name of at most `NAME_SHORT_CLUSTERS` = 3 clusters admits only a single typist
+   confusion (distance ≤ 0.5). That leaves none.
+
+Cost: IRV's own two-cluster spelling சேத் is no longer offered as a variant of சேத்து.
+A longer name keeps its one-cluster variants: பார்வொன் → பார்வோன் is still found.
+
+After the fix the rule raises 0 Bible-wide. Test:
+`test_a_short_approved_name_does_not_claim_ordinary_words`.
+
+### Step 7 — re-measured
+
+**Human benchmark, final (`ta-irv@1.1.0`, `ta-irv-lexicon@2`).**
+
+| Rule | Step 0 | Final | Inline |
+|---|---|---|---|
+| `sandhi.vallinam.dative` | 93.9% (46/49) | 100% (46/46) | yes |
+| `sandhi.vallinam.accusative` | 70.0% (35/50) | 94.6% (35/37) | yes |
+| `sandhi.vallinam.demonstrative` | 87.5% (7/8) | 100% (7/7) | no, 7 labels |
+| `sandhi.vallinam.manner-adverb` | 100% (1/1) | 100% (1/1) | no |
+| `lexicon.known-misspelling` | 100% (43/43) | 100% (43/43) | yes |
+| `common/spacing.extra` | 100% (15/15) | 100% (15/15) | no, 15 labels |
+| `typo.divine-name.vowel-drop` | 100% (1/1) | 100% (1/1) | no |
+| `lexicon.rare-near-common` | 0% (0/21) | disabled; 21 false alarms gone | — |
+| `tamil.repeated-word` | 0% (0/20) | disabled; 20 false alarms gone | — |
+| `integrity.space-before-note-end` | 0/15 as a text error | markup item (`usfm`, low) | — |
+
+- **Precision.** Every rule's human precision is at or above its step-0 value.
+- **Lost findings.** No human-confirmed finding was lost.
+- **Missed contexts.** Every reviewer-labelled "missed" context is now found, except
+  the split word சு வரை, which the pack correctly leaves to a split-word check (step 6):
+  - -ற்கு 17/17;
+  - -க்கு exceptions 5/5;
+  - poetry lines 2/2;
+  - demonstrative house forms 9/9;
+  - bare-majority 4/5.
+- **Residuals.** The two accusative false alarms before a name are the only strict
+  residuals.
+
+**The same text, before and after.** Language QA alone over the 66 books of
+`D:\Claude Lab\IRV Tamil`. Before is b5688ef, the pre-task engine; after is the final
+code.
+
+| Rule | Before | After | Change | Drawn inline after |
+|---|---|---|---|---|
+| `ta-irv/sandhi.vallinam.accusative` | 982 | 1000 | +18 | 1000 |
+| `ta-irv/sandhi.vallinam.dative` | 643 | 789 | +146 | 789 |
+| `ta-irv/integrity.space-before-note-end` | 224 | 224 | +0 | 0 |
+| `ta-irv/lexicon.known-misspelling` | 154 | 160 | +6 | 160 |
+| `ta-irv/sandhi.vallinam.demonstrative` | 101 | 210 | +109 | 0 |
+| `common/spacing.extra` | 91 | 91 | +0 | 0 |
+| `ta-irv/lexicon.rare-near-common` | 179 | 0 | -179 | 0 |
+| `ta-irv/tamil.repeated-word` | 146 | 0 | -146 | 0 |
+| `ta-irv/sandhi.compound.direction` | 0 | 92 | +92 | 0 |
+| `ta-irv/sandhi.vallinam.manner-adverb` | 22 | 22 | +0 | 0 |
+| `ta-irv/typo.divine-name.dative-stem` | 13 | 13 | +0 | 0 |
+| `ta-irv/typo.divine-name.vowel-drop` | 11 | 11 | +0 | 0 |
+| `ta-irv/sandhi.clitic.fused` | 9 | 6 | -3 | 0 |
+| `ta-irv/typo.suffix.dropped-tha` | 2 | 2 | +0 | 0 |
+| `common/unicode.invisible` | 1 | 1 | +0 | 0 |
+| `ta-irv/sandhi.vallinam.wrong-consonant` | 1 | 1 | +0 | 0 |
+| `common/punctuation.repeated` | 1 | 1 | +0 | 0 |
+| **Total** | **2580** | **2623** | **+43** | **1949** (before 1749) |
+
+- **False alarms fall by 328:** rare-near-common −179, repeated-word −146, clitic −3.
+- **New true checks add 371:** dative +146 (-ற்கு), demonstrative +109 (no house-form
+  stems), direction +92, accusative +18, known-misspelling +6.
+- **Net.** The total rises by 43, and inline marks rise from 1,749 to 1,949. They now
+  come only from rules at 94.6–100% human precision: before, they came from five
+  வல்லினம் rules on a sign-off.
+
+**The whole-Bible collection run.** `collection.runChecks`, with the checks local,
+greekroom and languageQa, on the 66 books of `D:\Claude Lab\IRV Tamil`, on an idle
+machine:
+- **Result:** `succeeded`; 66/66 books; no book error; import 10.9 s.
+- **Wall time:** 3,745.9 s (62 min).
+- **Language QA findings:** 2,623, exactly the same-text scan's total.
+- **Final stage:** house-style propagation available, 0 proposals.
+
+The brief asked for a comparison with the earlier **7,401**. That figure is not
+comparable, and not only because the text changed:
+- It came from a process started on 2026-09-24 on mid-Phase-6 code.
+- Genesis on the same older text gives 110 Language QA findings with the pre-task engine
+  and 124 with the final one. Both were measured through the check job, with the
+  collection's own check set, counting each finding exactly once. The earlier run
+  reported 295.
+- So the per-verse sum that run reported is not reproducible with either committed
+  engine.
+- The like-for-like numbers are the same-text scan above: 2,580 → 2,623.
+
+The earlier 6,031.8 s wall time also ran beside test suites; 3,745.9 s is the idle
+figure.
+
+**Performance contract.**
+- **Psalms** (`D:` copy, three cold passes each):
+
+  | | Before | After |
+  |---|---|---|
+  | Cold wall | 2.52–2.59 s | 2.50–2.55 s |
+  | Peak RSS | 60.6 MB | 71.3 MB (+11 MB, limit +50) |
+  | Warm reopen | 0.43–0.46 s | 0.39 s |
+
+- **Latency gate** (`benchmark_language_qa.py --gate --cores 2`): pass. p95
+  `verse.decide` (Language QA) 23.9 ms, `verse.get` 3.6 ms, `languageQa.status` 1.1 ms,
+  `languageQa.inline` 0.4 ms. The shared write paths are over, as before and outside
+  Language QA: `verse.edit` 244 ms, `project.open` 166 ms.
+- **Pack load:** 71 → 132 ms, once per process.
+
+**Review date and reviewer:** 2026-09-28, Yesu Selva Benz. 598 items on GEN/PSA/JHN,
+597 answered; R0102 (PSA 119:54) excluded, and not re-labelled.
+
+**Final gates (2026-09-28).**
+- Full engine suite (`pytest tests/ greek_room_engine/tests/ -n auto`, slow tests
+  included): 3779 passed, 2 xfailed (the name residuals).
+- svelte-check 0/0; Vitest 556 passed; `npm run build` ok.
+- Human gate pass. Latency gate pass.
+- Rust untouched, so cargo was not re-run in this task.
+
+## 2026-09-29 — Language QA, human-review round 2: promote, split the misspelling map, resolve தான், known splits (#169)
+
+**The data.** The same reviewer, Yesu Selva Benz, labelled 220 items on 2026-09-29.
+- **Scope.** They come from all 66 books of `D:\Claude Lab\IRV Tamil`, and none was seen
+  in round 1.
+- **Answers.** All 220 were answered, with a reason on every row.
+- **Where.** Committed as data in `benchmark/human/2026-09-29/`, with `verses.jsonl`
+  (211 verses from the D: copy).
+
+### Step 1 — merge round 2 into the benchmark
+
+- **Reading the rounds together.** `language_qa_benchmark.load_human_rounds()` reads every
+  `benchmark/human/*/human_labels.jsonl` and tags each row with its round. It refuses a
+  verse whose text differs between rounds.
+- **Scoring.** `human_score()` scores the new `split` rows (SPLIT = tp, WORD or
+  PARTICLE = fp, when a finding covers the span; otherwise a recall proxy) and reports
+  every rule per round and combined.
+- **The gate: inline and regression read different numbers.**
+  - Inline reads the combined figure.
+  - Regression is judged per round: a round may not fall below its own baseline.
+  - With round 2 added, the old single-round baseline would have "failed" dative
+    (100% → 98.8%) and known-misspelling (100% → 92.2%). Those are new data, not a
+    regression; round 1 is unchanged.
+  - `benchmark/human/baseline.json` now records rounds.
+  - CI passes `--human-labels ../benchmark/human`.
+- **Combined numbers.** They match the brief exactly:
+  - dative 85/86;
+  - accusative 74/77;
+  - demonstrative 24/24;
+  - manner-adverb 21/21;
+  - direction 25/25;
+  - spacing.extra 23/23;
+  - known-misspelling 47/51 (round 2: 4/8).
+
+  All 818 rows anchor.
+- **Fixtures.** Round-2 fixtures are appended (sandhi +165, typo +18, punctuation +8), and
+  `word-joining.jsonl` is a new bucket (23 rows). The labelled test reads it:
+  - the round-2 origin tag "(human review round 2)" counts as human;
+  - the converter's candidate rule name `word-joining.orphan-syllable` is an alias of
+    `lexicon.known-split`.
+- **18 strict pending cases**, each the pack disagreeing with the reviewer:
+  - 2 root nouns (step 2);
+  - 4 AI misspelling pairs (step 3);
+  - 2 தான் cases (step 4);
+  - 10 splits (step 5).
+
+### Step 2 — promote on evidence; settle the small-population rules
+
+- **(a) Promoted: at least 20 labelled at ≥ 0.90, over both rounds.**
+  - `sandhi.vallinam.demonstrative` 24/24;
+  - `sandhi.vallinam.manner-adverb` 21/21;
+  - `sandhi.compound.direction` 25/25;
+  - `common/spacing.extra` 23/23, in `INLINE_RULES`.
+
+  The pack rules are set in the builder's `INLINE` table.
+- **(b) The whole population is labelled** (DECISIONS.md 2026-09-29).
+  - `benchmark/human/population.json` is written from the 66 books of the D: copy with
+    `--write-population`. It records 10 small rules and a definition hash for each.
+  - The gate checks coverage and staleness.
+  - Inline under it: `typo.suffix.dropped-tha` 2/2 and `sandhi.vallinam.wrong-consonant`
+    1/1.
+  - Panel-only, in the next sample: `typo.divine-name.vowel-drop` 5/11 and `dative-stem`
+    4/13.
+- **Reviewer fixes.** The builder now reads every round, for word verdicts and for
+  examples. So சேட்டை (accusative, `FP_ROOT`) and தோவேக்கு (the name Doeg,
+  dative, `FP_ROOT`) go into `notLexical`: accusative roots 203, dative 18.
+  - Every round-2 sandhi verdict is now a pack example as well: demonstrative +17, manner
+    +20, accusative +40, dative +40, direction +25, wrong-consonant +1. Each carries its
+    round's date in `origin`.
+  - **Not a change: the brief's "dropped-tha missed செய்வற்கு".** It does not hold. The
+    rule already flags செய்வற்கு at 1CH 23:5 with fix செய்வதற்கு, and that verse was
+    already one of its incorrect examples. Only the clitic rule also fired on the pair
+    (step 4).
+- **Human gate.** It passes.
+  - accusative 74/76 (97.4%; round 2 39/39 now that சேட்டை is excluded);
+  - dative 85/85.
+- **Tests.**
+  - The inline tests' panel-only finding is now `,,`, because `spacing.extra` is inline.
+  - The inline-set assertions are updated.
+  - New: `test_a_rule_whose_whole_population_is_labelled_may_be_inline` (confirmed,
+    incomplete, stale).
+  - Service and jobs: 3493 passed.
+
+### Step 3 — the misspelling map split by provenance (`ta-irv-lexicon@3`)
+
+- **Rebuild.** Rebuilt on the D: copy with `--curated` covering the review folder and
+  both rounds' `lexicon_curated.csv`. `--human-labels` now reads every round.
+- **The map.** 182 pairs:
+  - **47 `human`:** round 1's 43, plus அணிந்துக், நிற்க்கும்போது, போர்வையைக்,
+    வார்தையின்படியே;
+  - **135 `ai-review`**, including ஐபிரத் and மகிழுகிறதுபோல, which the reviewer
+    marked unsure;
+  - **removed:** the four pairs the reviewer rejected — திடமனதாயிரு (meaning),
+    கவனிக்காதே (imperative → participle), பூட்டுக்களையும் (valid plural),
+    பெருந்தொனியாய் (style). They are now `protected` (25 in all).
+- **Why the map grew.** The review folder gained five AI Round 2 reports on 2026-09-29
+  (EST, ECC, SNG, PRO, ISA), adding 30 ai-review pairs. As ai-review pairs they are
+  panel-only.
+- **`lexicon.known-misspelling`.** Human pairs are high and inline. Ai-review pairs are
+  medium, not inline, and say "awaits human confirmation". Each finding carries
+  `provenance`.
+- **Fragments.** Single-grapheme tokens outside `MONOSYLLABLES` are not counted as words
+  (சு, நே gone; கை kept).
+- **Human gate.** It passes. Known-misspelling is now 47/47, and the 4 rejected pairs
+  are no longer produced.
+- **Tests.** The four round-2 misspelling negatives pass. Service tests: 3468 passed.
+
+### Step 4 — தான்: the clitic rule measured the wrong thing
+
+- **Disabled.** `sandhi.clitic.fused` is `enabled: false` (v3). All six of its round-2
+  findings were the reflexive pronoun, which the reviewer writes separately with
+  doubling.
+- **No longer abstained.** The வல்லினம் rules drop தான் and ஆவது from the clitic
+  abstain. ஆவது is vowel-initial, so no rule fires on it anyway.
+  - The rules get a new pack field, `contexts` (loader: `Context`,
+    `Candidate.confidence`/`alternatives`; `scan_text` adds the alternatives and the
+    context's confidence).
+  - After a case form, `X தான்` is flagged with two ranked suggestions,
+    `Xத் தான்` ("pronoun: separate, doubled") and then `Xத்தான்` ("clitic: fused"),
+    at medium confidence, with the reviewer's Tamil message.
+  - Both correct forms are left alone.
+  - Rule versions: the வல்லினம் rules v3, direction v2, wrong-consonant v3.
+- **Human gate.** It passes.
+  - Dative is now 87/87: the two round-2 தான் labels, ACT 7:46 and 1CH 23:5, are
+    credited to it, and its rank-1 fix is the reviewer's form.
+  - The fixture for 1CH 23:5 stays a strict xfail of its own (`COMBINED_FIX`). The
+    reviewer's `செய்வதற்குத் தான்` combines two findings: the typo and the link.
+- **Tests.**
+  - The clitic tests are replaced by
+    `test_bare_tan_offers_the_pronoun_first_and_the_clitic_second`.
+  - A reviewed finding whose rule is now disabled may be found by any sandhi rule.
+  - Service and jobs: 3499 passed.
+
+### Step 5 — known splits as data (`ta-irv-lexicon@4`)
+
+- **`lexicon.known-split`** (in-code, category word-joining, high).
+  - It flags an adjacent pair that the lexicon's `splits` map names, and suggests the
+    joined form.
+  - The builder takes the map only from the reviewer's `SPLIT` rows: சு வரை → சுவரை,
+    நே போ → நேபோ.
+  - The one-grapheme tokens judged a word, name or interjection (சீ, சோ, நோ, பை) are
+    added to `protected` (29 in all).
+- **Inline under rule (b).** The population file shows 11 of 11 findings confirmed: the
+  10 round-2 `SPLIT` rows, plus round 1's PSA 48:13 row, which overlaps the fourth
+  சு வரை. Its definition hash includes the split map.
+- **Cache.** The chapter cache key now includes `lexicon_fingerprint()`, which now
+  hashes the split map, so a rebuilt lexicon rescans the verse-level splits.
+- **The plan.** The `word-joining.orphan-syllable` entry is replaced by "split words:
+  curated pairs fed by review rounds".
+- **Tests.** `test_known_splits_are_curated_pairs_found_in_the_verse`. The 10 split
+  fixtures pass, and `PENDING_PACK_CHANGES` is empty. Only the 2 name residuals and
+  the 1 combined fix remain as strict xfail. Service and jobs: 3510 passed.
+
+### Step 6 — re-measured after round 2
+
+**Human gate (combined, both rounds).** It passes.
+
+| Rule | Labelled | Human precision | Inline | On |
+|---|---|---|---|---|
+| `sandhi.vallinam.dative` | 87 | 100% (87/87) | yes | (a) |
+| `sandhi.vallinam.accusative` | 76 | 97.4% (74/76) | yes | (a) |
+| `sandhi.vallinam.demonstrative` | 24 | 100% | yes (new) | (a) |
+| `sandhi.vallinam.manner-adverb` | 21 | 100% | yes (new) | (a) |
+| `sandhi.compound.direction` | 25 | 100% | yes (new) | (a) |
+| `common/spacing.extra` | 23 | 100% | yes (new) | (a) |
+| `lexicon.known-misspelling` | 47 | 100% (human pairs only) | yes for human pairs | (a) |
+| `lexicon.known-split` | 10 | 100%; population 11/11 | yes (new) | (b) |
+| `typo.suffix.dropped-tha` | 2 | 100%; population 2/2 | yes (new) | (b) |
+| `sandhi.vallinam.wrong-consonant` | 1 | 100%; population 1/1 | yes (new) | (b) |
+| `typo.divine-name.vowel-drop` | 5 | 100%; population 5/11 | no, until labelled | — |
+| `typo.divine-name.dative-stem` | 4 | 100%; population 4/13 | no, until labelled | — |
+| `sandhi.clitic.fused` | — | disabled (தான் resolved in the வல்லினம் rules) | — | — |
+
+Every fixture passes, except three strict, documented xfails: the two accusatives before
+a name, and the 1CH 23:5 fix that combines two findings.
+
+**The same text, round 1 final (de6feef) against round 2.** Language QA alone, 66 books,
+D: copy.
+
+| Rule | Round 1 final | Round 2 | Change | Inline before → after |
+|---|---|---|---|---|
+| `ta-irv/sandhi.vallinam.accusative` | 1000 | 999 | -1 | 1000 → 999 |
+| `ta-irv/sandhi.vallinam.dative` | 789 | 790 | +1 | 789 → 790 |
+| `ta-irv/integrity.space-before-note-end` | 224 | 224 | +0 | 0 → 0 |
+| `ta-irv/sandhi.vallinam.demonstrative` | 210 | 210 | +0 | 0 → 210 |
+| `ta-irv/lexicon.known-misspelling` | 160 | 185 | +25 | 160 → 58 |
+| `ta-irv/sandhi.compound.direction` | 92 | 92 | +0 | 0 → 92 |
+| `common/spacing.extra` | 91 | 91 | +0 | 0 → 91 |
+| `ta-irv/sandhi.vallinam.manner-adverb` | 22 | 22 | +0 | 0 → 22 |
+| `ta-irv/typo.divine-name.dative-stem` | 13 | 13 | +0 | 0 → 0 |
+| `ta-irv/typo.divine-name.vowel-drop` | 11 | 11 | +0 | 0 → 0 |
+| `ta-irv/lexicon.known-split` | 0 | 11 | +11 | 0 → 11 |
+| `ta-irv/sandhi.clitic.fused` | 6 | 0 | -6 | 0 → 0 |
+| `ta-irv/typo.suffix.dropped-tha` | 2 | 2 | +0 | 0 → 2 |
+| `ta-irv/sandhi.vallinam.wrong-consonant` | 1 | 1 | +0 | 0 → 1 |
+| `common/unicode.invisible` | 1 | 1 | +0 | 0 → 0 |
+| `common/punctuation.repeated` | 1 | 1 | +0 | 0 → 0 |
+| **Total** | **2623** | **2653** | **+30** | **1949 → 2276** |
+
+- **Inline marks rise by 327**, from 1,949 to 2,276:
+  - demonstrative +210, direction +92, spacing +91, manner-adverb +22, known-split +11;
+  - known-misspelling falls from 160 to 58, because only human-confirmed pairs are
+    drawn now.
+- **The total rises by 30** where the brief expected a small fall. That is +25
+  known-misspelling findings from the 30 ai-review pairs in the five AI reports added to
+  the review folder on 2026-09-29. They are panel-only, "awaits confirmation".
+  Without those 25 the total would be 2,628, or +5 on 2,623: the 11 new known splits outweigh the 6 clitic findings removed.
+- **Removed:** clitic.fused's 6 findings.
+- **தான்:** the four clitic findings already written `Xத் தான்` are now correctly
+  silent. Only two bare `X தான்` exist in the Bible, ACT 7:46 and 1CH 23:5, both
+  already labelled.
+
+**The whole-Bible collection run.** Local + greekroom + languageQa, on the D: copy:
+- **Result:** 66/66 succeeded; import 7.4 s.
+- **Wall time:** 4,447.9 s.
+- **Language QA findings:** 2,653, exactly the same-text total.
+- **Final stage:** house-style propagation available, 0 proposals.
+
+The wall time is 12 min above round 1's 3,745.9 s, but the machine is slower today. The
+unchanged pre-task engine's Psalms pass rose from 2.52 s to 2.94–3.26 s. The clean
+comparison is the Psalms pass run alternately in one session:
+
+| | Round 1 final | Round 2 |
+|---|---|---|
+| Cold wall | 2.91–3.04 s | 3.03–3.14 s (≈ +2%, within the spread) |
+| Warm reopen | 0.45–0.55 s | 0.43–0.46 s |
+| Peak RSS | 61.4 MB | 68.7 MB (+7 MB) |
+
+The pack load, which now holds 523 examples, is 256 ms, once per process.
+
+**Housekeeping.** The measurement run registered one throwaway project (`coll3`) in the
+workspace registry. It was removed, and the registry was backed up first.
+
+**Next sample, for the reviewer.**
+- The 6 + 9 unlabelled divine-name findings: vowel-drop 6 of 11 and dative-stem 9 of 13.
+  Labelling them lets rule (b) put both inline.
+- The two unsure ai-review pairs: ஐபிரத் → ஐபிராத் (name spelling) and மகிழுகிறதுபோல
+  → மகிழ்கிறதுபோல (verb stem).
+- 20 or more of the 135 ai-review misspelling pairs. That is what stands between them
+  and `human` provenance, including the 30 from the five new reports.
+- தான்: no new bare `X தான்` findings exist beyond the two already labelled. The batch
+  can only come from future text.
+
+**Final gates (2026-09-29).**
+- **Full engine suite** (`-n auto`, slow tests included): 4637 passed, 3 xfailed, 1
+  failed. The failure was `test_unreadable_chapter_is_incomplete_not_clean`, a single
+  parameter, which waits on a background scan with a timeout.
+  - It then passed in isolation, and 15 of 15 times under `-n auto`.
+  - Round 2 does not touch its path.
+  - Recorded as a timing flake under a 12-minute parallel load, not fixed here.
+- **Frontend:** svelte-check 0/0; Vitest 556 passed; build ok.
+- **Human gate:** pass.
 ## 2026-09-28 — The release version is declared in five places (#170)
 
 Release 0.12.0 bumped `package.json`, `src-tauri/tauri.conf.json` and

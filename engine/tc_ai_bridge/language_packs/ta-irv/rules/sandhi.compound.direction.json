@@ -1,0 +1,382 @@
+{
+ "id": "sandhi.compound.direction",
+ "version": 2,
+ "category": "sandhi",
+ "severity": "medium",
+ "confidence": "medium",
+ "inline": true,
+ "title": {
+  "ta": "வல்லினம் மிகுதல் — திசைச் சொல்",
+  "en": "Vallinam doubling after a direction word"
+ },
+ "message": {
+  "en": "Possible missing வல்லினம் at this word boundary: \"{prev} {initial}...\" normally takes \"{prev}{initial}் {initial}...\". Verify before editing."
+ },
+ "rationale": "\"{prev}\" before a {initial}-initial word takes the linking {initial}்",
+ "match": {
+  "type": "token-context",
+  "prev": {
+   "lexical": [
+    "கிழக்கு",
+    "மேற்கு",
+    "வடக்கு",
+    "தெற்கு"
+   ]
+  },
+  "gap": "whitespace",
+  "next": {
+   "initial": [
+    "க",
+    "ச",
+    "த",
+    "ப"
+   ]
+  },
+  "link": "none"
+ },
+ "abstain": [
+  {
+   "next": {
+    "lexical": [
+     "கூட",
+     "மட்டும்",
+     "போல",
+     "என்று",
+     "என",
+     "எனும்"
+    ]
+   },
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style). தான் is not abstained: see the rule's தான் context (2026-09-29)."
+  },
+  {
+   "next": {
+    "prefix": [
+     "தேவ"
+    ],
+    "notPrefix": [
+     "தேவை"
+    ]
+   },
+   "origin": "House style (reviewer 2026-09-28): no doubling before தேவன்/தேவ- forms (11 of 13 'case form, no doubling here' verdicts). தேவை 'need' is still checked."
+  }
+ ],
+ "fix": {
+  "type": "insert-link"
+ },
+ "contexts": [
+  {
+   "next": {
+    "lexical": [
+     "தான்"
+    ]
+   },
+   "confidence": "medium",
+   "message": {
+    "en": "தான்: பிரதிப்பெயர் என்றால் பிரித்து ஒற்றுடன்; ஒட்டுச்சொல் என்றால் ஒட்டி. \"{fix}\" if தான் is the pronoun (he, himself); \"{alternative}\" if it is the clitic (only, indeed)."
+   },
+   "rationale": "pronoun: separate, doubled",
+   "alternatives": [
+    {
+     "fix": "fuse-link",
+     "rationale": "clitic: fused"
+    }
+   ],
+   "origin": "2026-09-29 review: 6 of 6 sampled were the pronoun, wanting the separate doubled form."
+  }
+ ],
+ "provenance": "New (2026-09-28 review): the reviewer wants கிழக்குக் காற்று, கிழக்குத் தேசம் -- compound doubling after a direction word, which is not a dative (the dative rule excludes these four). Panel-only and medium confidence until benchmarked. v3 (2026-09-29): தான் is no longer abstained; X தான் is offered as the pronoun (Xத் தான்) and the clitic (Xத்தான்), medium confidence.",
+ "examples": {
+  "incorrect": [
+   {
+    "text": "பயணம் செய்து, கிழக்கு தேசத்தாரிடத்தில் போய்ச் சேர்ந்தான்.",
+    "span": "கிழக்கு தேசத்தாரிடத்தில்",
+    "fix": "கிழக்குத் தேசத்தாரிடத்தில்",
+    "origin": "GEN 29:1 (also in the review reports)"
+   },
+   {
+    "text": "கிழக்கு காற்றினால் தர்ஷீசின் கப்பல்களை",
+    "span": "கிழக்கு காற்றினால்",
+    "fix": "கிழக்குக் காற்றினால்",
+    "origin": "PSA 48:7 (also in the review reports)"
+   },
+   {
+    "text": "வானத்திலே கிழக்கு காற்றை வீசச் செய்து,",
+    "span": "கிழக்கு காற்றை",
+    "fix": "கிழக்குக் காற்றை",
+    "origin": "PSA 78:26 (also in the review reports)"
+   },
+   {
+    "text": "இருக்கிற யோர்தானுடைய கிழக்கு பகுதியில் வனாந்திரத்தின் சமவெளிக்கு",
+    "span": "கிழக்கு பகுதியில்",
+    "fix": "கிழக்குப் பகுதியில்",
+    "origin": "DEU 1:2 (also in the review reports)"
+   },
+   {
+    "text": "நதிக்கு கீழே மேற்கு புறத்தில் இருக்கிற மற்ற",
+    "span": "மேற்கு புறத்தில்",
+    "fix": "மேற்குப் புறத்தில்",
+    "origin": "EZR 4:10 (also in the review reports)"
+   },
+   {
+    "text": "ஐப்பிராத்து நதிக்கு மேற்கு புறத்திலிருக்கிற அப்பற்சாகியரான அவனுடன்",
+    "span": "மேற்கு புறத்திலிருக்கிற",
+    "fix": "மேற்குப் புறத்திலிருக்கிற",
+    "origin": "EZR 5:6 (also in the review reports)"
+   },
+   {
+    "text": "மீதியானியர்களும் அமலேக்கியர்களும் கிழக்கு பகுதியை சேர்ந்த மக்கள்",
+    "span": "கிழக்கு பகுதியை",
+    "fix": "கிழக்குப் பகுதியை",
+    "origin": "JDG 6:33 (also in the review reports)"
+   },
+   {
+    "text": "யோர்தான் நதிக்கு கிழக்கு திசையில் இருக்கிற கீலேயாத்,",
+    "span": "கிழக்கு திசையில்",
+    "fix": "கிழக்குத் திசையில்",
+    "origin": "JOS 17:5 (also in the review reports)"
+   },
+   {
+    "text": "யோர்தான் நதிக்கு மேற்கு திசையிலுள்ள மலைகளிலும் பள்ளத்தாக்குகளிலும்",
+    "span": "மேற்கு திசையிலுள்ள",
+    "fix": "மேற்குத் திசையிலுள்ள",
+    "origin": "JOS 9:1 (also in the review reports)"
+   },
+   {
+    "text": "சமுத்திரம் வரை, வடக்கு திசை துவங்கிக் கிழக்குத்",
+    "span": "வடக்கு திசை",
+    "fix": "வடக்குத் திசை",
+    "origin": "AMO 8:12"
+   },
+   {
+    "text": "எழுப்புவான்; அப்பொழுது தெற்கு திசை ராஜா மிகவும்",
+    "span": "தெற்கு திசை",
+    "fix": "தெற்குத் திசை",
+    "origin": "DAN 11:25"
+   },
+   {
+    "text": "ஆண்டுகள் வரை வடக்கு திசை ராஜாவைப்பார்க்கிலும் நிலையாக",
+    "span": "வடக்கு திசை",
+    "fix": "வடக்குத் திசை",
+    "origin": "DAN 11:8"
+   },
+   {
+    "text": "பயணம் செய்து, கிழக்கு தேசத்தாரிடத்தில் போய்ச் சேர்ந்தான்.",
+    "span": "கிழக்கு தேசத்தாரிடத்தில்",
+    "fix": "கிழக்குத் தேசத்தாரிடத்தில்",
+    "origin": "GEN 29:1 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "கிழக்கு காற்றினால் தர்ஷீசின் கப்பல்களை",
+    "span": "கிழக்கு காற்றினால்",
+    "fix": "கிழக்குக் காற்றினால்",
+    "origin": "PSA 48:7 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "வானத்திலே கிழக்கு காற்றை வீசச் செய்து,",
+    "span": "கிழக்கு காற்றை",
+    "fix": "கிழக்குக் காற்றை",
+    "origin": "PSA 78:26 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "தாவீது: யூதாவுடைய தெற்கு திசையிலும், யெராமியேலர்களுடைய தெற்கு",
+    "span": "தெற்கு திசையிலும்",
+    "fix": "தெற்குத் திசையிலும்",
+    "origin": "1SA 27:10 (human review 2026-09-29)"
+   },
+   {
+    "text": "தாவீது: யூதாவுடைய தெற்கு திசையிலும், யெராமியேலர்களுடைய தெற்கு",
+    "span": "தெற்கு திசையிலும்",
+    "fix": "தெற்குத் திசையிலும்",
+    "origin": "1SA 27:10 (human review 2026-09-29)"
+   },
+   {
+    "text": "ஒருவர் சம்பந்தம்செய்யும்படிக்குத் தெற்கு திசை ராஜாவின் மகள்",
+    "span": "தெற்கு திசை",
+    "fix": "தெற்குத் திசை",
+    "origin": "DAN 11:6 (human review 2026-09-29)"
+   },
+   {
+    "text": "இராணுவத்தோடே வந்து, வடக்கு திசை ராஜாவின் பாதுகாப்பிற்குள்",
+    "span": "வடக்கு திசை",
+    "fix": "வடக்குத் திசை",
+    "origin": "DAN 11:7 (human review 2026-09-29)"
+   },
+   {
+    "text": "அப்பொழுது தெற்கு திசை ராஜா கடுங்கோபம்",
+    "span": "தெற்கு திசை",
+    "fix": "தெற்குத் திசை",
+    "origin": "DAN 11:11 (human review 2026-09-29)"
+   },
+   {
+    "text": "பின்னும் தெற்கு திசை ராஜாவிற்கு விரோதமாகப்",
+    "span": "தெற்கு திசை",
+    "fix": "தெற்குத் திசை",
+    "origin": "DAN 11:25 (human review 2026-09-29)"
+   },
+   {
+    "text": "பின்னும் தெற்கு திசை ராஜாவிற்கு விரோதமாகப்",
+    "span": "தெற்கு திசை",
+    "fix": "தெற்குத் திசை",
+    "origin": "DAN 11:25 (human review 2026-09-29)"
+   },
+   {
+    "text": "எதிர்த்து நிற்பான்; வடக்கு திசை ராஜாவும் இரதங்களோடும்",
+    "span": "வடக்கு திசை",
+    "fix": "வடக்குத் திசை",
+    "origin": "DAN 11:40 (human review 2026-09-29)"
+   },
+   {
+    "text": "மேற்கு திசையிலே தனிப்பட்ட இடத்திற்கு",
+    "span": "மேற்கு திசையிலே",
+    "fix": "மேற்குத் திசையிலே",
+    "origin": "EZK 41:12 (human review 2026-09-29)"
+   },
+   {
+    "text": "முடிந்த பின்பு, கிழக்கு திசைக்கு எதிரான வாசல்",
+    "span": "கிழக்கு திசைக்கு",
+    "fix": "கிழக்குத் திசைக்கு",
+    "origin": "EZK 42:15 (human review 2026-09-29)"
+   },
+   {
+    "text": "அவர் என்னை கிழக்கு திசைக்கு எதிர் வாசலாகிய",
+    "span": "கிழக்கு திசைக்கு",
+    "fix": "கிழக்குத் திசைக்கு",
+    "origin": "EZK 43:1 (human review 2026-09-29)"
+   },
+   {
+    "text": "பங்கு மேற்கிலே மேற்கு பக்கமாகவும் கிழக்கிலே கிழக்கு",
+    "span": "மேற்கு பக்கமாகவும்",
+    "fix": "மேற்குப் பக்கமாகவும்",
+    "origin": "EZK 45:7 (human review 2026-09-29)"
+   },
+   {
+    "text": "பக்கமாகவும் கிழக்கிலே கிழக்கு பக்கமாகவும் இருப்பதாக; அதின்",
+    "span": "கிழக்கு பக்கமாகவும்",
+    "fix": "கிழக்குப் பக்கமாகவும்",
+    "origin": "EZK 45:7 (human review 2026-09-29)"
+   },
+   {
+    "text": "கிழக்கு பக்கத்தை ஆப்ரானுக்கும் தமஸ்குவுக்கும்",
+    "span": "கிழக்கு பக்கத்தை",
+    "fix": "கிழக்குப் பக்கத்தை",
+    "origin": "EZK 47:18 (human review 2026-09-29)"
+   },
+   {
+    "text": "தாணின் எல்லையருகே கிழக்கு திசை துவங்கி மேற்கிலுள்ள",
+    "span": "கிழக்கு திசை",
+    "fix": "கிழக்குத் திசை",
+    "origin": "EZK 48:2 (human review 2026-09-29)"
+   },
+   {
+    "text": "நப்தலியின் எல்லையருகே கிழக்கு திசை துவங்கி மேற்கு",
+    "span": "கிழக்கு திசை",
+    "fix": "கிழக்குத் திசை",
+    "origin": "EZK 48:4 (human review 2026-09-29)"
+   },
+   {
+    "text": "திசை துவங்கி மேற்கு திசை வரை எப்பிராயீமுக்கு",
+    "span": "மேற்கு திசை",
+    "fix": "மேற்குத் திசை",
+    "origin": "EZK 48:5 (human review 2026-09-29)"
+   },
+   {
+    "text": "அதின் அளவுகளாவன; வடக்கு பக்கம் நான்காயிரத்து ஐந்நூறு",
+    "span": "வடக்கு பக்கம்",
+    "fix": "வடக்குப் பக்கம்",
+    "origin": "EZK 48:16 (human review 2026-09-29)"
+   },
+   {
+    "text": "ஐந்நூறு கோலும், கிழக்கு பக்கம் நான்காயிரத்து ஐந்நூறு",
+    "span": "கிழக்கு பக்கம்",
+    "fix": "கிழக்குப் பக்கம்",
+    "origin": "EZK 48:16 (human review 2026-09-29)"
+   },
+   {
+    "text": "எல்லை அருகே கிழக்கு திசை துவக்கி மேற்கு",
+    "span": "கிழக்கு திசை",
+    "fix": "கிழக்குத் திசை",
+    "origin": "EZK 48:25 (human review 2026-09-29)"
+   },
+   {
+    "text": "திசை துவக்கி மேற்கு திசை வரை இசக்காருக்கு",
+    "span": "மேற்கு திசை",
+    "fix": "மேற்குத் திசை",
+    "origin": "EZK 48:25 (human review 2026-09-29)"
+   },
+   {
+    "text": "தெற்கு பக்கத்திலே நான்காயிரத்து ஐந்நூறு",
+    "span": "தெற்கு பக்கத்திலே",
+    "fix": "தெற்குப் பக்கத்திலே",
+    "origin": "EZK 48:33 (human review 2026-09-29)"
+   },
+   {
+    "text": "மேற்கு பக்கத்திலே நான்காயிரத்து ஐந்நூறு",
+    "span": "மேற்கு பக்கத்திலே",
+    "fix": "மேற்குப் பக்கத்திலே",
+    "origin": "EZK 48:34 (human review 2026-09-29)"
+   },
+   {
+    "text": "மீதியானியர்களும் அமலேக்கியர்களும் கிழக்கு பகுதியை சேர்ந்த மக்கள்",
+    "span": "கிழக்கு பகுதியை",
+    "fix": "கிழக்குப் பகுதியை",
+    "origin": "JDG 6:33 (human review 2026-09-29)"
+   },
+   {
+    "text": "தெற்கு தேசத்து ராணி சாலொமோனுடைய",
+    "span": "தெற்கு தேசத்து",
+    "fix": "தெற்குத் தேசத்து",
+    "origin": "LUK 11:31 (human review 2026-09-29)"
+   }
+  ],
+  "correct": [
+   {
+    "text": "பலத்த கிழக்குக் காற்றினால் கடல்",
+    "origin": "EXO 14:21 (correctly linked)"
+   },
+   {
+    "text": "பலிபீடத்தின் வடக்குப் பகுதியில் அதைக்",
+    "origin": "LEV 1:11 (correctly linked)"
+   },
+   {
+    "text": "அருகில் கிழக்குப் பகுதியில் சாம்பல்",
+    "origin": "LEV 1:16 (correctly linked)"
+   },
+   {
+    "text": "உங்களுக்குக் கிழக்குத் திசை எல்லைக்கு",
+    "origin": "NUM 34:10 (correctly linked)"
+   },
+   {
+    "text": "அதின் கிழக்குக் கரையோரமாக,",
+    "origin": "NUM 34:11 (correctly linked)"
+   },
+   {
+    "text": "நீ மேற்குத் திசையையும் தெற்குத்",
+    "origin": "DEU 33:23 (correctly linked)"
+   },
+   {
+    "text": "திசையையும் தெற்குத் திசையையும் சொந்தமாக்கிக்கொள்",
+    "origin": "DEU 33:23 (correctly linked)"
+   },
+   {
+    "text": "வனாந்திரத்திலும் தெற்குத் தேசத்திலும் இருக்கிறதும்,",
+    "origin": "JOS 12:7 (correctly linked)"
+   },
+   {
+    "text": "எரிகோவிற்கு வடக்குப் பக்கமாகச் சென்று,",
+    "origin": "JOS 18:12 (correctly linked)"
+   },
+   {
+    "text": "லூஸுக்குத் தெற்குப் பக்கமாகப் போய்,",
+    "origin": "JOS 18:13 (correctly linked)"
+   },
+   {
+    "text": "எல்லாக் கிழக்குப் பகுதி மக்களும்,",
+    "origin": "JDG 7:12 (correctly linked)"
+   },
+   {
+    "text": "தேசத்தைக் கிழக்குத் தேசத்தாருக்குத் திறந்துவைத்து,",
+    "origin": "EZK 25:9 (correctly linked)"
+   }
+  ]
+ }
+}

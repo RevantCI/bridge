@@ -1,0 +1,297 @@
+{
+ "rules": {
+  "ta-irv/sandhi.clitic.fused": {
+   "labelled": 6,
+   "tp": 2,
+   "fp": 0,
+   "house": 0,
+   "unsure": 4,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "UNSURE": 4,
+    "TP_OTHER_FIX": 2
+   }
+  },
+  "ta-irv/sandhi.compound.direction": {
+   "labelled": 25,
+   "tp": 25,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": true,
+   "verdicts": {
+    "TP": 25
+   }
+  },
+  "ta-irv/sandhi.vallinam.accusative": {
+   "labelled": 40,
+   "tp": 39,
+   "fp": 1,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 0.975,
+   "precisionHumanIncludingHouse": 0.975,
+   "inlineRecommended": true,
+   "verdicts": {
+    "TP": 39,
+    "FP_ROOT": 1
+   }
+  },
+  "ta-irv/sandhi.vallinam.dative": {
+   "labelled": 40,
+   "tp": 39,
+   "fp": 1,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 0.975,
+   "precisionHumanIncludingHouse": 0.975,
+   "inlineRecommended": true,
+   "verdicts": {
+    "TP": 39,
+    "FP_ROOT": 1
+   }
+  },
+  "ta-irv/sandhi.vallinam.demonstrative": {
+   "labelled": 17,
+   "tp": 17,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "TP": 17
+   }
+  },
+  "ta-irv/sandhi.vallinam.manner-adverb": {
+   "labelled": 20,
+   "tp": 20,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": true,
+   "verdicts": {
+    "TP": 20
+   }
+  },
+  "ta-irv/sandhi.vallinam.wrong-consonant": {
+   "labelled": 1,
+   "tp": 1,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "TP": 1
+   }
+  },
+  "ta-irv/lexicon.known-misspelling": {
+   "labelled": 10,
+   "tp": 4,
+   "fp": 4,
+   "house": 0,
+   "unsure": 2,
+   "precisionHuman": 0.5,
+   "precisionHumanIncludingHouse": 0.5,
+   "inlineRecommended": false,
+   "verdicts": {
+    "FP": 4,
+    "TP1": 4,
+    "UNSURE": 2
+   }
+  },
+  "ta-irv/typo.divine-name.dative-stem": {
+   "labelled": 4,
+   "tp": 4,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "TP1": 4
+   }
+  },
+  "ta-irv/typo.divine-name.vowel-drop": {
+   "labelled": 4,
+   "tp": 4,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "TP1": 4
+   }
+  },
+  "ta-irv/typo.suffix.dropped-tha": {
+   "labelled": 2,
+   "tp": 2,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "TP1": 2
+   }
+  },
+  "common/spacing.extra": {
+   "labelled": 8,
+   "tp": 8,
+   "fp": 0,
+   "house": 0,
+   "unsure": 0,
+   "precisionHuman": 1.0,
+   "precisionHumanIncludingHouse": 1.0,
+   "inlineRecommended": false,
+   "verdicts": {
+    "TP": 8
+   }
+  }
+ },
+ "abstained": {
+  "T_theva_abstain": {
+   "HOUSE": 16,
+   "CORRECT_SKIP": 4,
+   "missedRate": 0.0
+  }
+ },
+ "clitics": {},
+ "demonstrativeHouseForms": {},
+ "notLexicalAdd": {
+  "ta-irv/sandhi.vallinam.accusative": [
+   "சேட்டை"
+  ],
+  "ta-irv/sandhi.vallinam.dative": [
+   "தோவேக்கு"
+  ]
+ },
+ "notLexicalRemove": {},
+ "properNouns": [],
+ "thevaHouseRule": {
+  "judged": {
+   "HOUSE": 16,
+   "CORRECT_SKIP": 4
+  },
+  "missed": []
+ },
+ "splitWords": [
+  "EZK 13:5 «சு வரை» → சுவரை",
+  "EZK 22:30 «சு வரை» → சுவரை",
+  "EZK 41:5 «சு வரை» → சுவரை",
+  "1CH 5:8 «நே போ» → நேபோ",
+  "DEU 34:1 «நே போ» → நேபோ",
+  "ISA 46:1 «நே போ» → நேபோ",
+  "JER 48:1 «நே போ» → நேபோ",
+  "NEH 7:33 «நே போ» → நேபோ",
+  "NUM 32:3 «நே போ» → நேபோ",
+  "NUM 32:38 «நே போ» → நேபோ"
+ ],
+ "properNounContexts": {
+  "doublingRequired": 9,
+  "noDoubling": 0,
+  "rows": [
+   {
+    "pair": "அரசாட்சியை சவுலின்",
+    "verdict": "TP",
+    "book": "2SA",
+    "ref": "3:9"
+   },
+   {
+    "pair": "உரியதை சீசருக்கும்",
+    "verdict": "TP",
+    "book": "LUK",
+    "ref": "20:25"
+   },
+   {
+    "pair": "பாதிக்கோத்திரத்திற்கு பெதாயாவின்",
+    "verdict": "TP",
+    "book": "1CH",
+    "ref": "27:20"
+   },
+   {
+    "pair": "இந்த தாத்தான்",
+    "verdict": "TP",
+    "book": "NUM",
+    "ref": "26:9"
+   },
+   {
+    "pair": "இப்படி தாவீதும்",
+    "verdict": "TP",
+    "book": "1CH",
+    "ref": "15:25"
+   },
+   {
+    "pair": "இப்படி சீமேயி",
+    "verdict": "TP",
+    "book": "1KI",
+    "ref": "2:40"
+   },
+   {
+    "pair": "இப்படி சாலொமோன்",
+    "verdict": "TP",
+    "book": "2CH",
+    "ref": "1:13"
+   },
+   {
+    "pair": "இப்படி காதேசிலே",
+    "verdict": "TP",
+    "book": "DEU",
+    "ref": "1:46"
+   },
+   {
+    "pair": "எப்படி செபோயீமைப்போல",
+    "verdict": "TP",
+    "book": "HOS",
+    "ref": "11:8"
+   }
+  ]
+ },
+ "noDoubleNextPrefixes": {},
+ "rootFalsePositives": {
+  "words": [
+   "சேட்டை",
+   "தோவேக்கு"
+  ],
+  "endingInMai": []
+ },
+ "projectedPrecisionAfterAbstains": {
+  "ta-irv/sandhi.vallinam.accusative": {
+   "tp": 39,
+   "fp": 0,
+   "precision": 1.0,
+   "systemAbstainPrefixes": []
+  },
+  "ta-irv/sandhi.vallinam.dative": {
+   "tp": 39,
+   "fp": 0,
+   "precision": 1.0,
+   "systemAbstainPrefixes": []
+  },
+  "ta-irv/sandhi.vallinam.demonstrative": {
+   "tp": 17,
+   "fp": 0,
+   "precision": 1.0,
+   "systemAbstainPrefixes": []
+  },
+  "ta-irv/sandhi.vallinam.manner-adverb": {
+   "tp": 20,
+   "fp": 0,
+   "precision": 1.0,
+   "systemAbstainPrefixes": []
+  }
+ }
+}

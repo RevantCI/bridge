@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { bridge } from "../api/bridgeClient";
-  import { decideLocalFinding } from "../findingActions";
+  import { decideLanguageQaFindingOptimistically, decideLocalFinding } from "../findingActions";
+  import { languageQaChannel } from "../languageQaInline";
+  import type { LanguageQaFinding, LanguageQaSuggestion } from "../types/languageQa";
   import AlignmentModal from "./AlignmentModal.svelte";
   import TranslationHelpsReview from "./TranslationHelpsReview.svelte";
   import { aiJobAppliesToReference, isAIReviewJobActive } from "../utils/aiJobScope";
@@ -14,7 +16,7 @@
   import {
     editingChapter, editingVerse, editText, editSaving, editError, editErrorKey,
     recheckingKey, recheckedKey, startVerseEdit, cancelVerseEdit, setVerseEditSavedHook,
-    setPendingAcceptFinding,
+    setPendingAcceptFinding, applyLanguageQaSuggestedFix,
   } from "../verseEditor";
   import { alignmentOpen, alignmentKey, openAlignment } from "../alignmentUi";
   import { aiReviewRequest, aiJobActive } from "../aiReviewUi";
@@ -58,6 +60,88 @@
     } finally {
       if (displayedLiveCheck === requestToken) greekRoomChecking = false;
     }
+  }
+
+  // -- Language QA (layered-rules Phase 4.3) ---------------------------------
+  // The selected verse's Language QA findings, inline or panel-only, with the
+  // same actions as the verse's right-click menu. The LanguageQaPanel keeps
+  // the book-level lists; this is where one verse's findings are acted on.
+  // Fetched when the verse changes and when a new completed pass lands on the
+  // status channel; actions change this list first and the engine after.
+  let lqaFindings: LanguageQaFinding[] = [];
+  let lqaHidden: Array<LanguageQaFinding & { decision: string }> = [];
+  let lqaLoadedFor = "";
+  let lqaSequence = 0;
+  let lqaNotice = "";
+  let lqaNoticeError = false;
+  let lqaBusy = false;
+
+  let lqaShownFor = "";
+  $: lqaVerseKey = $selectedVerse && $project ? `${$project.path}::${verseKey($currentChapter, $selectedVerse)}` : "";
+  // Another verse: drop the last verse's list at once, before its own arrives.
+  $: if (lqaVerseKey !== lqaShownFor) {
+    lqaShownFor = lqaVerseKey;
+    lqaFindings = [];
+    lqaHidden = [];
+    lqaNotice = "";
+  }
+  $: lqaStatus = $languageQaChannel.status;
+  $: lqaWanted = $selectedVerse && $project && lqaStatus?.state === "completed"
+    ? `${$project.path}::${verseKey($currentChapter, $selectedVerse)}::${lqaStatus.generation}` : "";
+  $: if (lqaWanted && lqaWanted !== lqaLoadedFor && $project && $selectedVerse) {
+    lqaLoadedFor = lqaWanted;
+    void loadLanguageQa($project.path, $currentChapter, $selectedVerse);
+  }
+
+  async function loadLanguageQa(projectPath: string, chapter: string, verse: string): Promise<void> {
+    const sequence = ++lqaSequence;
+    try {
+      const result = await bridge.languageQaVerse(projectPath, chapter, verse);
+      if (sequence !== lqaSequence) return;
+      lqaFindings = result.findings;
+      lqaHidden = result.hidden;
+    } catch (error) {
+      if (sequence !== lqaSequence) return;
+      lqaFindings = [];
+      lqaHidden = [];
+      console.error("Language QA findings for the verse could not be loaded", error);
+    }
+  }
+
+  function lqaSuggestions(finding: LanguageQaFinding): LanguageQaSuggestion[] {
+    if (finding.suggestions?.length) return finding.suggestions.slice(0, 5);
+    return finding.suggestedReplacement
+      ? [{ text: finding.suggestedReplacement, rank: 1, source: "rule", rationale: "" }] : [];
+  }
+
+  function restoreLqa(finding: LanguageQaFinding): void {
+    if (!lqaFindings.some((f) => f.id === finding.id)) {
+      lqaFindings = [...lqaFindings, finding].sort((a, b) => a.start - b.start);
+    }
+  }
+
+  function useLqa(finding: LanguageQaFinding, chosen: LanguageQaSuggestion): void {
+    if (lqaBusy) return;
+    lqaBusy = true;
+    lqaNotice = "";
+    lqaFindings = lqaFindings.filter((f) => f.id !== finding.id);
+    void applyLanguageQaSuggestedFix(finding, chosen).then((result) => {
+      lqaNotice = result.message;
+      lqaNoticeError = !result.ok;
+      if (!result.ok) restoreLqa(finding);
+    }).finally(() => { lqaBusy = false; });
+  }
+
+  function decideLqa(finding: LanguageQaFinding, status: "ignored" | "rejected"): void {
+    lqaFindings = lqaFindings.filter((f) => f.id !== finding.id);
+    lqaNotice = status === "ignored" ? "Occurrence ignored." : "Marked as a false positive.";
+    lqaNoticeError = false;
+    void decideLanguageQaFindingOptimistically(finding, status).then((error) => {
+      if (!error) return;
+      lqaNotice = error;
+      lqaNoticeError = true;
+      restoreLqa(finding);
+    });
   }
 
   async function decide(findingId: string, status: FindingStatus) {
@@ -376,7 +460,7 @@
     high: "badge-wrong", medium: "badge-review", low: "badge-review", info: "badge-review",
   };
 
-  type ReviewTab = "greekroom" | "tntw" | "ai";
+  type ReviewTab = "greekroom" | "tntw" | "lqa" | "ai";
   let activeTab: ReviewTab = "greekroom";
   // The three real Greek Room engines (see each adapter's own engine_name:
   // wildebeest_adapter.py, usfm_adapter.py, names_adapter.py) — everything
@@ -465,6 +549,13 @@
         >
           tN/tW/Alignment
           {#if tntwOpenCount > 0}<span class="tab-count">{tntwOpenCount}</span>{/if}
+        </button>
+        <button
+          type="button" role="tab" aria-selected={activeTab === "lqa"}
+          class:active={activeTab === "lqa"} on:click={() => (activeTab = "lqa")}
+        >
+          Language QA
+          {#if lqaFindings.length > 0}<span class="tab-count">{lqaFindings.length}</span>{/if}
         </button>
         <button
           type="button" role="tab" aria-selected={activeTab === "ai"}
@@ -613,6 +704,53 @@
                     >✎ Edit verse</button>
                     <button class="undo-ignore" disabled={decisionSaveState[f.id] === "saving"} on:click={() => decide(f.id, "open")}>↺ Undo ignore</button>
                   </div>
+                </div>
+              {/each}
+            </details>
+          {/if}
+        </div>
+      {:else if activeTab === "lqa"}
+        <div class="tab-panel" role="tabpanel">
+          <div class="section">
+            <div class="section-title">Language QA</div>
+            {#if lqaNotice}<p class="lqa-notice" class:failed={lqaNoticeError} role="status">{lqaNotice}</p>{/if}
+            {#each lqaFindings as f (f.id)}
+              <div class="finding lqa-finding" data-lqa-id={f.id}>
+                <div class="verdict">
+                  <span class="badge {severityBadge[f.severity] ?? 'badge-review'}">{f.severity}</span>
+                  <span class="engine-badge">{f.category}</span>
+                  <span class="check-id">{f.ruleId}</span>
+                  {#if f.previouslyIgnored}<span class="badge badge-decided" title="Ignored under an older rule version; check it again">re-check</span>{/if}
+                </div>
+                <p class="explain"><b>{f.originalText}</b> — {f.message}</p>
+                <div class="decision-row lqa-actions">
+                  {#each lqaSuggestions(f) as s (s.rank)}
+                    <button class="edit-inline" disabled={lqaBusy || $checkingProgress.running || Boolean($editingChapter)}
+                      title={s.rationale || "Replace the flagged text with this form and re-check the verse"}
+                      on:click={() => useLqa(f, s)}>Use “{s.text}”</button>
+                  {/each}
+                  <button class="ignore" on:click={() => decideLqa(f, "ignored")}>⊘ Ignore</button>
+                  <button class="ignore" on:click={() => decideLqa(f, "rejected")}>False positive</button>
+                </div>
+              </div>
+            {:else}
+              <p class="none">
+                {#if !lqaStatus}Language QA has not reported yet.
+                {:else if lqaStatus.state !== "completed"}Language QA is checking…
+                {:else}No Language QA findings on this verse.{/if}
+              </p>
+            {/each}
+          </div>
+          {#if lqaHidden.length > 0}
+            <details class="section ignored-section">
+              <summary class="section-title ignored-summary">Decided ({lqaHidden.length})</summary>
+              {#each lqaHidden as f (f.id)}
+                <div class="finding lqa-finding">
+                  <div class="verdict">
+                    <span class="check-id">{f.ruleId}</span>
+                    <span class="badge badge-decided">{f.decision === "rejected" ? "false positive" : f.decision}</span>
+                  </div>
+                  <p class="explain"><b>{f.originalText}</b> — {f.message}</p>
                 </div>
               {/each}
             </details>
@@ -813,6 +951,10 @@
   .decision-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
   .decision-row.two-up { grid-template-columns: 1fr 1fr; }
   .decision-row.one-up { grid-template-columns: 1fr; }
+  .decision-row.lqa-actions { display: flex; flex-wrap: wrap; }
+  .decision-row.lqa-actions button { flex: 1 1 auto; }
+  .lqa-notice { margin: 0 0 6px; font-size: var(--fs-xs); color: var(--text-3); }
+  .lqa-notice.failed { color: var(--danger); }
   .decision-row button { padding: 7px; font-size: var(--fs-xs); font-weight: 700; border-radius: 6px; border: none; cursor: pointer; }
   .accept { background: var(--success); color: #fff; }
   .ignore { background: #F5EBFC; color: #9333EA; }

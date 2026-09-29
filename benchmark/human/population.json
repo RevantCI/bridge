@@ -1,0 +1,2017 @@
+{
+ "packVersion": "language-qa-7+ta-irv@1.1.0",
+ "books": 66,
+ "rules": {
+  "common/punctuation.repeated": {
+   "definition": "69470a8c7bfdd3cdf95315825844d6513200a295",
+   "findings": [
+    {
+     "book": "jos",
+     "chapter": "22",
+     "verse": "13",
+     "start": 82,
+     "end": 84,
+     "text": ",,"
+    }
+   ]
+  },
+  "common/spacing.extra": {
+   "definition": "5e81911c543c32ec4d566f7d59c899156af35008",
+   "findings": [
+    {
+     "book": "1ch",
+     "chapter": "2",
+     "verse": "18",
+     "start": 86,
+     "end": 88,
+     "text": "  "
+    },
+    {
+     "book": "1ch",
+     "chapter": "20",
+     "verse": "6",
+     "start": 107,
+     "end": 109,
+     "text": "  "
+    },
+    {
+     "book": "1jn",
+     "chapter": "3",
+     "verse": "23",
+     "start": 113,
+     "end": 115,
+     "text": "  "
+    },
+    {
+     "book": "1sa",
+     "chapter": "1",
+     "verse": "1",
+     "start": 51,
+     "end": 53,
+     "text": "  "
+    },
+    {
+     "book": "1sa",
+     "chapter": "4",
+     "verse": "8",
+     "start": 133,
+     "end": 135,
+     "text": "  "
+    },
+    {
+     "book": "1sa",
+     "chapter": "6",
+     "verse": "5",
+     "start": 233,
+     "end": 235,
+     "text": "  "
+    },
+    {
+     "book": "1sa",
+     "chapter": "10",
+     "verse": "11",
+     "start": 208,
+     "end": 210,
+     "text": "  "
+    },
+    {
+     "book": "2ki",
+     "chapter": "18",
+     "verse": "34",
+     "start": 38,
+     "end": 40,
+     "text": "  "
+    },
+    {
+     "book": "2ki",
+     "chapter": "18",
+     "verse": "34",
+     "start": 94,
+     "end": 96,
+     "text": "  "
+    },
+    {
+     "book": "2ki",
+     "chapter": "19",
+     "verse": "12",
+     "start": 126,
+     "end": 128,
+     "text": "  "
+    },
+    {
+     "book": "2ki",
+     "chapter": "19",
+     "verse": "18",
+     "start": 75,
+     "end": 77,
+     "text": "  "
+    },
+    {
+     "book": "2sa",
+     "chapter": "1",
+     "verse": "23",
+     "start": 57,
+     "end": 59,
+     "text": "  "
+    },
+    {
+     "book": "2sa",
+     "chapter": "2",
+     "verse": "13",
+     "start": 119,
+     "end": 121,
+     "text": "  "
+    },
+    {
+     "book": "act",
+     "chapter": "7",
+     "verse": "26",
+     "start": 123,
+     "end": 125,
+     "text": "  "
+    },
+    {
+     "book": "act",
+     "chapter": "12",
+     "verse": "25",
+     "start": 191,
+     "end": 192,
+     "text": " "
+    },
+    {
+     "book": "amo",
+     "chapter": "1",
+     "verse": "2",
+     "start": 50,
+     "end": 52,
+     "text": "  "
+    },
+    {
+     "book": "est",
+     "chapter": "3",
+     "verse": "7",
+     "start": 119,
+     "end": 121,
+     "text": "  "
+    },
+    {
+     "book": "est",
+     "chapter": "9",
+     "verse": "19",
+     "start": 169,
+     "end": 171,
+     "text": "  "
+    },
+    {
+     "book": "est",
+     "chapter": "9",
+     "verse": "22",
+     "start": 64,
+     "end": 66,
+     "text": "  "
+    },
+    {
+     "book": "est",
+     "chapter": "9",
+     "verse": "24",
+     "start": 154,
+     "end": 156,
+     "text": "  "
+    },
+    {
+     "book": "est",
+     "chapter": "9",
+     "verse": "30",
+     "start": 208,
+     "end": 210,
+     "text": "  "
+    },
+    {
+     "book": "exo",
+     "chapter": "2",
+     "verse": "10",
+     "start": 150,
+     "end": 152,
+     "text": "  "
+    },
+    {
+     "book": "ezk",
+     "chapter": "24",
+     "verse": "6",
+     "start": 120,
+     "end": 122,
+     "text": "  "
+    },
+    {
+     "book": "gen",
+     "chapter": "26",
+     "verse": "31",
+     "start": 35,
+     "end": 37,
+     "text": "  "
+    },
+    {
+     "book": "heb",
+     "chapter": "4",
+     "verse": "12",
+     "start": 65,
+     "end": 67,
+     "text": "  "
+    },
+    {
+     "book": "hos",
+     "chapter": "14",
+     "verse": "3",
+     "start": 133,
+     "end": 135,
+     "text": "  "
+    },
+    {
+     "book": "isa",
+     "chapter": "1",
+     "verse": "29",
+     "start": 167,
+     "end": 168,
+     "text": " "
+    },
+    {
+     "book": "isa",
+     "chapter": "2",
+     "verse": "3",
+     "start": 215,
+     "end": 217,
+     "text": "  "
+    },
+    {
+     "book": "isa",
+     "chapter": "37",
+     "verse": "19",
+     "start": 75,
+     "end": 77,
+     "text": "  "
+    },
+    {
+     "book": "isa",
+     "chapter": "41",
+     "verse": "6",
+     "start": 15,
+     "end": 17,
+     "text": "  "
+    },
+    {
+     "book": "isa",
+     "chapter": "41",
+     "verse": "23",
+     "start": 77,
+     "end": 79,
+     "text": "  "
+    },
+    {
+     "book": "jdg",
+     "chapter": "7",
+     "verse": "25",
+     "start": 86,
+     "end": 88,
+     "text": "  "
+    },
+    {
+     "book": "jdg",
+     "chapter": "7",
+     "verse": "25",
+     "start": 120,
+     "end": 122,
+     "text": "  "
+    },
+    {
+     "book": "jer",
+     "chapter": "9",
+     "verse": "19",
+     "start": 159,
+     "end": 161,
+     "text": "  "
+    },
+    {
+     "book": "jer",
+     "chapter": "28",
+     "verse": "1",
+     "start": 166,
+     "end": 168,
+     "text": "  "
+    },
+    {
+     "book": "jer",
+     "chapter": "46",
+     "verse": "2",
+     "start": 266,
+     "end": 268,
+     "text": "  "
+    },
+    {
+     "book": "jhn",
+     "chapter": "5",
+     "verse": "44",
+     "start": 62,
+     "end": 64,
+     "text": "  "
+    },
+    {
+     "book": "jhn",
+     "chapter": "13",
+     "verse": "34",
+     "start": 27,
+     "end": 29,
+     "text": "  "
+    },
+    {
+     "book": "jhn",
+     "chapter": "13",
+     "verse": "34",
+     "start": 102,
+     "end": 104,
+     "text": "  "
+    },
+    {
+     "book": "jhn",
+     "chapter": "13",
+     "verse": "35",
+     "start": 27,
+     "end": 29,
+     "text": "  "
+    },
+    {
+     "book": "jhn",
+     "chapter": "15",
+     "verse": "12",
+     "start": 64,
+     "end": 66,
+     "text": "  "
+    },
+    {
+     "book": "jhn",
+     "chapter": "15",
+     "verse": "17",
+     "start": 27,
+     "end": 29,
+     "text": "  "
+    },
+    {
+     "book": "job",
+     "chapter": "9",
+     "verse": "13",
+     "start": 68,
+     "end": 70,
+     "text": "  "
+    },
+    {
+     "book": "jos",
+     "chapter": "15",
+     "verse": "49",
+     "start": 22,
+     "end": 24,
+     "text": "  "
+    },
+    {
+     "book": "jos",
+     "chapter": "18",
+     "verse": "14",
+     "start": 138,
+     "end": 140,
+     "text": "  "
+    },
+    {
+     "book": "lev",
+     "chapter": "25",
+     "verse": "14",
+     "start": 103,
+     "end": 105,
+     "text": "  "
+    },
+    {
+     "book": "luk",
+     "chapter": "4",
+     "verse": "8",
+     "start": 221,
+     "end": 222,
+     "text": " "
+    },
+    {
+     "book": "mat",
+     "chapter": "10",
+     "verse": "6",
+     "start": 89,
+     "end": 90,
+     "text": " "
+    },
+    {
+     "book": "mat",
+     "chapter": "16",
+     "verse": "3",
+     "start": 241,
+     "end": 242,
+     "text": " "
+    },
+    {
+     "book": "mat",
+     "chapter": "16",
+     "verse": "8",
+     "start": 129,
+     "end": 130,
+     "text": " "
+    },
+    {
+     "book": "mat",
+     "chapter": "16",
+     "verse": "9",
+     "start": 140,
+     "end": 141,
+     "text": " "
+    },
+    {
+     "book": "mat",
+     "chapter": "16",
+     "verse": "10",
+     "start": 148,
+     "end": 149,
+     "text": " "
+    },
+    {
+     "book": "mat",
+     "chapter": "16",
+     "verse": "17",
+     "start": 329,
+     "end": 330,
+     "text": " "
+    },
+    {
+     "book": "mat",
+     "chapter": "16",
+     "verse": "24",
+     "start": 175,
+     "end": 176,
+     "text": " "
+    },
+    {
+     "book": "mat",
+     "chapter": "16",
+     "verse": "25",
+     "start": 120,
+     "end": 121,
+     "text": " "
+    },
+    {
+     "book": "mat",
+     "chapter": "16",
+     "verse": "26",
+     "start": 153,
+     "end": 154,
+     "text": " "
+    },
+    {
+     "book": "mic",
+     "chapter": "4",
+     "verse": "2",
+     "start": 215,
+     "end": 217,
+     "text": "  "
+    },
+    {
+     "book": "mic",
+     "chapter": "5",
+     "verse": "2",
+     "start": 58,
+     "end": 60,
+     "text": "  "
+    },
+    {
+     "book": "mrk",
+     "chapter": "12",
+     "verse": "35",
+     "start": 122,
+     "end": 123,
+     "text": " "
+    },
+    {
+     "book": "num",
+     "chapter": "7",
+     "verse": "88",
+     "start": 51,
+     "end": 53,
+     "text": "  "
+    },
+    {
+     "book": "psa",
+     "chapter": "3",
+     "verse": "8",
+     "start": 98,
+     "end": 99,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "4",
+     "verse": "2",
+     "start": 107,
+     "end": 108,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "4",
+     "verse": "4",
+     "start": 159,
+     "end": 160,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "21",
+     "verse": "2",
+     "start": 119,
+     "end": 120,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "32",
+     "verse": "4",
+     "start": 114,
+     "end": 115,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "39",
+     "verse": "5",
+     "start": 166,
+     "end": 167,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "49",
+     "verse": "13",
+     "start": 134,
+     "end": 135,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "52",
+     "verse": "3",
+     "start": 90,
+     "end": 91,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "52",
+     "verse": "5",
+     "start": 192,
+     "end": 193,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "55",
+     "verse": "7",
+     "start": 74,
+     "end": 75,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "60",
+     "verse": "4",
+     "start": 102,
+     "end": 103,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "66",
+     "verse": "7",
+     "start": 168,
+     "end": 169,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "67",
+     "verse": "4",
+     "start": 150,
+     "end": 151,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "68",
+     "verse": "7",
+     "start": 88,
+     "end": 89,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "68",
+     "verse": "19",
+     "start": 115,
+     "end": 116,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "68",
+     "verse": "32",
+     "start": 75,
+     "end": 76,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "75",
+     "verse": "3",
+     "start": 107,
+     "end": 108,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "76",
+     "verse": "9",
+     "start": 88,
+     "end": 89,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "81",
+     "verse": "7",
+     "start": 243,
+     "end": 244,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "82",
+     "verse": "2",
+     "start": 108,
+     "end": 109,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "84",
+     "verse": "8",
+     "start": 107,
+     "end": 108,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "85",
+     "verse": "2",
+     "start": 84,
+     "end": 85,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "87",
+     "verse": "6",
+     "start": 102,
+     "end": 103,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "88",
+     "verse": "7",
+     "start": 112,
+     "end": 113,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "88",
+     "verse": "10",
+     "start": 104,
+     "end": 105,
+     "text": " "
+    },
+    {
+     "book": "psa",
+     "chapter": "89",
+     "verse": "48",
+     "start": 117,
+     "end": 118,
+     "text": " "
+    },
+    {
+     "book": "sng",
+     "chapter": "1",
+     "verse": "1",
+     "start": 73,
+     "end": 74,
+     "text": " "
+    },
+    {
+     "book": "sng",
+     "chapter": "1",
+     "verse": "7",
+     "start": 257,
+     "end": 258,
+     "text": " "
+    },
+    {
+     "book": "sng",
+     "chapter": "8",
+     "verse": "7",
+     "start": 279,
+     "end": 280,
+     "text": " "
+    },
+    {
+     "book": "zec",
+     "chapter": "11",
+     "verse": "10",
+     "start": 15,
+     "end": 17,
+     "text": "  "
+    },
+    {
+     "book": "zec",
+     "chapter": "11",
+     "verse": "14",
+     "start": 94,
+     "end": 96,
+     "text": "  "
+    }
+   ]
+  },
+  "common/unicode.invisible": {
+   "definition": "76ca864eddb354846b646f116a6f360393235620",
+   "findings": [
+    {
+     "book": "1ch",
+     "chapter": "9",
+     "verse": "14",
+     "start": 56,
+     "end": 57,
+     "text": "‌"
+    }
+   ]
+  },
+  "ta-irv/lexicon.known-split": {
+   "definition": "71b953ca71e1d1fcf4f09a20668b0b04067ab199",
+   "findings": [
+    {
+     "book": "1ch",
+     "chapter": "5",
+     "verse": "8",
+     "start": 92,
+     "end": 97,
+     "text": "நே போ"
+    },
+    {
+     "book": "deu",
+     "chapter": "34",
+     "verse": "1",
+     "start": 58,
+     "end": 63,
+     "text": "நே போ"
+    },
+    {
+     "book": "ezk",
+     "chapter": "13",
+     "verse": "5",
+     "start": 103,
+     "end": 109,
+     "text": "சு வரை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "22",
+     "verse": "30",
+     "start": 50,
+     "end": 56,
+     "text": "சு வரை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "41",
+     "verse": "5",
+     "start": 22,
+     "end": 28,
+     "text": "சு வரை"
+    },
+    {
+     "book": "isa",
+     "chapter": "46",
+     "verse": "1",
+     "start": 147,
+     "end": 152,
+     "text": "நே போ"
+    },
+    {
+     "book": "jer",
+     "chapter": "48",
+     "verse": "1",
+     "start": 171,
+     "end": 176,
+     "text": "நே போ"
+    },
+    {
+     "book": "neh",
+     "chapter": "7",
+     "verse": "33",
+     "start": 9,
+     "end": 14,
+     "text": "நே போ"
+    },
+    {
+     "book": "num",
+     "chapter": "32",
+     "verse": "3",
+     "start": 101,
+     "end": 106,
+     "text": "நே போ"
+    },
+    {
+     "book": "num",
+     "chapter": "32",
+     "verse": "38",
+     "start": 21,
+     "end": 26,
+     "text": "நே போ"
+    },
+    {
+     "book": "psa",
+     "chapter": "48",
+     "verse": "13",
+     "start": 54,
+     "end": 60,
+     "text": "சு வரை"
+    }
+   ]
+  },
+  "ta-irv/sandhi.compound.direction": {
+   "definition": "2bc68971792e45528586b1eebc3d1c97742efc7f",
+   "findings": [
+    {
+     "book": "1sa",
+     "chapter": "27",
+     "verse": "10",
+     "start": 90,
+     "end": 107,
+     "text": "தெற்கு திசையிலும்"
+    },
+    {
+     "book": "1sa",
+     "chapter": "27",
+     "verse": "10",
+     "start": 127,
+     "end": 144,
+     "text": "தெற்கு திசையிலும்"
+    },
+    {
+     "book": "1sa",
+     "chapter": "27",
+     "verse": "10",
+     "start": 156,
+     "end": 173,
+     "text": "தெற்கு திசையிலும்"
+    },
+    {
+     "book": "amo",
+     "chapter": "8",
+     "verse": "12",
+     "start": 87,
+     "end": 98,
+     "text": "வடக்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "5",
+     "start": 0,
+     "end": 11,
+     "text": "தெற்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "6",
+     "start": 78,
+     "end": 89,
+     "text": "தெற்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "6",
+     "start": 104,
+     "end": 115,
+     "text": "வடக்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "7",
+     "start": 85,
+     "end": 96,
+     "text": "வடக்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "8",
+     "start": 164,
+     "end": 175,
+     "text": "வடக்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "9",
+     "start": 0,
+     "end": 11,
+     "text": "தெற்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "11",
+     "start": 10,
+     "end": 21,
+     "text": "தெற்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "11",
+     "start": 64,
+     "end": 75,
+     "text": "வடக்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "13",
+     "start": 26,
+     "end": 37,
+     "text": "வடக்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "14",
+     "start": 14,
+     "end": 25,
+     "text": "தெற்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "15",
+     "start": 0,
+     "end": 11,
+     "text": "வடக்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "15",
+     "start": 83,
+     "end": 94,
+     "text": "தெற்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "25",
+     "start": 9,
+     "end": 20,
+     "text": "தெற்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "25",
+     "start": 125,
+     "end": 136,
+     "text": "தெற்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "40",
+     "start": 45,
+     "end": 56,
+     "text": "தெற்கு திசை"
+    },
+    {
+     "book": "dan",
+     "chapter": "11",
+     "verse": "40",
+     "start": 91,
+     "end": 102,
+     "text": "வடக்கு திசை"
+    },
+    {
+     "book": "deu",
+     "chapter": "1",
+     "verse": "2",
+     "start": 111,
+     "end": 128,
+     "text": "கிழக்கு பகுதியில்"
+    },
+    {
+     "book": "deu",
+     "chapter": "1",
+     "verse": "5",
+     "start": 17,
+     "end": 40,
+     "text": "கிழக்கு திசையிலிருக்கிற"
+    },
+    {
+     "book": "exo",
+     "chapter": "27",
+     "verse": "11",
+     "start": 9,
+     "end": 26,
+     "text": "வடக்கு பக்கத்தின்"
+    },
+    {
+     "book": "exo",
+     "chapter": "27",
+     "verse": "12",
+     "start": 14,
+     "end": 28,
+     "text": "மேற்கு பக்கமான"
+    },
+    {
+     "book": "exo",
+     "chapter": "36",
+     "verse": "27",
+     "start": 22,
+     "end": 41,
+     "text": "மேற்கு பக்கத்திற்கு"
+    },
+    {
+     "book": "exo",
+     "chapter": "36",
+     "verse": "32",
+     "start": 87,
+     "end": 100,
+     "text": "மேற்கு புறமான"
+    },
+    {
+     "book": "ezk",
+     "chapter": "20",
+     "verse": "47",
+     "start": 258,
+     "end": 272,
+     "text": "தெற்கு துவக்கி"
+    },
+    {
+     "book": "ezk",
+     "chapter": "21",
+     "verse": "4",
+     "start": 69,
+     "end": 83,
+     "text": "தெற்கு துவக்கி"
+    },
+    {
+     "book": "ezk",
+     "chapter": "41",
+     "verse": "12",
+     "start": 0,
+     "end": 15,
+     "text": "மேற்கு திசையிலே"
+    },
+    {
+     "book": "ezk",
+     "chapter": "42",
+     "verse": "12",
+     "start": 88,
+     "end": 104,
+     "text": "கிழக்கு திசையில்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "42",
+     "verse": "15",
+     "start": 38,
+     "end": 54,
+     "text": "கிழக்கு திசைக்கு"
+    },
+    {
+     "book": "ezk",
+     "chapter": "42",
+     "verse": "17",
+     "start": 0,
+     "end": 21,
+     "text": "வடக்கு திசைப்பக்கத்தை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "42",
+     "verse": "18",
+     "start": 0,
+     "end": 21,
+     "text": "தெற்கு திசைப்பக்கத்தை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "42",
+     "verse": "19",
+     "start": 0,
+     "end": 13,
+     "text": "மேற்கு திசைப்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "43",
+     "verse": "1",
+     "start": 18,
+     "end": 34,
+     "text": "கிழக்கு திசைக்கு"
+    },
+    {
+     "book": "ezk",
+     "chapter": "43",
+     "verse": "2",
+     "start": 91,
+     "end": 113,
+     "text": "கிழக்கு திசையிலிருந்து"
+    },
+    {
+     "book": "ezk",
+     "chapter": "43",
+     "verse": "4",
+     "start": 18,
+     "end": 34,
+     "text": "கிழக்கு திசைக்கு"
+    },
+    {
+     "book": "ezk",
+     "chapter": "45",
+     "verse": "7",
+     "start": 200,
+     "end": 218,
+     "text": "மேற்கு பக்கமாகவும்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "45",
+     "verse": "7",
+     "start": 229,
+     "end": 248,
+     "text": "கிழக்கு பக்கமாகவும்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "47",
+     "verse": "2",
+     "start": 66,
+     "end": 82,
+     "text": "கிழக்கு திசைக்கு"
+    },
+    {
+     "book": "ezk",
+     "chapter": "47",
+     "verse": "15",
+     "start": 22,
+     "end": 35,
+     "text": "வடக்கு பக்கம்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "47",
+     "verse": "17",
+     "start": 137,
+     "end": 150,
+     "text": "வடக்கு பக்கம்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "47",
+     "verse": "18",
+     "start": 0,
+     "end": 16,
+     "text": "கிழக்கு பக்கத்தை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "47",
+     "verse": "18",
+     "start": 127,
+     "end": 139,
+     "text": "கிழக்கு கடல்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "47",
+     "verse": "18",
+     "start": 181,
+     "end": 195,
+     "text": "கிழக்கு பக்கம்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "47",
+     "verse": "19",
+     "start": 15,
+     "end": 28,
+     "text": "தெற்கு பக்கம்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "47",
+     "verse": "20",
+     "start": 0,
+     "end": 13,
+     "text": "மேற்கு பக்கம்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "47",
+     "verse": "20",
+     "start": 100,
+     "end": 113,
+     "text": "மேற்கு பக்கம்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "1",
+     "start": 174,
+     "end": 186,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "2",
+     "start": 18,
+     "end": 30,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "3",
+     "start": 19,
+     "end": 31,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "3",
+     "start": 40,
+     "end": 51,
+     "text": "மேற்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "4",
+     "start": 22,
+     "end": 34,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "4",
+     "start": 43,
+     "end": 54,
+     "text": "மேற்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "5",
+     "start": 21,
+     "end": 33,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "5",
+     "start": 42,
+     "end": 53,
+     "text": "மேற்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "6",
+     "start": 25,
+     "end": 37,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "6",
+     "start": 46,
+     "end": 57,
+     "text": "மேற்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "7",
+     "start": 19,
+     "end": 31,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "8",
+     "start": 20,
+     "end": 32,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "8",
+     "start": 143,
+     "end": 155,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "8",
+     "start": 164,
+     "end": 175,
+     "text": "மேற்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "16",
+     "start": 17,
+     "end": 30,
+     "text": "வடக்கு பக்கம்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "16",
+     "start": 61,
+     "end": 74,
+     "text": "தெற்கு பக்கம்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "16",
+     "start": 105,
+     "end": 119,
+     "text": "கிழக்கு பக்கம்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "23",
+     "start": 46,
+     "end": 58,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "24",
+     "start": 21,
+     "end": 33,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "25",
+     "start": 23,
+     "end": 35,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "25",
+     "start": 44,
+     "end": 55,
+     "text": "மேற்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "26",
+     "start": 22,
+     "end": 34,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "27",
+     "start": 22,
+     "end": 34,
+     "text": "கிழக்கு திசை"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "30",
+     "start": 73,
+     "end": 90,
+     "text": "வடக்கு பக்கத்தின்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "32",
+     "start": 0,
+     "end": 18,
+     "text": "கிழக்கு பக்கத்திலே"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "33",
+     "start": 0,
+     "end": 17,
+     "text": "தெற்கு பக்கத்திலே"
+    },
+    {
+     "book": "ezk",
+     "chapter": "48",
+     "verse": "34",
+     "start": 0,
+     "end": 17,
+     "text": "மேற்கு பக்கத்திலே"
+    },
+    {
+     "book": "ezr",
+     "chapter": "4",
+     "verse": "10",
+     "start": 376,
+     "end": 392,
+     "text": "மேற்கு புறத்தில்"
+    },
+    {
+     "book": "ezr",
+     "chapter": "5",
+     "verse": "6",
+     "start": 20,
+     "end": 43,
+     "text": "மேற்கு புறத்திலிருக்கிற"
+    },
+    {
+     "book": "ezr",
+     "chapter": "5",
+     "verse": "6",
+     "start": 113,
+     "end": 136,
+     "text": "மேற்கு புறத்திலிருக்கிற"
+    },
+    {
+     "book": "gen",
+     "chapter": "29",
+     "verse": "1",
+     "start": 23,
+     "end": 47,
+     "text": "கிழக்கு தேசத்தாரிடத்தில்"
+    },
+    {
+     "book": "jdg",
+     "chapter": "6",
+     "verse": "33",
+     "start": 34,
+     "end": 49,
+     "text": "கிழக்கு பகுதியை"
+    },
+    {
+     "book": "job",
+     "chapter": "39",
+     "verse": "26",
+     "start": 35,
+     "end": 50,
+     "text": "தெற்கு திசைக்கு"
+    },
+    {
+     "book": "jos",
+     "chapter": "9",
+     "verse": "1",
+     "start": 17,
+     "end": 35,
+     "text": "மேற்கு திசையிலுள்ள"
+    },
+    {
+     "book": "jos",
+     "chapter": "17",
+     "verse": "5",
+     "start": 17,
+     "end": 33,
+     "text": "கிழக்கு திசையில்"
+    },
+    {
+     "book": "jos",
+     "chapter": "22",
+     "verse": "10",
+     "start": 173,
+     "end": 189,
+     "text": "மேற்கு பகுதியில்"
+    },
+    {
+     "book": "luk",
+     "chapter": "11",
+     "verse": "31",
+     "start": 4,
+     "end": 18,
+     "text": "தெற்கு தேசத்து"
+    },
+    {
+     "book": "num",
+     "chapter": "2",
+     "verse": "18",
+     "start": 48,
+     "end": 64,
+     "text": "மேற்கு புறத்தில்"
+    },
+    {
+     "book": "num",
+     "chapter": "34",
+     "verse": "6",
+     "start": 0,
+     "end": 15,
+     "text": "மேற்கு திசைக்கு"
+    },
+    {
+     "book": "num",
+     "chapter": "34",
+     "verse": "6",
+     "start": 68,
+     "end": 82,
+     "text": "மேற்கு புறத்து"
+    },
+    {
+     "book": "num",
+     "chapter": "35",
+     "verse": "14",
+     "start": 21,
+     "end": 38,
+     "text": "கிழக்கு புறத்தில்"
+    },
+    {
+     "book": "psa",
+     "chapter": "48",
+     "verse": "7",
+     "start": 0,
+     "end": 18,
+     "text": "கிழக்கு காற்றினால்"
+    },
+    {
+     "book": "psa",
+     "chapter": "78",
+     "verse": "26",
+     "start": 10,
+     "end": 24,
+     "text": "கிழக்கு காற்றை"
+    },
+    {
+     "book": "zec",
+     "chapter": "8",
+     "verse": "7",
+     "start": 24,
+     "end": 48,
+     "text": "தெற்கு தேசத்திலுமிருந்து"
+    }
+   ]
+  },
+  "ta-irv/sandhi.vallinam.manner-adverb": {
+   "definition": "6e6064766de8f6b042ac9e12065fb2dcace80e17",
+   "findings": [
+    {
+     "book": "1ch",
+     "chapter": "10",
+     "verse": "4",
+     "start": 189,
+     "end": 201,
+     "text": "அப்படி செய்ய"
+    },
+    {
+     "book": "1ch",
+     "chapter": "15",
+     "verse": "25",
+     "start": 0,
+     "end": 15,
+     "text": "இப்படி தாவீதும்"
+    },
+    {
+     "book": "1ki",
+     "chapter": "2",
+     "verse": "40",
+     "start": 143,
+     "end": 156,
+     "text": "இப்படி சீமேயி"
+    },
+    {
+     "book": "1ki",
+     "chapter": "5",
+     "verse": "11",
+     "start": 131,
+     "end": 146,
+     "text": "இப்படி சாலொமோன்"
+    },
+    {
+     "book": "1ki",
+     "chapter": "10",
+     "verse": "20",
+     "start": 92,
+     "end": 114,
+     "text": "இப்படி செய்யப்படவில்லை"
+    },
+    {
+     "book": "1pe",
+     "chapter": "5",
+     "verse": "4",
+     "start": 0,
+     "end": 15,
+     "text": "அப்படி செய்தால்"
+    },
+    {
+     "book": "1ti",
+     "chapter": "3",
+     "verse": "5",
+     "start": 75,
+     "end": 94,
+     "text": "எப்படி பராமரிப்பான்"
+    },
+    {
+     "book": "2ch",
+     "chapter": "1",
+     "verse": "13",
+     "start": 0,
+     "end": 15,
+     "text": "இப்படி சாலொமோன்"
+    },
+    {
+     "book": "2ch",
+     "chapter": "25",
+     "verse": "2",
+     "start": 70,
+     "end": 88,
+     "text": "அப்படி செய்யவில்லை"
+    },
+    {
+     "book": "2ch",
+     "chapter": "29",
+     "verse": "25",
+     "start": 204,
+     "end": 216,
+     "text": "இப்படி செய்ய"
+    },
+    {
+     "book": "2sa",
+     "chapter": "16",
+     "verse": "19",
+     "start": 92,
+     "end": 106,
+     "text": "எப்படி பணிவிடை"
+    },
+    {
+     "book": "deu",
+     "chapter": "1",
+     "verse": "46",
+     "start": 0,
+     "end": 15,
+     "text": "இப்படி காதேசிலே"
+    },
+    {
+     "book": "ecc",
+     "chapter": "2",
+     "verse": "16",
+     "start": 137,
+     "end": 152,
+     "text": "எப்படி சாகிறானோ"
+    },
+    {
+     "book": "ecc",
+     "chapter": "2",
+     "verse": "21",
+     "start": 69,
+     "end": 94,
+     "text": "அப்படி பிரயாசப்படாதிருந்த"
+    },
+    {
+     "book": "est",
+     "chapter": "8",
+     "verse": "6",
+     "start": 108,
+     "end": 129,
+     "text": "எப்படி சகிக்கமுடியும்"
+    },
+    {
+     "book": "exo",
+     "chapter": "5",
+     "verse": "17",
+     "start": 188,
+     "end": 208,
+     "text": "இப்படி கேட்கிறீர்கள்"
+    },
+    {
+     "book": "ezk",
+     "chapter": "32",
+     "verse": "16",
+     "start": 39,
+     "end": 55,
+     "text": "இப்படி தேசத்தின்"
+    },
+    {
+     "book": "gen",
+     "chapter": "27",
+     "verse": "20",
+     "start": 74,
+     "end": 90,
+     "text": "எப்படி கிடைத்தது"
+    },
+    {
+     "book": "hos",
+     "chapter": "11",
+     "verse": "8",
+     "start": 172,
+     "end": 192,
+     "text": "எப்படி செபோயீமைப்போல"
+    },
+    {
+     "book": "lev",
+     "chapter": "10",
+     "verse": "19",
+     "start": 145,
+     "end": 163,
+     "text": "இப்படி சம்பவித்ததே"
+    },
+    {
+     "book": "neh",
+     "chapter": "13",
+     "verse": "21",
+     "start": 109,
+     "end": 124,
+     "text": "இப்படி செய்தால்"
+    },
+    {
+     "book": "zec",
+     "chapter": "7",
+     "verse": "13",
+     "start": 35,
+     "end": 60,
+     "text": "எப்படி கேட்காமற்போனார்களோ"
+    }
+   ]
+  },
+  "ta-irv/sandhi.vallinam.wrong-consonant": {
+   "definition": "8c5a54b703f3e95d37dfb4fed87b93c665d76fd9",
+   "findings": [
+    {
+     "book": "luk",
+     "chapter": "22",
+     "verse": "8",
+     "start": 57,
+     "end": 81,
+     "text": "பஸ்காவைப் சாப்பிடுவதற்கு"
+    }
+   ]
+  },
+  "ta-irv/typo.divine-name.dative-stem": {
+   "definition": "371ecc7afda424ac92db35c189ca3a51b7f16cb0",
+   "findings": [
+    {
+     "book": "1ki",
+     "chapter": "19",
+     "verse": "10",
+     "start": 64,
+     "end": 73,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "2ch",
+     "chapter": "32",
+     "verse": "23",
+     "start": 12,
+     "end": 21,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "2ki",
+     "chapter": "10",
+     "verse": "16",
+     "start": 21,
+     "end": 30,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "exo",
+     "chapter": "30",
+     "verse": "37",
+     "start": 88,
+     "end": 97,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "jdg",
+     "chapter": "17",
+     "verse": "3",
+     "start": 224,
+     "end": 233,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "lev",
+     "chapter": "16",
+     "verse": "8",
+     "start": 46,
+     "end": 55,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "lev",
+     "chapter": "16",
+     "verse": "9",
+     "start": 0,
+     "end": 9,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "lev",
+     "chapter": "23",
+     "verse": "17",
+     "start": 160,
+     "end": 169,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "num",
+     "chapter": "6",
+     "verse": "2",
+     "start": 62,
+     "end": 71,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "num",
+     "chapter": "6",
+     "verse": "5",
+     "start": 92,
+     "end": 101,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "num",
+     "chapter": "6",
+     "verse": "12",
+     "start": 38,
+     "end": 47,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "num",
+     "chapter": "31",
+     "verse": "3",
+     "start": 30,
+     "end": 39,
+     "text": "யெகோவாக்க"
+    },
+    {
+     "book": "num",
+     "chapter": "31",
+     "verse": "28",
+     "start": 46,
+     "end": 55,
+     "text": "யெகோவாக்க"
+    }
+   ]
+  },
+  "ta-irv/typo.divine-name.vowel-drop": {
+   "definition": "bd771219b2f740e5f57921f80c803775efda6f51",
+   "findings": [
+    {
+     "book": "2ki",
+     "chapter": "19",
+     "verse": "1",
+     "start": 87,
+     "end": 93,
+     "text": "யெகோவவ"
+    },
+    {
+     "book": "2ki",
+     "chapter": "20",
+     "verse": "2",
+     "start": 69,
+     "end": 75,
+     "text": "யெகோவவ"
+    },
+    {
+     "book": "2ki",
+     "chapter": "20",
+     "verse": "3",
+     "start": 2,
+     "end": 8,
+     "text": "யெகோவவ"
+    },
+    {
+     "book": "2ki",
+     "chapter": "20",
+     "verse": "4",
+     "start": 54,
+     "end": 60,
+     "text": "யெகோவவ"
+    },
+    {
+     "book": "2ki",
+     "chapter": "20",
+     "verse": "5",
+     "start": 241,
+     "end": 247,
+     "text": "யெகோவவ"
+    },
+    {
+     "book": "2ki",
+     "chapter": "20",
+     "verse": "8",
+     "start": 81,
+     "end": 87,
+     "text": "யெகோவவ"
+    },
+    {
+     "book": "2ki",
+     "chapter": "20",
+     "verse": "19",
+     "start": 47,
+     "end": 53,
+     "text": "யெகோவவ"
+    },
+    {
+     "book": "2ki",
+     "chapter": "21",
+     "verse": "5",
+     "start": 0,
+     "end": 6,
+     "text": "யெகோவவ"
+    },
+    {
+     "book": "2ki",
+     "chapter": "22",
+     "verse": "4",
+     "start": 49,
+     "end": 55,
+     "text": "யெகோவவ"
+    },
+    {
+     "book": "2ki",
+     "chapter": "22",
+     "verse": "13",
+     "start": 294,
+     "end": 300,
+     "text": "யெகோவவ"
+    },
+    {
+     "book": "gen",
+     "chapter": "24",
+     "verse": "48",
+     "start": 181,
+     "end": 187,
+     "text": "யெகோவவ"
+    }
+   ]
+  },
+  "ta-irv/typo.suffix.dropped-tha": {
+   "definition": "c983af9f24b4fbf293301c5e395143d98319e306",
+   "findings": [
+    {
+     "book": "1ch",
+     "chapter": "6",
+     "verse": "31",
+     "start": 74,
+     "end": 85,
+     "text": "நடத்துவற்கு"
+    },
+    {
+     "book": "1ch",
+     "chapter": "23",
+     "verse": "5",
+     "start": 68,
+     "end": 77,
+     "text": "செய்வற்கு"
+    }
+   ]
+  }
+ },
+ "corpus": "IRV Tamil"
+}

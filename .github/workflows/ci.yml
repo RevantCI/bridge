@@ -119,6 +119,9 @@ jobs:
               # editing only a seed script would skip the suite it breaks.
               - 'schemas/**'
               - 'scripts/**'
+              # The human-labelled Language QA benchmark: the gate below scores
+              # the pack against these labels, so a change to them re-runs it.
+              - 'benchmark/**'
               # A change to the gate itself re-runs every job it defines. Without
               # this, a PR that edits ci.yml skips everything and merges green having
               # proved nothing about the workflow it just changed.
@@ -238,6 +241,31 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: '1'
         run: pytest tests/ greek_room_engine/tests/ -q -p no:cacheprovider
+
+      - name: Language QA foreground latency gate
+        # Layered-rules performance contract: while a Language QA pass runs,
+        # the RPCs Language QA owns or runs beside must keep a p95 under 50 ms,
+        # with the engine pinned to 2 cores. Those RPCs are ping, verse.get,
+        # a Language QA verse.decide, languageQa.status and languageQa.inline.
+        # It uses a synthetic 400-verse project, no translator data. The shared
+        # write paths (another verse.decide, verse.edit, project.open) are
+        # printed but not gated: they are over budget with or without a scan
+        # (BUILD_LOG 2026-09-24, Phase 2), which is not a Language QA cost.
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python ../scripts/benchmark_language_qa.py --gate --cores 2
+
+      - name: Language QA human-label accuracy gate
+        # A Tamil reviewer's verdicts on the engine's own findings
+        # (benchmark/human/2026-09-28). Inline requires >= 0.90 human precision
+        # on >= 20 labelled findings; no rule may fall below
+        # benchmark/human/baseline.json; no human-confirmed finding may be lost.
+        # The labelled verses are committed beside the labels, so this needs no
+        # IRV corpus. It replaces the AI-agreement gate as the inline decision,
+        # which stays local and diagnostic (DECISIONS.md 2026-09-28). ~10 s.
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python ../scripts/language_qa_benchmark.py --human-labels ../benchmark/human --gate
 
   # ---------------------------------------------------------------------------
   # Rust / Tauri shell.

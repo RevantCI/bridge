@@ -1,16 +1,21 @@
-import { describe, expect, it, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import { get } from "svelte/store";
 
-const { decideVerse, editVerse, runVerseChecks } = vi.hoisted(() => ({
+const { decideVerse, editVerse, runVerseChecks, languageQaHistory, housestyleRecord, housestyleSetState } = vi.hoisted(() => ({
+  housestyleRecord: vi.fn(),
+  housestyleSetState: vi.fn(),
   decideVerse: vi.fn(),
   editVerse: vi.fn(),
   runVerseChecks: vi.fn(),
+  languageQaHistory: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
-  bridge: { decideVerse, editVerse, runVerseChecks },
+  bridge: { decideVerse, editVerse, runVerseChecks, languageQaHistory, housestyleRecord, housestyleSetState },
 }));
+import { lqaFinding } from "./languageQaFixture";
+import type { LanguageQaSuggestion } from "../../types/languageQa";
 
 import VerseList from "../VerseList.svelte";
 import {
@@ -26,9 +31,11 @@ import {
   headingsByVerse,
   selectedVerse,
   verseKey,
+  languageQaFindingsByVerse,
+  project,
 } from "../../stores";
 import { alignmentOpen, alignmentKey } from "../../alignmentUi";
-import { editingChapter, editingVerse, editSaving, recheckingKey } from "../../verseEditor";
+import { cancelVerseEdit, editingChapter, editingVerse, editSaving, recheckingKey } from "../../verseEditor";
 import { aiReviewRequest, aiJobActive } from "../../aiReviewUi";
 import type { QaFinding } from "../../types/finding";
 
@@ -205,6 +212,176 @@ describe("VerseList footnote handling", () => {
     render(VerseList, { props: { onSelect: vi.fn() } });
     const marks = Array.from(document.querySelectorAll("mark")).map((m) => m.textContent);
     expect(marks).toContain(word);
+  });
+
+  it("applies a Language QA fix after a footnote at the raw offset, not the display one", async () => {
+    // Regression: the menu used to receive the display-shifted copy of the
+    // finding, so the fix spliced the raw verse at the wrong place and its
+    // own staleness guard refused it. Use must equal a manual raw splice.
+    const raw = "அவன் சொன்னான்\\f + \\ft குறிப்பு\\f* அந்த காகம் பறந்தது.";
+    const flagged = "அந்த காகம்";
+    const points = Array.from(raw);
+    const start = Array.from(raw.slice(0, raw.indexOf(flagged))).length;
+    const end = start + Array.from(flagged).length;
+    seed(raw);
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding({ start, end, originalText: flagged })] });
+    try {
+      render(VerseList, { props: { onSelect: vi.fn() } });
+      const mark = document.querySelector("mark.m-lqa-sandhi") as HTMLElement;
+      expect(mark.textContent).toBe(flagged);
+      await fireEvent.contextMenu(mark);
+      await fireEvent.click(screen.getByRole("menuitem", { name: 'Use "அந்தக் காகம்"' }));
+      const manual = points.slice(0, start).join("") + "அந்தக் காகம்" + points.slice(end).join("");
+      expect(editVerse).toHaveBeenCalledWith("1", "6", manual);
+      expect(manual).toContain("\\f + \\ft குறிப்பு\\f* அந்தக் காகம் பறந்தது.");
+    } finally {
+      languageQaFindingsByVerse.set({});
+    }
+  });
+
+  it("ignores a Language QA mark with an issue that keeps it out of review progress", async () => {
+    seed("அந்த காகம் பறந்தது.");
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding({ id: "lqa-2" })] });
+    try {
+      render(VerseList, { props: { onSelect: vi.fn() } });
+      await fireEvent.contextMenu(document.querySelector("mark.m-lqa-sandhi") as HTMLElement);
+      await fireEvent.click(screen.getByRole("menuitem", { name: "Ignore this occurrence" }));
+      expect(decideVerse).toHaveBeenCalledWith("1", "6", "lqa-2", "ignored", undefined, {
+        source: "languageQa", rule: "tamil.vallinam-missing", ruleId: "ta-irv/tamil.vallinam-missing",
+        ruleVersion: "language-qa-7", packVersion: "language-qa-7", ruleRevision: 1,
+        layer: "pattern", category: "sandhi",
+        originalText: "அந்த காகம்", suggestedReplacement: "அந்தக் காகம்",
+        chosenSuggestion: null, chosenRank: null,
+        message: "Possible missing வல்லினம்.", start: 0, end: 10,
+      });
+      expect(document.querySelector("mark.m-lqa-sandhi")).toBeNull();
+    } finally {
+      languageQaFindingsByVerse.set({});
+    }
+  });
+
+  describe("Language QA menu", () => {
+    const five: LanguageQaSuggestion[] = ["அந்தக் காகம்", "அந்தக்காகம்", "அக்காகம்", "அந்த க் காகம்", "அக் காகம்"]
+      .map((text, i) => ({ text, rank: i + 1, source: "rule", rationale: `reason ${i + 1}` }));
+
+    async function openMenu(overrides: Parameters<typeof lqaFinding>[0] = {}, text = "அந்த காகம் பறந்தது.") {
+      seed(text);
+      languageQaFindingsByVerse.set({ "1:6": [lqaFinding(overrides)] });
+      render(VerseList, { props: { onSelect: vi.fn() } });
+      await fireEvent.contextMenu(document.querySelector("mark.m-lqa-sandhi") as HTMLElement);
+      return screen.getAllByRole("menuitem").map((item) => [item.textContent, item.getAttribute("title")]);
+    }
+
+    afterEach(() => languageQaFindingsByVerse.set({}));
+
+    it("offers no Use item when the finding has no suggestion", async () => {
+      expect((await openMenu({ suggestions: [] })).map(([label]) => label))
+        .toEqual(["Edit…", "Ignore this occurrence", "Ignore more widely▸", "Mark as false positive"]);
+    });
+
+    it("offers one Use item, with the rationale as its tooltip", async () => {
+      const items = await openMenu();
+      expect(items[0]).toEqual(['Use "அந்தக் காகம்"', "test rationale"]);
+      expect(items.map(([label]) => label)).toEqual(
+        ['Use "அந்தக் காகம்"', "Edit…", "Ignore this occurrence", "Ignore more widely▸", "Mark as false positive"]);
+    });
+
+    it("offers up to five ranked Use items, and Use applies the one chosen and records its rank", async () => {
+      const items = await openMenu({ suggestions: [...five, { text: "sixth", rank: 6, source: "rule", rationale: "r" }] });
+      expect(items.slice(0, 5)).toEqual(five.map((s) => [`Use "${s.text}"`, s.rationale]));
+      expect(items.map(([label]) => label)).not.toContain('Use "sixth"');
+      await fireEvent.click(screen.getByRole("menuitem", { name: 'Use "அந்தக்காகம்"' }));
+      expect(editVerse).toHaveBeenCalledWith("1", "6", "அந்தக்காகம் பறந்தது.");
+      await waitFor(() => expect(decideVerse).toHaveBeenCalledWith("1", "6", "lqa-1", "accepted", undefined,
+        expect.objectContaining({ chosenSuggestion: "அந்தக்காகம்", chosenRank: 2, suggestedReplacement: "அந்தக்காகம்" })));
+    });
+
+    it("Use changes the verse before the engine answers, and closes the menu at once", async () => {
+      let finish: (value: unknown) => void = () => {};
+      await openMenu();
+      editVerse.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+      await fireEvent.click(screen.getByRole("menuitem", { name: 'Use "அந்தக் காகம்"' }));
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(get(verseTexts)["1:6"]).toBe("அந்தக் காகம் பறந்தது.");
+      expect(document.querySelector('[data-verse-key="1:6"] .vtext')?.textContent).toContain("அந்தக் காகம்");
+      finish({ issueResolutionsNeedingRecheck: 0 });
+      await waitFor(() => expect(runVerseChecks).toHaveBeenCalled());
+    });
+
+    it("Use puts the old text and mark back if the save fails", async () => {
+      await openMenu();
+      editVerse.mockRejectedValue(new Error("disk full"));
+      await fireEvent.click(screen.getByRole("menuitem", { name: 'Use "அந்தக் காகம்"' }));
+      await waitFor(() => expect(screen.getByRole("status").textContent).toContain("disk full"));
+      expect(get(verseTexts)["1:6"]).toBe("அந்த காகம் பறந்தது.");
+      expect(get(languageQaFindingsByVerse)["1:6"]).toHaveLength(1);
+    });
+
+    it("marks a false positive: the mark goes at once, and comes back if recording fails", async () => {
+      let fail: (reason: unknown) => void = () => {};
+      await openMenu();
+      decideVerse.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
+      await fireEvent.click(screen.getByRole("menuitem", { name: "Mark as false positive" }));
+      expect(document.querySelector("mark.m-lqa-sandhi")).toBeNull();
+      expect(decideVerse).toHaveBeenCalledWith("1", "6", "lqa-1", "rejected", undefined,
+        expect.objectContaining({ source: "languageQa", ruleId: "ta-irv/tamil.vallinam-missing" }));
+      fail(new Error("workbench locked"));
+      await waitFor(() => expect(document.querySelector("mark.m-lqa-sandhi")).not.toBeNull());
+      expect(screen.getByRole("status").textContent).toContain("workbench locked");
+    });
+
+    it("Edit… opens the verse with the flagged text selected, in UTF-16 units past an astral character", async () => {
+      // "𝔸" is one code point but two UTF-16 units: the engine's start (3) is
+      // a code-point offset, the textarea's selection is not.
+      const text = "𝔸 அந்த காகம் பறந்தது.";
+      const start = 2;
+      const end = start + Array.from("அந்த காகம்").length;
+      await openMenu({ start, end }, text);
+      await fireEvent.click(screen.getByRole("menuitem", { name: "Edit…" }));
+      const area = await waitFor(() => {
+        const found = document.querySelector('[data-verse-key="1:6"] textarea') as HTMLTextAreaElement;
+        expect(found).not.toBeNull();
+        return found;
+      });
+      await waitFor(() => expect(area.selectionStart).toBe(3));
+      expect(area.value.slice(area.selectionStart, area.selectionEnd)).toBe("அந்த காகம்");
+    });
+
+    it("meets the click budget: every action changes the screen in under 100 ms with the engine silent", async () => {
+      // The engine never answers, so any action that waited on it would never
+      // change the screen at all. jsdom does not paint; this times the DOM change.
+      const never = () => new Promise(() => {});
+      for (const [label, changed] of [
+        ["Ignore this occurrence", () => document.querySelector("mark.m-lqa-sandhi") === null],
+        ["Mark as false positive", () => document.querySelector("mark.m-lqa-sandhi") === null],
+        ['Use "அந்தக் காகம்"', () => Boolean(document.querySelector('[data-verse-key="1:6"] .vtext')
+          ?.textContent?.includes("அந்தக் காகம்"))],
+      ] as const) {
+        document.body.innerHTML = "";
+        await openMenu();
+        decideVerse.mockImplementation(never);
+        editVerse.mockImplementation(never);
+        const started = performance.now();
+        await fireEvent.click(screen.getByRole("menuitem", { name: label }));
+        expect(changed(), label).toBe(true);
+        expect(performance.now() - started, label).toBeLessThan(100);
+        cancelVerseEdit();
+        editSaving.set(false);
+      }
+    });
+
+    it("the verse menu opens this verse's Language QA history", async () => {
+      languageQaHistory.mockResolvedValue({ chapter: "1", verse: "6", findingId: null, entries: [] });
+      project.set({ path: "C:/project" } as never);
+      seed("அந்த காகம் பறந்தது.");
+      render(VerseList, { props: { onSelect: vi.fn() } });
+      await fireEvent.contextMenu(verseRow());
+      await fireEvent.click(screen.getByRole("menuitem", { name: "Language QA history…" }));
+      expect(await screen.findByRole("dialog", { name: "Language QA history for verse 1:6" })).toBeTruthy();
+      expect(languageQaHistory).toHaveBeenCalledWith("C:/project", "1", "6", undefined);
+      await screen.findByText("No decisions recorded yet.");
+      project.set(null);
+    });
   });
 
   it("offers exactly the two actions the review panel offers", async () => {
@@ -605,5 +782,78 @@ describe("VerseList section headings (#180)", () => {
     headingsByVerse.set({});
     render(VerseList, { props: { onSelect: vi.fn() } });
     expect(document.querySelectorAll(".section-heading")).toHaveLength(0);
+  });
+});
+
+describe("VerseList one review surface (layered-rules 4.3)", () => {
+  const text = "அந்த காகம் பறந்தது.";
+  const flaggedEnd = Array.from("அந்த காகம்").length;
+
+  afterEach(() => languageQaFindingsByVerse.set({}));
+
+  it("offers every finding on a span carried by two sources, each with its own actions", async () => {
+    seed(text, [finding({ id: "gr-1", start_offset: 0, end_offset: flaggedEnd, engine: "wildebeest",
+      explanation: "Mixed script" })]);
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding({ id: "lqa-9" })] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector('[data-finding-ids~="lqa-9"]') as HTMLElement);
+    expect(screen.getByRole("menu", { name: "Findings on this text" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^wildebeest: Mixed script/ })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("menuitem", { name: /^Language QA: அந்த காகம்/ }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Ignore this occurrence" }));
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "lqa-9", "ignored", undefined,
+      expect.objectContaining({ source: "languageQa" }));
+  });
+
+  it("walks Language QA marks with the keyboard and opens their menu", async () => {
+    seed(text);
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding({ id: "lqa-k" })] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.keyDown(verseRow(), { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: 'Use "அந்தக் காகம்"' })).toBeInTheDocument();
+  });
+
+  it("does not show a verse as clean while a Language QA mark is drawn on it", () => {
+    seed(text);
+    checkStatusByVerse.set({ "1:6": "succeeded" });
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding()] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(verseRow().classList.contains("approved")).toBe(false);
+    expect(verseRow().querySelector(".vnum")?.textContent).not.toContain("✓");
+  });
+});
+
+
+describe("VerseList house style (layered-rules 6.3/6.4)", () => {
+  afterEach(() => languageQaFindingsByVerse.set({}));
+
+  it("records a scoped Ignore as house style after ignoring the occurrence", async () => {
+    seed("அந்த காகம் பறந்தது.");
+    housestyleRecord.mockResolvedValue({ entries: [], proposals: [], thresholds: {}, entry: {} });
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding({ id: "lqa-s" })] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector("mark.m-lqa-sandhi") as HTMLElement);
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Ignore more widely" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "This word in this book" }));
+    await waitFor(() => expect(housestyleRecord).toHaveBeenCalledWith({
+      scope: "word-in-book", ruleId: "ta-irv/tamil.vallinam-missing", word: "அந்த காகம்", provenance: "explicit",
+      evidence: [{ chapter: "1", verse: "6", decisionId: "lqa-s" }] }));
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "lqa-s", "ignored", undefined, expect.anything());
+  });
+
+  it("shows what the learner learned from an Ignore, with Undo", async () => {
+    seed("அந்த காகம் பறந்தது.");
+    const learned = { key: "k-learned", word: "அந்த காகம்", ruleId: "ta-irv/tamil.vallinam-missing",
+                      evidence: [{}, {}, {}] };
+    decideVerse.mockResolvedValue({ houseStyle: { learned } });
+    housestyleSetState.mockResolvedValue({ entries: [], proposals: [], thresholds: {}, entry: learned });
+    languageQaFindingsByVerse.set({ "1:6": [lqaFinding({ id: "lqa-l" })] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    await fireEvent.contextMenu(document.querySelector("mark.m-lqa-sandhi") as HTMLElement);
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Ignore this occurrence" }));
+    expect(await screen.findByText(/Learned: “அந்த காகம்” is house style/)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(housestyleSetState).toHaveBeenCalledWith("k-learned", "undone");
+    expect(screen.queryByText(/Learned:/)).toBeNull();
   });
 });

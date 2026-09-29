@@ -2,12 +2,15 @@
   import { onMount } from "svelte";
   import { bridge, type EngineInfo } from "../api/bridgeClient";
   import { manualOverrideMode, navigationStatus, project, reviewerMode } from "../stores";
-  import type { NavigationSyncState, SettingsData } from "../types/finding";
+  import type { NavigationSyncState, SettingsData, TerminologyRule } from "../types/finding";
+  import type { HouseStyleEntry, HouseStyleListResponse, HouseStyleProposal } from "../types/houseStyle";
+
+  type Pane = "ai" | "quality" | "connections" | "resources" | "terminology" | "security";
 
   export let onClose: () => void;
-  export let initialPane: "ai" | "quality" | "connections" | "resources" | "security" = "ai";
+  export let initialPane: Pane = "ai";
 
-  let activePane: "ai" | "quality" | "connections" | "resources" | "security" = initialPane;
+  let activePane: Pane = initialPane;
   let loading = true;
   let saving = false;
   let saveMessage = "";
@@ -23,6 +26,49 @@
   let reviewerName = "";
   let reviewerNameUpdatedAt = "";
   let engineInfo: EngineInfo | null = null;
+
+  let terminologyRules: TerminologyRule[] = [];
+  let terminologyLoaded = false;
+  let terminologyLoading = false;
+  let terminologySaving = false;
+  let terminologyMessage = "";
+  let newConceptId = "";
+  let newPreferred = "";
+  let newRejected = "";
+  // Termbase v3 (layered-rules 6.1).
+  let newAllowed = "";
+  let newInflected = "";      // one line per rejected rendering: "rendering: form, form"
+  let newPrefix = false;      // match the rejected renderings with case/plural endings too
+  let editingConcept: string | null = null;  // editing an existing rule: saving replaces it
+
+  const splitList = (value: string): string[] => value.split(",").map((s) => s.trim()).filter(Boolean);
+
+  function parseInflected(value: string): Record<string, string[]> {
+    const forms: Record<string, string[]> = {};
+    for (const line of value.split("\n")) {
+      const [rendering, rest] = line.split(":");
+      if (rendering?.trim() && rest !== undefined && splitList(rest).length) forms[rendering.trim()] = splitList(rest);
+    }
+    return forms;
+  }
+
+  function editTerminologyRule(rule: TerminologyRule): void {
+    editingConcept = rule.conceptId;
+    newConceptId = rule.conceptId;
+    newPreferred = rule.approvedRenderings.join(", ");
+    newRejected = rule.rejectedRenderings.join(", ");
+    newAllowed = (rule.allowedAlternatives ?? []).join(", ");
+    newInflected = Object.entries(rule.inflectedForms ?? {}).map(([r, f]) => `${r}: ${f.join(", ")}`).join("\n");
+    newPrefix = rule.matchMode === "prefix";
+    terminologyConflict = null;
+    terminologyMessage = "";
+  }
+
+  function resetTerminologyForm(): void {
+    editingConcept = null;
+    newConceptId = newPreferred = newRejected = newAllowed = newInflected = "";
+    newPrefix = false;
+  }
 
   const providerPresets: Record<string, string> = {
     openai: "",
@@ -121,6 +167,134 @@
       saveMessage = e instanceof Error ? e.message : String(e);
     }
   }
+
+  // -- house style (layered-rules 6.2-6.4) --
+  let houseStyle: HouseStyleListResponse | null = null;
+  let houseStyleMessage = "";
+  let houseStyleBusy = false;
+  let newProperNoun = "";
+  let nameSuggestions: Array<{ word: string; count: number; variants: string[] }> = [];
+
+  async function approveName(word: string): Promise<void> {
+    await houseStyleAct(() => bridge.housestyleRecord({ scope: "word-in-book", list: "properNouns", word,
+                                                         provenance: "curated" }));
+    nameSuggestions = nameSuggestions.filter((s) => s.word !== word);
+  }
+
+  async function houseStyleAct(fn: () => Promise<HouseStyleListResponse | null | void>, done = ""): Promise<void> {
+    if (houseStyleBusy) return;
+    houseStyleBusy = true;
+    houseStyleMessage = "";
+    try {
+      const result = await fn();
+      if (result) houseStyle = result;
+      if (done) houseStyleMessage = done;
+    } catch (e) {
+      houseStyleMessage = e instanceof Error ? e.message : String(e);
+    } finally {
+      houseStyleBusy = false;
+    }
+  }
+
+  const acceptProposal = (p: HouseStyleProposal) => houseStyleAct(() => bridge.housestyleRecord({
+    scope: p.scope, ruleId: p.ruleId, word: p.word, provenance: "learned", state: "active" }), "Applied to every book.");
+  // Dismissing records the proposal as removed, so it is not proposed again.
+  const dismissProposal = (p: HouseStyleProposal) => houseStyleAct(() => bridge.housestyleRecord({
+    scope: p.scope, ruleId: p.ruleId, word: p.word, provenance: "learned", state: "removed" }));
+
+  async function addProperNoun(): Promise<void> {
+    const word = newProperNoun.trim();
+    if (!word) return;
+    await houseStyleAct(() => bridge.housestyleRecord({ scope: "word-in-book", list: "properNouns", word,
+                                                         provenance: "curated" }));
+    if (!houseStyleMessage) newProperNoun = "";
+  }
+
+  async function exportHouseStyle(): Promise<void> {
+    const path = await bridge.pickSavePath(`${$project?.bookId ?? "book"}-house-style.json`);
+    if (path) await houseStyleAct(async () => {
+      const result = await bridge.housestyleExport(path);
+      houseStyleMessage = `Exported ${result.count} entr${result.count === 1 ? "y" : "ies"}.`;
+    });
+  }
+
+  async function importHouseStyle(): Promise<void> {
+    const path = await bridge.pickJsonFile();
+    if (path) await houseStyleAct(async () => {
+      const result = await bridge.housestyleImport(path);
+      houseStyleMessage = `Imported ${result.imported}; confirm each to make it yours.`;
+      return result;
+    });
+  }
+
+  function describeEntry(e: HouseStyleEntry): string {
+    if (e.list) return `proper noun “${e.word}”`;
+    return e.scope.startsWith("word") ? `“${e.word}” for ${e.ruleId}` : `${e.ruleId} off`;
+  }
+
+  async function loadTerminology(): Promise<void> {
+    if (terminologyLoading) return;
+    terminologyLoading = true;
+    try {
+      const result = await bridge.terminologyList();
+      terminologyRules = result.rules;
+      terminologyLoaded = true;
+      houseStyle = await bridge.housestyleList().catch(() => null);
+      nameSuggestions = (await bridge.housestyleNameSuggestions().catch(() => null))?.suggestions ?? [];
+    } catch (e) {
+      terminologyMessage = e instanceof Error ? e.message : String(e);
+    } finally {
+      terminologyLoading = false;
+    }
+  }
+
+  // Rules are book-scoped, so this only fires once a project is actually
+  // open -- otherwise the pane shows the same "open a project" message the
+  // Resources pane already uses, rather than calling an RPC that would
+  // reject with project_error.
+  $: if (activePane === "terminology" && $project && !terminologyLoaded && !terminologyLoading) {
+    void loadTerminology();
+  }
+
+  // A rule already recorded for the concept being added: the engine wrote
+  // nothing and the pane asks before replacing it.
+  let terminologyConflict: TerminologyRule | null = null;
+
+  async function addTerminologyRule(overwrite = false): Promise<void> {
+    const conceptId = newConceptId.trim();
+    if (!conceptId) {
+      terminologyMessage = "Concept ID is required.";
+      return;
+    }
+    const approved = splitList(newPreferred);
+    const rejected = splitList(newRejected);
+    if (!approved.length && !rejected.length) {
+      terminologyMessage = "Enter at least one preferred or rejected rendering.";
+      return;
+    }
+    terminologySaving = true;
+    terminologyMessage = "";
+    terminologyConflict = null;
+    try {
+      // Editing the rule it was opened from replaces it; a new concept id that
+      // collides with an existing rule still asks first.
+      const replace = overwrite || editingConcept === conceptId;
+      const result = await bridge.terminologyRecord(conceptId, approved, rejected, replace, {
+        allowedAlternatives: splitList(newAllowed), inflectedForms: parseInflected(newInflected),
+        matchMode: newPrefix ? "prefix" : "exact",
+      });
+      terminologyRules = result.rules;
+      if (result.conflict) {
+        terminologyConflict = result.conflict;
+        return;
+      }
+      resetTerminologyForm();
+    } catch (e) {
+      terminologyMessage = e instanceof Error ? e.message : String(e);
+    } finally {
+      terminologySaving = false;
+    }
+  }
 </script>
 
 <div class="modal-overlay">
@@ -132,6 +306,7 @@
       <button class="nav-item" class:active={activePane === "quality"} on:click={() => (activePane = "quality")}>Quality engine</button>
       <button class="nav-item" class:active={activePane === "connections"} on:click={() => (activePane = "connections")}>Connections</button>
       <button class="nav-item" class:active={activePane === "resources"} on:click={() => (activePane = "resources")}>Resources & licenses</button>
+      <button class="nav-item" class:active={activePane === "terminology"} on:click={() => (activePane = "terminology")}>Terminology</button>
       <button class="nav-item" class:active={activePane === "security"} on:click={() => (activePane = "security")}>Security</button>
       {#if engineInfo}
         <div class="about-version" title="What this window is actually running, not what Windows says was installed">
@@ -271,6 +446,133 @@
         <div class="kv"><span>Greek</span><span>Gentium Plus</span></div>
         <div class="resource-note">All bundled fonts are licensed under the SIL Open Font License 1.1, with the MIT/X11 licence additionally covering Ezra SIL's Hebrew layout intelligence. The full licence texts ship alongside the font files in the installed app under <code>fonts/</code>.</div>
         <div class="resource-note">On Windows, Tamil and the other Indian scripts prefer Vijaya and Nirmala UI where they are installed. Those are Microsoft fonts and are not redistributed with Bridge; the bundled faces above are the fallback.</div>
+      {:else if activePane === "terminology"}
+        <h3>Terminology</h3>
+        <p class="desc">Preferred and deprecated target-language renderings for this book. Language QA flags a rejected rendering inline as it's typed; nothing here changes Scripture text automatically.</p>
+        {#if !$project}
+          <p class="muted">Open a project to manage its terminology.</p>
+        {:else}
+          {#if terminologyLoading && !terminologyLoaded}
+            <p class="muted">Loading…</p>
+          {:else if terminologyRules.length}
+            {#each terminologyRules as rule (rule.conceptId)}
+              <div class="kv term-rule">
+                <span>{rule.conceptId}</span>
+                <span>
+                  preferred: {rule.approvedRenderings.join(", ") || "none"} · rejected: {rule.rejectedRenderings.join(", ") || "none"}
+                  {#if rule.allowedAlternatives?.length} · allowed: {rule.allowedAlternatives.join(", ")}{/if}
+                  {#if rule.matchMode === "prefix"} · <em>also with case endings</em>{/if}
+                  {#each Object.entries(rule.inflectedForms ?? {}) as [rendering, forms]}
+                    <br /><small>{rendering} → {forms.join(", ")}</small>
+                  {/each}
+                  <button class="btn link" on:click={() => editTerminologyRule(rule)}>Edit</button>
+                </span>
+              </div>
+            {/each}
+          {:else}
+            <p class="muted">No terminology rules recorded for this book yet.</p>
+          {/if}
+          <h3 class="sub">{editingConcept ? `Edit ${editingConcept}` : "Add a rule"}</h3>
+          <div class="field">
+            <label for="termConcept">Concept ID</label>
+            <input id="termConcept" type="text" bind:value={newConceptId} placeholder="e.g. god" />
+          </div>
+          <div class="field">
+            <label for="termPreferred">Preferred rendering(s)</label>
+            <input id="termPreferred" type="text" bind:value={newPreferred} placeholder="Comma-separated, e.g. இறைவன்" />
+          </div>
+          <div class="field">
+            <label for="termRejected">Rejected rendering(s)</label>
+            <input id="termRejected" type="text" bind:value={newRejected} placeholder="Comma-separated, e.g. கடவுள்" />
+          </div>
+          <div class="field">
+            <label for="termAllowed">Allowed alternative(s)</label>
+            <input id="termAllowed" type="text" bind:value={newAllowed} placeholder="Comma-separated; offered as further suggestions" />
+          </div>
+          <div class="field">
+            <label for="termInflected">Inflected forms of a rejected rendering</label>
+            <textarea id="termInflected" rows="2" bind:value={newInflected} placeholder="One per line, e.g. கடவுள்: கடவுளை, கடவுளுக்கு"></textarea>
+          </div>
+          <label class="check">
+            <input type="checkbox" bind:checked={newPrefix} />
+            Also match the rejected renderings with case and plural endings (ஐ, க்கு, இல், கள் …). Such matches are marked medium confidence, for you to confirm.
+          </label>
+          <div class="save-row">
+            <button class="btn primary" on:click={() => addTerminologyRule()} disabled={terminologySaving}>{terminologySaving ? "Saving…" : editingConcept ? "Save changes" : "Add rule"}</button>
+            {#if editingConcept}<button class="btn" on:click={resetTerminologyForm} disabled={terminologySaving}>Cancel</button>{/if}
+            {#if terminologyMessage}<span class="save-msg">{terminologyMessage}</span>{/if}
+          </div>
+          <h3 class="sub">House style</h3>
+          <p class="desc">What this project has decided is not a problem. Learned entries come from your Ignores ({houseStyle?.thresholds.learnIgnores ?? 3} of the same word, none Used); every entry only hides or ranks, never adds a check.</p>
+          {#if houseStyle}
+            {#each houseStyle.proposals as p (p.scope + p.ruleId + p.word)}
+              <div class="kv hs-proposal">
+                <span>Suggested</span>
+                <span>{p.scope === "rule-in-project" ? `${p.ruleId} off in every book` : `“${p.word}” for ${p.ruleId} in every book`} — {p.reason}
+                  <button class="btn link" on:click={() => acceptProposal(p)} disabled={houseStyleBusy}>Accept</button>
+                  <button class="btn link" on:click={() => dismissProposal(p)} disabled={houseStyleBusy}>Dismiss</button>
+                </span>
+              </div>
+            {/each}
+            {#each houseStyle.seed ?? [] as e (e.key)}
+              <div class="kv hs-entry hs-seed">
+                <span><span class="badge curated">bundled</span></span>
+                <span>{describeEntry(e)} · from the language pack's reviewed house style
+                  <!-- Removing a bundled entry records this project's own entry for it, state removed. -->
+                  <button class="btn link" on:click={() => houseStyleAct(() => bridge.housestyleRecord({ scope: e.scope,
+                    ruleId: e.ruleId, word: e.word, list: e.list === "properNouns" ? "properNouns" : "",
+                    provenance: "curated", state: "removed" }))} disabled={houseStyleBusy}>Remove</button>
+                </span>
+              </div>
+            {/each}
+            {#each houseStyle.entries.filter((e) => e.state === "active") as e (e.key)}
+              <div class="kv hs-entry">
+                <span><span class="badge {e.provenance}">{e.imported ? "imported" : e.provenance}</span></span>
+                <span>{describeEntry(e)} · {e.scope.replace("-in-", " in ")} · {e.evidence.length} evidence
+                  {#if e.imported}<button class="btn link" on:click={() => houseStyleAct(() => bridge.housestyleSetState(e.key, "active"))} disabled={houseStyleBusy}>Confirm</button>{/if}
+                  <button class="btn link" on:click={() => houseStyleAct(() => bridge.housestyleSetState(e.key, "removed"))} disabled={houseStyleBusy}>Remove</button>
+                </span>
+              </div>
+            {:else}
+              <p class="muted">No project house style recorded yet.</p>
+            {/each}
+          {/if}
+          {#if nameSuggestions.length}
+            <details class="name-suggestions">
+              <summary>Suggested names from the names check ({nameSuggestions.length})</summary>
+              {#each nameSuggestions.slice(0, 30) as s (s.word)}
+                <div class="kv">
+                  <span>{s.word}</span>
+                  <span>{s.count}× · also spelt {s.variants.join(", ")}
+                    <button class="btn link" on:click={() => approveName(s.word)} disabled={houseStyleBusy}>Approve</button></span>
+                </div>
+              {/each}
+            </details>
+          {/if}
+          <div class="field">
+            <label for="hsProperNoun">Add a proper noun (never a வல்லினம் target)</label>
+            <input id="hsProperNoun" type="text" bind:value={newProperNoun} placeholder="e.g. மோவாப்" />
+          </div>
+          <div class="save-row">
+            <button class="btn" on:click={addProperNoun} disabled={houseStyleBusy || !newProperNoun.trim()}>Add name</button>
+            <button class="btn" on:click={exportHouseStyle} disabled={houseStyleBusy}>Export…</button>
+            <button class="btn" on:click={importHouseStyle} disabled={houseStyleBusy}>Import…</button>
+            {#if houseStyleMessage}<span class="save-msg">{houseStyleMessage}</span>{/if}
+          </div>
+          {#if terminologyConflict}
+            <div class="term-conflict" role="alertdialog" aria-label="Replace existing terminology rule">
+              <p>
+                A rule for <strong>{terminologyConflict.conceptId}</strong> already exists
+                (preferred: {terminologyConflict.approvedRenderings.join(", ") || "none"} · rejected:
+                {terminologyConflict.rejectedRenderings.join(", ") || "none"}). Replace it?
+              </p>
+              <div class="save-row">
+                <button class="btn primary" on:click={() => addTerminologyRule(true)} disabled={terminologySaving}>Replace</button>
+                <button class="btn" on:click={() => (terminologyConflict = null)} disabled={terminologySaving}>Keep existing</button>
+              </div>
+            </div>
+          {/if}
+        {/if}
       {:else if activePane === "security"}
         <h3>Security & privacy</h3>
         <p class="desc">Project data and Greek Room findings never leave this machine unless you explicitly use AI explain.</p>
@@ -312,6 +614,15 @@
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .save-msg { font-size: var(--fs-xs); color: var(--success); }
+  .term-conflict { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--warning); border-radius: 6px; background: var(--warning-bg); font-size: var(--fs-sm); }
+  .term-conflict p { margin: 0 0 8px; }
+  .field textarea { width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: var(--fs-sm); color: var(--text); background: var(--surface-2); box-sizing: border-box; font-family: inherit; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-xs); color: var(--text-2); margin: -4px 0 12px; }
+  .btn.link { border: none; background: none; padding: 0 0 0 6px; text-decoration: underline; cursor: pointer; font-size: var(--fs-xs); }
+  .term-rule small { color: var(--text-3); }
+  .badge { font-size: var(--fs-2xs); padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); }
+  .badge.learned { border-color: var(--accent); color: var(--accent); }
+  .badge.curated { border-color: var(--success); color: var(--success); }
   .kv { display: flex; justify-content: space-between; font-size: var(--fs-sm); padding: 6px 0; border-bottom: 1px dashed var(--border); }
   .kv .on { color: var(--success); font-weight: 700; }
   .resource-note { font-size: var(--fs-2xs); line-height: 1.45; color: var(--text-3); margin-top: 10px; overflow-wrap: anywhere; }

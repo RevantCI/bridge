@@ -54,6 +54,7 @@ from typing import Any
 from .models import VerseAlignment
 from .tc_project import TranslationCoreProject, _read_json
 from .triage import persisted_findings, triage_hash
+from .language_qa_jobs import language_qa_open_counts, reported_language_qa
 
 
 REPORT_SCHEMA_VERSION = 1
@@ -68,11 +69,18 @@ CATEGORY_TN = "translationNotes"
 CATEGORY_TW = "translationWords"
 CATEGORY_ALIGNMENT = "alignment"
 CATEGORY_AI_REVIEW = "aiReview"
-CATEGORIES = (CATEGORY_GREEK_ROOM, CATEGORY_TN, CATEGORY_TW, CATEGORY_ALIGNMENT, CATEGORY_AI_REVIEW)
+# Offline Language QA (#169, layered-rules Phase 4.2): one category, with the
+# finding's own category (typo, sandhi, ...) on `languageQaCategory` for the
+# sub-rows.
+CATEGORY_LANGUAGE_QA = "languageQa"
+CATEGORIES = (CATEGORY_GREEK_ROOM, CATEGORY_TN, CATEGORY_TW, CATEGORY_ALIGNMENT, CATEGORY_AI_REVIEW,
+              CATEGORY_LANGUAGE_QA)
 
-CHECK_FAMILIES = ("greekRoom", "translationNotes", "translationWords", "alignment", "aiReview")
+CHECK_FAMILIES = ("greekRoom", "translationNotes", "translationWords", "alignment", "aiReview", "languageQa")
 # Families that count toward the collection's pass/fail totals. AI review is
-# advisory and never a check that passes or fails on its own.
+# advisory and never a check that passes or fails on its own; so is Language
+# QA, whose findings are review candidates (the publication gate weighs its
+# high-severity, high-confidence ones separately).
 _SCORED_FAMILIES = ("greekRoom", "translationNotes", "translationWords", "alignment")
 
 # A finding is closed once a human has done anything but leave it open or
@@ -87,6 +95,9 @@ EXPORT_FORMATS = {"csv": ",", "tsv": "\t"}
 DEFAULT_EXPORT_COLUMNS = [
     "category", "book", "chapter", "verse", "issue", "explanation", "aiProposal",
     "fixedBy", "result", "status", "severity",
+    # Language QA rows fill these; they are empty on every other row.
+    "languageQaCategory", "ruleId", "packVersion", "layer", "confidence", "suggestions",
+    "houseStyleSuppressed",
 ]
 
 
@@ -300,6 +311,14 @@ class _BookReportBuilder:
             # the report screen can merge triage.results by dict lookup
             # without the report itself depending on triage having run.
             "triageHash": "",
+            # Language QA only (empty elsewhere).
+            "languageQaCategory": "",
+            "ruleId": "",
+            "packVersion": "",
+            "layer": "",
+            "confidence": "",
+            "suggestions": "",
+            "houseStyleSuppressed": "",
         }
         row.update(fields)
         row["reference"] = row["reference"] or self._reference(row["chapter"], row["verse"])
@@ -514,6 +533,54 @@ class _BookReportBuilder:
                 **self._decision_fields(chapter, verse, finding_id),
             ))
 
+    # -- Language QA ----------------------------------------------------------
+
+    def _add_language_qa_rows(self) -> dict[str, Any]:
+        """What the last check job's Language QA stage reported, with each
+        finding's current status (language_qa_jobs.reported_language_qa: the
+        same reader the exception queue and the publication gate use)."""
+        findings = reported_language_qa(self.project, self.rollup)
+        by_category: dict[str, dict[str, int]] = {}
+        for finding in findings:
+            chapter, verse = str(finding.get("chapter", "")), str(finding.get("verse", ""))
+            status = str(finding.get("status") or "open")
+            resolved = status not in _UNRESOLVED_STATUSES
+            category = str(finding.get("category") or "")
+            bucket = by_category.setdefault(category, {"total": 0, "open": 0})
+            bucket["total"] += 1
+            bucket["open"] += 0 if resolved else 1
+            suggestions = " | ".join(
+                str(s.get("text", "")) for s in (finding.get("suggestions") or []) if isinstance(s, dict))
+            self.rows.append(self._row(
+                id=f"languageQa:{finding.get('id', '')}",
+                category=CATEGORY_LANGUAGE_QA, engine="languageQa",
+                checkType=str(finding.get("ruleId") or finding.get("rule") or ""),
+                severity=_normalize_severity(finding.get("severity")),
+                chapter=chapter, verse=verse,
+                issue=str(finding.get("originalText") or finding.get("rule") or ""),
+                explanation=str(finding.get("message") or ""),
+                status=status,
+                fixedBy="human" if resolved else "",
+                fixedByDetail="reviewer" if resolved else "",
+                languageQaCategory=category,
+                ruleId=str(finding.get("ruleId") or ""),
+                packVersion=str(finding.get("packVersion") or ""),
+                layer=str(finding.get("layer") or ""),
+                confidence=str(finding.get("confidence") or ""),
+                suggestions=suggestions,
+                houseStyleSuppressed="yes" if finding.get("houseStyleSuppressed") else "",
+                **self._decision_fields(chapter, verse, str(finding.get("id", ""))),
+            ))
+        counts = language_qa_open_counts(findings)
+        return {
+            "state": "not_run" if not findings and not self.project.language_qa_snapshots()
+            else ("complete" if counts["open"] == 0 else "partial"),
+            "total": len(findings), "open": counts["open"], "resolved": len(findings) - counts["open"],
+            "blocking": counts["blocking"], "openMedium": counts["medium"],
+            "byCategory": by_category,
+            "percent": _percent(len(findings) - counts["open"], len(findings)),
+        }
+
     # -- AI review ------------------------------------------------------------
 
     def _add_ai_review_rows(self) -> dict[str, int]:
@@ -582,6 +649,7 @@ class _BookReportBuilder:
             helps[tool] = {**counts, "available": available}
         self._add_alignment_marks()
         ai_counts = self._add_ai_review_rows()
+        language_qa = self._add_language_qa_rows()
 
         self.rows.sort(key=lambda r: (
             0 if r["resolution"] == "unresolved" else 1,
@@ -646,6 +714,7 @@ class _BookReportBuilder:
             **ai_counts, "total": total_verses,
             "percent": _percent(ai_counts["current"], total_verses),
         }
+        checks["languageQa"] = language_qa
         check_results = {
             key: sum(int(checks[f].get(key, 0)) for f in _SCORED_FAMILIES)
             for key in ("run", "passed", "failed")
@@ -735,6 +804,8 @@ def _placeholder_checks() -> dict[str, Any]:
             "total": 0, "percent": 0.0, "run": 0, "passed": 0, "failed": 0,
         },
         "aiReview": {"state": "not_run", "current": 0, "stale": 0, "missing": 0, "total": 0, "percent": 0.0},
+        "languageQa": {"state": "not_run", "total": 0, "open": 0, "resolved": 0, "blocking": 0,
+                       "openMedium": 0, "byCategory": {}, "percent": 0.0},
     }
 
 
@@ -758,7 +829,7 @@ def unopened_book_report(*, book_id: str, book_name: str, path: str, lazy: bool,
 
 _FAMILY_DONE_KEY = {
     "greekRoom": "checked", "translationNotes": "passed", "translationWords": "passed",
-    "alignment": "complete", "aiReview": "current",
+    "alignment": "complete", "aiReview": "current", "languageQa": "resolved",
 }
 
 

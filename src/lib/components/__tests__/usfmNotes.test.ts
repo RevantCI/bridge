@@ -75,6 +75,21 @@ describe("parseVerseNotes", () => {
     expect(parsed.notes).toHaveLength(0);
   });
 
+  it("lifts notes exactly as the engine's lift_inline_usfm does", () => {
+    // Same table as test_lifted_text_mirrors_the_frontend_note_swallow_rule in
+    // engine/tests/service/test_language_qa.py. Change both or neither.
+    for (const [raw, clean] of [
+      ["a \\f + \\ft n\\f* b", "a b"],
+      ["a\\f + \\ft n\\f* b", "a b"],
+      ["a \\f + \\ft n\\f*", "a "],
+      ["a\\f + \\ft n\\f*", "a"],
+      ["\\f + \\ft n\\f* b", "b"],
+      ["a \\x - \\xo 1.1 \\xt Gen 1.1\\x* b", "a b"],
+    ]) {
+      expect(parseVerseNotes(raw).clean, raw).toBe(clean);
+    }
+  });
+
   it("does not leave a double space where a note was removed", () => {
     expect(parseVerseNotes("alpha \\f + \\ft n\\f* bravo").clean).toBe("alpha bravo");
   });

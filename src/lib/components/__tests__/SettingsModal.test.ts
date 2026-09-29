@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 
-const { getSettings, getNavigationStatus, setSettings, engineInfo } = vi.hoisted(() => ({
+const { getSettings, getNavigationStatus, setSettings, engineInfo, terminologyList, terminologyRecord, housestyleList, housestyleRecord, housestyleSetState, housestyleNameSuggestions } = vi.hoisted(() => ({
+  housestyleNameSuggestions: vi.fn(),
+  housestyleList: vi.fn(),
+  housestyleRecord: vi.fn(),
+  housestyleSetState: vi.fn(),
   getSettings: vi.fn(),
   getNavigationStatus: vi.fn(),
   setSettings: vi.fn(),
   engineInfo: vi.fn(),
+  terminologyList: vi.fn(),
+  terminologyRecord: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
@@ -14,10 +20,18 @@ vi.mock("../../api/bridgeClient", () => ({
     navigationStatus: getNavigationStatus,
     setSettings,
     engineInfo,
+    terminologyList,
+    terminologyRecord,
+    housestyleList,
+    housestyleRecord,
+    housestyleSetState,
+    housestyleNameSuggestions,
   },
 }));
 
 import SettingsModal from "../SettingsModal.svelte";
+import { project } from "../../stores";
+import type { ProjectInfo } from "../../types/finding";
 
 const target = {
   enabled: true,
@@ -225,5 +239,212 @@ describe("SettingsModal version display (V11-011)", () => {
 
     await waitFor(() => expect(screen.queryByText(/Loading/)).not.toBeInTheDocument());
     expect(container.querySelector(".about-version")).toBeNull();
+  });
+});
+
+describe("SettingsModal terminology (#171)", () => {
+  function minimalProject(): ProjectInfo {
+    return {
+      path: "C:/projects/php", bookId: "php", bookName: "Philippians",
+      targetLanguage: "Tamil", tcVersion: "9", chapters: ["1"], checkTypes: {},
+    } as ProjectInfo;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    project.set(null);
+    housestyleList.mockResolvedValue({ entries: [], proposals: [], thresholds: { learnIgnores: 3 } });
+    housestyleNameSuggestions.mockResolvedValue({ suggestions: [], checked: false });
+    engineInfo.mockResolvedValue({
+      bridgeVersion: "0.9.6", companionSchemaVersion: 14, projectOpen: true, greekRoom: {},
+    });
+    getNavigationStatus.mockResolvedValue(navigationState());
+    getSettings.mockResolvedValue({
+      provider: "openai", apiBaseUrl: "", model: "gpt-5.6", hasApiKey: false,
+      reviewerMode: "basic", paratextNavigation: false, logosNavigation: false,
+    });
+  });
+
+  it("prompts to open a project instead of calling the RPC when none is open", async () => {
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+
+    expect(await screen.findByText(/Open a project to manage its terminology/)).toBeInTheDocument();
+    expect(terminologyList).not.toHaveBeenCalled();
+  });
+
+  it("renders existing rules for the open project", async () => {
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({
+      rules: [{
+        conceptId: "god", approvedRenderings: ["இறைவன்"], allowedAlternatives: [],
+        rejectedRenderings: ["கடவுள்"], status: "approved", provenance: "human",
+        modifiedTimestamp: "2026-09-23T05:24:44.736Z",
+      }],
+    });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+
+    expect(await screen.findByText("god")).toBeInTheDocument();
+    expect(screen.getByText(/preferred: இறைவன்.*rejected: கடவுள்/)).toBeInTheDocument();
+  });
+
+  it("shows an empty-termbase message rather than nothing when there are no rules", async () => {
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+
+    expect(await screen.findByText(/No terminology rules recorded/)).toBeInTheDocument();
+  });
+
+  it("adds a rule, splitting comma-separated renderings, and refreshes the list from the response", async () => {
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    terminologyRecord.mockResolvedValue({
+      rules: [{
+        conceptId: "god", approvedRenderings: ["இறைவன்"], allowedAlternatives: [],
+        rejectedRenderings: ["கடவுள்", "தேவன்"], status: "approved", provenance: "human",
+        modifiedTimestamp: "2026-09-23T05:24:44.736Z",
+      }],
+    });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    await screen.findByText(/No terminology rules recorded/);
+
+    await fireEvent.input(screen.getByLabelText("Concept ID"), { target: { value: "god" } });
+    await fireEvent.input(screen.getByLabelText("Preferred rendering(s)"), { target: { value: "இறைவன்" } });
+    await fireEvent.input(screen.getByLabelText("Rejected rendering(s)"), { target: { value: "கடவுள், தேவன்" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+
+    await waitFor(() => expect(terminologyRecord).toHaveBeenCalledWith(
+      "god", ["இறைவன்"], ["கடவுள்", "தேவன்"], false, { allowedAlternatives: [], inflectedForms: {}, matchMode: "exact" },
+    ));
+    expect(await screen.findByText("god")).toBeInTheDocument();
+    expect(screen.queryByText(/No terminology rules recorded/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Concept ID")).toHaveValue("");
+  });
+
+  it("asks before replacing an existing rule, and replaces it only when told to", async () => {
+    const existing = {
+      conceptId: "god", approvedRenderings: ["இறைவன்"], allowedAlternatives: [],
+      rejectedRenderings: ["கடவுள்"], status: "approved", provenance: "human",
+      modifiedTimestamp: "2026-09-23T05:24:44.736Z",
+    };
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [existing] });
+    terminologyRecord.mockImplementation(async (_id, approved, _rejected, overwrite) => overwrite
+      ? { rules: [{ ...existing, approvedRenderings: approved }] }
+      : { rules: [existing], conflict: existing });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    await screen.findByText(/preferred: இறைவன்/);
+
+    await fireEvent.input(screen.getByLabelText("Concept ID"), { target: { value: "god" } });
+    await fireEvent.input(screen.getByLabelText("Preferred rendering(s)"), { target: { value: "தேவன்" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Replace existing terminology rule" });
+    expect(dialog.textContent).toContain("already exists");
+    expect(terminologyRecord).toHaveBeenLastCalledWith("god", ["தேவன்"], [], false, { allowedAlternatives: [], inflectedForms: {}, matchMode: "exact" });
+    // Nothing replaced yet, and the entry is kept for the reviewer to decide.
+    expect(screen.getByLabelText("Concept ID")).toHaveValue("god");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Keep existing" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(terminologyRecord).toHaveBeenCalledTimes(1);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Replace" }));
+    await waitFor(() => expect(terminologyRecord).toHaveBeenLastCalledWith("god", ["தேவன்"], [], true, { allowedAlternatives: [], inflectedForms: {}, matchMode: "exact" }));
+    expect(await screen.findByText(/preferred: தேவன்/)).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("edits an existing rule with its v3 fields and saves it as a replacement (termbase v3)", async () => {
+    const existing = {
+      conceptId: "god", approvedRenderings: ["இறைவன்"], allowedAlternatives: ["கடவுள்"],
+      rejectedRenderings: ["தேவன்"], status: "approved", provenance: "human",
+      modifiedTimestamp: "2026-09-23T05:24:44.736Z",
+      inflectedForms: { "தேவன்": ["தேவனே"] }, matchMode: "exact" as const,
+    };
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [existing] });
+    terminologyRecord.mockResolvedValue({ rules: [{ ...existing, matchMode: "prefix" }] });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    expect(await screen.findByText(/தேவன் → தேவனே/)).toBeInTheDocument();
+    expect(screen.getByText(/allowed: கடவுள்/)).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Concept ID")).toHaveValue("god");
+    expect(screen.getByLabelText("Inflected forms of a rejected rendering")).toHaveValue("தேவன்: தேவனே");
+    await fireEvent.click(screen.getByRole("checkbox"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(terminologyRecord).toHaveBeenLastCalledWith(
+      "god", ["இறைவன்"], ["தேவன்"], true,
+      { allowedAlternatives: ["கடவுள்"], inflectedForms: { "தேவன்": ["தேவனே"] }, matchMode: "prefix" },
+    ));
+    expect(await screen.findByText(/also with case endings/)).toBeInTheDocument();
+  });
+
+  it("lists house style with provenance and evidence, and removes, accepts and dismisses (layered-rules 6.3/6.4)", async () => {
+    const learned = {
+      scope: "word-in-book", ruleId: "ta-irv/sandhi.vallinam.demonstrative", word: "அந்த தேசம்", list: "",
+      provenance: "learned", state: "active", imported: false, key: "k1", modifiedTimestamp: "t",
+      evidence: [{ chapter: "1", verse: "1", decisionId: "a" }, { chapter: "1", verse: "2", decisionId: "b" },
+                 { chapter: "1", verse: "3", decisionId: "c" }],
+    };
+    const proposal = { scope: "word-in-project", ruleId: learned.ruleId, word: learned.word, reason: "learned as house style in 2 books" };
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    housestyleList.mockResolvedValue({ entries: [learned], proposals: [proposal], thresholds: { learnIgnores: 3 } });
+    housestyleSetState.mockResolvedValue({ entries: [{ ...learned, state: "removed" }], proposals: [], thresholds: {}, entry: learned });
+    housestyleRecord.mockResolvedValue({ entries: [learned], proposals: [], thresholds: {}, entry: learned });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+
+    expect(await screen.findByText(/“அந்த தேசம்” for ta-irv\/sandhi.vallinam.demonstrative · word in book · 3 evidence/)).toBeInTheDocument();
+    expect(screen.getByText("learned")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(housestyleRecord).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "word-in-project", word: "அந்த தேசம்", state: "active" })));
+    await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(housestyleSetState).toHaveBeenCalledWith("k1", "removed"));
+    expect(await screen.findByText(/No project house style recorded yet/)).toBeInTheDocument();
+  });
+
+  it("shows the pack's bundled seed, and Remove records this project's own removed entry", async () => {
+    const seed = { scope: "word-in-project", ruleId: "", word: "சேத்து", list: "properNouns", provenance: "curated",
+      state: "active", imported: false, key: "word-in-project||சேத்து|properNouns", modifiedTimestamp: "",
+      evidence: [{ chapter: "4", verse: "24", decisionId: "" }] };
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    housestyleList.mockResolvedValue({ entries: [], seed: [seed], proposals: [], thresholds: { learnIgnores: 3 } });
+    housestyleRecord.mockResolvedValue({ entries: [{ ...seed, state: "removed" }], seed: [], proposals: [], thresholds: {}, entry: seed });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    expect(await screen.findByText(/proper noun “சேத்து” · from the language pack's reviewed house style/)).toBeInTheDocument();
+    expect(screen.getByText("bundled")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(housestyleRecord).toHaveBeenCalledWith({ scope: "word-in-project", ruleId: "",
+      word: "சேத்து", list: "properNouns", provenance: "curated", state: "removed" }));
+  });
+
+  it("adds a curated proper noun to the house-style list", async () => {
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    housestyleRecord.mockResolvedValue({ entries: [], proposals: [], thresholds: {}, entry: {} });
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    await screen.findByText(/No terminology rules recorded/);
+    await fireEvent.input(screen.getByLabelText(/Add a proper noun/), { target: { value: "மோவாப்" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add name" }));
+    await waitFor(() => expect(housestyleRecord).toHaveBeenCalledWith(
+      { scope: "word-in-book", list: "properNouns", word: "மோவாப்", provenance: "curated" }));
+  });
+
+  it("shows the RPC's validation error instead of silently doing nothing", async () => {
+    project.set(minimalProject());
+    terminologyList.mockResolvedValue({ rules: [] });
+    terminologyRecord.mockRejectedValue(new Error("At least one approved, allowed, or rejected rendering is required."));
+    render(SettingsModal, { props: { initialPane: "terminology", onClose: vi.fn() } });
+    await screen.findByText(/No terminology rules recorded/);
+
+    await fireEvent.input(screen.getByLabelText("Concept ID"), { target: { value: "god" } });
+    await fireEvent.input(screen.getByLabelText("Preferred rendering(s)"), { target: { value: "இறைவன்" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+
+    expect(await screen.findByText(/At least one approved, allowed, or rejected rendering is required/)).toBeInTheDocument();
   });
 });

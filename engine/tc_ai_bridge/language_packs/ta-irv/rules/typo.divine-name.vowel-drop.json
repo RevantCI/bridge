@@ -1,0 +1,146 @@
+{
+ "id": "typo.divine-name.vowel-drop",
+ "version": 1,
+ "category": "typo",
+ "severity": "high",
+ "confidence": "high",
+ "inline": false,
+ "title": {
+  "ta": "யெகோவா — நெடில் விடுபட்டது",
+  "en": "Divine name: dropped long vowel"
+ },
+ "message": {
+  "en": "\"{span}\" drops the ா of யெகோவா; \"{fix}\" is expected. Verify before editing."
+ },
+ "rationale": "யெகோவா keeps its long ா before the case ending",
+ "match": {
+  "type": "regex",
+  "on": "visible",
+  "pattern": "யெகோவவ"
+ },
+ "fix": {
+  "type": "replace",
+  "text": "யெகோவாவ"
+ },
+ "provenance": "Known IRV defect shape carried over from 14 books of Round 2. IRV: யெகோவவ 11, யெகோவாவ 3,488.",
+ "examples": {
+  "incorrect": [
+   {
+    "text": "அணிந்து கொண்டு, யெகோவவுடைய ஆலயத்தில் போய்,",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "2KI 19:1 (also in the review reports)"
+   },
+   {
+    "text": "நீர் சொன்ன யெகோவவுடைய வார்த்தை நல்லதுதான்",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "2KI 20:19 (also in the review reports)"
+   },
+   {
+    "text": "ஆ யெகோவவே, நான் உமக்கு",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "2KI 20:3 (also in the review reports)"
+   },
+   {
+    "text": "நாளிலே நீ யெகோவவுடைய ஆலயத்திற்குப் போவாய்.",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "2KI 20:5 (also in the review reports)"
+   },
+   {
+    "text": "யெகோவவுடைய ஆலயத்தின் இரண்டு",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "2KI 21:5 (also in the review reports)"
+   },
+   {
+    "text": "இல்க்கியாவினிடத்தில் போய், யெகோவவுடைய ஆலயத்திற்குக் கொண்டு",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "2KI 22:4 (also in the review reports)"
+   },
+   {
+    "text": "திருப்பிக் கொண்டு, யெகோவவை நோக்கி:",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "2KI 20:2 (also in the review reports)"
+   },
+   {
+    "text": "அப்புறம் போகிறதற்குமுன்னே, யெகோவவுடைய வார்த்தை அவனுக்கு",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "2KI 20:4 (also in the review reports)"
+   },
+   {
+    "text": "நாளிலே நான் யெகோவவுடைய ஆலயத்திற்குப் போவதற்கும்",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "2KI 20:8 (also in the review reports)"
+   },
+   {
+    "text": "நம்மேல் பற்றியெரிந்த யெகோவவுடைய கடுங்கோபம் பெரியது",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "2KI 22:13 (also in the review reports)"
+   },
+   {
+    "text": "ஆபிரகாமின் தேவனாயிருக்கிற யெகோவவை ஸ்தோத்திரித்தேன்.",
+    "span": "யெகோவவ",
+    "fix": "யெகோவாவ",
+    "origin": "GEN 24:48 (also in the review reports)"
+   }
+  ],
+  "correct": [
+   {
+    "text": "தேவனாகிய யெகோவாவுடைய சத்தத்தை",
+    "origin": "GEN 3:8 (correct form)"
+   },
+   {
+    "text": "மட்டும் யெகோவாவுக்கு அருகில்",
+    "origin": "EXO 24:2 (correct form)"
+   },
+   {
+    "text": "செய்யுங்கள்; யெகோவாவுடைய மகிமை",
+    "origin": "LEV 9:6 (correct form)"
+   },
+   {
+    "text": "மோசே யெகோவாவை நோக்கி:",
+    "origin": "NUM 11:11 (correct form)"
+   },
+   {
+    "text": "அவரவர் யெகோவாவுடைய சமுகத்தில்",
+    "origin": "NUM 32:29 (correct form)"
+   },
+   {
+    "text": "தேவனாகிய யெகோவாவை நோக்கிக்",
+    "origin": "DEU 26:7 (correct form)"
+   },
+   {
+    "text": "நீங்கள் யெகோவாவை விட்டு,",
+    "origin": "JOS 24:20 (correct form)"
+   },
+   {
+    "text": "யெகோவாவுடைய பெட்டியையும்,",
+    "origin": "1SA 6:11 (correct form)"
+   },
+   {
+    "text": "சேனைகளின் யெகோவாவாக இருக்கிற",
+    "origin": "2SA 7:27 (correct form)"
+   },
+   {
+    "text": "அவன் யெகோவாவின் பார்வைக்குத்",
+    "origin": "1KI 16:19 (correct form)"
+   },
+   {
+    "text": "வரச்செய்த யெகோவாவுக்கே பயந்து,",
+    "origin": "2KI 17:36 (correct form)"
+   },
+   {
+    "text": "தேவனாகிய யெகோவாவின் கற்பனைகளையெல்லாம்",
+    "origin": "1CH 28:8 (correct form)"
+   }
+  ]
+ }
+}

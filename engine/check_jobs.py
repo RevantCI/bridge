@@ -15,6 +15,7 @@ from typing import Any, Callable, Optional
 
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
+LANGUAGE_QA_CHECK = "languageQa"
 
 
 class CheckJobError(RuntimeError):
@@ -131,6 +132,12 @@ class CheckJobManager:
         thread.start()
         return job.snapshot()
 
+    def active(self) -> bool:
+        """True while a job is queued, running or cancelling."""
+        with self._lock:
+            job = self._jobs.get(self._active_job_id or "")
+            return job is not None and job.state not in TERMINAL_STATES
+
     def status(self, job_id: str = "") -> dict[str, Any]:
         with self._lock:
             resolved_id = job_id or self._active_job_id or ""
@@ -170,6 +177,12 @@ class CheckJobManager:
             stages.append(("tN · tW · Alignment", local or ["local"]))
         if any(c in checks for c in ("greekroom", "wildebeest")):
             stages.append(("QA", ["greekroom"]))
+        # Language QA findings are not QaFindings: the stage returns
+        # {"findings": [...], "decided": {id: decision}} and the verse result
+        # carries it under "languageQa", so every reader of "findings" keeps
+        # getting QaFinding dicts only.
+        if LANGUAGE_QA_CHECK in checks:
+            stages.append(("Language QA", [LANGUAGE_QA_CHECK]))
         return stages
 
     @staticmethod
@@ -220,6 +233,7 @@ class CheckJobManager:
                         return
                     key = f"{chapter}:{verse}"
                     findings: list[dict[str, Any]] = []
+                    language_qa: Optional[dict[str, Any]] = None
                     verse_error: Optional[str] = None
                     for label, stage_checks in stages:
                         if self._cancelled(job):
@@ -229,7 +243,11 @@ class CheckJobManager:
                             job.current_verse = verse
                             job.current_stage = label
                         try:
-                            findings.extend(run_stage(chapter, verse, stage_checks))
+                            produced = run_stage(chapter, verse, stage_checks)
+                            if stage_checks == [LANGUAGE_QA_CHECK]:
+                                language_qa = produced  # type: ignore[assignment]
+                            else:
+                                findings.extend(produced)
                         except Exception as exc:  # one verse must not abort the whole book
                             verse_error = str(exc)
                         finally:
@@ -247,6 +265,8 @@ class CheckJobManager:
                             "findings": findings,
                             "error": verse_error,
                         }
+                        if language_qa is not None:
+                            job.results[key]["languageQa"] = language_qa
 
             with job.lock:
                 failed = [r for r in job.results.values() if r.get("status") == "failed"]

@@ -17,7 +17,7 @@ import type {
 import type { TriageVerdict } from "../types/finding";
 
 export const CATEGORY_ORDER: ReportCategory[] = [
-  "translationNotes", "translationWords", "alignment", "greekRoom", "aiReview",
+  "translationNotes", "translationWords", "alignment", "greekRoom", "languageQa", "aiReview",
 ];
 
 export const CATEGORY_LABELS: Record<ReportCategory, string> = {
@@ -26,6 +26,7 @@ export const CATEGORY_LABELS: Record<ReportCategory, string> = {
   alignment: "Alignment",
   greekRoom: "Greek Room",
   aiReview: "AI review",
+  languageQa: "Language QA",
 };
 
 export const CATEGORY_LONG_LABELS: Record<ReportCategory, string> = {
@@ -34,6 +35,7 @@ export const CATEGORY_LONG_LABELS: Record<ReportCategory, string> = {
   alignment: "Word alignment",
   greekRoom: "Greek Room (Wildebeest, USFM, Names, local)",
   aiReview: "AI review observations",
+  languageQa: "Language QA (offline Tamil text checks)",
 };
 
 export const SEVERITY_ORDER: ReportSeverity[] = ["critical", "high", "medium", "low", "info"];
@@ -371,6 +373,13 @@ export const EXPORT_COLUMNS: ReportExportColumn[] = [
   { key: "selection", label: "Selection" },
   { key: "note", label: "Reviewer note" },
   { key: "decidedAt", label: "Decided at" },
+  { key: "languageQaCategory", label: "Language QA category" },
+  { key: "ruleId", label: "Rule" },
+  { key: "packVersion", label: "Pack version" },
+  { key: "layer", label: "Layer" },
+  { key: "confidence", label: "Confidence" },
+  { key: "suggestions", label: "Suggestions" },
+  { key: "houseStyleSuppressed", label: "House style suppressed" },
   { key: "triageVerdict", label: "AI triage" },
   { key: "triageConfidence", label: "AI triage confidence" },
   { key: "triageReason", label: "AI triage reason" },

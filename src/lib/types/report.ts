@@ -10,7 +10,7 @@ import type { TriageRecord } from "./finding";
 export type { TriageRecord };
 
 export type ReportCategory =
-  | "greekRoom" | "translationNotes" | "translationWords" | "alignment" | "aiReview";
+  | "greekRoom" | "translationNotes" | "translationWords" | "alignment" | "aiReview" | "languageQa";
 
 export type ReportSeverity = "critical" | "high" | "medium" | "low" | "info";
 export type ReportResolution = "resolved" | "unresolved";
@@ -60,6 +60,16 @@ export interface ReportRow {
    * key — so an untriaged project renders exactly as it always did.
    */
   triageHash: string;
+  /** Language QA rows only (empty elsewhere): the finding's own category
+   * (typo, sandhi, ...), rule, pack version, layer, confidence, suggestions
+   * joined with " | ", and "yes" when house style suppressed it. */
+  languageQaCategory: string;
+  ruleId: string;
+  packVersion: string;
+  layer: string;
+  confidence: string;
+  suggestions: string;
+  houseStyleSuppressed: string;
 }
 
 export type CheckState = "not_run" | "partial" | "complete" | "unavailable";
@@ -111,12 +121,28 @@ export interface AiReviewCheckSummary {
   percent: number;
 }
 
+/** What the last check job's Language QA stage reported, with current statuses.
+ * Advisory: not a scored family. */
+export interface LanguageQaCheckSummary {
+  state: CheckState;
+  total: number;
+  open: number;
+  resolved: number;
+  /** Open findings with severity high and confidence high: these block the publication gate. */
+  blocking: number;
+  openMedium: number;
+  byCategory: Record<string, { total: number; open: number }>;
+  percent: number;
+}
+
 export interface BookChecks {
   greekRoom: GreekRoomCheckSummary;
   translationNotes: HelpsCheckSummary;
   translationWords: HelpsCheckSummary;
   alignment: AlignmentCheckSummary;
   aiReview: AiReviewCheckSummary;
+  /** Absent in a report from an engine older than layered-rules Phase 4.2. */
+  languageQa?: LanguageQaCheckSummary;
 }
 
 export interface CheckResults {

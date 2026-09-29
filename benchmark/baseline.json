@@ -1,0 +1,163 @@
+{
+ "packVersion": "language-qa-7+ta-irv@1.0.0",
+ "books": [
+  "1ch",
+  "1ki",
+  "1sa",
+  "2ch",
+  "2ki",
+  "2sa",
+  "deu",
+  "exo",
+  "ezr",
+  "gen",
+  "jdg",
+  "jos",
+  "lev",
+  "num",
+  "php",
+  "psa",
+  "rut"
+ ],
+ "rules": {
+  "common/punctuation.repeated": {
+   "findings": 1,
+   "tp_strict": 1,
+   "fp_strict": 0,
+   "precision_strict": 1.0,
+   "precision_lenient": 1.0,
+   "inline": false
+  },
+  "common/unicode.invisible": {
+   "findings": 1,
+   "tp_strict": 1,
+   "fp_strict": 0,
+   "precision_strict": 1.0,
+   "precision_lenient": 1.0,
+   "inline": false
+  },
+  "ta-irv/integrity.space-before-note-end": {
+   "findings": 74,
+   "tp_strict": 55,
+   "fp_strict": 19,
+   "precision_strict": 0.7432,
+   "precision_lenient": 0.7432,
+   "inline": false
+  },
+  "ta-irv/lexicon.known-misspelling": {
+   "findings": 140,
+   "tp_strict": 130,
+   "fp_strict": 10,
+   "precision_strict": 0.9286,
+   "precision_lenient": 0.9286,
+   "inline": false
+  },
+  "ta-irv/lexicon.rare-near-common": {
+   "findings": 76,
+   "tp_strict": 2,
+   "fp_strict": 74,
+   "precision_strict": 0.0263,
+   "precision_lenient": 0.0263,
+   "inline": false
+  },
+  "ta-irv/sandhi.clitic.fused": {
+   "findings": 4,
+   "tp_strict": 0,
+   "fp_strict": 4,
+   "precision_strict": 0.0,
+   "precision_lenient": 0.0,
+   "inline": false
+  },
+  "ta-irv/sandhi.vallinam.accusative": {
+   "findings": 500,
+   "tp_strict": 275,
+   "fp_strict": 225,
+   "precision_strict": 0.55,
+   "precision_lenient": 0.552,
+   "inline": true
+  },
+  "ta-irv/sandhi.vallinam.dative": {
+   "findings": 396,
+   "tp_strict": 197,
+   "fp_strict": 199,
+   "precision_strict": 0.4975,
+   "precision_lenient": 0.4975,
+   "inline": true
+  },
+  "ta-irv/sandhi.vallinam.demonstrative": {
+   "findings": 80,
+   "tp_strict": 33,
+   "fp_strict": 47,
+   "precision_strict": 0.4125,
+   "precision_lenient": 0.55,
+   "inline": true
+  },
+  "ta-irv/sandhi.vallinam.manner-adverb": {
+   "findings": 13,
+   "tp_strict": 2,
+   "fp_strict": 11,
+   "precision_strict": 0.1538,
+   "precision_lenient": 0.1538,
+   "inline": true
+  },
+  "ta-irv/tamil.repeated-word": {
+   "findings": 33,
+   "tp_strict": 0,
+   "fp_strict": 33,
+   "precision_strict": 0.0,
+   "precision_lenient": 0.0,
+   "inline": false
+  },
+  "ta-irv/typo.divine-name.dative-stem": {
+   "findings": 13,
+   "tp_strict": 9,
+   "fp_strict": 4,
+   "precision_strict": 0.6923,
+   "precision_lenient": 0.6923,
+   "inline": false
+  },
+  "ta-irv/typo.divine-name.vowel-drop": {
+   "findings": 11,
+   "tp_strict": 11,
+   "fp_strict": 0,
+   "precision_strict": 1.0,
+   "precision_lenient": 1.0,
+   "inline": false
+  },
+  "ta-irv/typo.suffix.dropped-tha": {
+   "findings": 2,
+   "tp_strict": 2,
+   "fp_strict": 0,
+   "precision_strict": 1.0,
+   "precision_lenient": 1.0,
+   "inline": false
+  }
+ },
+ "buckets": {
+  "typo": {
+   "recall_strict": 0.2087,
+   "recall_lenient": 0.206,
+   "rows_positive": 839
+  },
+  "sandhi": {
+   "recall_strict": 0.2834,
+   "recall_lenient": 0.2848,
+   "rows_positive": 1877
+  },
+  "punctuation": {
+   "recall_strict": 0.18,
+   "recall_lenient": 0.18,
+   "rows_positive": 72
+  },
+  "name": {
+   "recall_strict": 0.0,
+   "recall_lenient": 0.0,
+   "rows_positive": 528
+  },
+  "usfm": {
+   "recall_strict": 0.2443,
+   "recall_lenient": 0.2433,
+   "rows_positive": 680
+  }
+ }
+}

@@ -67,8 +67,9 @@ describe("aggregates", () => {
   it("breaks issues down by category in the legend order", () => {
     const breakdown = categoryBreakdown(rows);
     expect(breakdown.map((b) => b.category)).toEqual([
-      "translationNotes", "translationWords", "alignment", "greekRoom", "aiReview",
+      "translationNotes", "translationWords", "alignment", "greekRoom", "languageQa", "aiReview",
     ]);
+    expect(breakdown.find((b) => b.category === "languageQa")?.total).toBe(0);
     expect(breakdown.find((b) => b.category === "translationNotes")).toEqual({
       category: "translationNotes", total: 1, resolved: 1, unresolved: 0,
     });

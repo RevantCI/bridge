@@ -194,6 +194,13 @@ def _flatten_alignment_markup(value: str) -> str:
     return value.strip()
 
 
+def imported_verse_text(raw_verse: str) -> str:
+    """The verse text an import writes to chapter JSON for one parsed verse:
+    alignment markup flattened, every other inline USFM kept. The Language QA
+    benchmark uses it so it scans exactly what an imported project holds."""
+    return _flatten_alignment_markup(raw_verse)
+
+
 def _target_word_bank(text: str) -> list[dict[str, Any]]:
     words = whitespace_tokens(text)
     totals = Counter(words)
@@ -934,6 +941,33 @@ def _collection_projects(project_root: Path) -> list[dict[str, Any]]:
 def collection_projects(project_root: str | Path) -> list[dict[str, Any]]:
     """Public reader used by project.open to restore a collection after restart."""
     return _collection_projects(Path(project_root).resolve())
+
+
+def collection_qa_runs(project_root: str | Path) -> dict[str, dict[str, Any]]:
+    """bookId -> the last recorded collection QA run for it (layered-rules 4.4),
+    from this project's `.bridge/collection.json` `qaRuns[]`."""
+    data = _read_json(Path(project_root).resolve() / _COLLECTION_PATH)
+    runs = data.get("qaRuns") if isinstance(data.get("qaRuns"), list) else []
+    return {str(r.get("bookId")): r for r in runs if isinstance(r, dict) and r.get("bookId")}
+
+
+def record_collection_qa_run(project_root: str | Path, entry: dict[str, Any],
+                             final_stage: dict[str, Any] | None = None) -> None:
+    """Upsert one book's run into `qaRuns[]` (one entry per book, the latest),
+    and optionally the whole-collection stage's summary under `qaFinalStage`.
+    Every other key of the file is kept as it was; the write is atomic."""
+    path = Path(project_root).resolve() / _COLLECTION_PATH
+    data = _read_json(path) if path.is_file() else {}
+    if not isinstance(data, dict):
+        data = {}
+    if entry:
+        runs = [r for r in (data.get("qaRuns") or []) if isinstance(r, dict) and r.get("bookId") != entry.get("bookId")]
+        runs.append(dict(entry))
+        data["qaRuns"] = runs
+    if final_stage is not None:
+        data["qaFinalStage"] = final_stage
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(path, data)
 
 
 def materialize_lazy_project(project_root: str | Path) -> bool:

@@ -1,0 +1,371 @@
+{
+ "packVersion": "language-qa-7+ta-irv@1.1.0",
+ "rounds": [
+  "2026-09-28",
+  "2026-09-29"
+ ],
+ "books": [
+  "1ch",
+  "1ki",
+  "1pe",
+  "1sa",
+  "1ti",
+  "2ch",
+  "2co",
+  "2ki",
+  "2sa",
+  "act",
+  "amo",
+  "dan",
+  "deu",
+  "ecc",
+  "est",
+  "exo",
+  "ezk",
+  "ezr",
+  "gen",
+  "heb",
+  "hos",
+  "isa",
+  "jas",
+  "jdg",
+  "jer",
+  "jhn",
+  "job",
+  "jon",
+  "jos",
+  "lam",
+  "lev",
+  "luk",
+  "mat",
+  "mrk",
+  "nam",
+  "neh",
+  "num",
+  "pro",
+  "psa",
+  "rev",
+  "zec"
+ ],
+ "rules": {
+  "common/spacing.extra": {
+   "labelled": 23,
+   "tp": 23,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": true,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 15,
+     "tp": 15,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 8,
+     "tp": 8,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/integrity.space-before-note-end": {
+   "labelled": 15,
+   "tp": 0,
+   "fp": 15,
+   "house": 0,
+   "precision": 0.0,
+   "inline": false,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 15,
+     "tp": 0,
+     "fp": 15,
+     "precision": 0.0
+    }
+   }
+  },
+  "ta-irv/lexicon.known-misspelling": {
+   "labelled": 47,
+   "tp": 47,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": true,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 43,
+     "tp": 43,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 4,
+     "tp": 4,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/lexicon.known-split": {
+   "labelled": 10,
+   "tp": 10,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": true,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 10,
+     "tp": 10,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/lexicon.rare-near-common": {
+   "labelled": 0,
+   "tp": 0,
+   "fp": 0,
+   "house": 0,
+   "precision": null,
+   "inline": false,
+   "rounds": {}
+  },
+  "ta-irv/sandhi.clitic.fused": {
+   "labelled": 0,
+   "tp": 0,
+   "fp": 0,
+   "house": 0,
+   "precision": null,
+   "inline": false,
+   "rounds": {}
+  },
+  "ta-irv/sandhi.compound.direction": {
+   "labelled": 25,
+   "tp": 25,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": true,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 25,
+     "tp": 25,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/sandhi.vallinam.accusative": {
+   "labelled": 76,
+   "tp": 74,
+   "fp": 2,
+   "house": 0,
+   "precision": 0.9737,
+   "inline": true,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 37,
+     "tp": 35,
+     "fp": 2,
+     "precision": 0.9459
+    },
+    "2026-09-29": {
+     "labelled": 39,
+     "tp": 39,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/sandhi.vallinam.dative": {
+   "labelled": 87,
+   "tp": 87,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": true,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 46,
+     "tp": 46,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 41,
+     "tp": 41,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/sandhi.vallinam.demonstrative": {
+   "labelled": 24,
+   "tp": 24,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": true,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 7,
+     "tp": 7,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 17,
+     "tp": 17,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/sandhi.vallinam.manner-adverb": {
+   "labelled": 21,
+   "tp": 21,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": true,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 1,
+     "tp": 1,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 20,
+     "tp": 20,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/sandhi.vallinam.wrong-consonant": {
+   "labelled": 1,
+   "tp": 1,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": true,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 1,
+     "tp": 1,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/tamil.repeated-word": {
+   "labelled": 0,
+   "tp": 0,
+   "fp": 0,
+   "house": 0,
+   "precision": null,
+   "inline": false,
+   "rounds": {}
+  },
+  "ta-irv/typo.divine-name.dative-stem": {
+   "labelled": 4,
+   "tp": 4,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 4,
+     "tp": 4,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/typo.divine-name.vowel-drop": {
+   "labelled": 5,
+   "tp": 5,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": false,
+   "rounds": {
+    "2026-09-28": {
+     "labelled": 1,
+     "tp": 1,
+     "fp": 0,
+     "precision": 1.0
+    },
+    "2026-09-29": {
+     "labelled": 4,
+     "tp": 4,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  },
+  "ta-irv/typo.suffix.dropped-tha": {
+   "labelled": 2,
+   "tp": 2,
+   "fp": 0,
+   "house": 0,
+   "precision": 1.0,
+   "inline": true,
+   "rounds": {
+    "2026-09-29": {
+     "labelled": 2,
+     "tp": 2,
+     "fp": 0,
+     "precision": 1.0
+    }
+   }
+  }
+ },
+ "recallProxies": {
+  "A_ai_rootnoun": {
+   "missed": 1,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 0.0333
+  },
+  "B_ai_baremajority": {
+   "missed": 5,
+   "missed_now_flagged": 5,
+   "still_missed_rate": 0.0
+  },
+  "D_rku_dative": {
+   "missed": 17,
+   "missed_now_flagged": 17,
+   "still_missed_rate": 0.0
+  },
+  "E_kku_exception": {
+   "missed": 5,
+   "missed_now_flagged": 5,
+   "still_missed_rate": 0.0
+  },
+  "G_marker": {
+   "missed": 2,
+   "missed_now_flagged": 2,
+   "still_missed_rate": 0.0
+  },
+  "H_demonstrative_houseform": {
+   "missed": 9,
+   "missed_now_flagged": 9,
+   "still_missed_rate": 0.0
+  },
+  "T_theva_abstain": {
+   "missed": 0,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 0.0
+  },
+  "split": {
+   "missed": 0,
+   "missed_now_flagged": 0,
+   "still_missed_rate": 0.0
+  }
+ }
+}

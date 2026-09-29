@@ -43,10 +43,17 @@ from tc_ai_bridge.tc_project import (
 from tc_ai_bridge.project_import import (
     apply_resource_materialization,
     collection_projects,
+    collection_qa_runs,
     ensure_bridge_original_language,
     import_source,
     inspect_import,
     materialize_lazy_project,
+    record_collection_qa_run,
+)
+from collection_jobs import CollectionJobConflict, CollectionJobError, CollectionJobManager, CollectionJobSpec
+from tc_ai_bridge.housestyle import (
+    LEARN_IGNORES, PREFER_USES, PROPOSE_PROJECT_BOOKS, PROPOSE_RULE_DECISIONS, PROPOSE_RULE_IGNORE_RATE,
+    HouseStyleLearner, bundled_seed, name_suggestions, project_proposals,
 )
 from tc_ai_bridge.original_language_resources import resource_inventory
 from tc_ai_bridge.lexicon_resources import lexicon_entry_for_strong, HEBREW_PREFIX_LABELS
@@ -65,6 +72,8 @@ from tc_ai_bridge.analysis_jobs import (
     AnalysisJobNotFound,
 )
 from tc_ai_bridge.local_checks import run_local_qa
+from tc_ai_bridge.language_qa import FINDING_SOURCE as LANGUAGE_QA_SOURCE, UNSPECIFIED_DECISION_SOURCE
+from tc_ai_bridge.language_qa_jobs import LanguageQaManager
 from tc_ai_bridge.workbench_repository import WorkbenchConflict, WorkbenchValidationError
 from tc_ai_bridge.alignment_engine import (
     AlignmentError, apply_proposal, make_inventory, realign, unalign_bottom,
@@ -93,7 +102,7 @@ from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_gaps
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
 from tc_ai_bridge import cross_verse_proposals, cross_verse_ai_proposals
-from tc_ai_bridge.reporting import ReportService
+from tc_ai_bridge.reporting import LANGUAGE_QA_MEDIUM_ADVISORY, ReportService, publication_gate
 from tc_ai_bridge.qa_report import (
     aggregate_qa_report,
     build_book_qa_report,
@@ -111,6 +120,7 @@ from check_jobs import (
     CheckJobManager,
     CheckJobNotFound,
     CheckJobSpec,
+    LANGUAGE_QA_CHECK,
 )
 from ai_review_jobs import (
     AIReviewJobConflict,
@@ -178,6 +188,24 @@ class _PhaseTimer:
     def summary(self) -> str:
         total = time.perf_counter() - self._start
         return f"total={total:.2f}s " + " ".join(f"{p}={s:.2f}s" for p, s in self.phases)
+
+
+def _termbase_coverage(book_id: str, rules: list[dict[str, Any]], text_map: dict[str, str]) -> dict[str, Any]:
+    """One book's termbase coverage for the collection report (Phase 4.4):
+    approved renderings the book never uses, and rejected ones still present.
+    A substring count over the verse text: Tamil attaches case endings to the
+    rendering, so a whole-token match would miss inflected uses."""
+    text = "\n".join(text_map.values())
+    issues = []
+    for rule in rules:
+        approved = [r for r in rule.get("approvedRenderings") or [] if isinstance(r, str) and r]
+        rejected = [r for r in rule.get("rejectedRenderings") or [] if isinstance(r, str) and r]
+        never_seen = [r for r in approved if r not in text]
+        still_present = [{"rendering": r, "count": text.count(r)} for r in rejected if r in text]
+        if never_seen or still_present:
+            issues.append({"conceptId": str(rule.get("conceptId") or ""),
+                           "approvedNeverSeen": never_seen, "rejectedStillPresent": still_present})
+    return {"bookId": book_id, "concepts": len(rules), "issues": issues}
 
 
 def _stable_finding_id(*, chapter: str, verse: str, engine: str,
@@ -313,6 +341,21 @@ class Methods:
     CHAPTER_VERSE_DATA = "chapter.verseData"
 
     CHECKS_START = "checks.start"
+    HOUSESTYLE_LIST = "housestyle.list"
+    HOUSESTYLE_NAME_SUGGESTIONS = "housestyle.nameSuggestions"
+    HOUSESTYLE_RECORD = "housestyle.record"
+    HOUSESTYLE_SET_STATE = "housestyle.setState"
+    HOUSESTYLE_EXPORT = "housestyle.export"
+    HOUSESTYLE_IMPORT = "housestyle.import"
+    COLLECTION_RUN_CHECKS = "collection.runChecks"
+    COLLECTION_QA_STATUS = "collection.qaStatus"
+    COLLECTION_PAUSE_CHECKS = "collection.pauseChecks"
+    COLLECTION_CANCEL_CHECKS = "collection.cancelChecks"
+    LANGUAGE_QA_STATUS = "languageQa.status"
+    LANGUAGE_QA_PAUSE = "languageQa.pause"
+    LANGUAGE_QA_INLINE = "languageQa.inline"
+    LANGUAGE_QA_HISTORY = "languageQa.history"
+    LANGUAGE_QA_VERSE = "languageQa.verse"
     CHECKS_STATUS = "checks.status"
     CHECKS_CANCEL = "checks.cancel"
     CHECKS_RETRY = "checks.retry"
@@ -347,6 +390,9 @@ class Methods:
 
     SETTINGS_GET = "settings.get"
     SETTINGS_SET = "settings.set"
+
+    TERMINOLOGY_LIST = "terminology.list"
+    TERMINOLOGY_RECORD = "terminology.record"
 
     EXPORT_ALIGNED = "export.aligned"
     EXPORT_NON_ALIGNED = "export.nonAligned"
@@ -505,6 +551,9 @@ class BridgeEngine:
         self._checker_lock = threading.RLock()
         self._import_lock = threading.Lock()
         self._check_jobs = CheckJobManager()
+        self._collection_jobs = CollectionJobManager()
+        self._housestyle_learner = HouseStyleLearner()
+        self._language_qa = LanguageQaManager()
         self._ai_review_jobs = AIReviewJobManager()
         self._analysis_jobs = AnalysisJobManager()
         self._correction_application_service: CorrectionApplicationService | None = None
@@ -634,6 +683,7 @@ class BridgeEngine:
         except ProjectIdentityError as exc:
             raise ProjectError(str(exc)) from exc
         timer.mark("register")
+        self._language_qa.unbind()
         self.project = candidate
         self.passage_semantic_runtime = None
         self._correction_application_service = None
@@ -679,6 +729,7 @@ class BridgeEngine:
             })
             timer.mark("project_info")
             _trace(f"project.open {candidate.book_id} RECOVERY_REQUIRED {timer.summary()}")
+            self._language_qa.bind(candidate, blocked_reason="Project recovery requires attention.")
             return info
         self._passage_semantic_status = {
             "available": False, "readOnly": True, "state": "UNAVAILABLE",
@@ -725,6 +776,10 @@ class BridgeEngine:
             if self.passage_semantic_runtime is not None else ""
         )
         _trace(f"project.open {candidate.book_id} {timer.summary()}{runtime_phases}")
+        self._language_qa.bind(candidate)
+        # Rebuilt from the book's decisions on first use: anything recorded
+        # while the book was closed (an import, another device) is picked up.
+        self._housestyle_learner.forget(str(candidate.path))
         return info
 
     def list_projects(self) -> dict[str, Any]:
@@ -1007,7 +1062,16 @@ class BridgeEngine:
         AIReviewJobManager's own pattern), not inline in this handler.
         """
         self._require_project()
-        return ReportService(self.project).build_book_report()
+        return ReportService(self.project, **self._report_options()).build_book_report()
+
+    def _report_options(self) -> dict[str, Any]:
+        """The publication gate's Language QA advisory threshold: open medium
+        findings above it add an advisory line (default 50)."""
+        try:
+            value = int(self.settings.data.get("language_qa_medium_advisory", LANGUAGE_QA_MEDIUM_ADVISORY))
+        except (AttributeError, TypeError, ValueError):
+            value = LANGUAGE_QA_MEDIUM_ADVISORY
+        return {"language_qa_medium_advisory": value}
 
     def _materialized_collection_books(self) -> list[ReportBook]:
         """Every book in the currently open collection whose directory exists,
@@ -1047,7 +1111,10 @@ class BridgeEngine:
         for book in books:
             materialize_lazy_project(book.path)
             reports.append(ReportService(
-                TranslationCoreProject(book.path, workspace=self.workspace, reviewer_name=self.settings.reviewer_name)
+                TranslationCoreProject(
+                    book.path, workspace=self.workspace,
+                    reviewer_name=self.settings.reviewer_name,
+                ), **self._report_options(),
             ).build_book_report())
         return ReportService.build_collection_report(reports)
 
@@ -3552,7 +3619,7 @@ class BridgeEngine:
             raise CheckJobError(f"Unknown chapter(s): {', '.join(unknown)}")
 
         selected_checks = tuple(dict.fromkeys(checks or ["local", "greekroom"]))
-        supported = {"local", "tN", "tW", "alignment", "usfm", "greekroom", "wildebeest"}
+        supported = {"local", "tN", "tW", "alignment", "usfm", "greekroom", "wildebeest", LANGUAGE_QA_CHECK}
         invalid = [name for name in selected_checks if name not in supported]
         if invalid:
             raise CheckJobError(f"Unknown check type(s): {', '.join(invalid)}")
@@ -3567,9 +3634,20 @@ class BridgeEngine:
         return self._start_check_job_from_spec(spec, project)
 
     def _start_check_job_from_spec(
-        self, spec: CheckJobSpec, project: TranslationCoreProject,
+        self, spec: CheckJobSpec, project: TranslationCoreProject, *,
+        language_qa: Optional[LanguageQaManager] = None,
+        check_jobs: Optional[CheckJobManager] = None,
     ) -> dict[str, Any]:
-        def run_stage(chapter: str, verse: str, stage_checks: list[str]) -> list[dict[str, Any]]:
+        """`language_qa`/`check_jobs` default to the open project's own. The
+        collection runner (Phase 4.4) passes its own for a book that is not the
+        open one, so the editor's Language QA and check job are never touched."""
+        language_qa = language_qa or self._language_qa
+        check_jobs = check_jobs or self._check_jobs
+
+        def run_stage(chapter: str, verse: str, stage_checks: list[str]) -> Any:
+            if stage_checks == [LANGUAGE_QA_CHECK]:
+                # The book pass ran in the preflight; this verse's share of it.
+                return language_qa.verse_results(chapter, verse)
             with self._checker_lock:
                 return [
                     finding.to_dict()
@@ -3579,8 +3657,20 @@ class BridgeEngine:
                 ]
 
         preflight = None
-        if any(name in spec.checks for name in ("local", "tN", "tW", "usfm", "names")):
+        if any(name in spec.checks for name in ("local", "tN", "tW", "usfm", "names", LANGUAGE_QA_CHECK)):
             def run_preflight(cancel_event: threading.Event) -> None:
+                if LANGUAGE_QA_CHECK in spec.checks:
+                    # The authoritative Language QA pass: the same scan and cache
+                    # as live editing, on this job's thread. The wordlist audit
+                    # needs the whole book, so even a chapter job scans the book;
+                    # unchanged verses come from the persisted cache. Serialised
+                    # with the background worker by Language QA's own pass lock,
+                    # not _checker_lock: the dispatcher takes _checker_lock for
+                    # verse.runChecks, and must not wait on a book pass.
+                    if language_qa.run_pass(cancel_event) is None and not cancel_event.is_set():
+                        raise CheckJobError("Language QA could not check this book.")
+                    if cancel_event.is_set():
+                        return
                 with self._checker_lock:
                     if any(name in spec.checks for name in ("local", "tN", "tW")):
                         self._ensure_resource_indexes(project)
@@ -3602,10 +3692,176 @@ class BridgeEngine:
                         self._names_findings_for_book(project)
             preflight = run_preflight
 
-        return self._check_jobs.start(
+        return check_jobs.start(
             spec, run_stage=run_stage, preflight=preflight,
             on_complete=lambda job: self._on_check_job_complete(project, job),
         )
+
+    # -- collection-level QA runs (layered-rules Phase 4.4) -------------------
+
+    def start_collection_checks(self, *, checks: Optional[list[str]] = None, force: bool = False) -> dict[str, Any]:
+        """collection.runChecks: every book of the open collection, in
+        `.bridge/collection.json` order, each through the same check job a
+        "Run whole book" starts. Books whose recorded run still matches their
+        chapter files are skipped (resumable), unless `force`."""
+        self._require_project()
+        if self._check_jobs.active():
+            raise CheckJobConflict("Wait for the running check to finish.")
+        selected = tuple(dict.fromkeys(checks or ["local", "greekroom", LANGUAGE_QA_CHECK]))
+        supported = {"local", "tN", "tW", "alignment", "usfm", "greekroom", "wildebeest", LANGUAGE_QA_CHECK}
+        invalid = [name for name in selected if name not in supported]
+        if invalid:
+            raise CheckJobError(f"Unknown check type(s): {', '.join(invalid)}")
+        collection_path = str(self.project.path)
+        siblings = collection_projects(collection_path) or [{
+            "path": collection_path, "bookId": self.project.book_id,
+            "bookName": self.project.summary.book_name, "lazy": False,
+        }]
+        books = tuple(
+            {"path": str(entry.get("path") or ""), "bookId": str(entry.get("bookId") or ""),
+             "bookName": str(entry.get("bookName") or "")}
+            for entry in siblings if Path(str(entry.get("path") or "")).is_dir()
+        )
+        spec = CollectionJobSpec(
+            collection_path=collection_path, books=books, checks=selected,
+            previous_runs=collection_qa_runs(collection_path), force=bool(force),
+        )
+        return self._collection_jobs.start(
+            spec,
+            run_book=lambda book, cancel: self._run_collection_book(book, selected, cancel),
+            record_run=lambda entry: record_collection_qa_run(collection_path, entry),
+            final_stage=lambda done, cancel: self._collection_final_stage(collection_path, done, cancel),
+        )
+
+    def _run_collection_book(self, book: dict[str, Any], checks: tuple[str, ...],
+                             cancel_event: threading.Event) -> dict[str, Any]:
+        """One book, end to end, on the collection runner's thread: materialize
+        a lazy sibling, run the whole-book check job, persist (the job's own
+        completion hook writes the rollup and snapshots), then let go of it."""
+        path = str(book["path"])
+        materialize_lazy_project(path)
+        project = TranslationCoreProject(Path(path), workspace=self.workspace)
+        chapters = project.chapters()
+        spec = CheckJobSpec(scope="book", project_path=path, chapters=tuple(chapters),
+                            chapter_verses={ch: list(project.verses(ch)) for ch in chapters}, checks=checks)
+        language_qa = LanguageQaManager(debounce=0, yield_seconds=0) if LANGUAGE_QA_CHECK in checks else None
+        manager = CheckJobManager()
+        try:
+            if language_qa is not None:
+                language_qa.bind(project, autostart=False)
+            snapshot = self._start_check_job_from_spec(spec, project, language_qa=language_qa, check_jobs=manager)
+            while snapshot["state"] not in {"succeeded", "failed", "cancelled"}:
+                if cancel_event.is_set():
+                    manager.cancel(snapshot["jobId"])
+                # A snapshot deep-copies every verse's results; poll gently.
+                time.sleep(0.2)
+                snapshot = manager.status(snapshot["jobId"])
+        finally:
+            if language_qa is not None:
+                language_qa.unbind()
+        by_category: dict[str, int] = {}
+        for result in snapshot["results"].values():
+            for finding in result.get("findings") or []:
+                if finding.get("status") == "open":
+                    category = str(finding.get("category") or "other")
+                    by_category[category] = by_category.get(category, 0) + 1
+            open_lqa = len((result.get("languageQa") or {}).get("findings") or [])
+            if open_lqa:
+                by_category["languageQa"] = by_category.get("languageQa", 0) + open_lqa
+        return {"state": snapshot["state"], "jobId": snapshot["jobId"], "error": snapshot.get("error"),
+                "findingsByCategory": by_category, "checkedVerses": snapshot.get("completedVerses", 0)}
+
+    def _collection_final_stage(self, collection_path: str, books: list[dict[str, Any]],
+                                cancel_event: threading.Event) -> dict[str, Any]:
+        """The passes that only make sense across the whole collection, run
+        once after every book: a termbase coverage report and cross-book name
+        consistency. Reports only; nothing here writes Scripture."""
+        stage: dict[str, Any] = {"completedAt": None, "termbaseCoverage": [], "crossBookNames": None,
+                                 "houseStylePropagation": None}
+        texts: dict[str, dict[str, str]] = {}
+        styles: list[tuple[str, list[dict[str, Any]], list[dict[str, Any]]]] = []
+        for book in books:
+            if cancel_event.is_set():
+                return {**stage, "cancelled": True}
+            project = TranslationCoreProject(Path(book["path"]), workspace=self.workspace)
+            texts[book["bookId"]] = self._book_verse_text_map(project)
+            stage["termbaseCoverage"].append(_termbase_coverage(book["bookId"], project.terminology_rules(),
+                                                                texts[book["bookId"]]))
+            styles.append((book["bookId"], project.housestyle_entries(), project.project_qa_decisions()))
+        # House-style propagation (6.4): proposals only, never applied here.
+        proposals = project_proposals(styles)
+        stage["houseStylePropagation"] = {
+            "available": True, "proposals": proposals,
+            "reason": f"{len(proposals)} proposal(s); accept or dismiss them in Settings → Terminology → House style."}
+        if not cancel_event.is_set() and len(texts) > 1:
+            stage["crossBookNames"] = self._cross_book_names(texts)
+        stage["completedAt"] = datetime.now(timezone.utc).isoformat()
+        try:
+            record_collection_qa_run(collection_path, {}, final_stage={
+                "completedAt": stage["completedAt"],
+                "termbaseCoverage": stage["termbaseCoverage"],
+                "crossBookNames": (stage["crossBookNames"] or {}).get("summary"),
+            })
+        except Exception as exc:
+            stage["recordError"] = str(exc)
+        return stage
+
+    def _cross_book_names(self, texts: dict[str, dict[str, str]]) -> dict[str, Any]:
+        """The names adapter over the union of every book's tokens: a spelling
+        that is the minority form across books, which no single book shows."""
+        occurrences: dict[str, list[tuple[str, str]]] = {}
+        for book_id, text_map in texts.items():
+            for ref, text in text_map.items():
+                chapter, _, verse = ref.partition(":")
+                for token in whitespace_tokens(text):
+                    occurrences.setdefault(token, []).append((f"{book_id.upper()} {chapter}", verse))
+        target = self.project.manifest.get("target_language", {}) if self.project else {}
+        lang_code = str(target.get("id") or "") if isinstance(target, dict) else ""
+        try:
+            findings = self.greek_room.check_book_names(
+                project_id="collection", book_id="collection", lang_code=lang_code,
+                token_occurrences=occurrences)
+        except Exception as exc:
+            return {"available": False, "error": str(exc), "summary": {"available": False}}
+        rows = [{"explanation": f.explanation, "originalText": f.original_text,
+                 "suggestedReplacement": f.suggested_replacement,
+                 "evidence": [{"label": e.label, "value": e.value} for e in f.evidence][:6]}
+                for f in findings[:500]]
+        return {"available": True, "findings": rows,
+                "summary": {"available": True, "count": len(findings)}}
+
+    def collection_check_status(self, job_id: str = "") -> dict[str, Any]:
+        """The run's snapshot; with no run in this session, an idle one built
+        from the recorded `qaRuns[]`, so the Collection QA screen shows each
+        book's last run after a restart."""
+        try:
+            return self._collection_jobs.status(job_id)
+        except CollectionJobError:
+            if job_id:
+                raise
+        self._require_project()
+        collection_path = str(self.project.path)
+        runs = collection_qa_runs(collection_path)
+        siblings = collection_projects(collection_path) or [{
+            "path": collection_path, "bookId": self.project.book_id,
+            "bookName": self.project.summary.book_name}]
+        books = []
+        for entry in siblings:
+            run = runs.get(str(entry.get("bookId") or "")) or {}
+            books.append({
+                "bookId": str(entry.get("bookId") or ""), "bookName": str(entry.get("bookName") or ""),
+                "path": str(entry.get("path") or ""),
+                "state": run.get("state") or "pending", "elapsedSeconds": run.get("elapsedSeconds"),
+                "jobId": run.get("jobId"), "findingsByCategory": run.get("findingsByCategory") or {},
+                "checkedVerses": int(run.get("checkedVerses") or 0), "error": None,
+                "completedAt": run.get("completedAt"),
+            })
+        return {"jobId": "", "state": "idle", "paused": False, "collectionPath": collection_path,
+                "checks": [], "totalBooks": len(books),
+                "completedBooks": sum(1 for b in books if b["state"] == "done"),
+                "percent": 0, "currentBook": None, "books": books, "finalStage": None,
+                "elapsedSeconds": 0, "estimatedRemainingSeconds": None, "error": None,
+                "createdAt": None, "finishedAt": None}
 
     def _on_check_job_complete(self, project: TranslationCoreProject, job: Any) -> None:
         """Rebuilds the progress rollup's entries for exactly the chapters
@@ -3622,6 +3878,9 @@ class BridgeEngine:
             # dashboard reads, and the findings themselves for the project QA
             # report (qa_report.py), which has nothing else to read them from.
             snapshot_by_chapter: dict[str, dict[str, list[dict[str, Any]]]] = {}
+            # The Language QA stage's findings, open and decided, for the
+            # reports (qa_report, reporting, the exception queue).
+            language_qa_by_chapter: dict[str, dict[str, list[dict[str, Any]]]] = {}
             for result in job.results.values():
                 chapter = result.get("chapter")
                 verse = result.get("verse")
@@ -3630,10 +3889,23 @@ class BridgeEngine:
                 findings = [
                     f for f in (result.get("findings") or []) if isinstance(f, dict) and f.get("id")
                 ]
-                by_chapter.setdefault(str(chapter), {})[str(verse)] = {
+                statuses = {
                     str(f["id"]): str(f.get("status", FindingStatus.OPEN.value)) for f in findings
                 }
+                # Language QA (Phase 4.1): an open finding counts as open; one a
+                # decision hides counts with that decision, so ignoring it moves
+                # the verse's open count down like any other decision.
+                language_qa = result.get("languageQa") or {}
+                for finding in language_qa.get("findings") or []:
+                    if isinstance(finding, dict) and finding.get("id"):
+                        statuses[str(finding["id"])] = FindingStatus.OPEN.value
+                for finding_id, decision in (language_qa.get("decided") or {}).items():
+                    statuses[str(finding_id)] = str(decision)
+                by_chapter.setdefault(str(chapter), {})[str(verse)] = statuses
                 snapshot_by_chapter.setdefault(str(chapter), {})[str(verse)] = findings
+                if LANGUAGE_QA_CHECK in job.spec.checks:
+                    language_qa_by_chapter.setdefault(str(chapter), {})[str(verse)] = [
+                        *(language_qa.get("findings") or []), *(language_qa.get("hidden") or [])]
 
             now = project.timestamp_iso()
             project.replace_progress_chapters({
@@ -3651,12 +3923,26 @@ class BridgeEngine:
             # Written after the rollup so a crash between the two leaves the
             # rollup -- what the dashboard reads -- intact.
             for chapter, verses_map in snapshot_by_chapter.items():
-                project.save_check_findings_snapshot(chapter, verses_map)
+                project.save_check_findings_snapshot(
+                    chapter, verses_map,
+                    language_qa=language_qa_by_chapter.get(chapter, {}) if LANGUAGE_QA_CHECK in job.spec.checks else None)
         except Exception:
             pass
 
     def check_job_status(self, job_id: str = "") -> dict[str, Any]:
-        return self._check_jobs.status(job_id)
+        snapshot = self._check_jobs.status(job_id)
+        if LANGUAGE_QA_CHECK in snapshot.get("checks", []):
+            # The main progress bar's view of the Language QA stage; the panel
+            # keeps languageQa.status for its book-level lists.
+            summary = self._language_qa.status(limit=0)
+            snapshot["languageQa"] = {
+                "state": summary.get("state"),
+                "completedChapters": summary.get("completedChapters", 0),
+                "totalChapters": summary.get("totalChapters", 0),
+                "findings": summary.get("totalFindings", 0),
+                "limitations": list(summary.get("limitations") or [])[:20],
+            }
+        return snapshot
 
     def cancel_check_job(self, job_id: str = "") -> dict[str, Any]:
         return self._check_jobs.cancel(job_id)
@@ -3669,18 +3955,172 @@ class BridgeEngine:
         return self._start_check_job_from_spec(spec, self.project)
 
     def decide_verse(self, chapter: str, verse: str, finding_id: str,
-                      status: str, comment: str = "") -> dict[str, Any]:
+                      status: str, comment: str = "",
+                      issue: dict[str, Any] | None = None) -> dict[str, Any]:
         """Records a human decision (accept/reject/ignore/needs_discussion)
         on a specific finding. Uses tc_ai_bridge's existing QA-decision
         store (companion_dir()/qaDecisions/...) rather than reinventing
-        persistence — this already exists, is atomic, and is audited."""
+        persistence — this already exists, is atomic, and is audited.
+
+        `issue` is what the caller knows about the finding, stored as the
+        decision's payload. A Language QA finding (`issue.source ==
+        "languageQa"`) counts in the review-progress rollup once a check job
+        has put it there (the Language QA stage, Phase 4.1), exactly like a
+        Greek Room finding. Until then its decision is recorded and audited
+        but not counted: a decision alone must not add a finding row, or a
+        verse whose Language QA findings were never checked could look
+        reviewed. The origin comes only from `issue`, never from the finding
+        id."""
         self._require_project()
+        # A caller that names no source gets "unspecified": that records that
+        # nobody said, and it is what lets Language QA tell a new non-Language-QA
+        # decision from a legacy row with no source key at all
+        # (language_qa_jobs._may_concern_language_qa).
+        issue = {"source": UNSPECIFIED_DECISION_SOURCE, **(issue or {})}
         path = self.project.record_qa_decision(
-            chapter, verse, issue_key=finding_id, decision=status, note=comment,
+            chapter, verse, issue_key=finding_id, decision=status, note=comment, issue=issue,
         )
-        self._apply_decision_to_progress(self.project, chapter, verse, finding_id, status)
-        return {"chapter": chapter, "verse": verse, "findingId": finding_id,
-                "status": status, "recordedAt": str(path)}
+        if issue["source"] != LANGUAGE_QA_SOURCE or self._rollup_has_finding(chapter, verse, finding_id):
+            self._apply_decision_to_progress(self.project, chapter, verse, finding_id, status)
+        # Language QA reads this same decision store back inside its own scan
+        # loop (language_qa_jobs.py) to suppress a decided terminology
+        # finding, but nothing else about recording a decision touches its
+        # in-memory summary -- unlike an edit, there is no text change for it
+        # to notice on its own. Without this, an "ignored" decision on a
+        # Language QA finding would never actually take visible effect until
+        # some unrelated trigger (an edit elsewhere, a reopen) happened to
+        # force a rescan. Cheap and safe to call unconditionally, same as
+        # edit_verse already does below -- invalidate() is a no-op if
+        # Language QA isn't bound to a project, and debounces if several
+        # decisions land in a burst.
+        learned = self._learn_house_style(chapter, verse, finding_id, status, issue)
+        self._language_qa.invalidate(chapter)
+        result = {"chapter": chapter, "verse": verse, "findingId": finding_id,
+                  "status": status, "recordedAt": str(path)}
+        if learned is not None:
+            result["houseStyle"] = {"learned": learned}
+        return result
+
+    # -- house style (layered-rules 6.2-6.4) ---------------------------------
+
+    def _learn_house_style(self, chapter: str, verse: str, finding_id: str, status: str,
+                           issue: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """The learner's one incremental step (HouseStyleLearner.observe):
+        only the (rule, word) pair this decision touched is recomputed. A
+        pair that reaches the threshold becomes a learned word-in-book entry
+        at once, reported back so the UI can offer Undo. Best-effort: a
+        learning failure never fails the decision itself."""
+        if issue.get("source") != LANGUAGE_QA_SOURCE:
+            return None
+        try:
+            row = {"chapter": str(chapter), "verse": str(verse), "issueKey": finding_id, "decision": status,
+                   "issue": issue, "modifiedTimestamp": datetime.now(timezone.utc).isoformat()}
+            entry = self._housestyle_learner.observe(
+                str(self.project.path), self.project.project_qa_decisions, row, self.project.housestyle_entries())
+            if entry is None:
+                return None
+            return self.project.record_housestyle_entry(
+                entry, username=self.settings.reviewer_name or "Bridge Reviewer")
+        except Exception:
+            return None
+
+    def _collection_book_projects(self) -> list[TranslationCoreProject]:
+        """The open book and every materialized sibling (a lazy one has no
+        workbench yet). A project-scope house-style entry is written to each."""
+        self._require_project()
+        projects = [self.project]
+        for entry in collection_projects(str(self.project.path)):
+            path = Path(str(entry.get("path") or ""))
+            if entry.get("lazy") or not path.is_dir() or path.resolve() == Path(self.project.path).resolve():
+                continue
+            try:
+                projects.append(TranslationCoreProject(path, workspace=self.workspace))
+            except Exception:
+                continue
+        return projects
+
+    def housestyle_list(self) -> dict[str, Any]:
+        self._require_project()
+        books = []
+        for project in self._collection_book_projects():
+            try:
+                books.append((project.book_id, project.housestyle_entries(), project.project_qa_decisions()))
+            except Exception:
+                continue
+        own = self.project.housestyle_entries()
+        own_keys = {entry.get("key") for entry in own}
+        return {"entries": own, "proposals": project_proposals(books),
+                # The pack's bundled seed, read-only; an own entry with its key replaces it.
+                "seed": [entry for entry in bundled_seed("ta-irv") if entry["key"] not in own_keys],
+                "thresholds": {"learnIgnores": LEARN_IGNORES, "proposeProjectBooks": PROPOSE_PROJECT_BOOKS,
+                               "proposeRuleDecisions": PROPOSE_RULE_DECISIONS,
+                               "proposeRuleIgnoreRate": PROPOSE_RULE_IGNORE_RATE, "preferUses": PREFER_USES}}
+
+    def housestyle_name_suggestions(self) -> dict[str, Any]:
+        """Candidates for the approved proper-noun list: the names check's
+        cached majority spellings (it is not run here), minus those approved."""
+        self._require_project()
+        approved = frozenset(e.get("word") for e in self.project.housestyle_entries()
+                             if e.get("list") == "properNouns" and e.get("state") == "active")
+        cached = (self.project.load_check_cache().get("names") or {}).get("findings") or []
+        return {"suggestions": name_suggestions(cached, approved), "checked": bool(cached)}
+
+    def housestyle_record(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Record an entry: explicit (a scoped Ignore), curated (Settings), or
+        an accepted/dismissed proposal. A project scope is written to every
+        materialized book of the collection."""
+        self._require_project()
+        username = self.settings.reviewer_name or "Bridge Reviewer"
+        targets = (self._collection_book_projects() if str(entry.get("scope", "")).endswith("project")
+                   else [self.project])
+        recorded = [project.record_housestyle_entry(entry, username=username) for project in targets]
+        self._language_qa.invalidate_all()
+        return {"entry": recorded[0], "books": [p.book_id for p in targets], **self.housestyle_list()}
+
+    def housestyle_set_state(self, key: str, state: str) -> dict[str, Any]:
+        """Remove, Undo, or confirm (an imported entry): a new state on the
+        same row, never a delete."""
+        self._require_project()
+        current = next((e for e in self.project.housestyle_entries() if e.get("key") == key), None)
+        if current is None:
+            raise ProjectError(f"No house-style entry {key!r}.")
+        entry = {**current, "state": state}
+        if state == "active":
+            entry["imported"] = False  # a local decision confirms an imported entry
+        return self.housestyle_record(entry)
+
+    def housestyle_export(self, output_path: str) -> dict[str, Any]:
+        self._require_project()
+        entries = [e for e in self.project.housestyle_entries() if e.get("state") == "active"]
+        Path(output_path).write_text(json.dumps({"schemaVersion": 1, "bookId": self.project.book_id,
+                                                 "entries": entries}, ensure_ascii=False, indent=1),
+                                     encoding="utf-8")
+        return {"written": True, "path": output_path, "count": len(entries)}
+
+    def housestyle_import(self, input_path: str) -> dict[str, Any]:
+        """Carry a book's learned style into this one. Imported entries keep
+        their provenance and evidence, and show as imported until confirmed."""
+        self._require_project()
+        try:
+            data = json.loads(Path(input_path).read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError) as exc:
+            raise ProjectError(f"Cannot read house style from {input_path}: {exc}") from exc
+        count = 0
+        username = self.settings.reviewer_name or "Bridge Reviewer"
+        existing = {e.get("key") for e in self.project.housestyle_entries()}
+        for entry in data.get("entries") or []:
+            if not isinstance(entry, dict) or entry.get("key") in existing:
+                continue
+            self.project.record_housestyle_entry({**entry, "imported": True, "state": "active"}, username=username)
+            count += 1
+        self._language_qa.invalidate_all()
+        return {"imported": count, **self.housestyle_list()}
+
+    def _rollup_has_finding(self, chapter: str, verse: str, finding_id: str) -> bool:
+        try:
+            return self.project.progress_finding_status(chapter, verse, finding_id) is not None
+        except Exception:
+            return False
 
     def _apply_decision_to_progress(
         self, project: TranslationCoreProject, chapter: str, verse: str,
@@ -3780,6 +4220,7 @@ class BridgeEngine:
             username=self.settings.reviewer_name or "Bridge Reviewer",
             **strict_options,
         )
+        self._language_qa.invalidate(chapter)
         self._consistency_findings_by_book.pop(str(self.project.path), None)
         resolutions = self.project.list_issue_resolutions(chapter, verse)
         return {
@@ -3890,9 +4331,45 @@ class BridgeEngine:
         rendered = "".join(pieces)
         return rendered if rendered.endswith("\n") else rendered + "\n"
 
-    def export_non_aligned(self, output_path: str) -> dict[str, Any]:
+    def _export_gate(self, kind: str, output_path: str, override: bool) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+        """(refusal, gate). The one publication gate (reporting.publication_gate,
+        layered-rules 4.5) is consulted before any export. With blocking items
+        and no override the export is refused with those items, and nothing is
+        written. With the override it proceeds, and the override is recorded
+        as a decision (kind 'qa', key 'export.override') listing the items
+        open at that moment, so it is in change_log for the export ledger."""
+        gate = publication_gate(self.project)
+        if not gate["blocking"]:
+            return None, gate
+        if not override:
+            return {"written": False, "blocked": True, "path": output_path, "gate": gate}, gate
+        self.project.record_qa_decision(
+            "", "", issue_key="export.override", decision="accepted",
+            note=f"Exported {kind} with {len(gate['items'])} blocking item(s) open.",
+            issue={"source": "export", "format": kind, "outputPath": output_path,
+                   "openItems": gate["items"][:200], "counts": gate["counts"]},
+        )
+        return None, gate
+
+    def _write_export_ledger(self, output_path: str) -> str:
+        """`<book>.language-qa-changes.csv` beside the export (layered-rules
+        6.5): every Scripture change a Language QA Use applied, and every
+        export made over the publication gate. UTF-8 with a BOM, like the
+        other CSVs, so Excel opens Tamil as text."""
+        import csv
+        ledger = Path(output_path).with_name(f"{self.project.book_id}.language-qa-changes.csv")
+        with ledger.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(TranslationCoreProject.LEDGER_COLUMNS))
+            writer.writeheader()
+            writer.writerows(self.project.language_qa_change_ledger())
+        return str(ledger)
+
+    def export_non_aligned(self, output_path: str, override: bool = False) -> dict[str, Any]:
         """Write current verse text as non-aligned, re-importable USFM."""
         self._require_project()
+        refusal, gate = self._export_gate("nonAligned", output_path, override)
+        if refusal is not None:
+            return refusal
         summary = self.project.summary
         content = self._source_preserving_usfm()
         fidelity = "source-preserving"
@@ -3908,6 +4385,7 @@ class BridgeEngine:
                     lines.append(f"\\v {verse} {text}")
             content = "\n".join(lines) + "\n"
         Path(output_path).write_text(content, encoding="utf-8")
+        ledger = self._write_export_ledger(output_path)
         return {
             "written": True, "path": output_path,
             "bookId": summary.book_id, "chapters": len(self.project.chapters()),
@@ -3917,9 +4395,10 @@ class BridgeEngine:
                 if fidelity == "source-preserving"
                 else "No source USFM was available; generated id/chapter/verse markers only."
             ),
+            "gate": gate, "overridden": bool(gate and gate["blocking"]), "ledgerPath": ledger,
         }
 
-    def export_aligned(self, output_path: str) -> dict[str, Any]:
+    def export_aligned(self, output_path: str, override: bool = False) -> dict[str, Any]:
         """Write interoperable aligned USFM 3.
 
         A `.json` destination remains supported for backward compatibility
@@ -3927,8 +4406,13 @@ class BridgeEngine:
         `.usfm` and emits unfoldingWord-compatible `zaln`/`w` markers.
         """
         self._require_project()
+        refusal, gate = self._export_gate("aligned", output_path, override)
+        if refusal is not None:
+            return refusal
         if Path(output_path).suffix.lower() == ".json":
-            return self._export_alignment_json(output_path)
+            result = self._export_alignment_json(output_path)
+            return {**result, "gate": gate, "overridden": bool(gate and gate["blocking"]),
+                    "ledgerPath": self._write_export_ledger(output_path)}
         summary = self.project.summary
         book = summary.book_id
 
@@ -3963,11 +4447,13 @@ class BridgeEngine:
             insert_at = id_line.end() if id_line else 0
             content = content[:insert_at] + "\\usfm 3.0\n" + content[insert_at:]
         Path(output_path).write_text(content, encoding="utf-8")
+        ledger = self._write_export_ledger(output_path)
         status = self.alignment_status()
         return {
             "written": True, "path": output_path, "bookId": book,
             "chapters": len(self.project.chapters()), "format": "usfm3-aligned",
             "fidelity": fidelity, "alignmentStatus": status["counts"],
+            "gate": gate, "overridden": bool(gate and gate["blocking"]), "ledgerPath": ledger,
         }
 
     def _export_alignment_json(self, output_path: str) -> dict[str, Any]:
@@ -4063,11 +4549,82 @@ class BridgeEngine:
         if not self.project:
             raise ProjectError("No project open — call project.open first")
 
+    # -- terminology ----------------------------------------------------
+
+    def terminology_list(self) -> dict[str, Any]:
+        self._require_project()
+        return {"rules": self.project.terminology_rules()}
+
+    def terminology_record(
+        self, concept_id: str, approved_renderings: list[str] | None = None,
+        rejected_renderings: list[str] | None = None, overwrite: bool = False, *,
+        allowed_alternatives: list[str] | None = None,
+        inflected_forms: dict[str, list[str]] | None = None, match_mode: str = "exact",
+    ) -> dict[str, Any]:
+        """Add a termbase rule from the Settings pane. A rule that already
+        exists for this concept is never replaced silently: without
+        `overwrite`, nothing is written and the existing rule comes back as
+        `conflict`, so the pane can ask first."""
+        self._require_project()
+        existing = next((rule for rule in self.project.terminology_rules()
+                         if str(rule.get("conceptId", "")) == concept_id), None)
+        if existing is not None and not overwrite:
+            return {"rules": self.project.terminology_rules(), "conflict": existing}
+        self.project.record_terminology_rule(
+            concept_id, approved_renderings=approved_renderings,
+            allowed_alternatives=allowed_alternatives,
+            rejected_renderings=rejected_renderings,
+            username=self.settings.reviewer_name or "Bridge Reviewer",
+            inflected_forms=inflected_forms, match_mode=match_mode,
+        )
+        # #171 desktop testing: a rule added here has no chapter-file change
+        # for Language QA's idle-refresh to notice on its own, unlike an edit
+        # or a decision -- without this it would sit invisible until
+        # something unrelated triggered a rescan (same bug class as
+        # decide_verse not invalidating, fixed 2026-09-23 in 3a095c0).
+        self._language_qa.invalidate_all()
+        return {"rules": self.project.terminology_rules()}
+
     # -- protocol dispatch --------------------------------------------------
 
     def handle_request(self, request: EngineRequest) -> EngineResponse:
+        self._language_qa.touch()
         try:
             m, p = request.method, request.params
+
+            if m in {Methods.LANGUAGE_QA_STATUS, Methods.LANGUAGE_QA_PAUSE, Methods.LANGUAGE_QA_INLINE,
+                     Methods.LANGUAGE_QA_HISTORY, Methods.LANGUAGE_QA_VERSE}:
+                self._require_project()
+                if p.get("projectPath") != str(self.project.path):
+                    raise ProjectError("Language QA request belongs to a different project.")
+                if m == Methods.LANGUAGE_QA_PAUSE:
+                    if not isinstance(p.get("paused"), bool):
+                        raise ProjectError("paused must be a boolean")
+                    result = self._language_qa.pause(p["paused"])
+                elif m == Methods.LANGUAGE_QA_INLINE:
+                    chapter = p.get("chapter")
+                    if chapter is not None and not isinstance(chapter, str):
+                        raise ProjectError("chapter must be a string when given")
+                    result = self._language_qa.inline(chapter=chapter)
+                elif m == Methods.LANGUAGE_QA_VERSE:
+                    chapter, verse = p.get("chapter"), p.get("verse")
+                    if not isinstance(chapter, str) or not isinstance(verse, str):
+                        raise ProjectError("chapter and verse must be strings")
+                    result = self._language_qa.verse(chapter, verse)
+                elif m == Methods.LANGUAGE_QA_HISTORY:
+                    chapter, verse, finding_id = p.get("chapter"), p.get("verse"), p.get("findingId")
+                    if not isinstance(chapter, str) or not isinstance(verse, str):
+                        raise ProjectError("chapter and verse must be strings")
+                    if finding_id is not None and not isinstance(finding_id, str):
+                        raise ProjectError("findingId must be a string when given")
+                    result = {"chapter": chapter, "verse": verse, "findingId": finding_id,
+                              "entries": self.project.language_qa_decision_history(chapter, verse, finding_id)}
+                else:
+                    view = p.get("view", "findings")
+                    if view not in {"findings", "recheck", "falsePositives"}:
+                        raise ProjectError("view must be findings, recheck or falsePositives")
+                    result = self._language_qa.status(offset=p.get("offset", 0), limit=p.get("limit", 0), view=view)
+                return EngineResponse.ok(request.id, result=result)
 
             if m == Methods.PING:
                 return EngineResponse.ok(request.id, result={"pong": True})
@@ -4133,7 +4690,39 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result={"verses": self.chapter_verses(p["chapter"])})
             if m == Methods.CHAPTER_VERSE_DATA:
                 return EngineResponse.ok(request.id, result=self.get_chapter_verse_data(p["chapter"]))
+            if m == Methods.HOUSESTYLE_LIST:
+                return EngineResponse.ok(request.id, result=self.housestyle_list())
+            if m == Methods.HOUSESTYLE_NAME_SUGGESTIONS:
+                return EngineResponse.ok(request.id, result=self.housestyle_name_suggestions())
+            if m == Methods.HOUSESTYLE_RECORD:
+                if not isinstance(p.get("entry"), dict):
+                    raise ProjectError("entry must be an object")
+                return EngineResponse.ok(request.id, result=self.housestyle_record(p["entry"]))
+            if m == Methods.HOUSESTYLE_SET_STATE:
+                return EngineResponse.ok(request.id, result=self.housestyle_set_state(
+                    str(p.get("key") or ""), str(p.get("state") or "")))
+            if m == Methods.HOUSESTYLE_EXPORT:
+                return EngineResponse.ok(request.id, result=self.housestyle_export(str(p["outputPath"])))
+            if m == Methods.HOUSESTYLE_IMPORT:
+                return EngineResponse.ok(request.id, result=self.housestyle_import(str(p["inputPath"])))
+            if m == Methods.COLLECTION_RUN_CHECKS:
+                checks = p.get("checks")
+                if checks is not None and not (isinstance(checks, list) and all(isinstance(c, str) for c in checks)):
+                    raise ProjectError("checks must be a list of check names")
+                return EngineResponse.ok(request.id, result=self.start_collection_checks(
+                    checks=checks, force=bool(p.get("force", False))))
+            if m == Methods.COLLECTION_QA_STATUS:
+                return EngineResponse.ok(request.id, result=self.collection_check_status(str(p.get("jobId", ""))))
+            if m == Methods.COLLECTION_PAUSE_CHECKS:
+                if not isinstance(p.get("paused"), bool):
+                    raise ProjectError("paused must be a boolean")
+                return EngineResponse.ok(request.id, result=self._collection_jobs.pause(
+                    p["paused"], str(p.get("jobId", ""))))
+            if m == Methods.COLLECTION_CANCEL_CHECKS:
+                return EngineResponse.ok(request.id, result=self._collection_jobs.cancel(str(p.get("jobId", ""))))
             if m == Methods.CHECKS_START:
+                if self._collection_jobs.active():
+                    raise CheckJobConflict("A collection QA run is in progress; wait for it or cancel it.")
                 return EngineResponse.ok(request.id, result=self.start_check_job(
                     scope=p.get("scope", "chapter"),
                     chapters=p.get("chapters"),
@@ -4157,7 +4746,11 @@ class BridgeEngine:
                 findings = self.run_verse_checks(p["chapter"], p["verse"], p.get("checks", ["local", "greekroom"]))
                 return EngineResponse.ok(request.id, findings=findings)
             if m == Methods.VERSE_DECIDE:
-                result = self.decide_verse(p["chapter"], p["verse"], p["findingId"], p["status"], p.get("comment", ""))
+                issue = p.get("issue")
+                if issue is not None and not isinstance(issue, dict):
+                    raise ProjectError("issue must be an object when given")
+                result = self.decide_verse(p["chapter"], p["verse"], p["findingId"], p["status"],
+                                           p.get("comment", ""), issue)
                 return EngineResponse.ok(request.id, result=result)
             if m == Methods.VERSE_EDIT:
                 result = self.edit_verse(p["chapter"], p["verse"], p["newText"])
@@ -4250,10 +4843,26 @@ class BridgeEngine:
                 return EngineResponse.ok(request.id, result=self.get_settings())
             if m == Methods.SETTINGS_SET:
                 return EngineResponse.ok(request.id, result=self.set_settings(**p))
+            if m == Methods.TERMINOLOGY_LIST:
+                return EngineResponse.ok(request.id, result=self.terminology_list())
+            if m == Methods.TERMINOLOGY_RECORD:
+                overwrite = p.get("overwrite", False)
+                if not isinstance(overwrite, bool):
+                    raise ProjectError("overwrite must be a boolean")
+                inflected = p.get("inflectedForms")
+                if inflected is not None and not isinstance(inflected, dict):
+                    raise ProjectError("inflectedForms must be an object")
+                return EngineResponse.ok(request.id, result=self.terminology_record(
+                    p["conceptId"], p.get("approvedRenderings"), p.get("rejectedRenderings"), overwrite,
+                    allowed_alternatives=p.get("allowedAlternatives"), inflected_forms=inflected,
+                    match_mode=str(p.get("matchMode") or "exact"),
+                ))
             if m == Methods.EXPORT_ALIGNED:
-                return EngineResponse.ok(request.id, result=self.export_aligned(p["outputPath"]))
+                return EngineResponse.ok(request.id, result=self.export_aligned(
+                    p["outputPath"], override=p.get("override") is True))
             if m == Methods.EXPORT_NON_ALIGNED:
-                return EngineResponse.ok(request.id, result=self.export_non_aligned(p["outputPath"]))
+                return EngineResponse.ok(request.id, result=self.export_non_aligned(
+                    p["outputPath"], override=p.get("override") is True))
             if m == Methods.ALIGNMENT_AI_PROPOSE:
                 return EngineResponse.ok(request.id, result=self.propose_ai_alignment(
                     p["chapter"], p["verse"], p.get("mode", "gap_fill"),
@@ -4661,6 +5270,10 @@ class BridgeEngine:
             return EngineResponse.fail(request.id, "checker_error", str(exc))
         except versification_tool.VersificationUnavailable as exc:
             return EngineResponse.fail(request.id, "versification_unavailable", str(exc))
+        except CollectionJobConflict as exc:
+            return EngineResponse.fail(request.id, "job_conflict", str(exc))
+        except CollectionJobError as exc:
+            return EngineResponse.fail(request.id, "job_error", str(exc))
         except CheckJobNotFound as exc:
             return EngineResponse.fail(request.id, "job_not_found", str(exc))
         except CheckJobConflict as exc:

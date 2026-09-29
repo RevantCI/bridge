@@ -1673,21 +1673,67 @@ class TranslationCoreProject:
             book_id=self.book_id, equals=equals,
         )
 
+    _TERMINOLOGY_CATEGORIES = ('person_name', 'place_name', 'key_term', 'other')
+    _TERMINOLOGY_PROVENANCE = ('human', 'imported')
+    # 'approved' is the only status the terminology QA check ever treats as
+    # authoritative (see terminology.py's TermIndex). 'provisional'/'imported'
+    # exist so a future auto-discovery path has somewhere to land without ever
+    # being silently treated as a human decision -- frequency is evidence, not
+    # authority. This method represents explicit human/API-driven curation, so
+    # it defaults to 'approved'; nothing in this codebase yet writes anything
+    # else, and that absence is deliberate, not an oversight.
+    _TERMINOLOGY_STATUSES = ('approved', 'provisional', 'imported')
+
     def terminology_rules(self) -> list[dict[str, Any]]:
         return self._human_decision_payloads(kind='terminology')
 
-    def record_terminology_rule(self, concept_id: str, approved_renderings: list[str], allowed_alternatives: list[str] | None = None, rejected_renderings: list[str] | None = None, source_lemma: str = '', strong: str = '', note: str = '', username: str = 'AI Bridge Reviewer', scope: str = 'book') -> str:
-        concept_id=str(concept_id).strip()
-        approved=[str(x).strip() for x in approved_renderings if str(x).strip()]
-        if not concept_id: raise ProjectError('Terminology concept/key-term ID is required.')
-        if not approved: raise ProjectError('At least one approved target-language rendering is required.')
-        iso,_=self._timestamp(); safe=''.join(ch if ch.isalnum() or ch in ('-','_') else '_' for ch in concept_id)[:120]
-        data={
-            'bookId':self.book_id,'conceptId':concept_id,'sourceLemma':source_lemma,'strong':strong,
-            'approvedRenderings':approved,'allowedAlternatives':[str(x).strip() for x in (allowed_alternatives or []) if str(x).strip()],
-            'rejectedRenderings':[str(x).strip() for x in (rejected_renderings or []) if str(x).strip()],
-            'note':note,'scope':scope,'username':username,'modifiedTimestamp':iso,'status':'human_approved',
-            'app':'translationCore AI Bridge','schemaVersion':1,
+    def record_terminology_rule(
+        self, concept_id: str, approved_renderings: list[str] | None = None,
+        allowed_alternatives: list[str] | None = None, rejected_renderings: list[str] | None = None,
+        *, category: str = 'other', source_lemma: str = '', strong: str = '', note: str = '',
+        provenance: str = 'human', status: str = 'approved',
+        username: str = 'AI Bridge Reviewer', scope: str = 'book',
+        inflected_forms: dict[str, list[str]] | None = None, match_mode: str = 'exact',
+    ) -> str:
+        """Termbase v3 (layered-rules 6.1) adds `inflected_forms` (rendering ->
+        its forms, as authoritative as the rendering) and `match_mode`
+        ("prefix" also matches the rejected renderings with a closed list of
+        case/plural endings, at medium confidence; terminology.CASE_SUFFIXES)."""
+        concept_id = str(concept_id).strip()
+        if not concept_id:
+            raise ProjectError('Terminology concept/key-term ID is required.')
+        if match_mode not in ('exact', 'prefix'):
+            raise ProjectError(f"Unknown terminology match mode: {match_mode!r}.")
+        inflected: dict[str, list[str]] = {}
+        for rendering, forms in (inflected_forms or {}).items():
+            if not isinstance(forms, list):
+                raise ProjectError('inflectedForms must map a rendering to a list of forms.')
+            cleaned = [str(f).strip() for f in forms if str(f).strip()]
+            if str(rendering).strip() and cleaned:
+                inflected[str(rendering).strip()] = cleaned
+        approved = [str(x).strip() for x in (approved_renderings or []) if str(x).strip()]
+        allowed = [str(x).strip() for x in (allowed_alternatives or []) if str(x).strip()]
+        rejected = [str(x).strip() for x in (rejected_renderings or []) if str(x).strip()]
+        if not (approved or allowed or rejected):
+            raise ProjectError('At least one approved, allowed, or rejected rendering is required.')
+        if category not in self._TERMINOLOGY_CATEGORIES:
+            raise ProjectError(f"Unknown terminology category: {category!r}.")
+        if provenance not in self._TERMINOLOGY_PROVENANCE:
+            raise ProjectError(f"Unknown terminology provenance: {provenance!r}.")
+        if status not in self._TERMINOLOGY_STATUSES:
+            raise ProjectError(f"Unknown terminology status: {status!r}.")
+        if scope != 'book':
+            raise ProjectError("Only book-scoped terminology is supported; whole-project scope is a separate, unbuilt design.")
+        iso, _ = self._timestamp()
+        data = {
+            'bookId': self.book_id, 'conceptId': concept_id, 'category': category,
+            'sourceLemma': source_lemma, 'strong': strong,
+            'approvedRenderings': approved, 'allowedAlternatives': allowed,
+            'rejectedRenderings': rejected,
+            'inflectedForms': inflected, 'matchMode': match_mode,
+            'note': note, 'scope': scope, 'provenance': provenance, 'status': status,
+            'username': username, 'modifiedTimestamp': iso,
+            'app': 'translationCore AI Bridge', 'schemaVersion': 3,
         }
         # Book-scoped rather than verse-scoped: a terminology rule applies to the
         # whole book, so chapter/verse stay empty and the concept is the key.
@@ -1695,6 +1741,27 @@ class TranslationCoreProject:
             kind='terminology', chapter='', verse='', key=concept_id,
             decision='human_approved', payload=data,
         )
+
+    # -- house style (layered-rules 6.2-6.4; human_decisions kind 'housestyle', v5)
+
+    def housestyle_entries(self) -> list[dict[str, Any]]:
+        return self._human_decision_payloads(kind='housestyle')
+
+    def record_housestyle_entry(self, entry: dict[str, Any], *, username: str = 'Bridge Reviewer') -> dict[str, Any]:
+        """Upsert one house-style entry (housestyle.validate_entry). The same
+        key is the same row: Remove and Undo write a new state onto it, and
+        change_log keeps every earlier one -- nothing is deleted."""
+        from .housestyle import validate_entry
+        try:
+            data = validate_entry(entry)
+        except ValueError as exc:
+            raise ProjectError(str(exc)) from exc
+        iso, _ = self._timestamp()
+        data.update({'bookId': self.book_id, 'username': username, 'modifiedTimestamp': iso,
+                     'app': 'translationCore AI Bridge', 'schemaVersion': 1})
+        self._record_human_decision_row(kind='housestyle', chapter='', verse='', key=data['key'],
+                                        decision=data['state'], payload=data)
+        return data
 
     def project_decisions(self) -> list[dict[str, Any]]:
         return self._human_decision_payloads(kind='check')
@@ -2572,6 +2639,82 @@ class TranslationCoreProject:
             )
         }
 
+    def language_qa_decision_history(
+        self, chapter: str | int, verse: str | int, finding_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Every decision ever recorded on this verse's Language QA findings
+        (or on one finding), oldest first. Read-only.
+
+        A decision row is updated in place when a finding is decided again,
+        so its current value alone loses the history. The history is the row's
+        change_log images, which are append-only. Only rows whose issue says
+        "languageQa" are included: a decision recorded before issues carried a
+        source cannot be told apart from a Greek Room one."""
+        identity = self.workbench_identity
+        entries: list[dict[str, Any]] = []
+        for row in self.workbench.rows(
+            'human_decisions', project_id=identity.project_id, book_id=self.book_id,
+            equals={'kind': 'qa', 'chapter': str(chapter), 'verse': str(verse)},
+        ):
+            if finding_id is not None and row.get('key') != finding_id:
+                continue
+            current = json.loads(row.get('payload_json') or '{}')
+            if (current.get('issue') or {}).get('source') != 'languageQa':
+                continue
+            for event in self.workbench.events_for_row('human_decisions', row['id'], project_id=identity.project_id):
+                payload = json.loads(event.get('payload_json') or '{}')
+                if not payload:
+                    continue  # a pure domain event carries no decision image
+                issue = payload.get('issue') or {}
+                entries.append({
+                    'seq': event['seq'], 'findingId': row.get('key'),
+                    'decision': payload.get('decision'), 'note': payload.get('note', ''),
+                    'rule': issue.get('rule'), 'ruleId': issue.get('ruleId'),
+                    'originalText': issue.get('originalText'),
+                    'chosenSuggestion': issue.get('chosenSuggestion'), 'chosenRank': issue.get('chosenRank'),
+                    'packVersion': issue.get('packVersion', issue.get('ruleVersion')),
+                    'recordedAt': event.get('created_at'), 'revision': event.get('new_revision'),
+                    'actorId': event.get('actor_id'),
+                })
+        entries.sort(key=lambda entry: entry['seq'])
+        return entries
+
+    LEDGER_COLUMNS = ('chapter', 'verse', 'ruleId', 'original', 'replacement', 'timestamp', 'user', 'kind')
+
+    def language_qa_change_ledger(self) -> list[dict[str, str]]:
+        """Every Scripture change applied through a Language QA Use, and every
+        export made over the publication gate, from change_log (layered-rules
+        6.5). A Use is recorded as an 'accepted' Language QA decision right
+        after the verse edit it applied; each accepted image in a decision
+        row's history is one change, even when the same finding id was later
+        decided again."""
+        identity = self.workbench_identity
+        rows: list[dict[str, str]] = []
+        for row in self.workbench.rows('human_decisions', project_id=identity.project_id, book_id=self.book_id,
+                                       equals={'kind': 'qa'}):
+            current = json.loads(row.get('payload_json') or '{}')
+            source = (current.get('issue') or {}).get('source')
+            if source not in ('languageQa', 'export'):
+                continue
+            for event in self.workbench.events_for_row('human_decisions', row['id'], project_id=identity.project_id):
+                payload = json.loads(event.get('payload_json') or '{}')
+                issue = payload.get('issue') or {}
+                if source == 'languageQa' and payload.get('decision') == 'accepted':
+                    rows.append({'chapter': str(payload.get('chapter', '')), 'verse': str(payload.get('verse', '')),
+                                 'ruleId': str(issue.get('ruleId') or issue.get('rule') or ''),
+                                 'original': str(issue.get('originalText') or ''),
+                                 'replacement': str(issue.get('chosenSuggestion') or issue.get('suggestedReplacement') or ''),
+                                 'timestamp': str(event.get('created_at') or ''), 'user': str(event.get('actor_id') or ''),
+                                 'kind': 'use'})
+                elif source == 'export' and payload.get('issueKey') == 'export.override':
+                    rows.append({'chapter': '', 'verse': '', 'ruleId': 'export.override',
+                                 'original': f"{len(issue.get('openItems') or [])} open blocking item(s)",
+                                 'replacement': str(issue.get('outputPath') or ''),
+                                 'timestamp': str(event.get('created_at') or ''), 'user': str(event.get('actor_id') or ''),
+                                 'kind': 'export-override'})
+        rows.sort(key=lambda r: r['timestamp'])
+        return rows
+
     def timestamp_iso(self) -> str:
         """Public wrapper so bridge_service can stamp a rollup entry with the
         same timestamp format used everywhere else in this file."""
@@ -2620,6 +2763,59 @@ class TranslationCoreProject:
         )
         return row_id
 
+    # -- persisted Language QA scan (workbench v4) ---------------------------
+    #
+    # One `language_qa_cache` row per chapter: every verse's raw Language QA
+    # result, before decisions, keyed by the verse's text hash under a chapter
+    # key (rule pack, termbase, detected language). Written by
+    # language_qa_jobs from its worker or from the check-job stage, one
+    # transaction per chapter. Derived and regenerable: a miss rescans.
+
+    def _language_qa_cache_row_id(self, chapter: str) -> str:
+        return natural_row_id(self.workbench_identity.project_id, self.book_id, 'language_qa_cache', chapter)
+
+    def load_language_qa_cache(self) -> dict[str, dict[str, Any]]:
+        """chapter -> {"key", "verses"}, for the whole book in one query."""
+        out: dict[str, dict[str, Any]] = {}
+        for payload in self.workbench.payloads(
+            'language_qa_cache', project_id=self.workbench_identity.project_id, book_id=self.book_id,
+        ):
+            chapter = str(payload.get('chapter') or '')
+            verses = payload.get('verses')
+            if chapter and isinstance(verses, dict):
+                out[chapter] = {'key': str(payload.get('key') or ''), 'verses': verses}
+        return out
+
+    def save_language_qa_chapters(self, chapters: dict[str, tuple[str, dict[str, Any]]]) -> None:
+        """chapter -> (key, verses), all in one transaction: a full first pass
+        over Psalms is 150 chapters, and one fsync'd commit each more than
+        doubled the pass (5.3 s against 2.2 s)."""
+        identity = self.workbench_identity
+        computed_at = self._timestamp()[0]
+        with self.workbench.batch() as batch:
+            for chapter, (key, verses) in chapters.items():
+                chapter_key = str(chapter)
+                batch.write(
+                    'language_qa_cache', self._language_qa_cache_row_id(chapter_key),
+                    project_id=identity.project_id, book_id=self.book_id,
+                    payload={'schemaVersion': 1, 'chapter': chapter_key, 'key': key,
+                             'computedAt': computed_at, 'verses': verses},
+                    actor_id=identity.actor_id, device_id=identity.device_id,
+                    extra_columns={'chapter': chapter_key},
+                )
+
+    def progress_finding_status(self, chapter: str | int, verse: str | int, finding_id: str) -> str | None:
+        """The rollup's status for one finding, or None when the rollup has no
+        row for it (no check job has reported it)."""
+        row = self.workbench.get(
+            'progress_findings', self._progress_finding_row_id(str(chapter), str(verse), str(finding_id)))
+        if row is None:
+            return None
+        try:
+            return str(json.loads(row['payload_json']).get('status') or '')
+        except (TypeError, ValueError, KeyError):
+            return None
+
     # -- per-chapter check-finding snapshots ---------------------------------
     #
     # The progress rollup below records only finding id -> status; the
@@ -2635,23 +2831,55 @@ class TranslationCoreProject:
     def _check_findings_row_id(self, chapter: str) -> str:
         return natural_row_id(self.workbench_identity.project_id, self.book_id, 'check_findings', chapter)
 
-    def save_check_findings_snapshot(self, chapter: str | int, verses: dict[str, list[dict[str, Any]]]) -> str:
+    def save_check_findings_snapshot(self, chapter: str | int, verses: dict[str, list[dict[str, Any]]],
+                                     language_qa: dict[str, list[dict[str, Any]]] | None = None) -> str:
+        """`language_qa` is the Language QA stage's findings per verse, open
+        and decided (each decided one carries `decision`). Kept apart from
+        `verses`, which every reader takes as QaFinding dicts. None (a job
+        without the stage) keeps the chapter's previous Language QA share."""
         identity = self.workbench_identity
         chapter_key = str(chapter)
         row_id = self._check_findings_row_id(chapter_key)
+        if language_qa is None:
+            previous = self.workbench.get('check_findings', row_id)
+            try:
+                language_qa = json.loads(previous['payload_json']).get('languageQa') if previous else None
+            except (TypeError, ValueError, KeyError):
+                language_qa = None
+        payload: dict[str, Any] = {
+            'schemaVersion': 1, 'bookId': self.book_id, 'chapter': chapter_key,
+            'updatedAt': self._timestamp()[0],
+            'verses': {str(v): list(findings) for v, findings in verses.items()},
+        }
+        if isinstance(language_qa, dict):
+            payload['languageQa'] = {str(v): list(f) for v, f in language_qa.items()}
         self.workbench._write(
             'check_findings', row_id,
             project_id=identity.project_id, book_id=self.book_id,
-            payload={
-                'schemaVersion': 1, 'bookId': self.book_id, 'chapter': chapter_key,
-                'updatedAt': self._timestamp()[0],
-                'verses': {str(v): list(findings) for v, findings in verses.items()},
-            },
+            payload=payload,
             actor_id=identity.actor_id, device_id=identity.device_id,
             expected_revision=None,
             extra_columns={'chapter': chapter_key},
         )
         return row_id
+
+    def language_qa_snapshots(self) -> dict[tuple[str, str], list[dict[str, Any]]]:
+        """(chapter, verse) -> the Language QA findings the last check job with
+        the Language QA stage reported, for the whole book in one query. Open
+        ones carry no `decision`; decided ones carry the decision that hid
+        them at the time (the progress rollup has the current status)."""
+        out: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for payload in self.workbench.payloads(
+            'check_findings', project_id=self.workbench_identity.project_id, book_id=self.book_id,
+        ):
+            chapter = str(payload.get('chapter') or '')
+            by_verse = payload.get('languageQa')
+            if not chapter or not isinstance(by_verse, dict):
+                continue
+            for verse, findings in by_verse.items():
+                if isinstance(findings, list):
+                    out[(chapter, str(verse))] = [f for f in findings if isinstance(f, dict)]
+        return out
 
     def load_check_findings_snapshot(self, chapter: str | int) -> dict[str, list[dict[str, Any]]]:
         found = self.workbench.payloads(

@@ -1,0 +1,28 @@
+{
+ "id": "integrity.digits-in-text",
+ "version": 1,
+ "enabled": false,
+ "category": "typo",
+ "layer": "integrity",
+ "severity": "low",
+ "confidence": "low",
+ "inline": false,
+ "title": {
+  "ta": "எண்கள் வசனத்தில்",
+  "en": "Digits in verse text"
+ },
+ "message": {
+  "en": "Digits \"{span}\" in verse text; check the project's numeral policy."
+ },
+ "rationale": "Numeral policy",
+ "match": {
+  "type": "regex",
+  "on": "visible",
+  "pattern": "\\p{Nd}+"
+ },
+ "provenance": "DISABLED: the Pass 3 reviewers confirmed digits in verse text are IRV house form (IRV_Pass3_Handoff.md §5), and IRV has 2,423 of them; enabled, it would also crowd the book finding cap. A project override cannot enable it (overrides only narrow): enabling is a pack change for the maintainer.",
+ "examples": {
+  "incorrect": [],
+  "correct": []
+ }
+}

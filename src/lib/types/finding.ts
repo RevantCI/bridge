@@ -826,6 +826,21 @@ export interface CheckJobVerseResult {
   status: "succeeded" | "failed";
   findings: QaFinding[];
   error: string | null;
+  /** The Language QA stage's share of this verse (only when the job ran it).
+   * Kept apart from `findings`: these are not QaFindings. `decided` maps the
+   * id of each finding a decision hides to that decision. The marks are not
+   * drawn from here; the job's pass publishes a new Language QA generation,
+   * and the status channel redraws from it. */
+  languageQa?: { findings: import("./languageQa").LanguageQaFinding[]; decided: Record<string, string> };
+}
+
+/** checks.status's view of the Language QA stage, for the main progress bar. */
+export interface CheckJobLanguageQa {
+  state: string | null;
+  completedChapters: number;
+  totalChapters: number;
+  findings: number;
+  limitations: string[];
 }
 
 export interface CheckJobSnapshot {
@@ -847,6 +862,7 @@ export interface CheckJobSnapshot {
   error: string | null;
   createdAt: string;
   finishedAt: string | null;
+  languageQa?: CheckJobLanguageQa;
 }
 
 export interface AIReviewJobVerseResult {
@@ -930,6 +946,20 @@ export interface SettingsData {
   triageHideThreshold: number;
   hasApiKey: boolean;
   aiUsage: { tokens: number; estimatedCostUSD: number };
+}
+
+export interface TerminologyRule {
+  conceptId: string;
+  approvedRenderings: string[];
+  allowedAlternatives: string[];
+  rejectedRenderings: string[];
+  status: string;
+  provenance: string;
+  modifiedTimestamp: string;
+  /** Termbase v3 (layered-rules 6.1): a rejected rendering -> its listed forms. */
+  inflectedForms?: Record<string, string[]>;
+  /** "prefix" also matches the rejected renderings with case/plural endings. */
+  matchMode?: "exact" | "prefix";
 }
 
 export const STATUS_COLOR: Record<string, string> = {

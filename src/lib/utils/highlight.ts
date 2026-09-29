@@ -1,4 +1,5 @@
 import type { AiCheckReview, QaFinding, FindingCategory, NativeCheckReview } from "../types/finding";
+import type { LanguageQaCategory, LanguageQaFinding } from "../types/languageQa";
 
 // Category -> CSS class matching the four-colour finding-source legend in
 // index.css (tN red, tW blue, Alignment amber, everything else = Greek Room
@@ -11,6 +12,45 @@ export function categoryClass(category: FindingCategory): string {
     case "alignment": return "m-align";
     default: return "m-gr"; // unicode, spelling, names, repetition, consistency, structure, omission_addition
   }
+}
+
+// Language QA category -> CSS class. WHICH findings are drawn inline is the
+// engine's decision (each finding's `inline` flag, from INLINE_RULES in
+// language_qa.py); this map only chooses how a category looks. Its keys must
+// equal the engine's CATEGORIES -- test_category_marks_match_the_engine
+// (engine suite) fails if they drift. Every style is distinguishable without
+// colour: wavy, dotted, dashed, thin solid, hatched background, double.
+export const LANGUAGE_QA_CATEGORY_MARKS: Record<LanguageQaCategory, string> = {
+  typo: "m-lqa-typo",              // amber dotted; high-confidence typo -> m-lqa-typo-high, red wavy
+  sandhi: "m-lqa-sandhi",          // green dashed
+  "word-joining": "m-lqa-sandhi",
+  punctuation: "m-lqa-spacing",    // grey thin solid
+  spacing: "m-lqa-spacing",
+  unicode: "m-lqa-unicode",        // grey hatched background
+  termbase: "m-term",              // purple double
+  name: "m-term",
+  usfm: "m-lqa-spacing",           // markup hygiene, not a text change
+};
+
+/** The class for one Language QA finding. */
+export function languageQaMarkClass(
+  finding: Pick<LanguageQaFinding, "category" | "confidence" | "layer">,
+): string {
+  if (finding.layer === "lexicon") return "m-lqa-typo";
+  if (finding.category === "typo" && finding.confidence === "high") return "m-lqa-typo-high";
+  return LANGUAGE_QA_CATEGORY_MARKS[finding.category] ?? "m-lqa-typo";
+}
+
+// When Language QA marks overlap, one class supplies the underline:
+// highest severity first, then this class order (the brief's table order).
+const LQA_CLASS_ORDER = ["m-lqa-typo-high", "m-lqa-typo", "m-lqa-sandhi", "m-lqa-spacing", "m-lqa-unicode", "m-term"];
+const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+
+/** Lower wins. Exported for its test. */
+export function languageQaMarkRank(finding: Pick<LanguageQaFinding, "severity" | "category" | "confidence" | "layer">): number {
+  const severity = SEVERITY_ORDER[finding.severity] ?? SEVERITY_ORDER.low;
+  const order = LQA_CLASS_ORDER.indexOf(languageQaMarkClass(finding));
+  return severity * LQA_CLASS_ORDER.length + (order === -1 ? LQA_CLASS_ORDER.length - 1 : order);
 }
 
 export interface TextSegment {
@@ -67,6 +107,8 @@ interface ReviewSpan extends ExactTextRange {
   className: string;
   title: string;
   number?: number;
+  /** Language QA spans only: languageQaMarkRank, lower wins. */
+  lqaRank?: number;
 }
 
 /**
@@ -74,14 +116,18 @@ interface ReviewSpan extends ExactTextRange {
  * Findings without offsets (most tc_ai_bridge QAIssues — they're
  * verse-level, not span-level) don't produce an inline highlight; they
  * still show up in the review panel, just not underlined in the text.
- * Overlapping spans are merged conservatively (first-match-wins per
- * character) rather than attempting nested/stacked highlighting.
+ * Where spans overlap, a segment carries every covering finding id and the
+ * union of the non-Language-QA classes, but only ONE Language QA class: the
+ * highest-ranked covering finding's (languageQaMarkRank). Language QA ids are
+ * listed after the others, in rank order, so the first one is the mark's
+ * primary finding.
  */
 export function buildSegments(
   text: string,
   findings: QaFinding[],
   nativeChecks: NativeCheckReview[] = [],
   aiReviews: AiCheckReview[] = [],
+  languageQaFindings: LanguageQaFinding[] = [],
 ): TextSegment[] {
   const numbers = findingNumbers(findings);
   const spans: ReviewSpan[] = findings
@@ -148,6 +194,23 @@ export function buildSegments(
     }
   }
 
+  // Language QA findings are offset-addressed the same way QaFinding is
+  // (start/end rather than start_offset/end_offset -- the only real
+  // difference), but they're a deliberately separate, disposable data model
+  // (see language_qa_jobs.py's own docstring) and never get cast into a fake
+  // QaFinding here, matching how nativeChecks/aiReviews above are mapped in
+  // their own native shape rather than forced into QaFinding's either.
+  // Only findings the engine marked `inline` carry a span; the rest are
+  // listed in the panel only.
+  for (const finding of languageQaFindings) {
+    if (!finding.inline) continue;
+    spans.push({
+      start: finding.start, end: finding.end, id: finding.id,
+      className: languageQaMarkClass(finding), title: finding.message,
+      lqaRank: languageQaMarkRank(finding),
+    });
+  }
+
   if (spans.length === 0) {
     return [{ text, findingIds: [], className: null, title: "", numbers: [] }];
   }
@@ -164,7 +227,15 @@ export function buildSegments(
     const start = points[i];
     const end = points[i + 1];
     const covering = spans.filter((span) => span.start <= start && span.end >= end);
-    const classes = Array.from(new Set(covering.map((span) => span.className)));
+    const other = covering.filter((span) => span.lqaRank === undefined);
+    const languageQa = covering
+      .filter((span) => span.lqaRank !== undefined)
+      .sort((a, b) => (a.lqaRank! - b.lqaRank!) || a.id.localeCompare(b.id));
+    covering.splice(0, covering.length, ...other, ...languageQa);
+    const classes = Array.from(new Set([
+      ...other.map((span) => span.className),
+      ...(languageQa.length ? [languageQa[0].className] : []),
+    ]));
     segments.push({
       text: text.slice(start, end),
       findingIds: Array.from(new Set(covering.map((span) => span.id))),

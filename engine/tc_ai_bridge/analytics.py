@@ -124,10 +124,30 @@ def _translation_helps_findings(
     return invalid_count, findings
 
 
+def _language_qa_by_verse(project) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """Open Language QA findings worth a place in the queue: severity high or
+    confidence high (layered-rules Phase 4.2). From the last check job's
+    Language QA stage, with current statuses (reported_language_qa, the same
+    reader as the QA report and the publication gate)."""
+    from .language_qa_jobs import reported_language_qa
+    by_verse: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for f in reported_language_qa(project):
+        if f.get('status') != 'open':
+            continue
+        if f.get('severity') != 'high' and f.get('confidence') != 'high':
+            continue
+        by_verse.setdefault((str(f.get('chapter', '')), str(f.get('verse', ''))), []).append(f)
+    return by_verse
+
+
 def exception_first_queue(project) -> list[dict[str,Any]]:
     rows=[]
     ai={(str(x.get('chapter')),str(x.get('verse'))):x for x in project.list_ai_review_results()}
     local_by_verse=_local_findings_by_verse(project)
+    try:
+        language_qa_by_verse=_language_qa_by_verse(project)
+    except Exception:
+        language_qa_by_verse={}  # the queue must not fail on an unreadable Language QA snapshot
     for ch in project.chapters():
         for vs in project.verses(ch):
             if vs=='front': continue
@@ -155,6 +175,7 @@ def exception_first_queue(project) -> list[dict[str,Any]]:
             invalid,helps_findings=_translation_helps_findings(project,str(ch),str(vs),checks)
             discussion=sum(1 for d in project.decisions_for_verse(ch,vs) if d.get('decision')=='needs_discussion')
             review=project.load_review_state(ch,vs) or {}; final_state=str(review.get('status',''))
+            language_qa=language_qa_by_verse.get((str(ch),str(vs)),[])
             # `missing` is deliberately NOT an exception (#144). It means only
             # that no AI review has been saved for this verse, and AI review is
             # optional and human-invoked -- never on the path a translator hits
@@ -164,7 +185,7 @@ def exception_first_queue(project) -> list[dict[str,Any]]:
             # attention" was the whole book in verse order. `stale` still
             # counts, because that means a review existed and the text moved
             # underneath it, which is a real thing to look at.
-            if critical or high or cache=='stale' or invalid or wa=='invalid' or discussion or final_state.startswith('stale') or local_findings:
+            if critical or high or cache=='stale' or invalid or wa=='invalid' or discussion or final_state.startswith('stale') or local_findings or language_qa:
                 summary=str(saved.get('summary','')) or '; '.join(
                     str(f.get('explanation','')) for f in local_findings[:3] if f.get('explanation')
                 )
@@ -186,7 +207,21 @@ def exception_first_queue(project) -> list[dict[str,Any]]:
                     # (Wildebeest/USFM/Names) and the dashboard colour-codes the
                     # two differently.
                     'helpsFindings':helps_findings,
+                    # Open Language QA findings of severity or confidence high,
+                    # also kept in their own list: they are review candidates
+                    # from the offline text checker, not Greek Room findings.
+                    'languageQa':len(language_qa),
+                    'languageQaFindings':[
+                        {
+                            'ruleId':str(f.get('ruleId','')),'severity':str(f.get('severity','')),
+                            'confidence':str(f.get('confidence','')),'originalText':str(f.get('originalText','')),
+                            'message':str(f.get('message','')),
+                        }
+                        for f in language_qa
+                    ],
                 })
     rank={'stale':0,'missing':1,'current':2}
-    rows.sort(key=lambda r:(-r['critical'],-r['high'],-r['invalidChecks'],-r['discussions'],rank.get(r['cache'],9),int(r['chapter']) if r['chapter'].isdigit() else 999,int(r['verse']) if r['verse'].isdigit() else 999))
+    # Language QA ranks after AI critical (and high) issues and before tN/tW
+    # invalid checks (layered-rules Phase 4.2).
+    rows.sort(key=lambda r:(-r['critical'],-r['high'],-r['languageQa'],-r['invalidChecks'],-r['discussions'],rank.get(r['cache'],9),int(r['chapter']) if r['chapter'].isdigit() else 999,int(r['verse']) if r['verse'].isdigit() else 999))
     return rows

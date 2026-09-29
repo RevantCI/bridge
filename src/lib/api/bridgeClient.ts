@@ -1,4 +1,29 @@
 import type {
+  LanguageQaDecisionIssue, LanguageQaHistory, LanguageQaInline, LanguageQaStatus, LanguageQaVerse, LanguageQaView,
+} from "../types/languageQa";
+import type { CollectionQaSnapshot } from "../types/collectionQa";
+import type {
+  HouseStyleEntry, HouseStyleEntryInput, HouseStyleListResponse,
+} from "../types/houseStyle";
+
+/** One thing that blocks an export (reporting.publication_gate, layered-rules 4.5). */
+export interface ExportGateItem {
+  source: "aiReview" | "languageQa" | "translationHelps" | string;
+  reference: string;
+  summary: string;
+}
+
+export interface ExportResult {
+  written: boolean;
+  path: string;
+  chapters?: number;
+  /** True when blocking items are open and no override was given: nothing was written. */
+  blocked?: boolean;
+  /** True when it was written over blocking items, with the override recorded. */
+  overridden?: boolean;
+  gate?: { blocking: boolean; items: ExportGateItem[]; counts: Record<string, number> };
+}
+import type {
   AIReviewChapterResponse,
   AIReviewJobSnapshot,
   AlignmentAiProposal,
@@ -28,6 +53,7 @@ import type {
   VerseHeading,
   QaFinding,
   SettingsData,
+  TerminologyRule,
   IssueResolutionHandoffResult,
   IssueResolutionListResponse,
   IssueResolutionRecord,
@@ -165,6 +191,21 @@ interface EngineEnvelope<T> {
  * the engine's dispatcher and sidecar.rs's timeout table key on the same
  * string. A typo fails to compile instead of failing at runtime. */
 export type EngineMethod =
+  | "languageQa.status"
+  | "languageQa.pause"
+  | "languageQa.inline"
+  | "languageQa.history"
+  | "languageQa.verse"
+  | "housestyle.list"
+  | "housestyle.nameSuggestions"
+  | "housestyle.record"
+  | "housestyle.setState"
+  | "housestyle.export"
+  | "housestyle.import"
+  | "collection.runChecks"
+  | "collection.qaStatus"
+  | "collection.pauseChecks"
+  | "collection.cancelChecks"
   | "ai.review.cancel"
   | "ai.review.listForChapter"
   | "ai.review.retry"
@@ -248,6 +289,8 @@ export type EngineMethod =
   | "settings.get"
   | "settings.set"
   | "targetSemantic.getRange"
+  | "terminology.list"
+  | "terminology.record"
   | "triage.cancel"
   | "triage.override"
   | "triage.results"
@@ -271,6 +314,55 @@ async function call<T>(method: EngineMethod, params?: Record<string, unknown>): 
 }
 
 export const bridge = {
+  /** One page of one list: every open finding, only those shown again for
+   * re-checking, or those marked as false positives. */
+  languageQaStatus(
+    projectPath: string, offset = 0, limit = 0, view: LanguageQaView = "findings",
+  ): Promise<LanguageQaStatus> {
+    return call("languageQa.status", { projectPath, offset, limit, view });
+  },
+
+  /** Every decision recorded on this verse's Language QA findings (or one of
+   * them), oldest first. Read-only. */
+  languageQaHistory(
+    projectPath: string, chapter: string, verse: string, findingId?: string,
+  ): Promise<LanguageQaHistory> {
+    return call("languageQa.history", { projectPath, chapter, verse, findingId });
+  },
+
+  languageQaPause(projectPath: string, paused: boolean): Promise<LanguageQaStatus> {
+    return call("languageQa.pause", { projectPath, paused });
+  },
+
+  /** Every inline-rule finding for `chapter` (the whole book when omitted),
+   * unpaged -- what the verse marks are drawn from. */
+  languageQaInline(projectPath: string, chapter?: string): Promise<LanguageQaInline> {
+    return call("languageQa.inline", { projectPath, chapter });
+  },
+
+  /** Check every book of the open collection in turn (layered-rules 4.4). */
+  collectionRunChecks(checks: string[], force = false): Promise<CollectionQaSnapshot> {
+    return call("collection.runChecks", { checks, force });
+  },
+
+  /** The run's snapshot; with jobId "" and no run, each book's last recorded run. */
+  collectionQaStatus(jobId: string): Promise<CollectionQaSnapshot> {
+    return call("collection.qaStatus", { jobId });
+  },
+
+  collectionPauseChecks(paused: boolean): Promise<CollectionQaSnapshot> {
+    return call("collection.pauseChecks", { paused });
+  },
+
+  collectionCancelChecks(): Promise<CollectionQaSnapshot> {
+    return call("collection.cancelChecks", {});
+  },
+
+  /** Every Language QA finding of one verse, inline or not, for the review panel. */
+  languageQaVerse(projectPath: string, chapter: string, verse: string): Promise<LanguageQaVerse> {
+    return call("languageQa.verse", { projectPath, chapter, verse });
+  },
+
   ping(): Promise<{ pong: boolean }> {
     return call("ping");
   },
@@ -429,9 +521,9 @@ export const bridge = {
 
   decideVerse(
     chapter: string, verse: string, findingId: string,
-    status: string, comment?: string,
+    status: string, comment?: string, issue?: LanguageQaDecisionIssue,
   ): Promise<Record<string, unknown>> {
-    return call("verse.decide", { chapter, verse, findingId, status, comment });
+    return call("verse.decide", { chapter, verse, findingId, status, comment, issue });
   },
 
   editVerse(chapter: string, verse: string, newText: string): Promise<{
@@ -655,16 +747,55 @@ export const bridge = {
     return call("settings.set", params);
   },
 
+  terminologyList(): Promise<{ rules: TerminologyRule[] }> {
+    return call("terminology.list");
+  },
+
+  /** Without `overwrite`, an existing rule for the concept is not replaced:
+   * nothing is written and it comes back as `conflict`. */
+  terminologyRecord(
+    conceptId: string, approvedRenderings: string[], rejectedRenderings: string[], overwrite = false,
+    extra: { allowedAlternatives?: string[]; inflectedForms?: Record<string, string[]>; matchMode?: "exact" | "prefix" } = {},
+  ): Promise<{ rules: TerminologyRule[]; conflict?: TerminologyRule }> {
+    return call("terminology.record", { conceptId, approvedRenderings, rejectedRenderings, overwrite, ...extra });
+  },
+
+  async pickJsonFile(): Promise<string | null> {
+    return invoke<string | null>("pick_json_file");
+  },
+
+  // -- house style (layered-rules 6.3/6.4) --
+  housestyleList(): Promise<HouseStyleListResponse> {
+    return call("housestyle.list", {});
+  },
+  housestyleNameSuggestions(): Promise<{ suggestions: Array<{ word: string; count: number; variants: string[] }>; checked: boolean }> {
+    return call("housestyle.nameSuggestions", {});
+  },
+  housestyleRecord(entry: HouseStyleEntryInput): Promise<HouseStyleListResponse & { entry: HouseStyleEntry }> {
+    return call("housestyle.record", { entry });
+  },
+  housestyleSetState(key: string, state: "active" | "removed" | "undone"): Promise<HouseStyleListResponse & { entry: HouseStyleEntry }> {
+    return call("housestyle.setState", { key, state });
+  },
+  housestyleExport(outputPath: string): Promise<{ written: boolean; path: string; count: number }> {
+    return call("housestyle.export", { outputPath });
+  },
+  housestyleImport(inputPath: string): Promise<HouseStyleListResponse & { imported: number }> {
+    return call("housestyle.import", { inputPath });
+  },
+
   pickSavePath(defaultName: string): Promise<string | null> {
     return invoke<string | null>("pick_save_path", { defaultName });
   },
 
-  exportAligned(outputPath: string): Promise<{ written: boolean; path: string; chapters: number }> {
-    return call("export.aligned", { outputPath });
+  /** With blocking publication-gate items open and no override, nothing is
+   * written and the answer is `{written: false, blocked: true, gate}`. */
+  exportAligned(outputPath: string, override = false): Promise<ExportResult> {
+    return call("export.aligned", { outputPath, override });
   },
 
-  exportNonAligned(outputPath: string): Promise<{ written: boolean; path: string; chapters: number }> {
-    return call("export.nonAligned", { outputPath });
+  exportNonAligned(outputPath: string, override = false): Promise<ExportResult> {
+    return call("export.nonAligned", { outputPath, override });
   },
 
   // --- Stage 8 QA audit (analysis; read-only) -------------------------------

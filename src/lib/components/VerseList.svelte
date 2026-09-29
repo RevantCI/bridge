@@ -1,16 +1,21 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { verseNums, verseTexts, headingsByVerse, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress } from "../stores";
+  import { verseNums, verseTexts, headingsByVerse, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress, languageQaFindingsByVerse, project } from "../stores";
   import { rangeBetween } from "../crossVerseRange";
   import { unionInChapterOrder } from "../crossVerseSuggest";
   import { buildSegments } from "../utils/highlight";
   import { parseVerseNotes, withNoteMarkers, type ParsedVerse, type VerseNote, type VerseNoteKind } from "../utils/usfmNotes";
   import VerseNotesPopup from "./VerseNotesPopup.svelte";
   import FindingContextMenu from "./FindingContextMenu.svelte";
-  import { decideLocalFinding } from "../findingActions";
+  import { decideLanguageQaFindingOptimistically, decideLocalFinding } from "../findingActions";
+  import { codePointToUtf16 } from "../utils/codePoints";
+  import LanguageQaHistoryPopup from "./LanguageQaHistoryPopup.svelte";
+  import { IGNORE_SCOPES, houseStyleNotice, recordScopedIgnore, undoLearned } from "../houseStyleUi";
+  import type { HouseStyleScope } from "../types/houseStyle";
   import type { QaFinding } from "../types/finding";
+  import type { LanguageQaFinding, LanguageQaSuggestion } from "../types/languageQa";
   import {
-    applySuggestedFindingFix, editingChapter, editingVerse, editText, editSaving,
+    applySuggestedFindingFix, applyLanguageQaSuggestedFix, editingChapter, editingVerse, editText, editSaving,
     editError, saveVerseEdit, cancelVerseEdit, startVerseEdit, recheckingKey,
   } from "../verseEditor";
   import { openAlignment } from "../alignmentUi";
@@ -21,11 +26,25 @@
   let openNotes: { kind: VerseNoteKind; notes: VerseNote[]; reference: string } | null = null;
   let contextMenu: { finding: QaFinding; verse: string; x: number; y: number } | null = null;
   let contextBusy = false;
+  // Separate from contextMenu: Language QA findings are a different,
+  // disposable data model (see language_qa_jobs.py's own docstring), never
+  // cast into a fake QaFinding just to reuse the one menu instance above.
+  // Covers every inline-decorated Language QA rule (terminology.deprecated-
+  // form, tamil.vallinam-missing) -- not termbase-specific despite the
+  // history, and "term" would now collide with the unrelated Settings >
+  // Terminology pane.
+  let langQaContextMenu: { finding: LanguageQaFinding; verse: string; x: number; y: number } | null = null;
+  let langQaContextBusy = false;
+  // A span carrying findings from more than one source (Greek Room/native and
+  // Language QA): one menu with a section per finding (layered-rules 4.3).
+  let mixedMenu: { verse: string; qa: QaFinding[]; lqa: LanguageQaFinding[]; x: number; y: number } | null = null;
   // The general verse right-click menu (issue #69) -- a separate menu from
   // contextMenu above, which only ever opens on a finding span. The two
   // never open at once: a right-click on a mark stops propagation before it
   // reaches the row.
   let verseMenu: { verse: string; x: number; y: number } | null = null;
+  // The verse whose Language QA decision history is open (verse menu).
+  let historyFor: { projectPath: string; chapter: string; verse: string } | null = null;
   // Which underlined finding Left/Right last landed on, scoped to one verse
   // key so switching verses starts at that verse's first finding again.
   let activeFindingVerseKey = "";
@@ -49,22 +68,87 @@
    * its "Accept translation as correct" means the opposite of "Accept finding"
    * here — see the hints, and USER_MANUAL.md §6.4.
    */
-  $: contextActions = contextMenu ? [
-    {
-      id: "accept",
-      label: "Accept finding",
-      disabled: contextBusy,
-      title: hasProposedFix(contextMenu.finding)
-        ? "Replace the highlighted words with the proposed correction, re-check the verse, and file this finding as accepted."
-        : "File this finding as accepted. This check proposed no correction, so the verse text is left alone.",
-    },
-    {
-      id: "ignore",
-      label: "Ignore",
-      disabled: contextBusy,
-      title: "Leave the verse as it is and move this finding to Ignored in the review panel.",
-    },
-  ] : [];
+  $: contextActions = contextMenu ? findingActionsFor(contextMenu.finding, contextBusy) : [];
+
+  function findingActionsFor(finding: QaFinding, busy = contextBusy) {
+    return [
+      {
+        id: "accept",
+        label: "Accept finding",
+        disabled: busy,
+        title: hasProposedFix(finding)
+          ? "Replace the highlighted words with the proposed correction, re-check the verse, and file this finding as accepted."
+          : "File this finding as accepted. This check proposed no correction, so the verse text is left alone.",
+      },
+      {
+        id: "ignore",
+        label: "Ignore",
+        disabled: busy,
+        title: "Leave the verse as it is and move this finding to Ignored in the review panel.",
+      },
+    ];
+  }
+
+  /**
+   * The inline Language QA context menu: one "Use" per ranked suggestion (at
+   * most five, each with its rationale as the tooltip), Edit… (the verse
+   * opens with the flagged text selected), Ignore this occurrence, and Mark as
+   * false positive. A finding with no suggestion (a termbase entry with only
+   * rejected forms) simply has no Use item. Every action closes the menu at
+   * once: nothing here waits on the engine before the screen changes.
+   * (Ignore scoped to a word or rule -- house style -- is layered-rules Phase 6.)
+   */
+  $: langQaContextActions = langQaContextMenu ? buildLangQaActions(langQaContextMenu.finding) : [];
+
+  function buildLangQaActions(finding: LanguageQaFinding) {
+    const suggestions = languageQaSuggestions(finding);
+    return [
+      ...suggestions.map((s) => ({
+        id: `use:${s.rank}`,
+        label: `Use "${s.text}"`,
+        disabled: langQaContextBusy,
+        title: s.rationale || "Replace the flagged text with this form, re-check the verse, and record it as accepted.",
+      })),
+      {
+        id: "edit",
+        label: "Edit…",
+        separatorBefore: suggestions.length > 0,
+        disabled: langQaContextBusy,
+        title: "Open this verse for editing, with the flagged text selected.",
+      },
+      {
+        id: "ignore",
+        label: "Ignore this occurrence",
+        separatorBefore: true,
+        disabled: langQaContextBusy,
+        title: "Leave the verse as it is and record this occurrence as ignored.",
+      },
+      {
+        id: "ignore-scope",
+        label: "Ignore more widely",
+        disabled: langQaContextBusy,
+        title: "Record this as the project's house style (Settings → Terminology → House style, where it can be removed).",
+        submenu: IGNORE_SCOPES.filter((s) => s.scope !== "occurrence").map((s) => ({
+          id: `ignore-scope:${s.scope}`, label: s.label, title: s.title, disabled: langQaContextBusy,
+        })),
+      },
+      {
+        id: "false-positive",
+        label: "Mark as false positive",
+        disabled: langQaContextBusy,
+        title: "This is not a problem: hide it and list it under False positives in the Language QA panel.",
+      },
+    ];
+  }
+
+  /** Ranked, at most five. Falls back to the one-release alias for a finding
+   * from an older engine. */
+  function languageQaSuggestions(finding: LanguageQaFinding): LanguageQaSuggestion[] {
+    if (finding.suggestions?.length) return finding.suggestions.slice(0, 5);
+    return finding.suggestedReplacement
+      ? [{ text: finding.suggestedReplacement, rank: 1, source: "rule", rationale: "" }]
+      : [];
+  }
 
   /**
    * The general verse right-click menu (issue #69): "AI review" opens a
@@ -118,6 +202,12 @@
           ? "This verse is already being edited."
           : editBlocked ? "Wait for background checking to finish before editing" : "Edit this verse",
       },
+      {
+        id: "lqa-history",
+        label: "Language QA history…",
+        disabled: !$project,
+        title: "Every Language QA decision recorded on this verse (read-only)",
+      },
     ];
   }
 
@@ -135,6 +225,10 @@
     verseMenu = null;
     if (id === "edit-verse") {
       startVerseEdit($currentChapter, verse);
+      return;
+    }
+    if (id === "lqa-history") {
+      if ($project) historyFor = { projectPath: $project.path, chapter: $currentChapter, verse };
       return;
     }
     const scope: AIReviewScope | null =
@@ -166,16 +260,181 @@
     contextMenu = { finding, verse, x: event.clientX, y: event.clientY };
   }
 
+  function openLangQaFindingMenu(
+    event: MouseEvent,
+    findingIds: string[],
+    langFindings: LanguageQaFinding[],
+    verse: string,
+  ): void {
+    const finding = findingIds
+      .map((id) => langFindings.find((item) => item.id === id))
+      .find((item): item is LanguageQaFinding => Boolean(item));
+    if (!finding) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect(verse);
+    langQaContextMenu = { finding, verse, x: event.clientX, y: event.clientY };
+  }
+
+  /**
+   * A mark's findingIds can come from QaFinding, native/AI check reviews, or
+   * a Language QA finding (buildSegments merges all of them). Try the
+   * existing QaFinding-owning menu first, exactly as before -- this
+   * preserves every existing finding type's behaviour unchanged -- and fall
+   * back to the Language QA menu only when nothing in `findings` claims this
+   * span.
+   */
+  function onMarkContextMenu(
+    event: MouseEvent,
+    findingIds: string[],
+    findings: QaFinding[],
+    langFindings: LanguageQaFinding[],
+    verse: string,
+  ): void {
+    const qa = findingIds.map((id) => findings.find((f) => f.id === id)).filter((f): f is QaFinding => Boolean(f));
+    const lqa = findingIds.map((id) => langFindings.find((f) => f.id === id))
+      .filter((f): f is LanguageQaFinding => Boolean(f));
+    if (qa.length > 0 && lqa.length > 0) {
+      // Several sources on one span (layered-rules Phase 4.3): one section per
+      // finding, each with its own actions, rather than the first one winning.
+      event.preventDefault();
+      event.stopPropagation();
+      onSelect(verse);
+      mixedMenu = { verse, qa, lqa, x: event.clientX, y: event.clientY };
+    } else if (qa.length > 0) {
+      openFindingMenu(event, findingIds, findings, verse);
+    } else {
+      openLangQaFindingMenu(event, findingIds, langFindings, verse);
+    }
+  }
+
+  const shortText = (text: string, limit = 48): string =>
+    text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+
+  /** One submenu per finding: the Greek Room/native actions or the Language QA
+   * actions, exactly as their own menus offer them, with ids prefixed by the
+   * finding so the action is routed back to the right handler. */
+  $: mixedMenuActions = mixedMenu ? [
+    ...mixedMenu.qa.map((finding) => ({
+      id: `qa:${finding.id}`,
+      label: `${finding.engine || "Check"}: ${shortText(finding.explanation || finding.check_type)}`,
+      submenu: findingActionsFor(finding).map((a) => ({ ...a, id: `qa:${finding.id}:${a.id}` })),
+    })),
+    ...mixedMenu.lqa.map((finding) => ({
+      id: `lqa:${finding.id}`,
+      label: `Language QA: ${shortText(`${finding.originalText} — ${finding.message}`)}`,
+      submenu: buildLangQaActions(finding).map((a) => ({ ...a, id: `lqa:${finding.id}:${a.id}` })),
+    })),
+  ] : [];
+
+  function onMixedMenuAction(event: CustomEvent<{ id: string }>): void {
+    if (!mixedMenu) return;
+    const { verse, qa, lqa, x, y } = mixedMenu;
+    const [source, findingId, ...rest] = event.detail.id.split(":");
+    const action = rest.join(":");
+    mixedMenu = null;
+    if (source === "qa") {
+      const finding = qa.find((f) => f.id === findingId);
+      if (!finding) return;
+      contextMenu = { finding, verse, x, y };
+      void onContextAction(new CustomEvent("action", { detail: { id: action } }));
+    } else if (source === "lqa") {
+      const finding = lqa.find((f) => f.id === findingId);
+      if (!finding) return;
+      langQaContextMenu = { finding, verse, x, y };
+      onLangQaContextAction(new CustomEvent("action", { detail: { id: action } }));
+    }
+  }
+
+  /**
+   * Every action closes the menu and changes the screen before any engine
+   * call: Use shows the corrected verse at once (applyLanguageQaSuggestedFix
+   * saves optimistically and rolls back if the save fails); Ignore and False
+   * positive drop the mark at once and put it back only if recording fails.
+   * The notice reports the outcome when it arrives.
+   */
+  function onLangQaContextAction(event: CustomEvent<{ id: string }>): void {
+    if (!langQaContextMenu || langQaContextBusy) return;
+    const { finding, verse } = langQaContextMenu;
+    const id = event.detail.id;
+    langQaContextMenu = null;
+    contextNotice = "";
+    if (id.startsWith("use:")) {
+      const chosen = languageQaSuggestions(finding).find((s) => `use:${s.rank}` === id) ?? null;
+      langQaContextBusy = true;
+      void applyLanguageQaSuggestedFix(finding, chosen).then((result) => {
+        contextNotice = result.message;
+        contextNoticeError = !result.ok;
+      }).finally(() => { langQaContextBusy = false; });
+    } else if (id === "edit") {
+      void editWithSelection(finding, verse);
+    } else if (id.startsWith("ignore-scope:")) {
+      // House style: the occurrence is ignored at once, and the scope is
+      // recorded as an explicit house-style entry the next pass applies.
+      const scope = id.slice("ignore-scope:".length) as HouseStyleScope;
+      contextNotice = `Ignored: ${IGNORE_SCOPES.find((s) => s.scope === scope)?.label.toLowerCase() ?? scope}.`;
+      contextNoticeError = false;
+      void decideLanguageQaFindingOptimistically(finding, "ignored").then(async (error) => {
+        if (error) {
+          contextNotice = error;
+          contextNoticeError = true;
+          return;
+        }
+        try {
+          await recordScopedIgnore(finding, scope);
+        } catch (e) {
+          contextNotice = e instanceof Error ? e.message : String(e);
+          contextNoticeError = true;
+        }
+      });
+    } else if (id === "ignore" || id === "false-positive") {
+      contextNotice = id === "ignore" ? "Occurrence ignored." : "Marked as a false positive.";
+      contextNoticeError = false;
+      void decideLanguageQaFindingOptimistically(finding, id === "ignore" ? "ignored" : "rejected")
+        .then((error) => {
+          if (error) {
+            contextNotice = error;
+            contextNoticeError = true;
+          }
+        });
+    }
+  }
+
+  /** Edit… opens the editor with the flagged span selected. Engine offsets
+   * are code points; a textarea selection is UTF-16, so they are converted
+   * over the raw text the editor holds. */
+  async function editWithSelection(finding: LanguageQaFinding, verse: string): Promise<void> {
+    if (!startVerseEdit($currentChapter, verse)) return;
+    await tick();
+    const area = scrollContainer?.querySelector<HTMLTextAreaElement>(
+      `[data-verse-key="${verseKey($currentChapter, verse)}"] textarea`);
+    if (!area) return;
+    const text = area.value;
+    area.focus();
+    area.setSelectionRange(codePointToUtf16(text, finding.start), codePointToUtf16(text, finding.end));
+  }
+
   /**
    * Finding ids that actually carry an underline in this verse, in reading
    * order — same filter and sort buildSegments/findingNumbers use, so the
    * keyboard walks the marks a reviewer can see, in the order their
    * superscript numbers run.
    */
-  function markedFindingIds(findings: QaFinding[], textLength: number): string[] {
-    return findings
-      .filter((f) => f.start_offset !== null && f.end_offset !== null && f.end_offset <= textLength)
-      .sort((a, b) => (a.start_offset! - b.start_offset!) || a.id.localeCompare(b.id))
+  // The row's ✓ also counts drawn Language QA marks as open (layered-rules
+  // 4.3): a verse with a mark on it is not shown as clean.
+  function markedFindingIds(
+    findings: QaFinding[], textLength: number, langDisplay: LanguageQaFinding[] = [],
+  ): string[] {
+    // Language QA marks are walked too (layered-rules 4.3), by their display
+    // offsets, in one reading order with the other findings.
+    const spans = [
+      ...findings
+        .filter((f) => f.start_offset !== null && f.end_offset !== null && f.end_offset <= textLength)
+        .map((f) => ({ id: f.id, start: f.start_offset! })),
+      ...langDisplay.filter((f) => f.end <= textLength).map((f) => ({ id: f.id, start: f.start })),
+    ];
+    return spans
+      .sort((a, b) => (a.start - b.start) || a.id.localeCompare(b.id))
       .map((f) => f.id);
   }
 
@@ -206,6 +465,7 @@
     key: string,
     findingIds: string[],
     findings: QaFinding[],
+    langFindings: LanguageQaFinding[] = [],
   ): void {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -234,14 +494,17 @@
     if (!isMenuKey) return;
     event.preventDefault();
     const finding = findings.find((item) => item.id === findingIds[index]);
-    if (!finding) return;
+    // The raw store copy, not the display one: the fix splices the raw verse.
+    const langFinding = finding ? undefined : langFindings.find((item) => item.id === findingIds[index]);
+    if (!finding && !langFinding) return;
     onSelect(verse);
     activeFindingVerseKey = key;
     activeFindingIndex = index;
     const row = event.currentTarget as HTMLElement;
     const anchor = row.querySelector<HTMLElement>(`[data-finding-ids~="${findingIds[index]}"]`) ?? row;
     const rect = anchor.getBoundingClientRect();
-    contextMenu = { finding, verse, x: rect.left, y: rect.bottom };
+    if (finding) contextMenu = { finding, verse, x: rect.left, y: rect.bottom };
+    else if (langFinding) langQaContextMenu = { finding: langFinding, verse, x: rect.left, y: rect.bottom };
   }
 
   async function onContextAction(event: CustomEvent<{ id: string }>): Promise<void> {
@@ -300,6 +563,18 @@
           }
         : finding,
     );
+  }
+
+  /** Display only. Language QA's start/end are raw-verse code-point offsets,
+   * so to draw a mark over the rendered text (notes lifted out) they shift
+   * the same way remapFindings' do. These copies go to buildSegments and
+   * nowhere else: the right-click menu and applyLanguageQaSuggestedFix get the
+   * store's raw findings, because the fix splices the raw verse. Handing them
+   * these shifted offsets put the fix before a footnote in the wrong place. */
+  function displayLanguageQaFindings(findings: LanguageQaFinding[], parsed: ParsedVerse): LanguageQaFinding[] {
+    return findings.map((finding) => ({
+      ...finding, start: parsed.mapOffset(finding.start), end: parsed.mapOffset(finding.end),
+    }));
   }
 
   let scrollContainer: HTMLDivElement;
@@ -424,12 +699,14 @@
     {@const findings = $findingsByVerse[key] ?? []}
     {@const checkStatus = $checkStatusByVerse[key]}
     {@const alignmentStatus = $alignmentStatusByVerse[key] ?? "untouched"}
-    {@const openCount = findings.filter((f) => f.status === "open").length}
+    {@const langFindings = $languageQaFindingsByVerse[key] ?? []}
+    {@const openCount = findings.filter((f) => f.status === "open").length + langFindings.length}
     {@const highlightFindings = findings.filter((f) => f.status !== "ignored" && f.status !== "accepted")}
     {@const parsed = parseVerseNotes($verseTexts[key] ?? "")}
     {@const remapped = remapFindings(highlightFindings, parsed)}
-    {@const segments = buildSegments(parsed.clean, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [])}
-    {@const menuFindingIds = markedFindingIds(remapped, parsed.clean.length)}
+    {@const langDisplay = displayLanguageQaFindings(langFindings, parsed)}
+    {@const segments = buildSegments(parsed.clean, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [], langDisplay)}
+    {@const menuFindingIds = markedFindingIds(remapped, parsed.clean.length, langDisplay)}
     {@const activeFindingId = menuFindingIds[activeIndexFor(key, menuFindingIds.length)]}
     {@const isEditingThis = $editingChapter === $currentChapter && $editingVerse === v}
     <div
@@ -447,7 +724,7 @@
       aria-keyshortcuts="Shift+F10"
       on:click={(event) => selectFromRow(v, event)}
       on:dblclick={() => beginEditFromList(v)}
-      on:keydown={(e) => onVerseKeydown(e, v, key, menuFindingIds, findings)}
+      on:keydown={(e) => onVerseKeydown(e, v, key, menuFindingIds, findings, langFindings)}
       on:contextmenu={(e) => openVerseMenu(e, v)}
     >
       <div class="vnum">
@@ -491,7 +768,7 @@
                   && piece.seg.findingIds.includes(activeFindingId)}
                 data-finding-ids={piece.seg.findingIds.join(" ")}
                 title={piece.seg.title}
-                on:contextmenu={(event) => openFindingMenu(event, piece.seg.findingIds, findings, v)}
+                on:contextmenu={(event) => onMarkContextMenu(event, piece.seg.findingIds, findings, langFindings, v)}
               >{piece.seg.text}</mark>{#if piece.seg.numbers.length}<sup class="finding-num">{piece.seg.numbers.join(",")}</sup>{/if}{:else}{piece.seg.text}{/if}
           {/each}
         </div>
@@ -532,6 +809,16 @@
   <p class="context-notice" class:error={contextNoticeError} role="status">{contextNotice}</p>
 {/if}
 
+{#if $houseStyleNotice}
+  <!-- The learner (layered-rules 6.4): shown for the session; Undo supersedes it. -->
+  <p class="context-notice house-style" role="status">
+    Learned: “{$houseStyleNotice.word}” is house style for {$houseStyleNotice.ruleId} in this book
+    ({$houseStyleNotice.evidence.length} ignores).
+    <button type="button" class="notice-undo" on:click={() => $houseStyleNotice && void undoLearned($houseStyleNotice)}>Undo</button>
+    <button type="button" class="notice-undo" on:click={() => houseStyleNotice.set(null)} aria-label="Dismiss">✕</button>
+  </p>
+{/if}
+
 {#if contextMenu}
   <FindingContextMenu
     x={contextMenu.x}
@@ -551,6 +838,37 @@
     actions={verseMenuActions}
     on:action={onVerseContextAction}
     on:close={() => (verseMenu = null)}
+  />
+{/if}
+
+{#if mixedMenu}
+  <FindingContextMenu
+    x={mixedMenu.x}
+    y={mixedMenu.y}
+    findingLabel="Findings on this text"
+    actions={mixedMenuActions}
+    on:action={onMixedMenuAction}
+    on:close={() => (mixedMenu = null)}
+  />
+{/if}
+
+{#if langQaContextMenu}
+  <FindingContextMenu
+    x={langQaContextMenu.x}
+    y={langQaContextMenu.y}
+    findingLabel="Actions for {langQaContextMenu.finding.originalText}"
+    actions={langQaContextActions}
+    on:action={onLangQaContextAction}
+    on:close={() => (langQaContextMenu = null)}
+  />
+{/if}
+
+{#if historyFor}
+  <LanguageQaHistoryPopup
+    projectPath={historyFor.projectPath}
+    chapter={historyFor.chapter}
+    verse={historyFor.verse}
+    onClose={() => (historyFor = null)}
   />
 {/if}
 
@@ -640,6 +958,9 @@
     color: var(--success); font-size: var(--fs-sm); box-shadow: 0 4px 14px rgba(15, 23, 42, .18);
   }
   .context-notice.error { background: var(--danger-bg, #fef2f2); color: var(--danger, #b91c1c); }
+  /* Above the ordinary notice, so both can show at once. */
+  .context-notice.house-style { bottom: 72px; background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .notice-undo { margin-left: 8px; border: none; background: none; color: var(--accent); cursor: pointer; font-size: var(--fs-sm); text-decoration: underline; }
   /* The row being edited is still .active, which paints its own border --
      nested inside the textarea's it read as a double outline. The
      textarea is the only box while editing. Equal specificity to

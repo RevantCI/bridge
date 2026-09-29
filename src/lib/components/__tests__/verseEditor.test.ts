@@ -1,23 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 
-const { editVerse, runVerseChecks } = vi.hoisted(() => ({
+const { editVerse, runVerseChecks, decideVerse } = vi.hoisted(() => ({
   editVerse: vi.fn(),
   runVerseChecks: vi.fn(),
+  decideVerse: vi.fn(),
 }));
 
 vi.mock("../../api/bridgeClient", () => ({
-  bridge: { editVerse, runVerseChecks },
+  bridge: { editVerse, runVerseChecks, decideVerse },
 }));
 
-import { applySuggestedFindingFix, cancelVerseEdit } from "../../verseEditor";
+import {
+  applyLanguageQaSuggestedFix, applySuggestedFindingFix, cancelVerseEdit, editText, saveVerseEdit, startVerseEdit,
+} from "../../verseEditor";
 import {
   checkingProgress,
   findingsByVerse,
+  languageQaFindingsByVerse,
   verseKey,
   verseTexts,
 } from "../../stores";
 import type { QaFinding } from "../../types/finding";
+import type { LanguageQaFinding } from "../../types/languageQa";
+import { lqaFinding } from "./languageQaFixture";
 
 function finding(overrides: Partial<QaFinding> = {}): QaFinding {
   return {
@@ -57,5 +63,135 @@ describe("applySuggestedFindingFix", () => {
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/stale/i);
     expect(editVerse).not.toHaveBeenCalled();
+  });
+
+  it("clears the edited verse's Language QA marks on success, and only that verse's", async () => {
+    // Any saved edit makes every Language QA offset in that verse stale, not
+    // only an edit made through a Language QA Use.
+    const mark = languageQaFinding();
+    languageQaFindingsByVerse.set({ "1:6": [mark], "1:7": [{ ...mark, id: "other", verse: "7" }] });
+    const result = await applySuggestedFindingFix(finding());
+    expect(result.ok).toBe(true);
+    expect(get(languageQaFindingsByVerse)["1:6"]).toBeUndefined();
+    expect(get(languageQaFindingsByVerse)["1:7"]).toEqual([expect.objectContaining({ id: "other" })]);
+  });
+
+  it("clears the verse's Language QA marks after a hand-typed edit is saved, until the next poll", async () => {
+    // No Use involved: the translator opens the editor, types, and saves.
+    languageQaFindingsByVerse.set({ "1:6": [languageQaFinding()] });
+    expect(startVerseEdit("1", "6")).toBe(true);
+    editText.set("alpha gamma");
+    expect(await saveVerseEdit()).toBe(true);
+    expect(editVerse).toHaveBeenCalledWith("1", "6", "alpha gamma");
+    expect(get(languageQaFindingsByVerse)["1:6"]).toBeUndefined();
+  });
+
+  it("keeps the Language QA marks when the save fails", async () => {
+    languageQaFindingsByVerse.set({ "1:6": [languageQaFinding()] });
+    editVerse.mockRejectedValue(new Error("disk full"));
+    const result = await applySuggestedFindingFix(finding());
+    expect(result.ok).toBe(false);
+    expect(get(languageQaFindingsByVerse)["1:6"]).toHaveLength(1);
+  });
+});
+
+function languageQaFinding(overrides: Partial<LanguageQaFinding> = {}): LanguageQaFinding {
+  return lqaFinding({
+    id: "term-1", rule: "terminology.deprecated-form", start: 0, end: 5, originalText: "alpha",
+    message: "Deprecated form.", suggestedReplacement: "omega", ...overrides,
+  });
+}
+
+describe("applyLanguageQaSuggestedFix", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cancelVerseEdit();
+    checkingProgress.set({
+      running: false, percent: 0, label: "", jobId: "", state: "idle", error: "", scope: "chapter",
+    });
+    verseTexts.set({ [verseKey("1", "6")]: "alpha beta" });
+    editVerse.mockResolvedValue({ issueResolutionsNeedingRecheck: 0 });
+    runVerseChecks.mockResolvedValue([]);
+    decideVerse.mockResolvedValue({});
+  });
+
+  it("uses the normal scripture edit/re-check path, then records the decision via verse.decide", async () => {
+    const result = await applyLanguageQaSuggestedFix(languageQaFinding());
+    expect(result.ok).toBe(true);
+    expect(editVerse).toHaveBeenCalledWith("1", "6", "omega beta");
+    expect(runVerseChecks).toHaveBeenCalledWith("1", "6", ["local", "greekroom"]);
+    // The issue marks it as Language QA, so the engine keeps it out of the
+    // review-progress rollup, and records what the reviewer saw.
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "term-1", "accepted", undefined, {
+      source: "languageQa", rule: "terminology.deprecated-form", ruleId: "project/terminology.deprecated-form",
+      ruleVersion: "language-qa-7", packVersion: "language-qa-7", ruleRevision: 1,
+      layer: "housestyle", category: "termbase", originalText: "alpha",
+      suggestedReplacement: "omega", chosenSuggestion: "omega", chosenRank: 1,
+      message: "Deprecated form.", start: 0, end: 5,
+    });
+    expect(get(verseTexts)[verseKey("1", "6")]).toBe("omega beta");
+  });
+
+  it("applies the suggestion the reviewer chose, not always the first", async () => {
+    const finding = languageQaFinding({ suggestions: [
+      { text: "omega", rank: 1, source: "termbase", rationale: "first" },
+      { text: "psi", rank: 2, source: "termbase", rationale: "second" },
+    ] });
+    const result = await applyLanguageQaSuggestedFix(finding, finding.suggestions[1]);
+    expect(result.ok).toBe(true);
+    expect(editVerse).toHaveBeenCalledWith("1", "6", "psi beta");
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "term-1", "accepted", undefined,
+      expect.objectContaining({ chosenSuggestion: "psi", chosenRank: 2 }));
+  });
+
+  it("does not write when the finding no longer matches the verse", async () => {
+    const result = await applyLanguageQaSuggestedFix(languageQaFinding({ originalText: "moved" }));
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/stale/i);
+    expect(editVerse).not.toHaveBeenCalled();
+    expect(decideVerse).not.toHaveBeenCalled();
+  });
+
+  it("refuses with no suggested form rather than inventing one", async () => {
+    const result = await applyLanguageQaSuggestedFix(languageQaFinding({ suggestedReplacement: null }));
+    expect(result.ok).toBe(false);
+    expect(editVerse).not.toHaveBeenCalled();
+  });
+
+  it("still reports success if recording the decision fails -- the text fix already landed", async () => {
+    decideVerse.mockRejectedValue(new Error("workbench unavailable"));
+    const result = await applyLanguageQaSuggestedFix(languageQaFinding());
+    expect(result.ok).toBe(true);
+    expect(editVerse).toHaveBeenCalled();
+  });
+
+  it("works identically for a tamil.vallinam-missing finding -- the logic is rule-agnostic", async () => {
+    const original = "அப்படி கூறினான்";
+    verseTexts.set({ [verseKey("1", "6")]: `${original} பின்னர்` });
+    const result = await applyLanguageQaSuggestedFix(languageQaFinding({
+      id: "vallinam-1", rule: "tamil.vallinam-missing",
+      start: 0, end: Array.from(original).length, originalText: original,
+      suggestedReplacement: "அப்படிக் கூறினான்",
+    }));
+    expect(result.ok).toBe(true);
+    expect(editVerse).toHaveBeenCalledWith("1", "6", "அப்படிக் கூறினான் பின்னர்");
+    expect(decideVerse).toHaveBeenCalledWith("1", "6", "vallinam-1", "accepted", undefined,
+      expect.objectContaining({ source: "languageQa", rule: "tamil.vallinam-missing" }));
+  });
+
+  it("splices a footnoted verse at the engine's raw offsets and keeps the note byte-identical", async () => {
+    // The engine scans the visible text but reports raw code-point offsets;
+    // the fix uses them as-is, with no remapping in either direction.
+    const raw = "அவன் சொன்னான்\\f + \\ft குறிப்பு\\f* அந்த காகம் பறந்தது.";
+    const flagged = "அந்த காகம்";
+    const start = Array.from(raw.slice(0, raw.indexOf(flagged))).length;
+    verseTexts.set({ [verseKey("1", "6")]: raw });
+    const result = await applyLanguageQaSuggestedFix(languageQaFinding({
+      id: "vallinam-2", rule: "tamil.vallinam-missing", start, end: start + Array.from(flagged).length,
+      originalText: flagged, suggestedReplacement: "அந்தக் காகம்",
+    }));
+    expect(result.ok).toBe(true);
+    expect(editVerse).toHaveBeenCalledWith(
+      "1", "6", "அவன் சொன்னான்\\f + \\ft குறிப்பு\\f* அந்தக் காகம் பறந்தது.");
   });
 });

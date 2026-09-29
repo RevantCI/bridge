@@ -1,0 +1,15 @@
+﻿Book,Chapter,Verse,Issue Type,Priority Category,Severity,Confidence,Original Tamil,Suggested Correction,Explanation,Source / Reference Note,Reviewer Decision Needed,Status
+EZK,44,17,Confirmed typo,Spelling,High,High,அணிந்துக்,அணிந்து,Human review 2026 (ta-irv/lexicon.known-misspelling),,No,accepted
+JDG,18,17,Confirmed typo,Spelling,High,High,நிற்க்கும்போது,நிற்கும்போது,Human review 2026 (ta-irv/lexicon.known-misspelling),,No,accepted
+JOB,41,13,Confirmed typo,Spelling,High,High,போர்வையைக்,போர்வையை,Human review 2026 (ta-irv/lexicon.known-misspelling),,No,accepted
+NUM,3,51,Confirmed typo,Spelling,High,High,வார்தையின்படியே,வார்த்தையின்படியே,Human review 2026 (ta-irv/lexicon.known-misspelling),,No,accepted
+2KI,10,16,Confirmed typo,Spelling,High,High,யெகோவாக்க,யெகோவாவுக்க,Human review 2026 (ta-irv/typo.divine-name.dative-stem),,No,accepted
+EXO,30,37,Confirmed typo,Spelling,High,High,யெகோவாக்க,யெகோவாவுக்க,Human review 2026 (ta-irv/typo.divine-name.dative-stem),,No,accepted
+NUM,6,12,Confirmed typo,Spelling,High,High,யெகோவாக்க,யெகோவாவுக்க,Human review 2026 (ta-irv/typo.divine-name.dative-stem),,No,accepted
+NUM,31,3,Confirmed typo,Spelling,High,High,யெகோவாக்க,யெகோவாவுக்க,Human review 2026 (ta-irv/typo.divine-name.dative-stem),,No,accepted
+2KI,20,3,Confirmed typo,Spelling,High,High,யெகோவவ,யெகோவாவ,Human review 2026 (ta-irv/typo.divine-name.vowel-drop),,No,accepted
+2KI,20,5,Confirmed typo,Spelling,High,High,யெகோவவ,யெகோவாவ,Human review 2026 (ta-irv/typo.divine-name.vowel-drop),,No,accepted
+2KI,20,19,Confirmed typo,Spelling,High,High,யெகோவவ,யெகோவாவ,Human review 2026 (ta-irv/typo.divine-name.vowel-drop),,No,accepted
+2KI,22,4,Confirmed typo,Spelling,High,High,யெகோவவ,யெகோவாவ,Human review 2026 (ta-irv/typo.divine-name.vowel-drop),,No,accepted
+1CH,6,31,Confirmed typo,Spelling,High,High,நடத்துவற்கு,நடத்துவதற்கு,Human review 2026 (ta-irv/typo.suffix.dropped-tha),,No,accepted
+1CH,23,5,Confirmed typo,Spelling,High,High,செய்வற்கு,செய்வதற்கு,Human review 2026 (ta-irv/typo.suffix.dropped-tha),,No,accepted

@@ -1,0 +1,416 @@
+{
+ "id": "sandhi.vallinam.demonstrative",
+ "version": 3,
+ "legacyId": "tamil.vallinam-missing",
+ "category": "sandhi",
+ "severity": "medium",
+ "confidence": "medium",
+ "inline": true,
+ "title": {
+  "ta": "வல்லினம் மிகுதல் — சுட்டு",
+  "en": "Vallinam doubling after a demonstrative"
+ },
+ "message": {
+  "en": "Possible missing வல்லினம் at this word boundary: \"{prev} {initial}...\" normally takes \"{prev}{initial}் {initial}...\". Verify before editing."
+ },
+ "rationale": "\"{prev}\" before a {initial}-initial word takes the linking {initial}்",
+ "match": {
+  "type": "token-context",
+  "prev": {
+   "lexical": [
+    "அந்த",
+    "இந்த",
+    "எந்த"
+   ]
+  },
+  "gap": "whitespace",
+  "next": {
+   "initial": [
+    "க",
+    "ச",
+    "த",
+    "ப"
+   ]
+  },
+  "link": "none"
+ },
+ "abstain": [
+  {
+   "next": {
+    "lexical": [
+     "கூட",
+     "மட்டும்",
+     "போல",
+     "என்று",
+     "என",
+     "எனும்"
+    ]
+   },
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style). தான் is not abstained: see the rule's தான் context (2026-09-29)."
+  },
+  {
+   "next": {
+    "prefix": [
+     "தேவ"
+    ],
+    "notPrefix": [
+     "தேவை"
+    ]
+   },
+   "origin": "House style (reviewer 2026-09-28): no doubling before தேவன்/தேவ- forms (11 of 13 'case form, no doubling here' verdicts). தேவை 'need' is still checked."
+  }
+ ],
+ "fix": {
+  "type": "insert-link"
+ },
+ "contexts": [
+  {
+   "next": {
+    "lexical": [
+     "தான்"
+    ]
+   },
+   "confidence": "medium",
+   "message": {
+    "en": "தான்: பிரதிப்பெயர் என்றால் பிரித்து ஒற்றுடன்; ஒட்டுச்சொல் என்றால் ஒட்டி. \"{fix}\" if தான் is the pronoun (he, himself); \"{alternative}\" if it is the clitic (only, indeed)."
+   },
+   "rationale": "pronoun: separate, doubled",
+   "alternatives": [
+    {
+     "fix": "fuse-link",
+     "rationale": "clitic: fused"
+    }
+   ],
+   "origin": "2026-09-29 review: 6 of 6 sampled were the pronoun, wanting the separate doubled form."
+  }
+ ],
+ "provenance": "B1 (BUILD_LOG 2026-09-22). IRV doubles after அந்த 89%, இந்த 84%, எந்த 86% of hard-initial contexts. v2: the per-trigger house-form stems (தேச-, தண்-, தரி-, திர-, தீங-, தூண-) are gone -- the reviewer found all 9 sampled to be real errors. 2026-09-28 human review (GEN/PSA/JHN): proper nouns do not block doubling (17 of 25 needed it), so the proper-noun abstain is gone; தேவ- forms do (house style). v3 (2026-09-29): தான் is no longer abstained; X தான் is offered as the pronoun (Xத் தான்) and the clitic (Xத்தான்), medium confidence.",
+ "examples": {
+  "incorrect": [
+   {
+    "text": "போனான்; எபூசியர்கள் அந்த தேசத்தின் குடிகளாக இருந்தார்கள்.",
+    "span": "அந்த தேசத்தின்",
+    "fix": "அந்தத் தேசத்தின்",
+    "origin": "1CH 11:4 (also in the review reports)"
+   },
+   {
+    "text": "அந்த தூதுவர்கள் திரும்பவும் வந்து:",
+    "span": "அந்த தூதுவர்கள்",
+    "fix": "அந்தத் தூதுவர்கள்",
+    "origin": "1KI 20:5 (also in the review reports)"
+   },
+   {
+    "text": "ராஜா அந்த பெண்ணைக் கேட்டதற்கு, அவள்:",
+    "span": "அந்த பெண்ணைக்",
+    "fix": "அந்தப் பெண்ணைக்",
+    "origin": "2KI 8:6 (also in the review reports)"
+   },
+   {
+    "text": "செய்வேன்; நான் அந்த தேசத்தின் குடிகளை உங்களுடைய",
+    "span": "அந்த தேசத்தின்",
+    "fix": "அந்தத் தேசத்தின்",
+    "origin": "EXO 23:31 (also in the review reports)"
+   },
+   {
+    "text": "பணமுடிப்பு இருந்தது; அந்த பணமுடிப்புகளை அவர்களும் அவர்கள்",
+    "span": "அந்த பணமுடிப்புகளை",
+    "fix": "அந்தப் பணமுடிப்புகளை",
+    "origin": "GEN 42:35 (also in the review reports)"
+   },
+   {
+    "text": "சேர்ந்து உடலுறவுகொண்டால், அந்த பெண்ணையும் அந்த மிருகத்தையும்",
+    "span": "அந்த பெண்ணையும்",
+    "fix": "அந்தப் பெண்ணையும்",
+    "origin": "LEV 20:16 (also in the review reports)"
+   },
+   {
+    "text": "நீ என்னை அந்த படையினிடத்திற்குக் கொண்டு போவாயா",
+    "span": "அந்த படையினிடத்திற்குக்",
+    "fix": "அந்தப் படையினிடத்திற்குக்",
+    "origin": "1SA 30:15 (also in the review reports)"
+   },
+   {
+    "text": "விடுதலையாக்கவும், அவர்களை அந்த தேசத்திலிருந்து நீக்கி, கானானியர்களும்,",
+    "span": "அந்த தேசத்திலிருந்து",
+    "fix": "அந்தத் தேசத்திலிருந்து",
+    "origin": "EXO 3:8 (also in the review reports)"
+   },
+   {
+    "text": "அதற்காக யெகோவா அந்த தேசங்களை யோசுவாவுடைய கையில்",
+    "span": "அந்த தேசங்களை",
+    "fix": "அந்தத் தேசங்களை",
+    "origin": "JDG 2:23 (also in the review reports)"
+   },
+   {
+    "text": "வானத்திலிருந்து கண்ணோக்கிப்பார்த்து,\nஇந்த திராட்சைச்செடியை விசாரித்தருளும்;",
+    "span": "இந்த திராட்சைச்செடியை",
+    "fix": "இந்தத் திராட்சைச்செடியை",
+    "origin": "PSA 80:14 (also in the review reports)"
+   },
+   {
+    "text": "அந்த பெண்ணிடம் கொழுத்த கன்றுக்குட்டி",
+    "span": "அந்த பெண்ணிடம்",
+    "fix": "அந்தப் பெண்ணிடம்",
+    "origin": "1SA 28:24"
+   },
+   {
+    "text": "எந்த மக்களும், எந்த தேசத்தானும், எந்த மொழி",
+    "span": "எந்த தேசத்தானும்",
+    "fix": "எந்தத் தேசத்தானும்",
+    "origin": "DAN 3:29"
+   },
+   {
+    "text": "பூமியில் சிந்தப்பட்டதால் இந்த பூமியில் நீ சபிக்கப்பட்டிருப்பாய்.",
+    "span": "இந்த பூமியில்",
+    "fix": "இந்தப் பூமியில்",
+    "origin": "GEN 4:11 (human review 2026-09-28)"
+   },
+   {
+    "text": "நீ பார்க்கிற இந்த பூமி முழுவதையும் நான்",
+    "span": "இந்த பூமி",
+    "fix": "இந்தப் பூமி",
+    "origin": "GEN 13:15 (human review 2026-09-28)"
+   },
+   {
+    "text": "யூதா அந்த பெண்ணிடத்தில் இருந்த அடைமானத்தை",
+    "span": "அந்த பெண்ணிடத்தில்",
+    "fix": "அந்தப் பெண்ணிடத்தில்",
+    "origin": "GEN 38:20 (human review 2026-09-28)"
+   },
+   {
+    "text": "பணமுடிப்பு இருந்தது; அந்த பணமுடிப்புகளை அவர்களும் அவர்கள்",
+    "span": "அந்த பணமுடிப்புகளை",
+    "fix": "அந்தப் பணமுடிப்புகளை",
+    "origin": "GEN 42:35 (human review 2026-09-28)"
+   },
+   {
+    "text": "ஏன் எனக்கு இந்த துன்பத்தை வருவித்தீர்கள் என்றான்.",
+    "span": "இந்த துன்பத்தை",
+    "fix": "இந்தத் துன்பத்தை",
+    "origin": "GEN 43:6 (human review 2026-09-28)"
+   },
+   {
+    "text": "இந்த விதமாக அந்த பூமி பார்வோனுடையதாயிற்று.",
+    "span": "அந்த பூமி",
+    "fix": "அந்தப் பூமி",
+    "origin": "GEN 47:20 (human review 2026-09-28)"
+   },
+   {
+    "text": "எங்களை என்றைக்கும் இந்த தலைமுறையாரிடமிருந்து விலக்கிக் காத்துக்கொள்ளுவீர்.",
+    "span": "இந்த தலைமுறையாரிடமிருந்து",
+    "fix": "இந்தத் தலைமுறையாரிடமிருந்து",
+    "origin": "PSA 12:7 (human review 2026-09-28)"
+   },
+   {
+    "text": "நீ தங்கியிருக்கிற இந்த தேசத்திற்கும், தயவு செய்வேன்",
+    "span": "இந்த தேசத்திற்கும்",
+    "fix": "இந்தத் தேசத்திற்கும்",
+    "origin": "GEN 21:23 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "கேராரூர் மேய்ப்பர்கள் இந்த தண்ணீர் தங்களுடையது என்று",
+    "span": "இந்த தண்ணீர்",
+    "fix": "இந்தத் தண்ணீர்",
+    "origin": "GEN 26:20 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "உன்னைக் காத்து, இந்த தேசத்திற்கு உன்னைத் திரும்பி",
+    "span": "இந்த தேசத்திற்கு",
+    "fix": "இந்தத் தேசத்திற்கு",
+    "origin": "GEN 28:15 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "ஏமோரின் மகனும் அந்த தேசத்தின் இளவரசனுமாகிய சீகேம்",
+    "span": "அந்த தேசத்தின்",
+    "fix": "அந்தத் தேசத்தின்",
+    "origin": "GEN 34:2 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "அந்த தேசத்தின் குடிகளாகிய ஓரியனான",
+    "span": "அந்த தேசத்தின்",
+    "fix": "அந்தத் தேசத்தின்",
+    "origin": "GEN 36:20 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "யோசேப்பு அந்த தேசத்திற்கு அதிபதியாயிருந்து, தேசத்தின்",
+    "span": "அந்த தேசத்திற்கு",
+    "fix": "அந்தத் தேசத்திற்கு",
+    "origin": "GEN 42:6 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "ஒன்று செய்யுங்கள்; இந்த தேசத்தின் விலை உயர்ந்த",
+    "span": "இந்த தேசத்தின்",
+    "fix": "இந்தத் தேசத்தின்",
+    "origin": "GEN 43:11 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "துக்கம் அனுசரிக்கிறதை அந்த தேசத்தின் குடிமக்களாகிய கானானியர்கள்",
+    "span": "அந்த தேசத்தின்",
+    "fix": "அந்தத் தேசத்தின்",
+    "origin": "GEN 50:11 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "அவர் வேறே எந்த தேசத்திற்கும் இப்படிச் செய்ததில்லை;",
+    "span": "எந்த தேசத்திற்கும்",
+    "fix": "எந்தத் தேசத்திற்கும்",
+    "origin": "PSA 147:20 (human review 2026-09-28, missed)"
+   },
+   {
+    "text": "எஜமானனே, நானும் இந்த பெண்ணும் ஒரே வீட்டிலே",
+    "span": "இந்த பெண்ணும்",
+    "fix": "இந்தப் பெண்ணும்",
+    "origin": "1KI 3:17 (human review 2026-09-29)"
+   },
+   {
+    "text": "இன்று எந்த திசையில் போய்க் கொள்ளையடித்தீர்கள்",
+    "span": "எந்த திசையில்",
+    "fix": "எந்தத் திசையில்",
+    "origin": "1SA 27:10 (human review 2026-09-29)"
+   },
+   {
+    "text": "கேட்டான். அதற்கு அந்த பெண்: ஒரு உருவத்தை",
+    "span": "அந்த பெண்",
+    "fix": "அந்தப் பெண்",
+    "origin": "1SA 28:13 (human review 2026-09-29)"
+   },
+   {
+    "text": "உடையணிந்து கொண்டு, இந்த தைலக்குப்பியை உன் கையில்",
+    "span": "இந்த தைலக்குப்பியை",
+    "fix": "இந்தத் தைலக்குப்பியை",
+    "origin": "2KI 9:1 (human review 2026-09-29)"
+   },
+   {
+    "text": "ஊரைச் சேர்ந்த அந்த பெண் ராஜாவோடு பேசப்",
+    "span": "அந்த பெண்",
+    "fix": "அந்தப் பெண்",
+    "origin": "2SA 14:4 (human review 2026-09-29)"
+   },
+   {
+    "text": "எந்த மக்களும், எந்த தேசத்தானும், எந்த மொழி",
+    "span": "எந்த தேசத்தானும்",
+    "fix": "எந்தத் தேசத்தானும்",
+    "origin": "DAN 3:29 (human review 2026-09-29)"
+   },
+   {
+    "text": "புத்தகத்தில் எழுதியிருக்கிறபடியே இந்த தண்டனைகள் எல்லாம் எங்கள்மேல்",
+    "span": "இந்த தண்டனைகள்",
+    "fix": "இந்தத் தண்டனைகள்",
+    "origin": "DAN 9:13 (human review 2026-09-29)"
+   },
+   {
+    "text": "பலிபீடத்திற்கு அருகில் எந்த தோப்பையும் உண்டாக்க வேண்டாம்;",
+    "span": "எந்த தோப்பையும்",
+    "fix": "எந்தத் தோப்பையும்",
+    "origin": "DEU 16:21 (human review 2026-09-29)"
+   },
+   {
+    "text": "பூமி முழுவதும் எந்த தேசங்களிடத்திலும் செய்யப்படாத அதிசயங்களை",
+    "span": "எந்த தேசங்களிடத்திலும்",
+    "fix": "எந்தத் தேசங்களிடத்திலும்",
+    "origin": "EXO 34:10 (human review 2026-09-29)"
+   },
+   {
+    "text": "நான் கண்ட இந்த தரிசனம் நகரத்தை அழிக்கவந்தபோது",
+    "span": "இந்த தரிசனம்",
+    "fix": "இந்தத் தரிசனம்",
+    "origin": "EZK 43:3 (human review 2026-09-29)"
+   },
+   {
+    "text": "உன் சந்ததிக்கு இந்த தேசத்தைத் தருவேன் என்று",
+    "span": "இந்த தேசத்தைத்",
+    "fix": "இந்தத் தேசத்தைத்",
+    "origin": "GEN 24:7 (human review 2026-09-29)"
+   },
+   {
+    "text": "துரத்திவிடவில்லை; கானானியர்கள் அந்த தேசத்தில்தான் குடியிருக்க வேண்டும்",
+    "span": "அந்த தேசத்தில்தான்",
+    "fix": "அந்தத் தேசத்தில்தான்",
+    "origin": "JDG 1:27 (human review 2026-09-29)"
+   },
+   {
+    "text": "எந்த தேசமாவது, எந்த ராஜ்யமாவது",
+    "span": "எந்த தேசமாவது",
+    "fix": "எந்தத் தேசமாவது",
+    "origin": "JER 27:8 (human review 2026-09-29)"
+   },
+   {
+    "text": "எனக்கு இருந்த அந்த பெலன் இந்த நாள்",
+    "span": "அந்த பெலன்",
+    "fix": "அந்தப் பெலன்",
+    "origin": "JOS 14:11 (human review 2026-09-29)"
+   },
+   {
+    "text": "அபிராம் என்பவர்கள்; இந்த தாத்தான் அபிராம் என்பவர்களே",
+    "span": "இந்த தாத்தான்",
+    "fix": "இந்தத் தாத்தான்",
+    "origin": "NUM 26:9 (human review 2026-09-29)"
+   },
+   {
+    "text": "அந்த தேசத்தைப் பார்ப்பதற்கு நான்",
+    "span": "அந்த தேசத்தைப்",
+    "fix": "அந்தத் தேசத்தைப்",
+    "origin": "NUM 32:8 (human review 2026-09-29)"
+   },
+   {
+    "text": "குடியிருக்க வேண்டும்; அந்த தேசத்தைச் சுதந்தரித்துக்கொள்ளும்படி அதை",
+    "span": "அந்த தேசத்தைச்",
+    "fix": "அந்தத் தேசத்தைச்",
+    "origin": "NUM 33:53 (human review 2026-09-29)"
+   }
+  ],
+  "correct": [
+   {
+    "text": "அப்பொழுது அந்தப் பெண், அந்த",
+    "origin": "GEN 3:6 (correctly linked)"
+   },
+   {
+    "text": "மகன்களும் அந்த தேவதூதனைக் கண்டு",
+    "origin": "1CH 21:20 (house form)"
+   },
+   {
+    "text": "அவன் அந்தச் சிலைகளைத் தேடியும்",
+    "origin": "GEN 31:35 (correctly linked)"
+   },
+   {
+    "text": "தேவனாகிய அந்த தேவனுடைய உடன்படிக்கையின்படியே",
+    "origin": "2CH 34:32 (house form)"
+   },
+   {
+    "text": "பரவாயில்லை; இந்தக் கூட்டம் முழுவதையும்",
+    "origin": "EXO 16:3 (correctly linked)"
+   },
+   {
+    "text": "இந்த தேவன் என்றென்றைக்குமுள்ள",
+    "origin": "PSA 48:14 (house form)"
+   },
+   {
+    "text": "கொண்டு, அந்தச் சாம்பலை முகாமிற்கு",
+    "origin": "LEV 6:11 (correctly linked)"
+   },
+   {
+    "text": "தவிர எந்த தேவனையானாலும் மனிதனையானாலும்",
+    "origin": "DAN 6:7 (house form)"
+   },
+   {
+    "text": "முறுமுறுக்கும்படி அந்தத் துர்ச்செய்தியைச் சொன்னவர்களாகிய",
+    "origin": "NUM 14:37 (correctly linked)"
+   },
+   {
+    "text": "தவிர எந்த தேவனையோ மனிதனையோ",
+    "origin": "DAN 6:12 (house form)"
+   },
+   {
+    "text": "கூறப்பட்டதால், அந்தக் கடனை மற்றவனிடத்திலாவது",
+    "origin": "DEU 15:2 (correctly linked)"
+   },
+   {
+    "text": "உயர்த்தி, எந்த தேவனிலும் தன்னைப்",
+    "origin": "DAN 11:36 (house form)"
+   },
+   {
+    "text": "இந்த தேவன் என்றென்றைக்குமுள்ள எல்லா",
+    "origin": "PSA 48:14 (human review 2026-09-28); FP_NODOUBLE"
+   }
+  ]
+ }
+}

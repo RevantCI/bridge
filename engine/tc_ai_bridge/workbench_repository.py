@@ -29,7 +29,7 @@ from typing import Any, Iterator
 import uuid
 
 
-WORKBENCH_SCHEMA_VERSION = 3
+WORKBENCH_SCHEMA_VERSION = 5
 WORKBENCH_SCHEMA_ID = "bridge-workbench-v1"
 
 _IDENTIFIER_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -59,6 +59,7 @@ MUTABLE_TABLES: tuple[str, ...] = (
     "metrics_counters",
     "file_backups",
     "alignment_cross_verse_links",
+    "language_qa_cache",
 )
 
 
@@ -489,10 +490,70 @@ CREATE UNIQUE INDEX ux_alignment_cross_verse_links_pair
                                    target_chapter, target_verse, target_signature);
 """
 
+# v4 (#169, layered-rules Phase 4.1): the persisted Language QA scan. One row
+# per chapter holding every verse's raw findings (before decisions, which are
+# applied on every pass), keyed by the verse's text hash and a chapter key
+# over the rule pack, termbase and detected language. It survives reopen, and
+# the check-job stage and live editing share it. Not in `check_cache`, because
+# every reader of that table (`load_check_cache`: USFM, names, the QA report,
+# triage, analytics) loads all of a book's rows, and 150 chapter payloads would
+# ride along on each of those reads. `chapter` is nullable, as in v3, so the
+# generic per-table tests that write rows without lifted columns still pass.
+_MIGRATION_V4 = r"""
+CREATE TABLE language_qa_cache (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    book_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+    actor_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    chapter TEXT
+);
+CREATE UNIQUE INDEX ux_language_qa_cache_chapter
+    ON language_qa_cache(project_id, book_id, chapter);
+"""
+
+# v5 (#169, layered-rules Phase 6.3): house style is a human decision kind.
+# `kind` carries a CHECK constraint, which SQLite cannot alter, so the table is
+# rebuilt with the widened CHECK and every row copied with its columns named
+# (a later rebuild must name any column added after this one). Nothing else
+# about the table changes; its one index is recreated.
+_MIGRATION_V5 = r"""
+CREATE TABLE human_decisions_v5 (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    book_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+    actor_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('check','qa','verse_status','terminology','housestyle')),
+    chapter TEXT,
+    verse TEXT,
+    key TEXT NOT NULL,
+    decision TEXT,
+    UNIQUE(project_id, book_id, kind, chapter, verse, key)
+);
+INSERT INTO human_decisions_v5(id, project_id, book_id, revision, actor_id, device_id, created_at,
+                               updated_at, payload_json, kind, chapter, verse, key, decision)
+    SELECT id, project_id, book_id, revision, actor_id, device_id, created_at,
+           updated_at, payload_json, kind, chapter, verse, key, decision FROM human_decisions;
+DROP TABLE human_decisions;
+ALTER TABLE human_decisions_v5 RENAME TO human_decisions;
+CREATE INDEX ix_human_decisions_scope ON human_decisions(project_id, book_id, kind);
+"""
+
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (1, _MIGRATION_V1),
     (2, _MIGRATION_V2),
     (3, _MIGRATION_V3),
+    (4, _MIGRATION_V4),
+    (5, _MIGRATION_V5),
 )
 
 

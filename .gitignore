@@ -83,3 +83,8 @@ Thumbs.db
 .pytest-tmp/
 .test-temp-*/
 test-temp-*/
+
+# ===== Language QA benchmark full results =====
+# They quote Scripture and review text; only benchmark/baseline.json and the
+# table in docs/LANGUAGE_QA_BENCHMARK.md are committed.
+benchmark/results/
