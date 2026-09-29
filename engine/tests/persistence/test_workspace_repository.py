@@ -158,3 +158,69 @@ def test_the_engine_owns_one_workspace_beside_its_settings_and_projects_write_th
     stamped = engine.project.workbench_identity
     assert stamped.device_id == engine.workspace.get_or_create_device_id()
     assert stamped.actor_id == engine.workspace.get_or_create_local_user("whoever")["userId"]
+
+
+def test_the_users_row_follows_the_name_chosen_in_settings_not_the_os_account(tmp_path):
+    """#78: `identity` passed `_seed_reviewer_name()` (the OS account)
+    unconditionally, so `users.display_name` was always the OS account and a
+    Settings rename never reached it. `reviewer_name` and `users.display_name`
+    were two competing answers to "who is this person".
+    """
+    from bridge_service import BridgeEngine
+    from tc_ai_bridge.secret_store import AppSettings
+    from tests.persistence.test_workbench_repository import _build_minimal_project
+
+    settings_root = tmp_path / "app"
+    settings_root.mkdir()
+    settings = AppSettings(path=settings_root / "settings.json")
+    settings.reviewer_name = "Benz"
+    engine = BridgeEngine(settings=settings)
+
+    root = _build_minimal_project(tmp_path / "rut")
+    (root / "rut" / "1.json").write_text(json.dumps({"1": "text"}), encoding="utf-8")
+    engine.open_project(str(root))
+    engine.project.record_qa_decision("1", "1", issue_key="f1", decision="accepted")
+
+    user = engine.local_user()
+    assert user["displayName"] == "Benz"
+    assert engine.project.workbench_identity.actor_id == user["userId"]
+
+
+def test_renaming_yourself_keeps_the_id_so_past_rows_are_relabelled_not_orphaned(tmp_path):
+    """The whole point of an id separate from a name. Writes used to record
+    `settings.reviewer_name`, so a rename left old rows under the old name and
+    new rows under the new one -- one person showing up as two actors."""
+    from bridge_service import BridgeEngine
+    from tc_ai_bridge.secret_store import AppSettings
+
+    settings_root = tmp_path / "app"
+    settings_root.mkdir()
+    settings = AppSettings(path=settings_root / "settings.json")
+    settings.reviewer_name = "Benz"
+    engine = BridgeEngine(settings=settings)
+
+    before = engine.local_user()
+    assert before["displayName"] == "Benz"
+
+    engine.set_settings(reviewerName="R. Idikulay")
+    after = engine.local_user()
+
+    assert after["userId"] == before["userId"], "a rename must not mint a new identity"
+    assert after["displayName"] == "R. Idikulay"
+    # And it is visible to the UI, which stamps this rather than the name.
+    assert engine.get_settings()["localUserId"] == before["userId"]
+
+
+def test_a_write_records_the_stable_id_rather_than_whatever_name_is_current(tmp_path):
+    from bridge_service import BridgeEngine
+    from tc_ai_bridge.secret_store import AppSettings
+
+    settings_root = tmp_path / "app"
+    settings_root.mkdir()
+    settings = AppSettings(path=settings_root / "settings.json")
+    settings.reviewer_name = "Benz"
+    engine = BridgeEngine(settings=settings)
+
+    actor = engine.current_actor_id()
+    assert actor and actor != "Benz", "the display name must never be the actor id"
+    assert actor != "human", "a real user id, not the legacy placeholder"

@@ -527,6 +527,9 @@ class BridgeEngine:
         # inject an isolated instance rather than touch the real machine's
         # settings. See tests/test_bridge_service.py.
         self.settings = settings if settings is not None else AppSettings()
+        # Resolved lazily by current_actor_id(): working it out opens the
+        # workspace database, and plenty of requests never write anything (#78).
+        self._local_user: dict[str, str] | None = None
 
         # Connector I/O is deliberately performed by NavigationSyncCoordinator's
         # daemon probe rather than this service's single-threaded stdio request loop.
@@ -551,6 +554,32 @@ class BridgeEngine:
         self.project_registry = ProjectRegistry(
             settings_root / "project-registry.json", self.project_root, workspace=self.workspace,
         )
+
+    # -- identity -------------------------------------------------------
+
+    def local_user(self) -> dict[str, str]:
+        """The one local user: a stable id plus the name they chose (#78).
+
+        Identity here is a chosen name plus a device, never a password
+        (`docs/DECISIONS.md`, 2026-09-11). The name seeds from the OS account
+        for someone who has never set one, and is editable in Settings.
+        """
+        if self._local_user is None:
+            self._local_user = self.workspace.get_or_create_local_user(
+                self.settings.reviewer_name
+            )
+        return self._local_user
+
+    def current_actor_id(self) -> str:
+        """The stable `user_id` to stamp on a write.
+
+        Not the display name. Writes used to record `settings.reviewer_name`,
+        so renaming yourself in Settings left your old rows under the old name
+        and new rows under the new one -- the same person appearing as two
+        actors, with no way to tell they were one. The id never changes, so a
+        rename re-labels everything that person has ever written.
+        """
+        return self.local_user()["userId"]
 
     # -- lifecycle ------------------------------------------------------
 
@@ -580,7 +609,7 @@ class BridgeEngine:
         timer.mark("materialize_lazy")
         ensure_bridge_original_language(path)
         timer.mark("original_language")
-        candidate = TranslationCoreProject(path, workspace=self.workspace)
+        candidate = TranslationCoreProject(path, workspace=self.workspace, reviewer_name=self.settings.reviewer_name)
         timer.mark("load_project")
         if project_id:
             existing = self.project_registry.get(project_id)
@@ -1018,7 +1047,7 @@ class BridgeEngine:
         for book in books:
             materialize_lazy_project(book.path)
             reports.append(ReportService(
-                TranslationCoreProject(book.path, workspace=self.workspace)
+                TranslationCoreProject(book.path, workspace=self.workspace, reviewer_name=self.settings.reviewer_name)
             ).build_book_report())
         return ReportService.build_collection_report(reports)
 
@@ -1065,7 +1094,7 @@ class BridgeEngine:
                 lazy=book.lazy, missing=book.missing,
             )
         try:
-            project = TranslationCoreProject(book.path, workspace=self.workspace)
+            project = TranslationCoreProject(book.path, workspace=self.workspace, reviewer_name=self.settings.reviewer_name)
         except ProjectError as exc:
             return unopened_book_report(
                 book_id=book.book_id, book_name=book.book_name, path=book.path,
@@ -1174,7 +1203,7 @@ class BridgeEngine:
         lock = self._triage_lock
 
         def run_book(entry: TriageBook, progress: Any, cancel: threading.Event) -> dict[str, Any]:
-            project = TranslationCoreProject(entry.path, workspace=self.workspace)
+            project = TranslationCoreProject(entry.path, workspace=self.workspace, reviewer_name=self.settings.reviewer_name)
 
             def record_usage() -> None:
                 settings.record_ai_usage(client.last_usage.total_tokens, client.last_cost_usd)
@@ -1204,7 +1233,7 @@ class BridgeEngine:
             return self.project
         for entry in self._report_books():
             if entry.book_id.lower() == wanted and not entry.missing and not entry.lazy:
-                return TranslationCoreProject(entry.path, workspace=self.workspace)
+                return TranslationCoreProject(entry.path, workspace=self.workspace, reviewer_name=self.settings.reviewer_name)
         raise ProjectError(f"No opened book '{book}' in this collection.")
 
     def override_triage(self, book: str, finding_hash: str, verdict: str = "") -> dict[str, Any]:
@@ -1252,7 +1281,7 @@ class BridgeEngine:
         with self._triage_lock:
             for entry in self._triage_books(book):
                 try:
-                    project = TranslationCoreProject(entry.path, workspace=self.workspace)
+                    project = TranslationCoreProject(entry.path, workspace=self.workspace, reviewer_name=self.settings.reviewer_name)
                 except ProjectError:
                     continue
                 if project.clear_triage_records():
@@ -3985,6 +4014,11 @@ class BridgeEngine:
             "model": self.settings.model,
             "reviewerName": self.settings.reviewer_name,
             "reviewerNameUpdatedAt": self.settings.reviewer_name_updated_at,
+            # The stable id to stamp on a write (#78). The UI used to send the
+            # display name as `actorId`, so renaming yourself split your history
+            # between two apparent actors. It sends this instead, and the engine
+            # falls back to the same value when it is absent.
+            "localUserId": self.current_actor_id(),
             "reviewerMode": self.settings.reviewer_mode,
             "paratextUsername": self.settings.paratext_username,
             "paratextNavigation": self.settings.paratext_navigation,
@@ -4005,6 +4039,12 @@ class BridgeEngine:
             self.settings.model = kwargs["model"]
         if "reviewerName" in kwargs:
             self.settings.reviewer_name = kwargs["reviewerName"]
+            # Keep the workspace users row in step immediately rather than at
+            # the next project open (#78). The user_id never changes, so the
+            # rename reaches every row this person has already written instead
+            # of detaching them from their own history.
+            self._local_user = None
+            self.current_actor_id()
         if "reviewerMode" in kwargs:
             self.settings.reviewer_mode = kwargs["reviewerMode"]
         if "paratextNavigation" in kwargs:
@@ -4450,7 +4490,7 @@ class BridgeEngine:
                     human_proposed_text=str(p.get("humanProposedText") or ""),
                     explanation=str(p.get("explanation") or ""),
                     request_suggestion=bool(p.get("requestSuggestion") or False),
-                    actor_id=str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                    actor_id=str(p.get("actorId") or self.current_actor_id()),
                 ))
             if m == Methods.CORRECTION_EDIT_PROPOSAL:
                 return EngineResponse.ok(request.id, result=self.correction_edit_proposal(
@@ -4458,20 +4498,20 @@ class BridgeEngine:
                     proposed_text=str(p.get("proposedText") or ""),
                     explanation=str(p.get("explanation") or ""),
                     expected_revision=int(p.get("expectedProposalRevision") or 0),
-                    actor_id=str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                    actor_id=str(p.get("actorId") or self.current_actor_id()),
                 ))
             if m == Methods.CORRECTION_REJECT_PROPOSAL:
                 return EngineResponse.ok(request.id, result=self.correction_reject_proposal(
                     str(p.get("proposalId") or ""),
                     expected_revision=int(p.get("expectedProposalRevision") or 0),
-                    actor_id=str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                    actor_id=str(p.get("actorId") or self.current_actor_id()),
                     reason=str(p.get("reason") or p.get("note") or ""),
                 ))
             if m == Methods.CORRECTION_REGENERATE_PROPOSAL:
                 return EngineResponse.ok(request.id, result=self.correction_regenerate_proposal(
                     str(p.get("proposalId") or ""),
                     expected_revision=int(p.get("expectedProposalRevision") or 0),
-                    actor_id=str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                    actor_id=str(p.get("actorId") or self.current_actor_id()),
                 ))
             if m == Methods.CORRECTION_GET_PROPOSAL_HISTORY:
                 return EngineResponse.ok(request.id, result=self.correction_get_proposal_history(
@@ -4480,7 +4520,7 @@ class BridgeEngine:
             if m == Methods.CORRECTION_APPLY_PROPOSAL:
                 actor = p.get("actor") or {
                     "actorType": "HUMAN",
-                    "actorId": str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                    "actorId": str(p.get("actorId") or self.current_actor_id()),
                 }
                 return EngineResponse.ok(request.id, result=self.correction_apply_proposal(
                     proposal_id=str(p.get("proposalId") or ""),
@@ -4497,13 +4537,13 @@ class BridgeEngine:
             if m == Methods.CORRECTION_REANALYZE_AFFECTED:
                 return EngineResponse.ok(request.id, result=self.correction_reanalyze_affected(
                     str(p.get("applicationId") or ""),
-                    str(p.get("requestedBy") or self.settings.reviewer_name or "human"),
+                    str(p.get("requestedBy") or self.current_actor_id()),
                     bool(p.get("retry") or False),
                 ))
             if m == Methods.CORRECTION_VERIFY_APPLICATION:
                 return EngineResponse.ok(request.id, result=self.correction_verify_application(
                     str(p.get("applicationId") or ""),
-                    str(p.get("requestedBy") or self.settings.reviewer_name or "human"),
+                    str(p.get("requestedBy") or self.current_actor_id()),
                 ))
             if m == Methods.CORRECTION_GET_VERIFICATION:
                 return EngineResponse.ok(request.id, result=self.correction_get_verification(
@@ -4512,7 +4552,7 @@ class BridgeEngine:
             if m == Methods.CORRECTION_ACKNOWLEDGE_CORRECTED:
                 actor = p.get("actor") or {
                     "actorType": "HUMAN",
-                    "actorId": str(p.get("actorId") or self.settings.reviewer_name or "human"),
+                    "actorId": str(p.get("actorId") or self.current_actor_id()),
                 }
                 return EngineResponse.ok(request.id, result=self.correction_acknowledge_corrected(
                     application_id=str(p.get("applicationId") or ""),

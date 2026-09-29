@@ -140,6 +140,8 @@ const reviewContext = {
 
 const settings = {
   provider: "openai", apiBaseUrl: "", model: "gpt-test", reviewerName: "Reviewer",
+  // #78: the stable id is what a write records. "Reviewer" is only ever shown.
+  localUserId: "user-7f3a",
   reviewerNameUpdatedAt: "", reviewerMode: "advanced", paratextUsername: "", paratextNavigation: false,
   logosNavigation: false, hasApiKey: true, aiUsage: { tokens: 0, estimatedCostUSD: 0 },
 };
@@ -445,18 +447,24 @@ describe("CorrectionReviewPanel", () => {
     expect(await screen.findByText(/2 proposals retained/i)).toBeInTheDocument();
   });
 
-  it("V11-002: every actor-attributed call site sends the identical, non-empty settings reviewer name", async () => {
-    // Structural guarantee across all eight sites at once: before this fix,
+  it("V11-002 / #78: every actor-attributed call site sends the identical, non-empty local user id", async () => {
+    // Structural guarantee across all eight sites at once: before V11-002,
     // disposition/apply calls fell back to the literal "human" while
     // proposal calls fell back to `undefined` (silently dropped from the
     // request) for the exact same settings state. A single shared helper
     // function used everywhere makes that divergence impossible to
     // reintroduce by editing just one call site.
+    //
+    // #78 changed what that helper returns: the stable `localUserId`, never
+    // the display name. Sending the name meant renaming yourself in Settings
+    // split your history between two apparent actors.
     const callSites = correctionReviewPanelSource.match(/reviewerActorId\(\)/g) ?? [];
     // 8 call sites + 1 in the helper's own definition/return statement.
     expect(callSites.length).toBe(9);
     expect(correctionReviewPanelSource).not.toMatch(/reviewerName\s*\|\|\s*"human"/);
     expect(correctionReviewPanelSource).not.toMatch(/reviewerName\s*\|\|\s*undefined/);
+    // The display name must not be the actor id again (#78).
+    expect(correctionReviewPanelSource).not.toMatch(/actorId:\s*settings\??\.?reviewerName/);
 
     // Functional confirmation for one site from each formerly-divergent
     // group: "create" (used to fall back to `undefined`) and "apply" (used
@@ -471,7 +479,7 @@ describe("CorrectionReviewPanel", () => {
     await fireEvent.input(screen.getByLabelText("Proposed wording"), { target: { value: "new wording" } });
     await fireEvent.click(screen.getByRole("button", { name: "Save proposal" }));
     await waitFor(() => expect(api.create).toHaveBeenCalledWith(
-      expect.objectContaining({ actorId: "Reviewer" }),
+      expect.objectContaining({ actorId: "user-7f3a" }),
     ));
   });
 
@@ -662,7 +670,7 @@ describe("CorrectionReviewPanel", () => {
     await waitFor(() => expect(api.apply).toHaveBeenCalledWith(expect.objectContaining({
       proposalId: "proposal-1", expectedProposalRevision: 2,
       findingId: "qa-quantity", expectedFindingRevision: 2,
-      actor: { actorType: "HUMAN", actorId: "Reviewer" },
+      actor: { actorType: "HUMAN", actorId: "user-7f3a" },
     })));
     expect(await screen.findByText("Scripture updated. Semantic verification is pending.")).toBeInTheDocument();
   });
@@ -806,7 +814,7 @@ describe("CorrectionReviewPanel", () => {
 
     await waitFor(() => expect(api.reanalyze).toHaveBeenCalledTimes(1));
     expect(api.reanalyze).toHaveBeenCalledWith({
-      applicationId: "application-1", requestedBy: "Reviewer", retry: false,
+      applicationId: "application-1", requestedBy: "user-7f3a", retry: false,
     });
     expect(screen.getByText("Building target semantic inventory…")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel affected analysis" })).toBeInTheDocument();
@@ -1083,7 +1091,7 @@ describe("CorrectionReviewPanel", () => {
       await fireEvent.click(await screen.findByRole("button", { name: "Verify correction" }));
       await waitFor(() => expect(api.verify).toHaveBeenCalledTimes(1));
       expect(api.verify).toHaveBeenCalledWith({
-        applicationId: "application-1", requestedBy: "Reviewer",
+        applicationId: "application-1", requestedBy: "user-7f3a",
       });
       expect(await screen.findByText("Semantic verification passed")).toBeInTheDocument();
     });
@@ -1145,7 +1153,7 @@ describe("CorrectionReviewPanel", () => {
       expect(api.acknowledge).toHaveBeenCalledWith({
         applicationId: "application-1", verificationId: "verification-1",
         expectedVerificationRevision: 1, expectedFindingRevision: 2,
-        actor: { actorType: "HUMAN", actorId: "Reviewer" }, note: "",
+        actor: { actorType: "HUMAN", actorId: "user-7f3a" }, note: "",
       });
       await waitFor(() => expect(
         document.querySelector("[data-corrected-acknowledgement]"),

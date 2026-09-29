@@ -48,7 +48,7 @@ export async function getApplicableCorrection(findingId: string): Promise<Applic
   return {
     eligibility,
     proposal,
-    actorId: settings.reviewerName || "human",
+    actorId: settings.localUserId || "",
     disabledReason,
   };
 }

@@ -916,6 +916,11 @@ export interface SettingsData {
   /** ISO-8601 UTC, or "" if never explicitly changed via Settings (the
    * OS-seeded default on a fresh profile does not count as a change). */
   reviewerNameUpdatedAt: string;
+  /** The stable local `user_id` to stamp on a write (#78) — never the display
+   *  name. Renaming yourself changes `reviewerName` and leaves this alone, so a
+   *  rename re-labels the rows you already wrote instead of splitting your
+   *  history between two apparent actors. */
+  localUserId: string;
   reviewerMode: "basic" | "advanced";
   paratextUsername: string;
   paratextNavigation: boolean;

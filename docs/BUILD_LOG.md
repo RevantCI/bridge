@@ -9896,3 +9896,50 @@ heading words absent from the alignable targets, the reader plus `chapter.verseD
 and no sibling file when a book has none) and four new frontend tests. Engine
 `tests/project_io` + `tests/service`: 192 passed. `npm run check` 0/0; Vitest 451
 passed; `npm run build` clean.
+
+## 2026-09-29 — A stable user id on every write, not a display name (#78, identity slice)
+
+Scoped by the maintainer to identity only; the roles enum and `authorize()` from
+#78's original scope are deferred to #46, which is when something will actually
+consume them (#111 flags building that scaffolding ahead of its feature).
+
+**Two competing answers to "who is this person".** `TranslationCoreProject.identity`
+passed `AppSettings._seed_reviewer_name()` — the OS account — to
+`get_or_create_local_user()` unconditionally. So `users.display_name` was always
+the OS account, while `settings.reviewer_name` held whatever the person typed in
+Settings, and nothing reconciled them. Confirmed against the repository before
+changing anything: a rename is silently reverted on the next call. The `user_id`
+was stable throughout, so no history ever detached — only the name shown was
+wrong.
+
+**Worse, writes recorded the name.** Eight dispatcher sites read
+`p.get("actorId") or self.settings.reviewer_name or "human"`, and the frontend's
+`reviewerActorId()` returned `settings.reviewerName`. Renaming yourself would
+therefore have left old rows under the old name and new rows under the new one —
+one person appearing as two actors, with nothing to tell you they were one.
+
+**Now.** `BridgeEngine.local_user()` / `current_actor_id()` resolve the one local
+user lazily (working it out opens the workspace database, and most requests never
+write). Every dispatcher site stamps the id. `settings.get` returns `localUserId`
+and the UI sends that instead of the name. A Settings rename refreshes the users
+row immediately rather than at the next project open, and because the id is
+untouched it re-labels every row that person has already written.
+
+**Test updated, not deleted.** `V11-002: every actor-attributed call site sends
+the identical, non-empty settings reviewer name` asserted exactly the contract
+this reverses. Its intent — one shared helper so the eight sites cannot diverge —
+still holds, so it now asserts the identical non-empty *local user id*, plus a new
+guard that the display name never becomes the actor id again.
+
+**Deliberately not in this slice**, to keep it reviewable:
+- making `actor_id` a required parameter on the seven repository methods that
+  still default it to `"human"` (about 50 call sites, mostly tests, entirely
+  mechanical);
+- whether a client may assert an identity at all. The engine still honours a
+  wire-supplied `actorId`, which 26 engine tests use as a hook to stamp a known
+  actor. Once there is a hub it must not, and that belongs with #46.
+
+**Verification.** Engine `persistence` + `service` + `correction`: 649 passed,
+including three new tests (the users row follows the chosen name; a rename keeps
+the id; a write records an id that is neither the display name nor `"human"`).
+`npm run check` 0/0; Vitest 451 passed; `npm run build` clean.

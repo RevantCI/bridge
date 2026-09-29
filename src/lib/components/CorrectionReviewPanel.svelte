@@ -152,7 +152,9 @@
   // same reviewer in the same session ended up attributed two different
   // ways. One identical expression, everywhere.
   function reviewerActorId(): string {
-    return settings?.reviewerName || "Unnamed Reviewer";
+    // The stable id, not the display name (#78). Empty lets the engine
+    // stamp its own current_actor_id() rather than the client asserting one.
+    return settings?.localUserId || "";
   }
 
   function uniqueReferences(values: unknown): string[] {

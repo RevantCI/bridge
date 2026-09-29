@@ -100,6 +100,7 @@ class TranslationCoreProject:
         self, project_path: str | Path, *,
         identity: WorkbenchIdentity | None = None,
         workspace: WorkspaceRepository | None = None,
+        reviewer_name: str = '',
     ):
         self.path = Path(project_path).resolve()
         manifest_path = self.path / 'manifest.json'
@@ -126,6 +127,10 @@ class TranslationCoreProject:
         # known actor without touching app-level state; resolved lazily
         # otherwise, because working it out opens the workspace database and
         # most project operations never write anything.
+        # The name the person chose in Settings, passed down by BridgeEngine
+        # (#78). Empty means "nobody told us", and `identity` then falls back to
+        # the OS account exactly as before.
+        self._reviewer_name = str(reviewer_name or '').strip()
         self._identity: WorkbenchIdentity | None = identity
         # The app-level workspace database (users, devices, the progress
         # cache). BridgeEngine owns one and injects it so every project it
@@ -208,9 +213,17 @@ class TranslationCoreProject:
                 ).hexdigest()[:32]
 
             workspace = self.workspace
-            # Reuse the OS-account seeding V11-005 already settled, rather than
-            # inventing a second source of "who is this person by default".
-            user = workspace.get_or_create_local_user(AppSettings._seed_reviewer_name())
+            # The name the person chose in Settings wins; the OS account is only
+            # the seed for someone who has never chosen one (V11-005).
+            #
+            # #78: this used to pass `_seed_reviewer_name()` unconditionally, so
+            # the users row was always the OS account and a Settings rename
+            # never reached it — `reviewer_name` and `users.display_name` were
+            # two competing answers to "who is this". The user_id was stable
+            # throughout, so no history detached; only the name shown was wrong.
+            user = workspace.get_or_create_local_user(
+                self._reviewer_name or AppSettings._seed_reviewer_name()
+            )
             self._identity = WorkbenchIdentity(
                 project_id=project_id, book_id=self.book_id,
                 actor_id=user['userId'], device_id=workspace.get_or_create_device_id(),

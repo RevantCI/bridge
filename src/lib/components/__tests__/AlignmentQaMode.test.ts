@@ -92,7 +92,7 @@ describe("AlignmentQaMode analysis states", () => {
     });
     correctionList.mockResolvedValue({ findingId: "qa-finding-0001", proposals: [] });
     correctionHistory.mockResolvedValue({ proposalId: "", events: [] });
-    settings.mockResolvedValue({ hasApiKey: false, reviewerName: "Reviewer" });
+    settings.mockResolvedValue({ hasApiKey: false, reviewerName: "Reviewer", localUserId: "user-7f3a" });
     eligibility.mockResolvedValue({
       findingId: "qa-finding-0001", eligible: true, reasons: [{ code: "ELIGIBLE", detail: "Eligible" }],
       findingRevision: 2, currentTargetContentHash: "target", displayedReferences: ["PHP 1:6"],
@@ -222,7 +222,7 @@ describe("AlignmentQaMode analysis states", () => {
       expectedProposalRevision: 4,
       findingId: "qa-finding-0001",
       expectedFindingRevision: 2,
-      actor: { actorType: "HUMAN", actorId: "Reviewer" },
+      actor: { actorType: "HUMAN", actorId: "user-7f3a" },
     })));
     expect(await screen.findByText(/Fix applied. Semantic verification is pending/i)).toBeInTheDocument();
   });
