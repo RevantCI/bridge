@@ -66,15 +66,22 @@ def test_the_curated_map_only_keeps_safe_pairs():
     assert lexicon.deprecated
     data = json.loads(lexicon_module.LEXICON_PATH.read_text(encoding="utf-8"))
     confirmed = set(data["humanConfirmed"])
-    # The 2026-09-28 reviewer confirmed 43 pairs; they are all in the map.
-    assert len(confirmed) == 43 and confirmed <= set(lexicon.deprecated)
+    # The reviewer confirmed 43 pairs on 2026-09-28 and 4 more on 2026-09-29; all are in the map.
+    assert len(confirmed) == 47 and confirmed <= set(lexicon.deprecated)
+    # Every pair has a provenance, and the human ones are exactly the confirmed ones.
+    assert set(lexicon.provenance) == set(lexicon.deprecated)
+    assert {w for w, p in lexicon.provenance.items() if p == "human"} == confirmed
     for wrong, right in lexicon.deprecated.items():
         # A common word is never marked wrong from an AI review row; a person's
         # confirmation is the one exception (IRV repeats some misspellings).
         assert lexicon.count(wrong) <= 2 or wrong in confirmed, wrong
         assert wrong != right
-    # The reviewer's rare-near-common false alarms are protected words.
-    assert len(lexicon.protected) == 21 and not (lexicon.protected & set(lexicon.deprecated))
+    # The reviewer's false alarms are protected words: 21 rare-near-common (round 1)
+    # and 4 known-misspelling pairs that were meaning or style changes (round 2).
+    assert len(lexicon.protected) == 25 and not (lexicon.protected & set(lexicon.deprecated))
+    assert {"திடமனதாயிரு", "கவனிக்காதே", "பூட்டுக்களையும்", "பெருந்தொனியாய்"} <= lexicon.protected
+    # Fragments are not words; real monosyllables are.
+    assert lexicon.count("சு") == 0 and lexicon.count("நே") == 0 and lexicon.count("கை") > 0
 
 
 def test_lexicon_loads_within_the_startup_budget():
@@ -118,12 +125,17 @@ def test_a_word_common_in_the_corpus_is_never_flagged():
     assert not findings_for({"1": "யெகோவா இஸ்ரவேல் தேவன்."})
 
 
-def test_a_reviewed_misspelling_is_a_high_confidence_finding_with_its_correction():
-    wrong, right = next(iter(default_lexicon().deprecated.items()))
-    [finding] = [f for f in findings_for({"1": f"அவன் {wrong} வந்தான்."})
-                 if f["rule"] == "lexicon.known-misspelling"]
-    assert finding["confidence"] == "high" and finding["severity"] == "medium"
-    assert finding["suggestions"][0]["text"] == right
+def test_a_misspelling_is_high_confidence_and_inline_only_when_a_human_confirmed_it():
+    lexicon = default_lexicon()
+    human = next(w for w, p in lexicon.provenance.items() if p == "human")
+    ai = next(w for w, p in lexicon.provenance.items() if p == "ai-review")
+    for wrong, confidence, inline, provenance in ((human, "high", True, "human"), (ai, "medium", False, "ai-review")):
+        [finding] = [f for f in findings_for({"1": f"அவன் {wrong} வந்தான்."})
+                     if f["rule"] == "lexicon.known-misspelling"]
+        assert (finding["confidence"], finding["inline"], finding["provenance"]) == (confidence, inline, provenance)
+        assert finding["severity"] == "medium" and finding["suggestions"][0]["text"] == lexicon.deprecated[wrong]
+    assert "awaits human confirmation" in [f for f in findings_for({"1": f"அவன் {ai} வந்தான்."})
+                                           if f["rule"] == "lexicon.known-misspelling"][0]["message"]
 
 
 def test_the_ratio_guard_holds():

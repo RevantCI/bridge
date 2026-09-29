@@ -89,7 +89,7 @@ in 61 labelled verses. `verses.jsonl` is built from the reviewer's copy.
 `verses.jsonl`.
 
 <!-- human-benchmark:start -->
-_Generated 2026-09-29T12:02:49 by scripts/language_qa_benchmark.py --human-labels benchmark/human._
+_Generated 2026-09-29T14:15:29 by scripts/language_qa_benchmark.py --human-labels benchmark/human._
 
 Pack version `language-qa-7+ta-irv@1.1.0`; 41 books; 818 label rows over 2 review round(s) (2026-09-28, 2026-09-29). The gate reads the combined numbers.
 
@@ -97,7 +97,7 @@ Pack version `language-qa-7+ta-irv@1.1.0`; 41 books; 818 label rows over 2 revie
 |---|---|---|---|---|---|---|---|---|---|
 | `common/spacing.extra` | yes | 23 | 23 | 0 | 0 | 100.0% | 2026-09-28: 15/15; 2026-09-29: 8/8 | 0 | 0 |
 | `ta-irv/integrity.space-before-note-end` | no | 15 | 0 | 15 | 0 | 0.0% | 2026-09-28: 0/15 | 0 | 0 |
-| `ta-irv/lexicon.known-misspelling` | yes | 51 | 47 | 4 | 0 | 92.2% | 2026-09-28: 43/43; 2026-09-29: 4/8 | 0 | 0 |
+| `ta-irv/lexicon.known-misspelling` | yes | 47 | 47 | 0 | 0 | 100.0% | 2026-09-28: 43/43; 2026-09-29: 4/4 | 0 | 4 |
 | `ta-irv/lexicon.rare-near-common` | no | 0 | 0 | 0 | 0 | — | — | 0 | 21 |
 | `ta-irv/sandhi.clitic.fused` | no | 2 | 2 | 0 | 0 | 100.0% | 2026-09-29: 2/2 | 0 | 0 |
 | `ta-irv/sandhi.compound.direction` | yes | 25 | 25 | 0 | 0 | 100.0% | 2026-09-29: 25/25 | 0 | 0 |
@@ -291,6 +291,14 @@ Per review bucket (recall counts only rows whose Original Tamil is found in the 
 <!-- benchmark:end -->
 
 ## Lexicon rules (Phase 5)
+
+**Since round 2 (2026-09-29, `ta-irv-lexicon@3`):**
+- **Provenance.** Each misspelling pair is `human` (47, confirmed) or `ai-review`
+  (135, from the AI reports, including 30 from reports added on 2026-09-29).
+  Only human pairs are high confidence and inline. An ai-review finding is
+  medium confidence, panel-only, and says it awaits confirmation.
+- **Rejected pairs.** The four pairs the reviewer rejected are removed and protected.
+- **Fragments.** Single-grapheme fragments (சு, நே, சோ) are not counted as words.
 
 **Since the 2026-09-28 human review (`ta-irv-lexicon@2`):**
 

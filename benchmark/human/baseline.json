@@ -87,11 +87,11 @@
    }
   },
   "ta-irv/lexicon.known-misspelling": {
-   "labelled": 51,
+   "labelled": 47,
    "tp": 47,
-   "fp": 4,
+   "fp": 0,
    "house": 0,
-   "precision": 0.9216,
+   "precision": 1.0,
    "inline": true,
    "rounds": {
     "2026-09-28": {
@@ -101,10 +101,10 @@
      "precision": 1.0
     },
     "2026-09-29": {
-     "labelled": 8,
+     "labelled": 4,
      "tp": 4,
-     "fp": 4,
-     "precision": 0.5
+     "fp": 0,
+     "precision": 1.0
     }
    }
   },

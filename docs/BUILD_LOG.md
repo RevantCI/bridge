@@ -13126,3 +13126,27 @@ figure.
   - New: `test_a_rule_whose_whole_population_is_labelled_may_be_inline` (confirmed,
     incomplete, stale).
   - Service and jobs: 3493 passed.
+
+### Step 3 — the misspelling map split by provenance (`ta-irv-lexicon@3`)
+
+- **Rebuild.** Rebuilt on the D: copy with `--curated` covering the review folder and
+  both rounds' `lexicon_curated.csv`. `--human-labels` now reads every round.
+- **The map.** 182 pairs:
+  - **47 `human`:** round 1's 43, plus அணிந்துக், நிற்க்கும்போது, போர்வையைக்,
+    வார்தையின்படியே;
+  - **135 `ai-review`**, including ஐபிரத் and மகிழுகிறதுபோல, which the reviewer
+    marked unsure;
+  - **removed:** the four pairs the reviewer rejected — திடமனதாயிரு (meaning),
+    கவனிக்காதே (imperative → participle), பூட்டுக்களையும் (valid plural),
+    பெருந்தொனியாய் (style). They are now `protected` (25 in all).
+- **Why the map grew.** The review folder gained five AI Round 2 reports on 2026-09-29
+  (EST, ECC, SNG, PRO, ISA), adding 30 ai-review pairs. As ai-review pairs they are
+  panel-only.
+- **`lexicon.known-misspelling`.** Human pairs are high and inline. Ai-review pairs are
+  medium, not inline, and say "awaits human confirmation". Each finding carries
+  `provenance`.
+- **Fragments.** Single-grapheme tokens outside `MONOSYLLABLES` are not counted as words
+  (சு, நே gone; கை kept).
+- **Human gate.** It passes. Known-misspelling is now 47/47, and the 4 rejected pairs
+  are no longer produced.
+- **Tests.** The four round-2 misspelling negatives pass. Service tests: 3468 passed.

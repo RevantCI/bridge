@@ -16,10 +16,18 @@ Writes engine/tc_ai_bridge/language_packs/ta-irv/lexicon.json:
   evidence only. A pair a human reviewer confirmed (`--human-labels`,
   `lexicon.known-misspelling` verdict TP) is kept without those filters, and
   listed in `humanConfirmed`.
-- `protected`: words a human reviewer judged correct when
-  `lexicon.rare-near-common` flagged them (2026-09-28: 21 of 21 were real
-  words -- வாள்/வாழ், காலை/காளை, a feminine past -ஆள் against a conditional
-  -ஆல், the name சேத்து). Never flagged again, and never proposed.
+- `protected`: words a human reviewer judged correct when a lexicon rule
+  flagged them (2026-09-28: rare-near-common 21 of 21 were real words --
+  வாள்/வாழ், காலை/காளை, a feminine past -ஆள் against a conditional -ஆல், the
+  name சேத்து; 2026-09-29: four known-misspelling pairs were a meaning or style
+  change, not a misspelling -- திடமனதாயிரு, கவனிக்காதே, பூட்டுக்களையும்,
+  பெருந்தொனியாய்). Never flagged again, and never proposed.
+- `provenance`: for every `deprecated` pair, `human` (confirmed by a reviewer
+  in any round) or `ai-review` (from the Round 2 / Pass 3 CSVs only, awaiting
+  confirmation). Only a human pair is reported with high confidence and
+  drawn inline.
+- Single-grapheme tokens are not words unless they are real monosyllables
+  (MONOSYLLABLES): fragments such as சு, நே, சோ were counted as words.
 
 Tokens are the runtime's own: imported_verse_text -> lift_inline_usfm ->
 language_qa.word_occurrences (NFC keys; the text is never rewritten).
@@ -39,11 +47,14 @@ from tc_ai_bridge import language_qa_benchmark as bench  # noqa: E402
 from tc_ai_bridge.language_packs.lexicon import (  # noqa: E402
     COMMON_MIN, LEXICON_VERSION, MIN_LISTED_COUNT, deletion_keys,
 )
-from tc_ai_bridge.language_packs.tamil_distance import tamil_distance  # noqa: E402
+from tc_ai_bridge.language_packs.tamil_distance import clusters, tamil_distance  # noqa: E402
 from tc_ai_bridge.language_qa import lift_inline_usfm, word_occurrences  # noqa: E402
 from tc_ai_bridge.project_import import imported_verse_text, parse_scripture_file  # noqa: E402
 
 OUT = REPO / "engine" / "tc_ai_bridge" / "language_packs" / "ta-irv" / "lexicon.json"
+# The one-grapheme tokens that are Tamil words (2026-09-29 review). Any other
+# single grapheme is a fragment of a split word or a name, not a word form.
+MONOSYLLABLES = frozenset({"நீ", "போ", "வா", "கை", "ஆ", "வை", "தா", "பூ", "ஓ", "ஏ", "ஈ", "ஊ", "கா", "பா", "தீ"})
 
 
 def corpus_counts(irv_dir: Path) -> tuple[collections.Counter, dict[str, set], int, int, list[str]]:
@@ -61,6 +72,8 @@ def corpus_counts(irv_dir: Path) -> tuple[collections.Counter, dict[str, set], i
                     continue
                 verses += 1
                 for word, _, _ in word_occurrences(lifted.visible):
+                    if len(clusters(word)) == 1 and word not in MONOSYLLABLES:
+                        continue  # a fragment (சு of சு வரை), not a word form
                     counts[word] += 1
                     books[word].add(book.book_id)
                     tokens += 1
@@ -112,12 +125,14 @@ def curated_pairs(paths: list[str], counts: collections.Counter) -> tuple[dict[s
 
 
 def human_lexicon(labels_path: Path | None) -> tuple[dict[str, str], set[str]]:
-    """(confirmed wrong -> right, protected words) from the reviewer's labels."""
+    """(confirmed wrong -> right, protected words) from the reviewer's labels,
+    every round (a folder) or one (a file)."""
     if labels_path is None or not labels_path.exists():
         return {}, set()
     confirmed: dict[str, str] = {}
     protected: set[str] = set()
-    for label in bench.load_human_labels(labels_path):
+    labels, _ = bench.load_human_rounds(labels_path)
+    for label in labels:
         if label.get("kind") != "flagged":
             continue
         verdict = bench.human_verdict(label.get("verdict"))
@@ -126,8 +141,10 @@ def human_lexicon(labels_path: Path | None) -> tuple[dict[str, str], set[str]]:
             right = bench.nfc(label.get("correctForm") or (label.get("suggestions") or [""])[0])
             if right and right != word:
                 confirmed[word] = right
-        elif label["rule"] == "ta-irv/lexicon.rare-near-common" and verdict == "fp":
-            protected.add(word)
+        elif label["rule"] in {"ta-irv/lexicon.rare-near-common", "ta-irv/lexicon.known-misspelling"} \
+                and verdict == "fp":
+            protected.add(word)  # a correct word, or a meaning/style change, not a misspelling
+    confirmed = {w: r for w, r in confirmed.items() if w not in protected}
     return confirmed, protected
 
 
@@ -137,7 +154,7 @@ def main() -> int:
     parser.add_argument("--curated", nargs="*", default=[])
     parser.add_argument("--top", type=int, default=60_000, help="bound on listed forms (most frequent first)")
     parser.add_argument("--human-labels", type=Path,
-                        default=REPO / "benchmark" / "human" / "2026-09-28" / "human_labels.jsonl")
+                        default=REPO / "benchmark" / "human")
     args = parser.parse_args()
     counts, books, verses, tokens, book_ids = corpus_counts(args.irv_dir)
     listed = [w for w, c in counts.most_common() if c >= MIN_LISTED_COUNT][:args.top]
@@ -165,6 +182,7 @@ def main() -> int:
         "buckets": {k: v for k, v in sorted(buckets.items())},
         "deprecated": dict(sorted(deprecated.items())),
         "humanConfirmed": sorted(w for w in confirmed if w in deprecated),
+        "provenance": {w: ("human" if w in confirmed else "ai-review") for w in sorted(deprecated)},
         "protected": sorted(protected),
         "curatedStats": curated_stats,
     }

@@ -331,4 +331,16 @@ An entry may hide findings, add list members, reorder suggestions, or propose a 
 
 **Revisit when:** the collection grows beyond the IRV (a new book's findings are unlabelled, which the gate reports as incomplete coverage once the population is rewritten).
 
+## 2026-09-29 — A misspelling pair is trusted only when a human confirmed it
+
+**Decision:**
+- **Provenance.** Every pair in the lexicon's `deprecated` map carries a provenance: `human` (confirmed in a review round) or `ai-review` (from the Round 2 / Pass 3 CSVs only).
+- **What each provenance gets.** `lexicon.known-misspelling` reports a human pair at high confidence and inline. It reports an ai-review pair at medium confidence, panel-only, with "awaits human confirmation".
+- **Rejected pairs.** Pairs the reviewer rejected are removed, and their wrong side becomes a `protected` word.
+- **Unsure pairs.** Pairs the reviewer was unsure of stay ai-review and go into the next sample.
+- **Fragments.** Single-grapheme tokens are not counted as words unless they are real monosyllables.
+**Because:** round 2 found 4 of 8 sampled pairs were not misspellings but meaning or style changes inherited from the AI rows: திடமனதாயிரு→திடமானதாயிரு changes meaning; கவனிக்காதே→கவனிக்காமல் turns an imperative into a participle; பூட்டுக்களையும் is a valid plural; பெருந்தொனியாய்→ஆக is style. The human-confirmed pairs are 47 of 47.
+**Rules out:** an AI-review pair drawn inline; an AI-review pair at high confidence; learning pairs from decisions.
+**Revisit when:** a review round confirms or rejects the remaining ai-review pairs (135 today, 30 of them from reports added on 2026-09-29).
+
 <!-- New entries go above this line. -->

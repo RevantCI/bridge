@@ -34,13 +34,13 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .tamil_distance import clusters, tamil_distance
 
-LEXICON_VERSION = "ta-irv-lexicon@2"  # 2: the 2026-09-28 review (confirmed pairs, protected words)
+LEXICON_VERSION = "ta-irv-lexicon@3"  # 2: the 2026-09-28 review. 3: pair provenance, round 2 (2026-09-29)
 # Build-time bounds (scripts/build_tamil_lexicon.py).
 MIN_LISTED_COUNT = 3   # a word seen fewer times is not listed: absent means rare
 COMMON_MIN = 6         # corpus count a suggestion needs
@@ -74,6 +74,8 @@ class Lexicon:
     deprecated: dict[str, str]
     corpus: dict[str, Any]
     protected: frozenset = frozenset()
+    # wrong -> "human" | "ai-review"; a pair with none is ai-review.
+    provenance: dict[str, str] = field(default_factory=dict)
 
     def count(self, word: str) -> int:
         entry = self.forms.get(word)
@@ -98,7 +100,8 @@ def load_lexicon(path: Path | None = None) -> Lexicon | None:
     return Lexicon(version=str(data.get("version") or LEXICON_VERSION), forms=data.get("forms") or {},
                    common=list(data.get("common") or []), buckets=data.get("buckets") or {},
                    deprecated=data.get("deprecated") or {}, corpus=data.get("corpus") or {},
-                   protected=frozenset(data.get("protected") or ()))
+                   protected=frozenset(data.get("protected") or ()),
+                   provenance=dict(data.get("provenance") or {}))
 
 
 _LOADED: dict[str, Lexicon | None] = {}
@@ -128,11 +131,20 @@ def lexicon_findings(book: str, counts: dict[str, int],
         chapter, verse, start, end, original, text_hash = first_seen[word]
         right = lexicon.deprecated.get(word)
         if right:
-            findings.append(_finding(
+            human = lexicon.provenance.get(word) == "human"
+            finding = _finding(
                 book, "lexicon.known-misspelling", word, chapter, verse, start, end, original, text_hash,
-                f'"{word}" is a reviewed misspelling of "{right}" in this project\'s corrections. Verify this occurrence.',
-                [suggestion(right, "lexicon", "Reviewed correction (Round 2 / Pass 3 reports)")],
-                rule_fields, rule_version))
+                (f'"{word}" is a confirmed misspelling of "{right}" (human review). Verify this occurrence.' if human
+                 else f'"{word}" may be a misspelling of "{right}": this pair comes from an AI review and awaits '
+                      f'human confirmation.'),
+                [suggestion(right, "lexicon", "Confirmed by a reviewer" if human
+                            else "From the Round 2 / Pass 3 AI review; not yet confirmed")],
+                rule_fields, rule_version)
+            if not human:
+                # Only a human-confirmed pair is high confidence and drawn inline (2026-09-29).
+                finding.update(confidence="medium", inline=False)
+            finding["provenance"] = "human" if human else "ai-review"
+            findings.append(finding)
             continue
         if not rare_near_common:
             continue
