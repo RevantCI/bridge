@@ -58,9 +58,17 @@ a = Analysis(
         # build cannot run any Tamil rule and every Language QA pass fails.
         ('tc_ai_bridge/language_packs/ta-irv', 'tc_ai_bridge/language_packs/ta-irv'),
         *collect_data_files('uroman'),
+        # usfmtc (the one USFM parser, #91) ships its USX schema and .vrs
+        # versification files beside its modules. The parse path Bridge uses
+        # does not read them today, but a grammar or reference call that did
+        # would fail only in the frozen build, so they are collected anyway.
+        *collect_data_files('usfmtc'),
         *wildebeest_datas,
     ],
-    hiddenimports=['regex'],
+    # usfmtc is imported on first parse inside tc_ai_bridge/usfm_parser.py so
+    # sidecar start does not pay its ~100 ms import; listed so the freeze does
+    # not depend on analysis finding a function-level import.
+    hiddenimports=['regex', 'usfmtc'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

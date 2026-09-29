@@ -470,6 +470,19 @@ change. **This is scheduled work, not accepted behaviour.**
     PyInstaller bootloader alone leaves the real Python child holding the
     file. A sidecar busy inside a long request when the app dies abruptly can
     still orphan; `Stop-Process -Name bridge-engine -Force` clears it.
+14. **Where a verse starts and ends is decided by one parser**
+    (`engine/tc_ai_bridge/usfm_parser.py`, usfmtc 0.4.8 pinned exactly, #91), and
+    it is the only module that may import usfmtc. The stored verse string is still
+    a verbatim slice of the source — the parser picks the boundaries from its
+    element positions, it does not re-serialise — so offsets, `\zaln`/`\w` markup
+    and notes survive byte-for-byte. usfmtc's lexer is quadratic in input length
+    (a whole aligned Psalms took 277 s), so books are parsed a chapter at a time;
+    it is still ~20x slower than a regex, so the import preview reads identity from
+    the preamble only and fully parses just the first book. Never hand usfmtc a
+    bare string: it opens anything `os.path.exists` accepts as a file. The other
+    USFM readers (`usfm.py`'s `strip_usfm` on stored verse strings,
+    `usfm_passages.py` and `passage_semantic_runtime.py` for Stages 4–8,
+    `aligned_usfm.py`, the frontend's `usfmNotes.ts`) are not on it yet — see #91.
 
 ## Working in this repo
 

@@ -198,7 +198,11 @@ def main() -> int:
 
             raw_source = Path(temp) / "57-TIT.usfm"
             raw_source.write_text(
-                "\\id TIT\n\\h Titus\n\\c 1\n\\v 1 Paul, a servant of God.\n",
+                # A heading and a mid-line \v: both are decided by usfmtc
+                # (tc_ai_bridge/usfm_parser.py, #91), whose pure-Python grammar
+                # is exactly what a freeze can drop without failing to build.
+                "\\id TIT\n\\h Titus\n\\c 1\n\\v 1 Paul, a servant of God.\n"
+                "\\s The work in Crete\n\\q1 \\v 2 In hope of eternal life.\n",
                 encoding="utf-8",
             )
             raw_import = request("original-language-import", "project.import", {
@@ -220,6 +224,19 @@ def main() -> int:
                 or original_resource.get("commit") != "fc95b2b8aad08bb65ab54628ab685413a1139e97"
             ):
                 raise SystemExit(f"Frozen UGNT resource provenance failed: {raw_import}")
+            parsed_chapter = request("usfm-parser-verse-data", "chapter.verseData", {"chapter": "1"})
+            parsed_result = parsed_chapter.get("result", {})
+            parsed_verses = {
+                verse: (item or {}).get("text")
+                for verse, item in (parsed_result.get("verses") or {}).items()
+            }
+            if (
+                not parsed_chapter.get("success")
+                or parsed_verses.get("1") != "Paul, a servant of God."
+                or parsed_verses.get("2") != "In hope of eternal life."
+                or (parsed_result.get("headings") or {}).get("2", [{}])[0].get("text") != "The work in Crete"
+            ):
+                raise SystemExit(f"Frozen USFM parser did not bound verses and headings: {parsed_chapter}")
             raw_alignment = request(
                 "original-language-alignment", "alignment.get", {"chapter": "1", "verse": "1"},
             )

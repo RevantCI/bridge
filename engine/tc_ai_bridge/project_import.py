@@ -24,6 +24,7 @@ from .original_language_resources import (
 )
 from .tc_project import ProjectError, TranslationCoreProject, _write_json_atomic
 from .usfm import whitespace_tokens
+from .usfm_parser import UsfmParseError, identify_usfm, parse_usfm
 from .version import BRIDGE_VERSION
 
 
@@ -53,26 +54,6 @@ BOOK_NAMES = {
     "rev": "Revelation",
 }
 
-_ID_RE = re.compile(r"(?:^|\n)[ \t]*\\id\s+([A-Za-z0-9]{3})\b", re.IGNORECASE)
-_ID_LINE_RE = re.compile(r"(?:^|\n)[ \t]*\\id\s+([^\r\n]+)", re.IGNORECASE)
-_HEADER_RE = re.compile(r"(?:^|\n)[ \t]*\\(?P<tag>h|toc1|toc2|toc3)\s+(?P<value>[^\r\n]+)", re.IGNORECASE)
-_CHAPTER_RE = re.compile(r"(?:^|\n)[ \t]*\\c\s+(?P<number>\S+)", re.IGNORECASE)
-_VERSE_RE = re.compile(r"(?:^|\n)[ \t]*\\v\s+(?P<number>\S+)(?:[ \t]+)?", re.IGNORECASE)
-# Section headings and their kin. A verse's content runs from its \v to the next
-# one, so a heading sitting between two verses used to be stored inside the
-# EARLIER verse -- displayed as part of it, and its words offered as alignable
-# targets. A heading is an editorial navigation aid, not a translation of any
-# source word, so an aligner can never close those gaps (#180).
-#
-# \d (descriptive title, e.g. a Psalm superscription) is deliberately NOT here:
-# it is translated content in its own right, and pulling it out of the verse
-# would remove real text from alignment.
-_HEADING_MARKERS = {
-    "s", "s1", "s2", "s3", "s4", "s5",
-    "ms", "ms1", "ms2", "ms3",
-    "mr", "r", "sr", "sp",
-}
-_HEADING_LINE_RE = re.compile(r"^[ \t]*\\(?P<tag>[A-Za-z0-9]+)\b[ \t]*(?P<text>.*)$")
 _MILESTONE_RE = re.compile(
     r"\\zaln-s\s*\|(?P<attrs>.*?)\\\*(?P<body>.*?)\\zaln-e\\\*",
     re.IGNORECASE | re.DOTALL,
@@ -102,49 +83,28 @@ class ParsedBook:
     language_direction: str = ""
     has_alignment_markers: bool = False
     alignment_warnings: int = 0
+    # The parser's own reports (unknown or misplaced markers). Informational:
+    # usfmtc is read in its lenient mode, so none of these stops an import.
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def verse_count(self) -> int:
         return sum(len(verses) for verses in self.chapters.values())
 
 
-def _split_trailing_headings(content: str) -> tuple[str, list[dict[str, str]]]:
-    """Separate a verse's own text from any heading that follows it.
-
-    Returns `(verse_text, headings)`, where each heading is `{"tag", "text"}` in
-    document order. A heading between verse N and verse N+1 introduces N+1, so
-    the caller files it against the verse it precedes, not the one it trailed.
-
-    Scripture after a heading is kept rather than discarded: valid USFM puts a
-    heading immediately before a `\\v`, so this should not happen, but silently
-    dropping verse text would be the worst possible way to be wrong. Marker-only
-    lines after the heading (`\\p`, `\\q`) structure the *next* verse and are
-    dropped -- they sat uselessly at the tail of the previous verse before.
-    """
-    lines = content.split("\n")
-    head: list[str] = []
-    headings: list[dict[str, str]] = []
-    tail: list[str] = []
-    seen_heading = False
-
-    for line in lines:
-        match = _HEADING_LINE_RE.match(line)
-        tag = match.group("tag").lower() if match else ""
-        if tag in _HEADING_MARKERS:
-            seen_heading = True
-            text = match.group("text").strip() if match else ""
-            if text:
-                headings.append({"tag": tag, "text": text})
-            continue
-        if not seen_heading:
-            head.append(line)
-        elif match and not match.group("text").strip():
-            continue  # a bare \p or \q introducing the next verse
-        elif line.strip():
-            tail.append(line)
-
-    verse_text = "\n".join(head + tail).strip()
-    return verse_text, headings
+@dataclass
+class BookIdentity:
+    """A book as the import preview sees it: identity from the parsed preamble,
+    size from a marker count. `parse_scripture_file` is what normalizes it."""
+    source_path: Path
+    book_id: str
+    book_name: str
+    headers: list[dict[str, str]]
+    verse_count: int
+    language_id: str = ""
+    language_name: str = ""
+    language_direction: str = ""
+    has_alignment_markers: bool = False
 
 
 def _read_text(path: Path) -> str:
@@ -306,10 +266,10 @@ def _verse_alignment(raw_verse: str) -> tuple[str, dict[str, Any], bool]:
     return flattened, {"alignments": groups, "wordBank": remaining}, reliable
 
 
-def _header_value(text: str, tag: str) -> str:
-    for match in _HEADER_RE.finditer(text):
-        if match.group("tag").lower() == tag:
-            return match.group("value").strip()
+def _book_header(book: ParsedBook | BookIdentity, tag: str) -> str:
+    for item in book.headers:
+        if str(item.get("tag", "")).lower() == tag:
+            return str(item.get("content", ""))
     return ""
 
 
@@ -322,92 +282,126 @@ def _book_id_from_filename(path: Path) -> str:
     return match.group(1) if match else ""
 
 
-def parse_scripture_file(path: str | Path) -> ParsedBook:
-    source = Path(path).resolve()
-    text = _read_text(source)
-    id_match = _ID_RE.search(text)
-    id_line_match = _ID_LINE_RE.search(text)
-    book_id = (id_match.group(1).lower() if id_match else _book_id_from_filename(source))
+def _identity_fields(source: Path, text: str, book_code: str, id_line: str,
+                     headers: tuple[Any, ...]) -> dict[str, Any]:
+    """Book id, name and language, from what the parser read in the preamble."""
+    book_id = (
+        book_code.lower() if re.fullmatch(r"[A-Za-z0-9]{3}", book_code)
+        else _book_id_from_filename(source)
+    )
     if not book_id:
         raise ProjectError(f"Could not identify a USFM book id in {source.name}; add a \\id marker.")
 
-    chapter_matches = list(_CHAPTER_RE.finditer(text))
-    if not chapter_matches:
-        raise ProjectError(f"No \\c chapter marker found in {source.name}.")
-
-    chapters: dict[str, dict[str, str]] = {}
-    headings: dict[str, dict[str, list[dict[str, str]]]] = {}
-    for index, chapter_match in enumerate(chapter_matches):
-        chapter = chapter_match.group("number")
-        block_end = chapter_matches[index + 1].start() if index + 1 < len(chapter_matches) else len(text)
-        block = text[chapter_match.end():block_end]
-        verse_matches = list(_VERSE_RE.finditer(block))
-        if not verse_matches:
-            continue
-        verses: dict[str, str] = {}
-        chapter_headings: dict[str, list[dict[str, str]]] = {}
-
-        # A heading between \c and the first \v introduces that first verse. The
-        # loop below only sees text from \v onward, so it is read here or lost.
-        _, opening_headings = _split_trailing_headings(
-            "\n" + block[:verse_matches[0].start()].strip()
-        )
-        if opening_headings:
-            chapter_headings[verse_matches[0].group("number")] = opening_headings
-
-        for verse_index, verse_match in enumerate(verse_matches):
-            verse = verse_match.group("number")
-            verse_end = verse_matches[verse_index + 1].start() if verse_index + 1 < len(verse_matches) else len(block)
-            content = block[verse_match.end():verse_end].strip()
-            content, trailing = _split_trailing_headings(content)
-            if trailing:
-                # It introduces whatever comes next. At the end of a chapter
-                # there is no next verse, so it is filed against this one --
-                # losing it would be worse than filing it a verse early.
-                following = (
-                    verse_matches[verse_index + 1].group("number")
-                    if verse_index + 1 < len(verse_matches) else verse
-                )
-                chapter_headings.setdefault(following, []).extend(trailing)
-            if verse in verses:
-                raise ProjectError(f"Duplicate verse {chapter}:{verse} in {source.name}.")
-            verses[verse] = content
-        chapters[chapter] = verses
-        if chapter_headings:
-            headings[chapter] = chapter_headings
-
-    if not any(chapters.values()):
-        raise ProjectError(f"No \\v verse markers found in {source.name}.")
-
-    headers = []
-    first_chapter = chapter_matches[0].start()
-    for line in text[:first_chapter].splitlines():
-        marker = re.match(r"\s*\\(?P<tag>[A-Za-z0-9]+)\s*(?P<value>.*)", line)
-        if marker:
-            headers.append({"tag": marker.group("tag"), "content": marker.group("value").strip()})
-
-    # translationCore's extended \\id convention may contain
+    # translationCore's extended \id convention may contain
     # langcode_LanguageName_ltr ... tc. Read it when present, but never guess.
     language_id = language_name = language_direction = ""
-    id_line = id_line_match.group(1) if id_line_match else ""
     lang_match = re.search(r"\b([A-Za-z][A-Za-z0-9-]{1,11})_([^_\s]+)_(ltr|rtl)\b", id_line, re.IGNORECASE)
     if lang_match:
         language_id = lang_match.group(1).lower()
         language_name = lang_match.group(2).replace("⋅", " ")
         language_direction = lang_match.group(3).lower()
 
-    book_name = _header_value(text, "h") or _header_value(text, "toc2") or BOOK_NAMES.get(book_id, book_id.upper())
+    def header(tag: str) -> str:
+        return next((item.content for item in headers if item.tag.lower() == tag), "")
+
+    return {
+        "source_path": source,
+        "book_id": book_id,
+        "book_name": header("h") or header("toc2") or BOOK_NAMES.get(book_id, book_id.upper()),
+        "headers": [{"tag": item.tag, "content": item.content} for item in headers],
+        "language_id": language_id,
+        "language_name": language_name,
+        "language_direction": language_direction,
+        "has_alignment_markers": "\\zaln-s" in text and "\\w" in text,
+    }
+
+
+def identify_scripture_file(path: str | Path) -> BookIdentity:
+    """What the import preview shows for one book, without parsing its body."""
+    return _cached(_IDENTITY_CACHE, _IDENTITY_CACHE_SIZE, Path(path).resolve(), _identify_scripture_file)
+
+
+def _identify_scripture_file(source: Path) -> BookIdentity:
+    text = _read_text(source)
+    try:
+        identity = identify_usfm(text)
+    except UsfmParseError as exc:
+        raise ProjectError(f"{source.name} could not be read as USFM: {exc}") from exc
+    fields = _identity_fields(source, text, identity.book_code, identity.id_line, identity.headers)
+    if not identity.has_chapters:
+        raise ProjectError(f"No \\c chapter marker found in {source.name}.")
+    if not identity.verse_markers:
+        raise ProjectError(f"No \\v verse markers found in {source.name}.")
+    return BookIdentity(verse_count=identity.verse_markers, **fields)
+
+
+# (resolved path, size, mtime_ns) -> result. An import is a preview request
+# followed by an import request to the same long-lived sidecar, and the import
+# previews again; an aligned Psalms takes ~8 s to parse, so each book is read
+# once. Nothing downstream mutates a ParsedBook or a BookIdentity. The parse
+# cache is small on purpose: only a collection's first book is fully parsed.
+_PARSE_CACHE: dict[tuple[str, int, int], Any] = {}
+_PARSE_CACHE_SIZE = 2
+_IDENTITY_CACHE: dict[tuple[str, int, int], Any] = {}
+_IDENTITY_CACHE_SIZE = 256
+
+
+def _cached(cache: dict[tuple[str, int, int], Any], size: int, source: Path, build: Any) -> Any:
+    try:
+        stat = source.stat()
+        key = (str(source), stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        return build(source)
+    if key in cache:
+        return cache[key]
+    value = build(source)
+    while len(cache) >= size:
+        cache.pop(next(iter(cache)))
+    cache[key] = value
+    return value
+
+
+def parse_scripture_file(path: str | Path) -> ParsedBook:
+    """Read one book of USFM through the shared parser (#91).
+
+    Where a verse starts and ends, and which lines are section headings, is the
+    parser's decision (`usfm_parser.parse_usfm`); the stored verse string is cut
+    verbatim from the source between those boundaries.
+    """
+    return _cached(_PARSE_CACHE, _PARSE_CACHE_SIZE, Path(path).resolve(), _parse_scripture_file)
+
+
+def _parse_scripture_file(source: Path) -> ParsedBook:
+    text = _read_text(source)
+    try:
+        parsed = parse_usfm(text)
+    except UsfmParseError as exc:
+        raise ProjectError(f"{source.name} could not be read as USFM: {exc}") from exc
+    fields = _identity_fields(source, text, parsed.book_code, parsed.id_line, parsed.headers)
+    if not parsed.chapters:
+        raise ProjectError(f"No \\c chapter marker found in {source.name}.")
+
+    chapters: dict[str, dict[str, str]] = {}
+    for verse in parsed.verses:
+        verses = chapters.setdefault(verse.chapter, {})
+        if verse.verse in verses:
+            raise ProjectError(f"Duplicate verse {verse.chapter}:{verse.verse} in {source.name}.")
+        verses[verse.verse] = verse.text
+    if not any(chapters.values()):
+        raise ProjectError(f"No \\v verse markers found in {source.name}.")
+
+    # chapter -> the verse a heading introduces -> the headings, in order.
+    headings: dict[str, dict[str, list[dict[str, str]]]] = {}
+    for heading in parsed.headings:
+        headings.setdefault(heading.chapter, {}).setdefault(heading.verse, []).append(
+            {"tag": heading.tag, "text": heading.text}
+        )
+
     return ParsedBook(
-        source_path=source,
-        book_id=book_id,
-        book_name=book_name,
-        headers=headers,
-        chapters=chapters,
+        chapters={chapter: chapters[chapter] for chapter in parsed.chapters if chapters.get(chapter)},
         headings=headings,
-        language_id=language_id,
-        language_name=language_name,
-        language_direction=language_direction,
-        has_alignment_markers="\\zaln-s" in text and "\\w" in text,
+        warnings=list(parsed.warnings),
+        **fields,
     )
 
 
@@ -531,7 +525,14 @@ def inspect_import(source_path: str | Path) -> dict[str, Any]:
     files = _scripture_files(source)
     if not files:
         raise ProjectError("No USFM/SFM Scripture files were found. Supported extensions are .usfm, .sfm, and marker-based .txt files.")
-    books = [parse_scripture_file(path) for path in files]
+    # The first book is parsed in full -- it is the one an import normalizes
+    # eagerly, so it is validated before the user commits, and the parse is
+    # cached for the import that follows. The rest are identified from their
+    # preamble and parsed on first open: a full parse of all 66 IRV books
+    # through usfmtc is ~11 s, where the line regex it replaced took 0.5 s.
+    books: list[ParsedBook | BookIdentity] = [
+        parse_scripture_file(files[0]), *(identify_scripture_file(path) for path in files[1:]),
+    ]
     duplicate_ids = [book_id for book_id, count in Counter(book.book_id for book in books).items() if count > 1]
     if duplicate_ids:
         raise ProjectError(f"More than one source file identifies the same book: {', '.join(duplicate_ids)}")
@@ -545,7 +546,7 @@ def inspect_import(source_path: str | Path) -> dict[str, Any]:
         "languageName": next(iter(language_names)) if len(language_names) == 1 else "",
         "languageDirection": next(iter(language_directions)) if len(language_directions) == 1 else ("ltr" if paratext.get("lefttoright", "").lower() == "true" else ""),
         "projectName": paratext.get("name", "") or source.stem,
-        "bibleName": paratext.get("fullname", "") or _header_value(_read_text(files[0]), "toc1"),
+        "bibleName": paratext.get("fullname", "") or _book_header(books[0], "toc1"),
     }
     warnings = []
     if len(books) > 1:
@@ -669,7 +670,15 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
     _write_json_atomic(project_root / ".bridge" / "import.json", {
         "schemaVersion": 1,
         "source": {"path": str(book.source_path), "sha256": source_hash},
-        "scripture": {"bookId": book.book_id, "chapters": len(book.chapters), "verses": book.verse_count},
+        "scripture": {
+            "bookId": book.book_id, "chapters": len(book.chapters), "verses": book.verse_count,
+            # What the USFM parser (#91) reported about the source: unknown or
+            # misplaced markers, and anything Bridge did about them. None of it
+            # stopped the import; it is kept so nobody has to re-parse to ask.
+            "parser": "usfmtc",
+            "parserWarnings": book.warnings[:200],
+            "parserWarningCount": len(book.warnings),
+        },
         "alignment": {
             "sourceHadMilestones": book.has_alignment_markers,
             "versesRequiringAlignmentReview": unreliable,
@@ -865,7 +874,7 @@ def _ensure_tc_project_compatible(project_root: Path, metadata: dict[str, str]) 
         return
 
     scripture = _scripture_files(project_root)
-    matching = [path for path in scripture if parse_scripture_file(path).book_id == book_id]
+    matching = [path for path in scripture if identify_scripture_file(path).book_id == book_id]
     if not matching:
         raise ProjectError(
             "This older translationStudio/translationCore project has neither target chapter JSON "
