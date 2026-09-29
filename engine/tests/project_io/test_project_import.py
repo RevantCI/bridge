@@ -530,6 +530,27 @@ def test_import_rejects_incomplete_metadata(tmp_path):
         import_source(source, tmp_path / "projects", {"projectName": "Titus", "bibleName": "Bible"})
 
 
+def test_a_malformed_later_book_is_reported_when_it_is_first_opened(tmp_path):
+    """The preview fully parses only a collection's first book (#91: parsing all
+    66 through usfmtc is ~11 s). A later book's error therefore surfaces on first
+    open -- as a clear ProjectError, and its source is left untouched."""
+    source = tmp_path / "Bible"
+    source.mkdir()
+    (source / "57TIT.SFM").write_text(SIMPLE_USFM, encoding="utf-8")
+    broken = "\\id PHM\n\\h Philemon\n\\c 1\n\\v 1 Grace.\n\\v 1 Again.\n"
+    (source / "58PHM.SFM").write_text(broken, encoding="utf-8")
+
+    preview = inspect_import(source)
+    assert [book["bookId"] for book in preview["books"]] == ["tit", "phm"]
+    imported = import_source(source, tmp_path / "out", _metadata(projectName="Two books"))
+    deferred = Path(imported["projects"][1]["path"])
+
+    with pytest.raises(ProjectError, match="Duplicate verse 1:1"):
+        project_import.materialize_lazy_project(deferred)
+    copied = next((deferred / ".bridge").glob("source.*"))
+    assert copied.read_text(encoding="utf-8") == broken
+
+
 def test_import_rejects_duplicate_verse_numbers(tmp_path):
     source = tmp_path / "TIT.usfm"
     source.write_text("\\id TIT\n\\c 1\n\\v 1 First.\n\\v 1 Duplicate.\n", encoding="utf-8")
