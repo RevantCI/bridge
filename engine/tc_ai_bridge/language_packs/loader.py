@@ -28,6 +28,12 @@ engine:
     with one (a compound-final element: முறை also excludes ஒருமுறை);
   - listRef: membership of a named list, e.g. a house-style list.
 
+A pair rule may carry `contexts`: a next-word condition under which its
+finding reads differently -- its own confidence, message and rationale, and
+further ranked alternatives (another fix type). The first suggestion is still
+the rule's own fix. (2026-09-29: after a case form, `X தான்` is the pronoun,
+`Xத் தான்`, or the clitic, `Xத்தான்`; the engine cannot see which.)
+
 A project may narrow a bundled rule, never widen it. An override can
 disable a rule, take it off inline display, or add abstains. Anything else
 is refused and reported (docs/DECISIONS.md).
@@ -62,7 +68,7 @@ CONDITION_KEYS = {"lexical", "notLexical", "suffix", "regex", "minLength", "init
                   "notSuffix", "notSuffixLexical", "listRef"}
 RULE_KEYS = {"id", "version", "legacyId", "enabled", "category", "layer", "severity", "confidence",
              "inline", "title", "message", "rationale", "match", "abstain", "fix",
-             "examples", "provenance"}
+             "examples", "provenance", "contexts"}
 OVERRIDE_RULE_KEYS = {"enabled", "inline", "abstain"}
 OVERRIDES_PATH = Path(".apps") / "translationCoreAI" / "language-packs"
 
@@ -156,6 +162,18 @@ def _condition(raw: Any, where: str) -> Condition:
 
 
 @dataclass(frozen=True)
+class Context:
+    """A next-word condition under which a pair rule's finding reads
+    differently: confidence, message, rationale, and ranked alternatives
+    (fix types) after the rule's own fix."""
+    next: "Condition"
+    confidence: str
+    message: str
+    rationale: str
+    alternatives: tuple  # ((fix type, rationale), ...)
+
+
+@dataclass(frozen=True)
 class Abstain:
     prev: Condition | None
     next: Condition | None
@@ -185,6 +203,7 @@ class Rule:
     fix: dict[str, Any] | None = None
     examples: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     source: dict[str, Any] = field(default_factory=dict)
+    contexts: list["Context"] = field(default_factory=list)
 
     @property
     def name(self) -> str:
@@ -214,6 +233,9 @@ class Candidate:
     # pair that straddles a poetry line or lifted markup (scan_text).
     first_word_end: int | None = None
     first_word_fix: str | None = None
+    # A matched context: its confidence, and ranked alternatives after the fix.
+    confidence: str | None = None
+    alternatives: tuple = ()  # ((replacement, rationale), ...)
 
 
 class RulePack:
@@ -278,25 +300,30 @@ class RulePack:
             raw_prev = text[prev_match.start():prev_match.end()]
             raw_gap = text[prev_match.end():next_match.start()]
             raw_next = text[next_match.start():next_match.end()]
-            kind = (rule.fix or {}).get("type")
-            first_fix = None
-            if kind == "insert-link":
-                replacement = raw_prev + initial + PULLI + raw_gap + raw_next
-                first_fix = raw_prev + initial + PULLI
-            elif kind == "replace-link":
-                replacement = raw_prev[:-2] + initial + PULLI + raw_gap + raw_next
-                first_fix = raw_prev[:-2] + initial + PULLI
-            elif kind == "fuse-link":
-                stem = raw_prev[:-2] if link is not None else raw_prev
-                replacement = stem + initial + PULLI + raw_next
-            else:
-                replacement = None
+            def fixed(kind):
+                if kind == "insert-link":
+                    return raw_prev + initial + PULLI + raw_gap + raw_next, raw_prev + initial + PULLI
+                if kind == "replace-link":
+                    return raw_prev[:-2] + initial + PULLI + raw_gap + raw_next, raw_prev[:-2] + initial + PULLI
+                if kind == "fuse-link":
+                    stem = raw_prev[:-2] if link is not None else raw_prev
+                    return stem + initial + PULLI + raw_next, None
+                return None, None
+
+            replacement, first_fix = fixed((rule.fix or {}).get("type"))
+            context = next((c for c in rule.contexts if c.next.matches(next_word, lists)), None)
+            alternatives = tuple((fixed(kind)[0], why) for kind, why in (context.alternatives if context else ())
+                                 if fixed(kind)[0] and fixed(kind)[0] != replacement)
             values = {"prev": base, "word": prev_word, "next": next_word, "initial": initial,
-                      "link": link or "", "fix": replacement or ""}
-            out.append(Candidate(rule, prev_match.start(), next_match.end(), replacement,
-                                 rule.message.format(**values), rule.rationale.format(**values),
+                      "link": link or "", "fix": replacement or "",
+                      "alternative": alternatives[0][0] if alternatives else ""}
+            message = (context.message if context else rule.message).format(**values)
+            rationale = (context.rationale if context and context.rationale else rule.rationale).format(**values)
+            out.append(Candidate(rule, prev_match.start(), next_match.end(), replacement, message, rationale,
                                  first_word_end=prev_match.end() if first_fix else None,
-                                 first_word_fix=first_fix))
+                                 first_word_fix=first_fix,
+                                 confidence=context.confidence if context else None,
+                                 alternatives=alternatives))
         return out
 
     def regex_candidates(self, visible: str, raw: str) -> list[Candidate]:
@@ -373,6 +400,9 @@ def _rule(raw: dict[str, Any], where: str) -> Rule:
             raise PackError(f"{where}: match.pattern: {exc}") from exc
         rule.on = match.get("on", "visible")
     rule.abstain = [_abstain(entry, f"{where}.abstain[{i}]") for i, entry in enumerate(raw.get("abstain") or [])]
+    rule.contexts = [_context(entry, f"{where}.contexts[{i}]") for i, entry in enumerate(raw.get("contexts") or [])]
+    if rule.contexts and rule.match_type != "token-context":
+        raise PackError(f"{where}: contexts apply to token-context rules only")
     if rule.fix is not None:
         if not isinstance(rule.fix, dict) or rule.fix.get("type") not in FIXES:
             raise PackError(f"{where}: fix.type must be one of {FIXES}")
@@ -383,6 +413,27 @@ def _rule(raw: dict[str, Any], where: str) -> Rule:
         if rule.fix["type"] == "expand" and not isinstance(rule.fix.get("template"), str):
             raise PackError(f"{where}: fix.template is required for expand")
     return rule
+
+
+def _context(raw: Any, where: str) -> Context:
+    if not isinstance(raw, dict) or "next" not in raw:
+        raise PackError(f"{where}: a context needs a next condition")
+    unknown = set(raw) - {"next", "confidence", "message", "rationale", "alternatives", "origin"}
+    if unknown:
+        raise PackError(f"{where}: unknown context keys {sorted(unknown)}")
+    confidence = raw.get("confidence", "medium")
+    if confidence not in CONFIDENCES:
+        raise PackError(f"{where}: confidence must be high, medium or low")
+    message = raw.get("message", {}).get("en") if isinstance(raw.get("message"), dict) else None
+    if not message:
+        raise PackError(f"{where}: message.en is required")
+    alternatives = []
+    for alt in raw.get("alternatives") or []:
+        if not isinstance(alt, dict) or alt.get("fix") not in {"insert-link", "replace-link", "fuse-link"}:
+            raise PackError(f"{where}: an alternative is {{fix: insert-link|replace-link|fuse-link, rationale}}")
+        alternatives.append((alt["fix"], str(alt.get("rationale", ""))))
+    return Context(next=_condition(raw["next"], f"{where}.next"), confidence=confidence, message=message,
+                   rationale=str(raw.get("rationale", "")), alternatives=tuple(alternatives))
 
 
 def _abstain(raw: Any, where: str) -> Abstain:

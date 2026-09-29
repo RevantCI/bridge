@@ -1,6 +1,6 @@
 {
  "id": "sandhi.vallinam.wrong-consonant",
- "version": 2,
+ "version": 3,
  "category": "sandhi",
  "severity": "medium",
  "confidence": "medium",
@@ -259,17 +259,15 @@
   {
    "next": {
     "lexical": [
-     "தான்",
      "கூட",
      "மட்டும்",
-     "ஆவது",
      "போல",
      "என்று",
      "என",
      "எனும்"
     ]
    },
-   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style); தான்/ஆவது are written fused (sandhi.clitic.fused for தான்)."
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style). தான் is not abstained: see the rule's தான் context (2026-09-29)."
   },
   {
    "next": {
@@ -394,8 +392,8 @@
     "origin": "DEU 21:12 (correctly linked)"
    },
    {
-    "text": "செய்து, தங்களை தேவரீர் மனவருத்தப்படுத்தும்போது",
-    "origin": "1KI 8:35 (house form)"
+    "text": "அந்தத் தூண்களை தேவாலய வாசல்",
+    "origin": "1KI 7:21 (house form)"
    },
    {
     "text": "நிலத்தின் விளைச்சலைக் கெடுத்து, இஸ்ரவேலிலே",

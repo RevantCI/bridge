@@ -100,7 +100,7 @@ def test_the_generalised_case_rules_flag_real_case_forms(text, span, fix):
     "அவன் கை தட்டினான்",                 # கை: root (கையை)
     "கிழக்கு பக்கத்தில் இருந்தது",         # கிழக்கு "east": a root in -க்கு (கிழக்கில்), not a dative
     "ஈசாக்கு பதில் சொன்னான்",            # a name in -க்கு: a nominative (IRV_Pass3_Handoff §5)
-    "அதை தான் செய்தான்",                  # a clitic after the trigger: sandhi.clitic.fused's, not a missing link
+    "அவனோடு கூட போனான்",                  # a spaced clitic, house style apart without doubling
 ])
 def test_roots_names_house_forms_and_clitics_are_not_missing_links(text):
     assert not [f for f in scan(text) if f["rule"] == "tamil.vallinam-missing"]
@@ -122,14 +122,21 @@ def test_names_ending_in_a_consonant_are_not_wrong_links(text):
     assert not by_rule(text, "sandhi.vallinam.wrong-consonant")
 
 
-def test_clitic_is_fused_and_never_given_a_spaced_link():
-    [finding] = by_rule("அவன் அதைத் தான் செய்தான்", "sandhi.clitic.fused")
-    assert finding["suggestedReplacement"] == "அதைத்தான்"
-    assert finding["inline"] is False and finding["confidence"] == "low"
-    [bare] = by_rule("அவன் அதை தான் செய்தான்", "sandhi.clitic.fused")
-    assert bare["suggestedReplacement"] == "அதைத்தான்"
-    assert not by_rule("அவனோடு கூட போனான்", "sandhi.clitic.fused")  # comitative கூட, "with"
-    assert not by_rule("அதைத்தான் செய்தான்", "sandhi.clitic.fused")
+def test_bare_tan_offers_the_pronoun_first_and_the_clitic_second():
+    """2026-09-29: after a case form a bare "X தான்" is always a defect; the
+    reflexive pronoun is written apart and doubled (அதைத் தான்), the clitic
+    fused (அதைத்தான்). The engine cannot tell which, so it offers both, the
+    pronoun first (6 of 6 sampled), at medium confidence."""
+    assert default_pack().by_id("sandhi.clitic.fused").enabled is False
+    [finding] = by_rule("அவன் அதை தான் செய்தான்", "sandhi.vallinam.accusative")
+    assert [s["text"] for s in finding["suggestions"]] == ["அதைத் தான்", "அதைத்தான்"]
+    assert [s["rationale"] for s in finding["suggestions"]] == ["pronoun: separate, doubled", "clitic: fused"]
+    assert finding["confidence"] == "medium" and "பிரதிப்பெயர்" in finding["message"]
+    [dative] = by_rule("தேவனுக்கு தான் கொடுத்தான்", "sandhi.vallinam.dative")
+    assert dative["suggestedReplacement"] == "தேவனுக்குத் தான்"
+    # Either correct form is left alone.
+    for text in ("அவன் அதைத் தான் செய்தான்", "அதைத்தான் செய்தான்"):
+        assert not [f for f in scan(text) if f["category"] in {"sandhi", "word-joining"}], text
 
 
 @pytest.mark.parametrize("text,rule_id,span,fix", [

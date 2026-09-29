@@ -343,4 +343,15 @@ An entry may hide findings, add list members, reorder suggestions, or propose a 
 **Rules out:** an AI-review pair drawn inline; an AI-review pair at high confidence; learning pairs from decisions.
 **Revisit when:** a review round confirms or rejects the remaining ai-review pairs (135 today, 30 of them from reports added on 2026-09-29).
 
+## 2026-09-29 — தான் after a case form: offer the pronoun first, the clitic second
+
+**Decision:** `sandhi.clitic.fused` is disabled. The வல்லினம் rules no longer abstain on தான் (or ஆவது, which starts with a vowel and so never triggers them). A bare `X தான்` after a case form is flagged with two ranked suggestions:
+- rank 1, `Xத் தான்`: the reflexive pronoun, written apart with doubling;
+- rank 2, `Xத்தான்`: the clitic, written fused.
+
+The finding is medium confidence, with the message "தான்: பிரதிப்பெயர் என்றால் பிரித்து ஒற்றுடன்; ஒட்டுச்சொல் என்றால் ஒட்டி". The mechanism is a rule-level `contexts` entry in the pack, a next-word condition with its own confidence, message and ranked alternatives. The spaced clitics கூட, மட்டும், போல, என்று, என, எனும் keep the abstain.
+**Because:** all six `sandhi.clitic.fused` findings in round 2 were the pronoun (David, Jonah, the offerer), which the reviewer writes separately with doubling (பெட்டிக்குத் தான், தேவனுக்குத் தான்). Round 1 established that the clitic is written fused (அதைத்தான்). So a bare `X தான்` is always a defect, and which fix is right depends on syntax the engine cannot see.
+**Rules out:** choosing one form automatically; the clitic rule's fused-only suggestion.
+**Revisit when:** a review round labels a batch of the new தான் findings (the next sample); if the clitic reading turns out common, reorder the suggestions per context.
+
 <!-- New entries go above this line. -->

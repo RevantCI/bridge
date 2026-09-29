@@ -1,6 +1,7 @@
 {
  "id": "sandhi.clitic.fused",
- "version": 2,
+ "version": 3,
+ "enabled": false,
  "category": "word-joining",
  "severity": "low",
  "confidence": "low",
@@ -256,127 +257,9 @@
  "fix": {
   "type": "fuse-link"
  },
- "provenance": "Panel-only, low confidence. v2 (2026-09-28 review): தான் and ஆவது are written fused, and கூட is written apart, so கூட is no longer matched. ஆவது fuses by vowel sandhi (யாராவது), not by a linking consonant, so it has no fix this rule could offer and is not matched either. Only after a manner adverb, -ஐ, -க்கு or -ற்கு; never the spaced form அதைத் தான்.",
+ "provenance": "DISABLED v3 (2026-09-29 review): all six findings were தான் the reflexive PRONOUN, not the clitic, which the reviewer writes apart with doubling; the வல்லினம் rules now offer both forms (their தான் context). Panel-only, low confidence. v2 (2026-09-28 review): தான் and ஆவது are written fused, and கூட is written apart, so கூட is no longer matched. ஆவது fuses by vowel sandhi (யாராவது), not by a linking consonant, so it has no fix this rule could offer and is not matched either. Only after a manner adverb, -ஐ, -க்கு or -ற்கு; never the spaced form அதைத் தான்.",
  "examples": {
-  "incorrect": [
-   {
-    "text": "என்றும், துதி செய்வற்கு தான் செய்து வைத்த",
-    "span": "செய்வற்கு தான்",
-    "fix": "செய்வற்குத்தான்",
-    "origin": "1CH 23:5 (also in the review reports)"
-   },
-   {
-    "text": "அதிகமாகவும் சேர்த்து, அதைத் தான் குற்றநிவாரணபலியை செலுத்தும்",
-    "span": "அதைத் தான்",
-    "fix": "அதைத்தான்",
-    "origin": "LEV 6:5 (also in the review reports)"
-   },
-   {
-    "text": "அப்படியே யெகோவாவுடைய பெட்டிக்குத் தான் ஆயத்தப்படுத்தின அதின்",
-    "span": "பெட்டிக்குத் தான்",
-    "fix": "பெட்டிக்குத்தான்",
-    "origin": "1CH 15:3"
-   },
-   {
-    "text": "பெற்றபடியினால், யாக்கோபின் தேவனுக்கு தான் ஒரு உறைவிடத்தைக்",
-    "span": "தேவனுக்கு தான்",
-    "fix": "தேவனுக்குத்தான்",
-    "origin": "ACT 7:46"
-   },
-   {
-    "text": "போட்டு, நகரத்திற்கு நடக்கப்போகிறதைத் தான் பார்க்கும் வரைக்கும்",
-    "span": "நடக்கப்போகிறதைத் தான்",
-    "fix": "நடக்கப்போகிறதைத்தான்",
-    "origin": "JON 4:5"
-   },
-   {
-    "text": "வீரர்களோடு வருகிற அவனைத் தான் பத்தாயிரம் போர்",
-    "span": "அவனைத் தான்",
-    "fix": "அவனைத்தான்",
-    "origin": "LUK 14:31"
-   },
-   {
-    "text": "ஆளாதபடி, என்னைத் தான் தள்ளினார்கள்.",
-    "span": "என்னைத் தான்",
-    "fix": "என்னைத்தான்",
-    "origin": "derived from 1SA 8:7 (fused தான் written apart)"
-   },
-   {
-    "text": "சேனாதிபதியாகிய உமக்குத் தான் என்றான்.",
-    "span": "உமக்குத் தான்",
-    "fix": "உமக்குத்தான்",
-    "origin": "derived from 2KI 9:5 (fused தான் written apart)"
-   },
-   {
-    "text": "இருக்கும்?\nஅவருக்குத் தான் ஆலோசனையும்",
-    "span": "அவருக்குத் தான்",
-    "fix": "அவருக்குத்தான்",
-    "origin": "derived from JOB 12:13 (fused தான் written apart)"
-   },
-   {
-    "text": "விவேகியாயிருந்து,\nதனக்குத் தான் பயனுள்ளதாக",
-    "span": "தனக்குத் தான்",
-    "fix": "தனக்குத்தான்",
-    "origin": "derived from JOB 22:2 (fused தான் written apart)"
-   },
-   {
-    "text": "என்றும், துதி செய்வற்கு தான் செய்து வைத்த",
-    "span": "செய்வற்கு தான்",
-    "fix": null,
-    "origin": "1CH 23:5 (human review 2026-09-29)"
-   },
-   {
-    "text": "பெற்றபடியினால், யாக்கோபின் தேவனுக்கு தான் ஒரு உறைவிடத்தைக்",
-    "span": "தேவனுக்கு தான்",
-    "fix": null,
-    "origin": "ACT 7:46 (human review 2026-09-29)"
-   }
-  ],
-  "correct": [
-   {
-    "text": "ஆளாதபடி, என்னைத்தான் தள்ளினார்கள்.",
-    "origin": "1SA 8:7 (fused clitic)"
-   },
-   {
-    "text": "சேனாதிபதியாகிய உமக்குத்தான் என்றான்.",
-    "origin": "2KI 9:5 (fused clitic)"
-   },
-   {
-    "text": "இருக்கும்?\nஅவருக்குத்தான் ஆலோசனையும்",
-    "origin": "JOB 12:13 (fused clitic)"
-   },
-   {
-    "text": "விவேகியாயிருந்து,\nதனக்குத்தான் பயனுள்ளதாக",
-    "origin": "JOB 22:2 (fused clitic)"
-   },
-   {
-    "text": "சுமந்திருந்தது,\nஇன்றைக்குத்தான் என்னுடைய",
-    "origin": "PRO 7:14 (fused clitic)"
-   },
-   {
-    "text": "கேட்டு: நோயாளிகளுக்குத்தான் வைத்தியன்",
-    "origin": "MAT 9:12 (fused clitic)"
-   },
-   {
-    "text": "தீர்க்கதரிசிகளுக்கும் அப்படித்தான் செய்தார்கள்.",
-    "origin": "LUK 6:23 (fused clitic)"
-   },
-   {
-    "text": "குறித்தும் அப்படித்தான் பேசினார்கள்.",
-    "origin": "LUK 6:26 (fused clitic)"
-   },
-   {
-    "text": "நிலத்தை இவ்வளவிற்குத்தான் விற்றீர்களா",
-    "origin": "ACT 5:8 (fused clitic)"
-   },
-   {
-    "text": "ஆம், இவ்வளவிற்குத்தான் என்றாள்.",
-    "origin": "ACT 5:8 (fused clitic)"
-   },
-   {
-    "text": "முதலாவது உங்களுக்குத்தான் தேவ",
-    "origin": "ACT 13:46 (fused clitic)"
-   }
-  ]
+  "incorrect": [],
+  "correct": []
  }
 }

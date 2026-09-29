@@ -118,20 +118,13 @@
    "rounds": {}
   },
   "ta-irv/sandhi.clitic.fused": {
-   "labelled": 2,
-   "tp": 2,
+   "labelled": 0,
+   "tp": 0,
    "fp": 0,
    "house": 0,
-   "precision": 1.0,
+   "precision": null,
    "inline": false,
-   "rounds": {
-    "2026-09-29": {
-     "labelled": 2,
-     "tp": 2,
-     "fp": 0,
-     "precision": 1.0
-    }
-   }
+   "rounds": {}
   },
   "ta-irv/sandhi.compound.direction": {
    "labelled": 25,
@@ -172,8 +165,8 @@
    }
   },
   "ta-irv/sandhi.vallinam.dative": {
-   "labelled": 85,
-   "tp": 85,
+   "labelled": 87,
+   "tp": 87,
    "fp": 0,
    "house": 0,
    "precision": 1.0,
@@ -186,8 +179,8 @@
      "precision": 1.0
     },
     "2026-09-29": {
-     "labelled": 39,
-     "tp": 39,
+     "labelled": 41,
+     "tp": 41,
      "fp": 0,
      "precision": 1.0
     }

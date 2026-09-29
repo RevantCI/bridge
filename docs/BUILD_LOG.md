@@ -13150,3 +13150,29 @@ figure.
 - **Human gate.** It passes. Known-misspelling is now 47/47, and the 4 rejected pairs
   are no longer produced.
 - **Tests.** The four round-2 misspelling negatives pass. Service tests: 3468 passed.
+
+### Step 4 — தான்: the clitic rule measured the wrong thing
+
+- **Disabled.** `sandhi.clitic.fused` is `enabled: false` (v3). All six of its round-2
+  findings were the reflexive pronoun, which the reviewer writes separately with
+  doubling.
+- **No longer abstained.** The வல்லினம் rules drop தான் and ஆவது from the clitic
+  abstain. ஆவது is vowel-initial, so no rule fires on it anyway.
+  - The rules get a new pack field, `contexts` (loader: `Context`,
+    `Candidate.confidence`/`alternatives`; `scan_text` adds the alternatives and the
+    context's confidence).
+  - After a case form, `X தான்` is flagged with two ranked suggestions,
+    `Xத் தான்` ("pronoun: separate, doubled") and then `Xத்தான்` ("clitic: fused"),
+    at medium confidence, with the reviewer's Tamil message.
+  - Both correct forms are left alone.
+  - Rule versions: the வல்லினம் rules v3, direction v2, wrong-consonant v3.
+- **Human gate.** It passes.
+  - Dative is now 87/87: the two round-2 தான் labels, ACT 7:46 and 1CH 23:5, are
+    credited to it, and its rank-1 fix is the reviewer's form.
+  - The fixture for 1CH 23:5 stays a strict xfail of its own (`COMBINED_FIX`). The
+    reviewer's `செய்வதற்குத் தான்` combines two findings: the typo and the link.
+- **Tests.**
+  - The clitic tests are replaced by
+    `test_bare_tan_offers_the_pronoun_first_and_the_clitic_second`.
+  - A reviewed finding whose rule is now disabled may be found by any sandhi rule.
+  - Service and jobs: 3499 passed.

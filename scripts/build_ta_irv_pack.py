@@ -57,8 +57,22 @@ MANNER = ["அப்படி", "இப்படி", "எப்படி"]
 DIRECTIONS = ["கிழக்கு", "மேற்கு", "வடக்கு", "தெற்கு"]
 # After a trigger these begin a clitic or a quotative, never a doubling site.
 # The 2026-09-28 reviewer: கூட, மட்டும், போல, என்று, என, எனும் are written
-# apart without doubling (house style); தான் and ஆவது are written fused.
-CLITICS_AND_QUOTATIVES = ["தான்", "கூட", "மட்டும்", "ஆவது", "போல", "என்று", "என", "எனும்"]
+# apart without doubling (house style). தான் and ஆவது are not here any more
+# (2026-09-29): see TAN below. ஆவது starts with a vowel, so no வல்லினம் rule
+# fires on it.
+CLITICS_AND_QUOTATIVES = ["கூட", "மட்டும்", "போல", "என்று", "என", "எனும்"]
+# After a case form, a bare "X தான்" is always a defect, and which fix depends
+# on syntax the engine cannot see. The 2026-09-29 reviewer: all six sampled were
+# the reflexive PRONOUN தான் (David, Jonah, the offerer), written apart WITH
+# doubling (பெட்டிக்குத் தான், தேவனுக்குத் தான், அதைத் தான்); round 1 says the
+# CLITIC தான் is written fused (அதைத்தான்). So both are offered, pronoun first.
+TAN = {"next": {"lexical": ["தான்"]}, "confidence": "medium",
+       "message": {"en": 'தான்: பிரதிப்பெயர் என்றால் பிரித்து ஒற்றுடன்; ஒட்டுச்சொல் என்றால் ஒட்டி. '
+                         '"{fix}" if தான் is the pronoun (he, himself); "{alternative}" if it is the '
+                         'clitic (only, indeed).'},
+       "rationale": "pronoun: separate, doubled",
+       "alternatives": [{"fix": "fuse-link", "rationale": "clitic: fused"}],
+       "origin": "2026-09-29 review: 6 of 6 sampled were the pronoun, wanting the separate doubled form."}
 HOUSE_NAMES_IN_KKU = ["ஈசாக்கு", "ஏனோக்கு"]  # IRV_Pass3_Handoff.md §5: nominatives, not datives
 # Compound-final nouns: a word ending in one is that noun, never a case form
 # (ஒருமுறை, நல்வினை). Only elements that end no real accusative in the corpus:
@@ -193,11 +207,11 @@ def definitions(acc_roots, dat_roots, reviewed: dict[str, set[str]]) -> list[dic
         {"next": {"lexical": CLITICS_AND_QUOTATIVES},
          "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 "
                    "reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house "
-                   "style); தான்/ஆவது are written fused (sandhi.clitic.fused for தான்)."},
+                   "style). தான் is not abstained: see the rule's தான் context (2026-09-29)."},
         DEVA,
     ]
 
-    def missing(rule_id, title_ta, title_en, prev, provenance, confidence="medium", version=2):
+    def missing(rule_id, title_ta, title_en, prev, provenance, confidence="medium", version=3):
         return {
             "id": rule_id, "version": version, "legacyId": "tamil.vallinam-missing",
             "category": "sandhi", "severity": "medium", "confidence": confidence, "inline": False,
@@ -206,7 +220,9 @@ def definitions(acc_roots, dat_roots, reviewed: dict[str, set[str]]) -> list[dic
             "match": {"type": "token-context", "prev": prev, "gap": "whitespace",
                       "next": {"initial": HARD}, "link": "none"},
             "abstain": list(common_abstain), "fix": {"type": "insert-link"},
-            "provenance": provenance,
+            "contexts": [TAN],
+            "provenance": provenance + " v3 (2026-09-29): தான் is no longer abstained; X தான் is offered as the "
+                                       "pronoun (Xத் தான்) and the clitic (Xத்தான்), medium confidence.",
         }
 
     review = ("2026-09-28 human review (GEN/PSA/JHN): proper nouns do not block doubling (17 of 25 needed "
@@ -215,7 +231,7 @@ def definitions(acc_roots, dat_roots, reviewed: dict[str, set[str]]) -> list[dic
                         {"lexical": DIRECTIONS},
                         "New (2026-09-28 review): the reviewer wants கிழக்குக் காற்று, கிழக்குத் தேசம் -- compound "
                         "doubling after a direction word, which is not a dative (the dative rule excludes these "
-                        "four). Panel-only and medium confidence until benchmarked.", version=1)
+                        "four). Panel-only and medium confidence until benchmarked.", version=2)
     direction.pop("legacyId")
     return [
         missing("sandhi.vallinam.demonstrative", "வல்லினம் மிகுதல் — சுட்டு", "Vallinam doubling after a demonstrative",
@@ -248,7 +264,7 @@ def definitions(acc_roots, dat_roots, reviewed: dict[str, set[str]]) -> list[dic
                 f"(5) the {len(reviewed['datCaseForms'])} words the reviewer confirmed are real datives "
                 f"(சபைக்கு, யோபுக்கு …). v2 drops the corpus bare-majority list. {review}"),
         {
-            "id": "sandhi.vallinam.wrong-consonant", "version": 2,
+            "id": "sandhi.vallinam.wrong-consonant", "version": 3,
             "category": "sandhi", "severity": "medium", "confidence": "medium", "inline": False,
             "title": {"ta": "வல்லினம் — தவறான மெய்", "en": "Wrong linking consonant"},
             "message": {"en": 'The linking "{link}்" does not match the following "{initial}...": '
@@ -265,7 +281,7 @@ def definitions(acc_roots, dat_roots, reviewed: dict[str, set[str]]) -> list[dic
         },
         direction,
         {
-            "id": "sandhi.clitic.fused", "version": 2,
+            "id": "sandhi.clitic.fused", "version": 3, "enabled": False,
             "category": "word-joining", "severity": "low", "confidence": "low", "inline": False,
             "title": {"ta": "இடைச்சொல் — சேர்த்து எழுதுதல்", "en": "Clitic written apart"},
             "message": {"en": '"{word} {next}" is normally written as one word, "{fix}". Verify before editing.'},
@@ -274,7 +290,10 @@ def definitions(acc_roots, dat_roots, reviewed: dict[str, set[str]]) -> list[dic
                       "prev": {"regex": clitic_base, "notLexical": sorted(set(acc_words) | set(dat_words))},
                       "next": {"lexical": ["தான்"]}},
             "abstain": [], "fix": {"type": "fuse-link"},
-            "provenance": "Panel-only, low confidence. v2 (2026-09-28 review): தான் and ஆவது are written "
+            "provenance": "DISABLED v3 (2026-09-29 review): all six findings were தான் the reflexive PRONOUN, "
+                          "not the clitic, which the reviewer writes apart with doubling; the வல்லினம் rules "
+                          "now offer both forms (their தான் context). "
+                          "Panel-only, low confidence. v2 (2026-09-28 review): தான் and ஆவது are written "
                           "fused, and கூட is written apart, so கூட is no longer matched. ஆவது fuses by "
                           "vowel sandhi (யாராவது), not by a linking consonant, so it has no fix this rule "
                           "could offer and is not matched either. Only after a manner adverb, -ஐ, -க்கு or "
@@ -629,8 +648,9 @@ def main() -> int:
         rule_examples = examples[rule["id"]]
         if rule["match"].get("on") == "raw" and rule.get("enabled", True):
             rule_examples = examples[rule["id"]] = raw_note_examples(pack, rule["id"])
-        top_up(rule_examples, rule["id"], verses)
-        fill_spans(pack, rule["id"], rule_examples)
+        if rule.get("enabled", True):  # a disabled rule runs no examples, so gets none
+            top_up(rule_examples, rule["id"], verses)
+            fill_spans(pack, rule["id"], rule_examples)
         for kind in ("incorrect", "correct"):
             rule_examples[kind] += reviewer[rule["id"]][kind] if rule["id"] in reviewer else []
         rule["examples"] = rule_examples

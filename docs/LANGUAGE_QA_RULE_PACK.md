@@ -164,6 +164,28 @@ word** instead, with the fix confined to that word (`யெகோவாவுக
 `யெகோவாவுக்குச்`). Only when the first word is itself split by markup is it dropped
 and counted as a limitation.
 
+### Contexts
+
+```json
+"contexts": [
+  { "next": { "lexical": ["தான்"] }, "confidence": "medium",
+    "message": { "en": "தான்: பிரதிப்பெயர் என்றால் பிரித்து ஒற்றுடன்; … \"{fix}\" … \"{alternative}\" …" },
+    "rationale": "pronoun: separate, doubled",
+    "alternatives": [ { "fix": "fuse-link", "rationale": "clitic: fused" } ] }
+]
+```
+
+A token-context rule may say that, before a given next word, its finding reads
+differently:
+- **Confidence and wording.** It carries the context's own confidence, message and
+  rationale.
+- **Ranked alternatives.** Further alternatives follow the rule's own fix. Each
+  alternative is a fix type, and `{alternative}` names the first one in the message.
+- **Alternatives need the whole pair.** A finding confined to its first word, a pair
+  across a poetry line, carries no alternatives.
+
+`ta-irv` uses this for தான் after a case form (DECISIONS.md, 2026-09-29).
+
 ### Fixes
 
 | `fix.type` | Match type | Replacement |

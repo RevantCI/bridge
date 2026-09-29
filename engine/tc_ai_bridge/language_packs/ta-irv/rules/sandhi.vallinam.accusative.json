@@ -1,6 +1,6 @@
 {
  "id": "sandhi.vallinam.accusative",
- "version": 2,
+ "version": 3,
  "legacyId": "tamil.vallinam-missing",
  "category": "sandhi",
  "severity": "medium",
@@ -247,17 +247,15 @@
   {
    "next": {
     "lexical": [
-     "தான்",
      "கூட",
      "மட்டும்",
-     "ஆவது",
      "போல",
      "என்று",
      "என",
      "எனும்"
     ]
    },
-   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style); தான்/ஆவது are written fused (sandhi.clitic.fused for தான்)."
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style). தான் is not abstained: see the rule's தான் context (2026-09-29)."
   },
   {
    "next": {
@@ -274,7 +272,28 @@
  "fix": {
   "type": "insert-link"
  },
- "provenance": "Generalises B4 (five pronouns) to the -ஐ ending. notLexical (204 words): (1) root nouns, 155 words whose -ஐ is part of the noun, shown by their own accusative in -யை (படை -> படையை, மலை -> மலையை, கை -> கையை); a real accusative never takes a second (no அதையை); (2) the 2026-09-28 reviewer's root nouns and house forms (203); minus (3) the 15 words the reviewer confirmed are real accusatives that need doubling (அசுத்தமானவைகளை, யெகோவாவை, ஜீவனை …). notSuffixLexical: compound-final nouns (அநேகமுறை, தீவினை). v2 drops the corpus bare-majority list: a corpus writing a case form bare is the defect. 2026-09-28 human review (GEN/PSA/JHN): proper nouns do not block doubling (17 of 25 needed it), so the proper-noun abstain is gone; தேவ- forms do (house style).",
+ "contexts": [
+  {
+   "next": {
+    "lexical": [
+     "தான்"
+    ]
+   },
+   "confidence": "medium",
+   "message": {
+    "en": "தான்: பிரதிப்பெயர் என்றால் பிரித்து ஒற்றுடன்; ஒட்டுச்சொல் என்றால் ஒட்டி. \"{fix}\" if தான் is the pronoun (he, himself); \"{alternative}\" if it is the clitic (only, indeed)."
+   },
+   "rationale": "pronoun: separate, doubled",
+   "alternatives": [
+    {
+     "fix": "fuse-link",
+     "rationale": "clitic: fused"
+    }
+   ],
+   "origin": "2026-09-29 review: 6 of 6 sampled were the pronoun, wanting the separate doubled form."
+  }
+ ],
+ "provenance": "Generalises B4 (five pronouns) to the -ஐ ending. notLexical (204 words): (1) root nouns, 155 words whose -ஐ is part of the noun, shown by their own accusative in -யை (படை -> படையை, மலை -> மலையை, கை -> கையை); a real accusative never takes a second (no அதையை); (2) the 2026-09-28 reviewer's root nouns and house forms (203); minus (3) the 15 words the reviewer confirmed are real accusatives that need doubling (அசுத்தமானவைகளை, யெகோவாவை, ஜீவனை …). notSuffixLexical: compound-final nouns (அநேகமுறை, தீவினை). v2 drops the corpus bare-majority list: a corpus writing a case form bare is the defect. 2026-09-28 human review (GEN/PSA/JHN): proper nouns do not block doubling (17 of 25 needed it), so the proper-noun abstain is gone; தேவ- forms do (house style). v3 (2026-09-29): தான் is no longer abstained; X தான் is offered as the pronoun (Xத் தான்) and the clitic (Xத்தான்), medium confidence.",
  "examples": {
   "incorrect": [
    {

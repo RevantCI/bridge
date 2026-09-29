@@ -1,6 +1,6 @@
 {
  "id": "sandhi.compound.direction",
- "version": 1,
+ "version": 2,
  "category": "sandhi",
  "severity": "medium",
  "confidence": "medium",
@@ -38,17 +38,15 @@
   {
    "next": {
     "lexical": [
-     "தான்",
      "கூட",
      "மட்டும்",
-     "ஆவது",
      "போல",
      "என்று",
      "என",
      "எனும்"
     ]
    },
-   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style); தான்/ஆவது are written fused (sandhi.clitic.fused for தான்)."
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style). தான் is not abstained: see the rule's தான் context (2026-09-29)."
   },
   {
    "next": {
@@ -65,7 +63,28 @@
  "fix": {
   "type": "insert-link"
  },
- "provenance": "New (2026-09-28 review): the reviewer wants கிழக்குக் காற்று, கிழக்குத் தேசம் -- compound doubling after a direction word, which is not a dative (the dative rule excludes these four). Panel-only and medium confidence until benchmarked.",
+ "contexts": [
+  {
+   "next": {
+    "lexical": [
+     "தான்"
+    ]
+   },
+   "confidence": "medium",
+   "message": {
+    "en": "தான்: பிரதிப்பெயர் என்றால் பிரித்து ஒற்றுடன்; ஒட்டுச்சொல் என்றால் ஒட்டி. \"{fix}\" if தான் is the pronoun (he, himself); \"{alternative}\" if it is the clitic (only, indeed)."
+   },
+   "rationale": "pronoun: separate, doubled",
+   "alternatives": [
+    {
+     "fix": "fuse-link",
+     "rationale": "clitic: fused"
+    }
+   ],
+   "origin": "2026-09-29 review: 6 of 6 sampled were the pronoun, wanting the separate doubled form."
+  }
+ ],
+ "provenance": "New (2026-09-28 review): the reviewer wants கிழக்குக் காற்று, கிழக்குத் தேசம் -- compound doubling after a direction word, which is not a dative (the dative rule excludes these four). Panel-only and medium confidence until benchmarked. v3 (2026-09-29): தான் is no longer abstained; X தான் is offered as the pronoun (Xத் தான்) and the clitic (Xத்தான்), medium confidence.",
  "examples": {
   "incorrect": [
    {

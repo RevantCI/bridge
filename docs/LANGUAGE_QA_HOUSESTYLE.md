@@ -70,7 +70,8 @@ They are not per-word entries, and a project does not need to record them:
 | House style | Where it lives |
 |---|---|
 | **No doubling before தேவ- forms**: தேவன், தேவனுடைய, தேவனிடத்தில், தேவரீர், தேவசாயல் … (11 of 13 "case form, but no doubling here" verdicts). தேவை "need" is not a தேவ- form and is still checked. | abstain `{"next": {"prefix": ["தேவ"], "notPrefix": ["தேவை"]}}` |
-| **Clitics:** கூட, மட்டும், போல, என்று, என, எனும் are written apart, without doubling. தான் and ஆவது are written fused (அதைத்தான், யாராவது). | the clitic abstain; `sandhi.clitic.fused` suggests the fused form for தான் (ஆவது fuses by vowel sandhi, which no linking-consonant fix can express) |
+| **Clitics:** கூட, மட்டும், போல, என்று, என, எனும் are written apart, without doubling. The clitic தான் and ஆவது are written fused (அதைத்தான், யாராவது). | the clitic abstain |
+| **தான் (2026-09-29):** the reflexive *pronoun* தான் is written apart with doubling (தேவனுக்குத் தான்); the *clitic* is fused. | not abstained: a bare `X தான்` is flagged with both, the pronoun first (`contexts` in the வல்லினம் rules); `sandhi.clitic.fused` is disabled |
 
 A project that disagrees narrows further with an override or an entry. It
 cannot widen, so it cannot turn these off (DECISIONS.md, overrides only narrow).

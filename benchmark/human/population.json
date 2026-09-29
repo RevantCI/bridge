@@ -761,61 +761,8 @@
     }
    ]
   },
-  "ta-irv/sandhi.clitic.fused": {
-   "definition": "69e61886cbc27c1c3b89456db7867af056a9db43",
-   "findings": [
-    {
-     "book": "1ch",
-     "chapter": "15",
-     "verse": "3",
-     "start": 21,
-     "end": 38,
-     "text": "பெட்டிக்குத் தான்"
-    },
-    {
-     "book": "1ch",
-     "chapter": "23",
-     "verse": "5",
-     "start": 68,
-     "end": 82,
-     "text": "செய்வற்கு தான்"
-    },
-    {
-     "book": "act",
-     "chapter": "7",
-     "verse": "46",
-     "start": 50,
-     "end": 64,
-     "text": "தேவனுக்கு தான்"
-    },
-    {
-     "book": "jon",
-     "chapter": "4",
-     "verse": "5",
-     "start": 116,
-     "end": 137,
-     "text": "நடக்கப்போகிறதைத் தான்"
-    },
-    {
-     "book": "lev",
-     "chapter": "6",
-     "verse": "5",
-     "start": 157,
-     "end": 167,
-     "text": "அதைத் தான்"
-    },
-    {
-     "book": "luk",
-     "chapter": "14",
-     "verse": "31",
-     "start": 107,
-     "end": 118,
-     "text": "அவனைத் தான்"
-    }
-   ]
-  },
   "ta-irv/sandhi.compound.direction": {
-   "definition": "de0cec0cf94bb28bbd7c0b0a2fa0d514ef740de2",
+   "definition": "2bc68971792e45528586b1eebc3d1c97742efc7f",
    "findings": [
     {
      "book": "1sa",
@@ -1556,7 +1503,7 @@
    ]
   },
   "ta-irv/sandhi.vallinam.manner-adverb": {
-   "definition": "e60f0fa82f46ded352dc61ab3959d522ad410d99",
+   "definition": "6e6064766de8f6b042ac9e12065fb2dcace80e17",
    "findings": [
     {
      "book": "1ch",
@@ -1737,7 +1684,7 @@
    ]
   },
   "ta-irv/sandhi.vallinam.wrong-consonant": {
-   "definition": "eb00022ecf0a7f39ecfa855a6d53dd9cfc285598",
+   "definition": "8c5a54b703f3e95d37dfb4fed87b93c665d76fd9",
    "findings": [
     {
      "book": "luk",

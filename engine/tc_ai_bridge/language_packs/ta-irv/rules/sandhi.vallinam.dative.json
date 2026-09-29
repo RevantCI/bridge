@@ -1,6 +1,6 @@
 {
  "id": "sandhi.vallinam.dative",
- "version": 2,
+ "version": 3,
  "legacyId": "tamil.vallinam-missing",
  "category": "sandhi",
  "severity": "medium",
@@ -57,17 +57,15 @@
   {
    "next": {
     "lexical": [
-     "தான்",
      "கூட",
      "மட்டும்",
-     "ஆவது",
      "போல",
      "என்று",
      "என",
      "எனும்"
     ]
    },
-   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style); தான்/ஆவது are written fused (sandhi.clitic.fused for தான்)."
+   "origin": "Clitic or quotative after the trigger: never the spaced doubled form. The 2026-09-28 reviewer: கூட/மட்டும்/போல/என்று/என/எனும் are written apart without doubling (house style). தான் is not abstained: see the rule's தான் context (2026-09-29)."
   },
   {
    "next": {
@@ -84,7 +82,28 @@
  "fix": {
   "type": "insert-link"
  },
- "provenance": "Generalises B3 (three datives) to the -க்கு ending, and in v2 to -ற்கு (the reviewer confirmed 17 of 17 sampled -ற்கு datives need doubling: அதற்குச் சித்னா). notLexical: (1) root nouns and names in -க்கு / -ற்கு, 18 words shown by a locative in -க்கில் / -ற்கில் or a dative -க்குக்கு (கிழக்கு -> கிழக்கில், விளக்கு, வழக்கு); a real dative has neither (no எனக்கில்); (2) the reviewer's root nouns; (3) the names IRV_Pass3_Handoff.md §5 lists as nominatives; (4) the four directions, which sandhi.compound.direction covers; minus (5) the 7 words the reviewer confirmed are real datives (சபைக்கு, யோபுக்கு …). v2 drops the corpus bare-majority list. 2026-09-28 human review (GEN/PSA/JHN): proper nouns do not block doubling (17 of 25 needed it), so the proper-noun abstain is gone; தேவ- forms do (house style).",
+ "contexts": [
+  {
+   "next": {
+    "lexical": [
+     "தான்"
+    ]
+   },
+   "confidence": "medium",
+   "message": {
+    "en": "தான்: பிரதிப்பெயர் என்றால் பிரித்து ஒற்றுடன்; ஒட்டுச்சொல் என்றால் ஒட்டி. \"{fix}\" if தான் is the pronoun (he, himself); \"{alternative}\" if it is the clitic (only, indeed)."
+   },
+   "rationale": "pronoun: separate, doubled",
+   "alternatives": [
+    {
+     "fix": "fuse-link",
+     "rationale": "clitic: fused"
+    }
+   ],
+   "origin": "2026-09-29 review: 6 of 6 sampled were the pronoun, wanting the separate doubled form."
+  }
+ ],
+ "provenance": "Generalises B3 (three datives) to the -க்கு ending, and in v2 to -ற்கு (the reviewer confirmed 17 of 17 sampled -ற்கு datives need doubling: அதற்குச் சித்னா). notLexical: (1) root nouns and names in -க்கு / -ற்கு, 18 words shown by a locative in -க்கில் / -ற்கில் or a dative -க்குக்கு (கிழக்கு -> கிழக்கில், விளக்கு, வழக்கு); a real dative has neither (no எனக்கில்); (2) the reviewer's root nouns; (3) the names IRV_Pass3_Handoff.md §5 lists as nominatives; (4) the four directions, which sandhi.compound.direction covers; minus (5) the 7 words the reviewer confirmed are real datives (சபைக்கு, யோபுக்கு …). v2 drops the corpus bare-majority list. 2026-09-28 human review (GEN/PSA/JHN): proper nouns do not block doubling (17 of 25 needed it), so the proper-noun abstain is gone; தேவ- forms do (house style). v3 (2026-09-29): தான் is no longer abstained; X தான் is offered as the pronoun (Xத் தான்) and the clitic (Xத்தான்), medium confidence.",
  "examples": {
   "incorrect": [
    {
@@ -94,10 +113,10 @@
     "origin": "1CH 10:11 (also in the review reports)"
    },
    {
-    "text": "உசியாவுக்கு போர் வீரர்களின் படையும்",
-    "span": "உசியாவுக்கு போர்",
-    "fix": "உசியாவுக்குப் போர்",
-    "origin": "2CH 26:11 (also in the review reports)"
+    "text": "தகப்பனாகிய யோய்தா, தனக்கு செய்த தயவை ராஜாவாகிய",
+    "span": "தனக்கு செய்த",
+    "fix": "தனக்குச் செய்த",
+    "origin": "2CH 24:22 (also in the review reports)"
    },
    {
     "text": "இன்று நான் உங்களுக்கு கொடுக்கிற வார்த்தைகள் யாவையும்",
@@ -106,10 +125,10 @@
     "origin": "DEU 28:13 (also in the review reports)"
    },
    {
-    "text": "மகாப்பிரபுக்களுக்கும் முன்பாக எனக்கு தயவு கிடைக்கச் செய்த",
-    "span": "எனக்கு தயவு",
-    "fix": "எனக்குத் தயவு",
-    "origin": "EZR 7:27 (also in the review reports)"
+    "text": "பரலோகத்தின் தேவனுக்கு சர்வாங்க தகனபலிகளை செலுத்தத்",
+    "span": "தேவனுக்கு சர்வாங்க",
+    "fix": "தேவனுக்குச் சர்வாங்க",
+    "origin": "EZR 6:9 (also in the review reports)"
    },
    {
     "text": "அவளிடத்திற்கு பெலிஸ்தர்களின் அதிபதிகள் போய்:",
@@ -124,22 +143,22 @@
     "origin": "NUM 30:6 (also in the review reports)"
    },
    {
-    "text": "பண்டிகையிலும், கூடாரப்பண்டிகையிலும், யெகோவாவுக்கு சர்வாங்க தகனபலிகளைச் செலுத்தினான்.",
-    "span": "யெகோவாவுக்கு சர்வாங்க",
-    "fix": "யெகோவாவுக்குச் சர்வாங்க",
-    "origin": "2CH 8:13 (also in the review reports)"
+    "text": "சகோதரர்களே, யெகோவா நமக்கு கொடுத்ததை நீங்கள் இப்படிச்",
+    "span": "நமக்கு கொடுத்ததை",
+    "fix": "நமக்குக் கொடுத்ததை",
+    "origin": "1SA 30:23 (also in the review reports)"
    },
    {
-    "text": "நீங்கள் சொந்தமாக்கிக்கொள்வதற்காக உங்களுக்கு கொடுக்கிற நாட்டிலே, நீங்கள்",
-    "span": "உங்களுக்கு கொடுக்கிற",
-    "fix": "உங்களுக்குக் கொடுக்கிற",
-    "origin": "DEU 12:1 (also in the review reports)"
+    "text": "அவைகளை உங்கள் பிள்ளைகளுக்கு போதித்து, நீங்கள் வீட்டில்",
+    "span": "பிள்ளைகளுக்கு போதித்து",
+    "fix": "பிள்ளைகளுக்குப் போதித்து",
+    "origin": "DEU 11:20 (also in the review reports)"
    },
    {
-    "text": "வேண்டும் என்றான்.\nஆசரிப்புக்கூடாரத்திற்கு கொடுக்கப்பட்ட காணிக்கைகள்.",
-    "span": "ஆசரிப்புக்கூடாரத்திற்கு கொடுக்கப்பட்ட",
-    "fix": "ஆசரிப்புக்கூடாரத்திற்குக் கொடுக்கப்பட்ட",
-    "origin": "EXO 35:19 (also in the review reports)"
+    "text": "எனக்கு செலுத்தும் பலியின் இரத்தத்தைப்",
+    "span": "எனக்கு செலுத்தும்",
+    "fix": "எனக்குச் செலுத்தும்",
+    "origin": "EXO 34:25 (also in the review reports)"
    },
    {
     "text": "மக்கள் யெகோவாவின் பார்வைக்கு தீமையானதைச் செய்து, பாகால்களைத்",
@@ -556,6 +575,18 @@
     "origin": "PSA 135:21 (human review 2026-09-28, missed)"
    },
    {
+    "text": "என்றும், துதி செய்வற்கு தான் செய்து வைத்த",
+    "span": "செய்வற்கு தான்",
+    "fix": null,
+    "origin": "1CH 23:5 (human review 2026-09-29)"
+   },
+   {
+    "text": "பெற்றபடியினால், யாக்கோபின் தேவனுக்கு தான் ஒரு உறைவிடத்தைக்",
+    "span": "தேவனுக்கு தான்",
+    "fix": "தேவனுக்குத் தான்",
+    "origin": "ACT 7:46 (human review 2026-09-29)"
+   },
+   {
     "text": "தலைவர்களும், ஆயிரம் பேர்களுக்கு தலைவர்களும், நூறு பேர்களுக்கு",
     "span": "பேர்களுக்கு தலைவர்களும்",
     "fix": "பேர்களுக்குத் தலைவர்களும்",
@@ -804,40 +835,40 @@
     "origin": "GEN 37:3 (correctly linked)"
    },
    {
-    "text": "அங்கே தனக்கு தேவன் காட்சியளித்ததால்,",
-    "origin": "GEN 35:7 (house form)"
+    "text": "இருந்த பட்டணத்தார்களுக்கு தேவனாலே பயங்கரம்",
+    "origin": "GEN 35:5 (house form)"
    },
    {
     "text": "அதின் சட்டத்திற்குச் சுற்றிலும் பொன்னினால்",
     "origin": "EXO 25:25 (correctly linked)"
    },
    {
-    "text": "சேர்த்துக்கொண்டு, உங்களுக்கு தேவனாக இருப்பேன்;",
-    "origin": "EXO 6:7 (house form)"
+    "text": "நீ அவனுக்கு தேவனாக இருப்பாய்.",
+    "origin": "EXO 4:16 (house form)"
    },
    {
     "text": "மக்களின் காவலுக்குப் பதிலாகப் பரிசுத்த",
     "origin": "NUM 3:38 (correctly linked)"
    },
    {
-    "text": "கொடுத்து, உங்களுக்கு தேவனாக இருப்பதற்கு,",
-    "origin": "LEV 25:38 (house form)"
+    "text": "நான் உங்களுக்கு தேவனாக இருப்பதற்காக,",
+    "origin": "LEV 22:33 (house form)"
    },
    {
     "text": "அவனே அவர்களுக்குப் பங்கிட்டுக்கொடுப்பான் என்றார்.",
     "origin": "DEU 3:28 (correctly linked)"
    },
    {
-    "text": "தாம் உனக்கு தேவனாயிருக்கவும்,",
-    "origin": "DEU 29:10 (house form)"
+    "text": "யெகோவா எனக்கு தேவனாயிருப்பார் என்றும்,",
+    "origin": "DEU 26:17 (house form)"
    },
    {
     "text": "தம்முடைய எதிரிகளுக்குப் பதில் கொடுத்து,",
     "origin": "DEU 32:43 (correctly linked)"
    },
    {
-    "text": "மனிதனாகிய செமாயாவுக்கு தேவனுடைய வார்த்தை",
-    "origin": "1KI 12:22 (house form)"
+    "text": "நியாயம் விசாரிப்பதற்கு தேவன் அருளின",
+    "origin": "1KI 3:28 (house form)"
    },
    {
     "text": "அடியேனுக்கு தேவரீர் காண்பித்த எல்லா",

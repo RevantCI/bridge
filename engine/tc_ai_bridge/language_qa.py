@@ -445,9 +445,14 @@ def scan_text(text: str, *, book: str, chapter: str, verse: str,
             # pair is not one piece of raw text. The first word is: flag it,
             # with the fix confined to it (the linking consonant it needs).
             end, replacement = candidate.first_word_end, candidate.first_word_fix
-        add(pack_rule.name, start, end, candidate.message, pack_rule.severity,
-            [suggestion(replacement, "rule", candidate.rationale)] if replacement else [],
+        ranked = [suggestion(replacement, "rule", candidate.rationale)] if replacement else []
+        if end == candidate.end:  # alternatives are whole-pair fixes; not for a first-word finding
+            ranked += [suggestion(text, "rule", why) for text, why in candidate.alternatives]
+        before = len(findings)
+        add(pack_rule.name, start, end, candidate.message, pack_rule.severity, ranked,
             pack_rule=pack_rule, raw_offsets=candidate.raw)
+        if candidate.confidence and len(findings) > before:
+            findings[-1]["confidence"] = candidate.confidence
 
     if tamil and pack is None:
         from .language_packs import default_pack  # loaded once, on first Tamil scan

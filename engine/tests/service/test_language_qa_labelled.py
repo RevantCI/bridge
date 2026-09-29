@@ -37,9 +37,7 @@ RULE_ALIASES = {"ta-irv/word-joining.orphan-syllable": "ta-irv/lexicon.known-spl
 # Round 2 (2026-09-29): the reviewer disagrees with the pack. Cleared by the
 # round-2 steps: roots (2), misspelling pairs (3), தான் (4), known splits (5).
 PENDING_PACK_CHANGES: set[tuple[str, str]] = {
-   
-    ("positive", "sandhi-241"),
-    ("positive", "sandhi-242"), ("positive", "word-joining-7"), ("positive", "word-joining-8"),
+    ("positive", "word-joining-7"), ("positive", "word-joining-8"),
     ("positive", "word-joining-9"), ("positive", "word-joining-11"), ("positive", "word-joining-12"),
     ("positive", "word-joining-13"), ("positive", "word-joining-14"), ("positive", "word-joining-15"),
     ("positive", "word-joining-16"), ("positive", "word-joining-17"),
@@ -53,6 +51,11 @@ RESIDUAL: set[tuple[str, str]] = {
     ("negative", "sandhi-81"), ("negative", "sandhi-83"),
 }
 
+# A reviewer's fix that combines two findings, which no single finding can
+# carry: 1CH 23:5 "செய்வற்கு தான்" -> "செய்வதற்குத் தான்" is typo.suffix.dropped-tha
+# (செய்வதற்கு) plus the dative's தான் (…குத் தான்). Both findings are raised.
+COMBINED_FIX: set[tuple[str, str]] = {("positive", "sandhi-241")}
+
 
 def examples(test: str = ""):
     params = []
@@ -63,7 +66,9 @@ def examples(test: str = ""):
             marks = [pytest.mark.xfail(strict=True, reason="the pack disagrees with the 2026-09-28 reviewer")] \
                 if (test, ident) in PENDING_PACK_CHANGES else \
                 [pytest.mark.xfail(strict=True, reason="residual false alarm before a name")] \
-                if (test, ident) in RESIDUAL else []
+                if (test, ident) in RESIDUAL else \
+                [pytest.mark.xfail(strict=True, reason="the reviewer's fix combines two findings")] \
+                if (test, ident) in COMBINED_FIX else []
             params.append(pytest.param(bucket, json.loads(line), id=ident, marks=marks))
     return params
 
@@ -125,6 +130,16 @@ def findings_of(example, rule_id):
     return [f for f in findings if f["ruleId"] == rule_id]
 
 
+def rule_disabled(rule_id):
+    """A reviewed finding whose rule the pack has since disabled, because
+    another rule now finds it (sandhi.clitic.fused -> the வல்லினம் rules' தான்
+    context, 2026-09-29): any sandhi rule may find it."""
+    from tc_ai_bridge.language_packs import default_pack
+    pack = default_pack()
+    rule = pack.by_id(rule_id.split("/", 1)[1]) if rule_id.startswith(f"{pack.name}/") else None
+    return rule is not None and not rule.enabled
+
+
 def overlaps(a, b):
     a, b = squeezed(a), squeezed(b)
     return a in b or b in a
@@ -162,7 +177,7 @@ def test_a_positive_credited_to_a_rule_is_still_found_by_it(bucket, example):
             continue  # no current rule covers it; Phase 3+ will
         if expected["ruleId"].endswith("/tamil.wordlist-variant"):
             continue  # a book-wide audit, not a per-verse rule; the benchmark measures it
-        if human(example) and "missed)" in example["origin"]:
+        if human(example) and ("missed)" in example["origin"] or rule_disabled(expected["ruleId"])):
             # A context the pack skipped: the reviewer said "doubling needed",
             # and the converter guessed the rule. Any sandhi rule may find it
             # (கிழக்கு காற்று is the direction rule's, not the dative's).
