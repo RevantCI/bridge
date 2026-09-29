@@ -167,6 +167,15 @@ A raw Scripture import becomes a translationCore-compatible book project:
 <project>/manifest.json
 <project>/<book>.usfm                          original source, preserved verbatim
 <project>/<book>/<chapter>.json                 verse-keyed target Scripture
+<project>/<book>/<chapter>.headings.json        section headings (\s, \ms, \r ...), keyed by the
+                                                verse each INTRODUCES, not the one it trailed (#180).
+                                                Written only when a chapter has any. Kept out of the
+                                                verse map because every reader of that file treats
+                                                each key as a verse number, and out of the verse TEXT
+                                                because a heading is not a translation of any source
+                                                word — its words must never become alignable targets.
+                                                \d is deliberately NOT split out: a Psalm
+                                                superscription is translated content.
 <project>/.apps/translationCore/alignmentData/<book>/<chapter>.json
 <project>/.apps/translationCore/index/{translationNotes,translationWords}/<book>/
 <project>/.bridge/import.json                   SHA-256 provenance + per-tool capability status

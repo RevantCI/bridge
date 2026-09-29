@@ -1,5 +1,5 @@
 import { writable, derived, get } from "svelte/store";
-import type { AiCheckReview, AlignmentWorkStatus, NativeCheckReview, NavigationSyncState, ProjectInfo, QaFinding } from "./types/finding";
+import type { AiCheckReview, AlignmentWorkStatus, NativeCheckReview, NavigationSyncState, ProjectInfo, QaFinding, VerseHeading } from "./types/finding";
 import type { EngineLogEntry } from "./api/bridgeClient";
 
 export function verseKey(chapter: string, verse: string): string {
@@ -16,6 +16,9 @@ export const chapterVerseNums = writable<Record<string, string[]>>({});
 // without collisions — needed for chapter switching and "Run whole book"
 // (verse "1" in chapter 1 and verse "1" in chapter 2 are different keys).
 export const verseTexts = writable<Record<string, string>>({});
+/** Section headings keyed by the verse they INTRODUCE, so a heading renders
+ *  above that verse rather than glued to the end of the previous one (#180). */
+export const headingsByVerse = writable<Record<string, VerseHeading[]>>({});
 export const findingsByVerse = writable<Record<string, QaFinding[]>>({});
 export type CheckStatus = "pending" | "succeeded" | "failed" | "cancelled";
 export const checkStatusByVerse = writable<Record<string, CheckStatus>>({});
@@ -60,6 +63,7 @@ export const selectedVerseSet = writable<string[]>([]);
 export function resetBookState(): void {
   chapterVerseNums.set({});
   verseTexts.set({});
+  headingsByVerse.set({});
   findingsByVerse.set({});
   checkStatusByVerse.set({});
   alignmentStatusByVerse.set({});

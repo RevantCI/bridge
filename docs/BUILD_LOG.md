@@ -9840,3 +9840,59 @@ trace. Both need an installed build, so neither is done here.
 
 **Verification.** `tests/semantic/test_passage_semantic_runtime.py` 32 passed;
 `cargo check` clean; `cargo test` 10 passed.
+
+## 2026-09-29 — Section headings leave the verse text they trailed (#180)
+
+A verse's content ran from its `\v` to the next one, so a `\s` heading sitting
+between two verses was stored **inside the earlier verse**. Two consequences:
+a reader of verse 2 saw the next section's heading glued onto it, and the
+heading's words were tokenised as alignable target words.
+
+**Found by the first real-key AI run, not by reading code.** The 2026-09-29
+`alignment.crossVerse.aiPropose` probe on `hin_indian-revised-version_gen`
+Genesis 1 returned three proposals, and all three linked a Hebrew word to a
+heading token — `יוֹם` to `दिन—उजियाला`, `אֶחָד` to `पहला`, `רָקִיעַ` to
+`दिन—आकाश`, at 0.82–0.94 model confidence. The model's reasoning was sound
+("the preceding heading carries the day designation"); it was handed a bad menu.
+
+**Where headings live now.** `_split_trailing_headings` separates them at parse
+time, and they are written to `<book>/<chapter>.headings.json`, keyed by the
+verse each *introduces* — a heading between 2 and 3 belongs to 3. A sibling file
+rather than a key inside `<chapter>.json`, because every reader of that file
+treats each key as a verse number. Nothing mistakes it for a chapter: all chapter
+globs filter on `stem.isdigit()`, and `1.headings` is not a digit.
+
+A heading before the first `\v` of a chapter is captured too — the verse loop
+never sees that text, so it would otherwise be lost.
+
+**`\d` is deliberately not split out.** A Psalm superscription is translated
+content in its own right; pulling it out would remove real text from alignment.
+The set is `\s1-5`, `\ms1-3`, `\mr`, `\r`, `\sr`, `\sp`.
+
+**On screen.** `chapter.verseData` carries `headings` alongside `verses` rather
+than earning its own RPC — the editor needs both at the same moment, and that
+call exists precisely to avoid a second round trip. `VerseList` renders each
+above the verse it introduces, in `--font-target`, not selectable and not
+checkable.
+
+**Why this may matter well beyond display.** `can_complete`
+(`bridge_service.py:1582`) requires `not alignment.word_bank`. A heading word sits
+in the word bank and can never be aligned to any source word, so a verse carrying
+a heading could never be marked complete — and completed alignments are the
+offline half of #146's cross-verse agreement gate. That is consistent with the
+measured state of this machine: **zero completed alignments across all 132
+projects**, and a cross-verse AI probe that returned 0 auto-linkable proposals
+because the corpus was empty. The mechanism is confirmed in code; that it is the
+*sole* cause is not — those projects may simply never have been hand-aligned.
+Worth testing directly on a fresh import of a book with headings.
+
+**Existing projects are unaffected and keep working.** `chapter_headings` returns
+`{}` when the sibling file is absent, so a project imported before this shows no
+headings rather than failing. Their verse text still carries the heading inline;
+re-import is what moves it.
+
+**Verification.** Five new engine tests (split, keying by the introduced verse,
+heading words absent from the alignable targets, the reader plus `chapter.verseData`,
+and no sibling file when a book has none) and four new frontend tests. Engine
+`tests/project_io` + `tests/service`: 192 passed. `npm run check` 0/0; Vitest 451
+passed; `npm run build` clean.

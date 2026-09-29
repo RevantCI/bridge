@@ -10,7 +10,7 @@ import tempfile
 import uuid
 import zipfile
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -58,6 +58,21 @@ _ID_LINE_RE = re.compile(r"(?:^|\n)[ \t]*\\id\s+([^\r\n]+)", re.IGNORECASE)
 _HEADER_RE = re.compile(r"(?:^|\n)[ \t]*\\(?P<tag>h|toc1|toc2|toc3)\s+(?P<value>[^\r\n]+)", re.IGNORECASE)
 _CHAPTER_RE = re.compile(r"(?:^|\n)[ \t]*\\c\s+(?P<number>\S+)", re.IGNORECASE)
 _VERSE_RE = re.compile(r"(?:^|\n)[ \t]*\\v\s+(?P<number>\S+)(?:[ \t]+)?", re.IGNORECASE)
+# Section headings and their kin. A verse's content runs from its \v to the next
+# one, so a heading sitting between two verses used to be stored inside the
+# EARLIER verse -- displayed as part of it, and its words offered as alignable
+# targets. A heading is an editorial navigation aid, not a translation of any
+# source word, so an aligner can never close those gaps (#180).
+#
+# \d (descriptive title, e.g. a Psalm superscription) is deliberately NOT here:
+# it is translated content in its own right, and pulling it out of the verse
+# would remove real text from alignment.
+_HEADING_MARKERS = {
+    "s", "s1", "s2", "s3", "s4", "s5",
+    "ms", "ms1", "ms2", "ms3",
+    "mr", "r", "sr", "sp",
+}
+_HEADING_LINE_RE = re.compile(r"^[ \t]*\\(?P<tag>[A-Za-z0-9]+)\b[ \t]*(?P<text>.*)$")
 _MILESTONE_RE = re.compile(
     r"\\zaln-s\s*\|(?P<attrs>.*?)\\\*(?P<body>.*?)\\zaln-e\\\*",
     re.IGNORECASE | re.DOTALL,
@@ -79,6 +94,9 @@ class ParsedBook:
     book_name: str
     headers: list[dict[str, str]]
     chapters: dict[str, dict[str, str]]
+    # chapter -> the verse a heading introduces -> the headings, in order (#180).
+    # Keyed by the FOLLOWING verse: a heading between 2 and 3 belongs to 3.
+    headings: dict[str, dict[str, list[dict[str, str]]]] = field(default_factory=dict)
     language_id: str = ""
     language_name: str = ""
     language_direction: str = ""
@@ -88,6 +106,45 @@ class ParsedBook:
     @property
     def verse_count(self) -> int:
         return sum(len(verses) for verses in self.chapters.values())
+
+
+def _split_trailing_headings(content: str) -> tuple[str, list[dict[str, str]]]:
+    """Separate a verse's own text from any heading that follows it.
+
+    Returns `(verse_text, headings)`, where each heading is `{"tag", "text"}` in
+    document order. A heading between verse N and verse N+1 introduces N+1, so
+    the caller files it against the verse it precedes, not the one it trailed.
+
+    Scripture after a heading is kept rather than discarded: valid USFM puts a
+    heading immediately before a `\\v`, so this should not happen, but silently
+    dropping verse text would be the worst possible way to be wrong. Marker-only
+    lines after the heading (`\\p`, `\\q`) structure the *next* verse and are
+    dropped -- they sat uselessly at the tail of the previous verse before.
+    """
+    lines = content.split("\n")
+    head: list[str] = []
+    headings: list[dict[str, str]] = []
+    tail: list[str] = []
+    seen_heading = False
+
+    for line in lines:
+        match = _HEADING_LINE_RE.match(line)
+        tag = match.group("tag").lower() if match else ""
+        if tag in _HEADING_MARKERS:
+            seen_heading = True
+            text = match.group("text").strip() if match else ""
+            if text:
+                headings.append({"tag": tag, "text": text})
+            continue
+        if not seen_heading:
+            head.append(line)
+        elif match and not match.group("text").strip():
+            continue  # a bare \p or \q introducing the next verse
+        elif line.strip():
+            tail.append(line)
+
+    verse_text = "\n".join(head + tail).strip()
+    return verse_text, headings
 
 
 def _read_text(path: Path) -> str:
@@ -272,6 +329,7 @@ def parse_scripture_file(path: str | Path) -> ParsedBook:
         raise ProjectError(f"No \\c chapter marker found in {source.name}.")
 
     chapters: dict[str, dict[str, str]] = {}
+    headings: dict[str, dict[str, list[dict[str, str]]]] = {}
     for index, chapter_match in enumerate(chapter_matches):
         chapter = chapter_match.group("number")
         block_end = chapter_matches[index + 1].start() if index + 1 < len(chapter_matches) else len(text)
@@ -280,14 +338,36 @@ def parse_scripture_file(path: str | Path) -> ParsedBook:
         if not verse_matches:
             continue
         verses: dict[str, str] = {}
+        chapter_headings: dict[str, list[dict[str, str]]] = {}
+
+        # A heading between \c and the first \v introduces that first verse. The
+        # loop below only sees text from \v onward, so it is read here or lost.
+        _, opening_headings = _split_trailing_headings(
+            "\n" + block[:verse_matches[0].start()].strip()
+        )
+        if opening_headings:
+            chapter_headings[verse_matches[0].group("number")] = opening_headings
+
         for verse_index, verse_match in enumerate(verse_matches):
             verse = verse_match.group("number")
             verse_end = verse_matches[verse_index + 1].start() if verse_index + 1 < len(verse_matches) else len(block)
             content = block[verse_match.end():verse_end].strip()
+            content, trailing = _split_trailing_headings(content)
+            if trailing:
+                # It introduces whatever comes next. At the end of a chapter
+                # there is no next verse, so it is filed against this one --
+                # losing it would be worse than filing it a verse early.
+                following = (
+                    verse_matches[verse_index + 1].group("number")
+                    if verse_index + 1 < len(verse_matches) else verse
+                )
+                chapter_headings.setdefault(following, []).extend(trailing)
             if verse in verses:
                 raise ProjectError(f"Duplicate verse {chapter}:{verse} in {source.name}.")
             verses[verse] = content
         chapters[chapter] = verses
+        if chapter_headings:
+            headings[chapter] = chapter_headings
 
     if not any(chapters.values()):
         raise ProjectError(f"No \\v verse markers found in {source.name}.")
@@ -316,6 +396,7 @@ def parse_scripture_file(path: str | Path) -> ParsedBook:
         book_name=book_name,
         headers=headers,
         chapters=chapters,
+        headings=headings,
         language_id=language_id,
         language_name=language_name,
         language_direction=language_direction,
@@ -563,6 +644,14 @@ def _write_imported_book(project_root: Path, book: ParsedBook, metadata: dict[st
                 unreliable += 1
         _write_json_atomic(project_root / book.book_id / f"{chapter}.json", target_chapter)
         _write_json_atomic(alignment_root / f"{chapter}.json", alignment_chapter)
+        # A sibling file, not a key inside the chapter: <book>/<chapter>.json is
+        # the translationCore-shaped verse map, and every reader of it treats
+        # each key as a verse number (#180).
+        chapter_headings = book.headings.get(chapter)
+        if chapter_headings:
+            _write_json_atomic(
+                project_root / book.book_id / f"{chapter}.headings.json", chapter_headings,
+            )
 
     # translationCore creates the tN/tW contents later from installed resources.
     # These roots declare compatibility without inventing checks that do not exist.

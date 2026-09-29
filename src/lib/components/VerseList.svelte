@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { verseNums, verseTexts, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress } from "../stores";
+  import { verseNums, verseTexts, headingsByVerse, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress } from "../stores";
   import { rangeBetween } from "../crossVerseRange";
   import { unionInChapterOrder } from "../crossVerseSuggest";
   import { buildSegments } from "../utils/highlight";
@@ -413,6 +413,14 @@
 
   {#each $verseNums as v}
     {@const key = verseKey($currentChapter, v)}
+    {@const headings = $headingsByVerse[key] ?? []}
+    {#each headings as heading}
+      <!-- Rendered above the verse it introduces, not as part of the previous
+           verse's text where it used to live (#180). Not selectable, not
+           checkable and never alignable: it is not a translation of any source
+           word. -->
+      <h3 class="section-heading" class:major={heading.tag.startsWith("ms")}>{heading.text}</h3>
+    {/each}
     {@const findings = $findingsByVerse[key] ?? []}
     {@const checkStatus = $checkStatusByVerse[key]}
     {@const alignmentStatus = $alignmentStatusByVerse[key] ?? "untouched"}
@@ -558,6 +566,21 @@
 <style>
   .editor-scroll { flex: 1; overflow-y: auto; padding: 22px 32px; background: var(--surface); }
   .chapter-label { font-size: var(--fs-xs); font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 14px; }
+  /* A heading is the team's text, so it uses --font-target like the verses, but
+     it is editorial rather than Scripture: no hover, no selection, no findings.
+     The extra top margin is what separates one section from the last verse of
+     the previous one. */
+  .section-heading {
+    font-family: var(--font-target);
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    color: var(--text-2, var(--text-3));
+    margin: 20px 0 8px;
+    padding: 0 10px;
+    line-height: 1.6;
+  }
+  .section-heading:first-child { margin-top: 0; }
+  .section-heading.major { font-size: var(--fs-xl); text-align: center; }
   .verse { display: flex; gap: 10px; padding: 9px 10px; border-radius: 7px; margin-bottom: 2px; cursor: pointer; border: 1px solid transparent; }
   .verse:hover { background: var(--surface-2); }
   .verse.active { background: var(--accent-bg); border-color: #C7D9FB; }

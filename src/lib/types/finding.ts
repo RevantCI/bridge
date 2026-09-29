@@ -659,6 +659,14 @@ export interface VerseData {
   alignmentStatus: AlignmentWorkStatus;
 }
 
+/** A section heading (`\s`, `\ms`, `\r`, ...) lifted out of the verse text it
+ *  used to trail (#180). It is the team's text and belongs on screen, but it is
+ *  not a translation of any source word, so it is never an alignable target. */
+export interface VerseHeading {
+  tag: string;
+  text: string;
+}
+
 export type NativeCheckTool = "translationNotes" | "translationWords";
 export type CheckSelectionStatus = "pending" | "selected" | "nothing_to_select" | "invalidated";
 export type CheckEvaluationStatus = "not_run" | "running" | "passed" | "issue_open" | "needs_review" | "failed";

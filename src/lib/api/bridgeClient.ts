@@ -25,6 +25,7 @@ import type {
   RegisteredProject,
   VerseAlignment,
   VerseData,
+  VerseHeading,
   QaFinding,
   SettingsData,
   IssueResolutionHandoffResult,
@@ -386,7 +387,15 @@ export const bridge = {
     return call("chapter.verses", { chapter });
   },
 
-  chapterVerseData(chapter: string): Promise<{ chapter: string; verses: Record<string, VerseData> }> {
+  /** `headings` is keyed by the verse each heading INTRODUCES, and rides on this
+   *  call rather than an RPC of its own: the editor needs them exactly when it
+   *  needs the verses, and this call exists to avoid a second round trip (#180).
+   *  Empty for a project imported before #180, or a book with no headings. */
+  chapterVerseData(chapter: string): Promise<{
+    chapter: string;
+    verses: Record<string, VerseData>;
+    headings: Record<string, VerseHeading[]>;
+  }> {
     return call("chapter.verseData", { chapter });
   },
 

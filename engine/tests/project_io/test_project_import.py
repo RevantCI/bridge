@@ -556,3 +556,100 @@ def test_translationcore_folder_import_preserves_project_files(tmp_path):
     assert project.target_verse_text("1", "1") == "Existing text"
     assert project.load_verse_alignment("1", "1").word_bank
     assert (imported / "reviewer-notes.txt").read_text(encoding="utf-8") == "preserve me"
+
+
+HEADING_USFM = """\\id TIT
+\\h Titus
+\\c 1
+\\s Opening greeting
+\\p
+\\v 1 Paul, a servant of God.
+\\v 2 in hope of eternal life.
+\\s The work in Crete
+\\p
+\\v 3 For this cause I left you in Crete.
+\\v 4 to Titus, my true child.
+\\c 2
+\\v 1 But speak the things that fit sound doctrine.
+"""
+
+
+def _import_heading_book(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "TIT.usfm").write_text(HEADING_USFM, encoding="utf-8")
+    destination = tmp_path / "projects"
+    destination.mkdir()
+    import_source(source, destination, _metadata())
+    return next(p for p in destination.iterdir() if p.is_dir())
+
+
+def test_section_headings_are_split_out_of_the_verse_they_trailed(tmp_path):
+    """#180: verse content ran from one \\v to the next, so a heading between two
+    verses was stored inside the earlier one -- shown as part of it, and its
+    words offered as alignable targets an aligner could never close."""
+    project = _import_heading_book(tmp_path)
+    chapter = json.loads((project / "tit" / "1.json").read_text(encoding="utf-8"))
+
+    assert chapter["2"] == "in hope of eternal life."
+    for verse_text in chapter.values():
+        assert "\\s" not in verse_text
+        assert "The work in Crete" not in verse_text
+        assert "Opening greeting" not in verse_text
+
+
+def test_headings_are_kept_beside_the_chapter_keyed_by_the_verse_they_introduce(tmp_path):
+    project = _import_heading_book(tmp_path)
+    headings = json.loads((project / "tit" / "1.headings.json").read_text(encoding="utf-8"))
+
+    # The heading after verse 2 introduces verse 3, not verse 2.
+    assert headings["3"] == [{"tag": "s", "text": "The work in Crete"}]
+    # One before the first \v belongs to verse 1, which the verse loop never sees.
+    assert headings["1"] == [{"tag": "s", "text": "Opening greeting"}]
+
+
+def test_heading_words_never_become_alignable_target_words(tmp_path):
+    """The point of the split. A heading is not a translation of any source
+    word, so an aligner can never close a gap it creates."""
+    project = _import_heading_book(tmp_path)
+    alignment = json.loads(
+        (project / ".apps" / "translationCore" / "alignmentData" / "tit" / "1.json")
+        .read_text(encoding="utf-8")
+    )
+    words = [
+        word.get("word")
+        for verse in alignment.values()
+        for group in (verse.get("alignments") or [])
+        for word in (group.get("bottomWords") or [])
+    ]
+    assert not any("Crete" in str(w) and "work" in str(w) for w in words)
+    for fragment in ("Opening", "greeting"):
+        assert fragment not in words
+
+
+def test_chapter_headings_reader_and_verse_data_expose_them(tmp_path):
+    project = _import_heading_book(tmp_path)
+    opened = TranslationCoreProject(str(project))
+    assert opened.chapter_headings("1")["3"][0]["text"] == "The work in Crete"
+    # A chapter with no headings is an empty dict, not an error.
+    assert opened.chapter_headings("2") == {}
+
+    engine = BridgeEngine()
+    _call(engine, "project.open", {"path": str(project)})
+    data = _call(engine, "chapter.verseData", {"chapter": "1"})["result"]
+    assert data["headings"]["3"][0]["text"] == "The work in Crete"
+    assert _call(engine, "chapter.verseData", {"chapter": "2"})["result"]["headings"] == {}
+
+
+def test_a_project_without_headings_writes_no_sibling_file(tmp_path):
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "TIT.usfm").write_text(SIMPLE_USFM, encoding="utf-8")
+    destination = tmp_path / "projects"
+    destination.mkdir()
+    import_source(source, destination, _metadata())
+    project = next(p for p in destination.iterdir() if p.is_dir())
+    assert not list((project / "tit").glob("*.headings.json"))
+    # And the chapter files are still found: the sibling name must never be
+    # mistaken for a chapter (stem "1.headings" is not a digit).
+    assert TranslationCoreProject(str(project)).chapters() == ["1", "2"]

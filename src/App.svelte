@@ -16,14 +16,14 @@
   import ProjectDashboard from "./lib/components/ProjectDashboard.svelte";
   import DiagnosticsPanel from "./lib/components/DiagnosticsPanel.svelte";
   import ProjectReportScreen from "./lib/components/ProjectReportScreen.svelte";
-  import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, ProjectReport, QaFinding } from "./lib/types/finding";
+  import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, ProjectReport, QaFinding, VerseHeading } from "./lib/types/finding";
   import type {
     QaReport, ReportJobSnapshot, TriageJobSnapshot, TriageRecord,
   } from "./lib/types/report";
   import { isTriageUnavailable } from "./lib/types/report";
   import type { TriageOverrideVerdict } from "./lib/types/finding";
   import {
-    project, currentChapter, chapterVerseNums, verseTexts, findingsByVerse,
+    project, currentChapter, chapterVerseNums, verseTexts, headingsByVerse, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, selectedVerseSet, checkingProgress, approvedCount, verseNums,
     verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState, reviewerMode,
     aiCheckReviewsByVerse, diagnosticsOpen, engineLog, appendEngineLog, navigationStatus,
@@ -648,7 +648,7 @@
       knownVerses.length > 0 &&
       knownVerses.every((verse) => Object.prototype.hasOwnProperty.call($verseTexts, verseKey(chapter, verse)))
     ) return;
-    const { verses } = await bridge.chapterVerseData(chapter);
+    const { verses, headings } = await bridge.chapterVerseData(chapter);
     const verseIds = Object.keys(verses);
     chapterVerseNums.update((m) => ({ ...m, [chapter]: verseIds }));
 
@@ -658,7 +658,14 @@
       texts[verseKey(chapter, v)] = data.text;
       alignmentStatuses[verseKey(chapter, v)] = data.alignmentStatus;
     }
+    // Keyed by verseKey like everything else here: a bare verse number would
+    // collide across chapters (gotcha 7).
+    const headingRows: Record<string, VerseHeading[]> = {};
+    for (const [v, rows] of Object.entries(headings ?? {})) {
+      headingRows[verseKey(chapter, v)] = rows;
+    }
     verseTexts.update((t) => ({ ...t, ...texts }));
+    headingsByVerse.update((h) => ({ ...h, ...headingRows }));
     alignmentStatusByVerse.update((existing) => ({ ...existing, ...alignmentStatuses }));
   }
 

@@ -270,6 +270,27 @@ class TranslationCoreProject:
     def target_verse_text(self, chapter: str | int, verse: str | int) -> str:
         return str(self.target_chapter(chapter).get(str(verse), ''))
 
+    def chapter_headings(self, chapter: str | int) -> dict[str, list[dict[str, str]]]:
+        """Section headings of `chapter`, keyed by the verse each introduces.
+
+        Kept beside the verse map rather than inside it (#180): a heading is not
+        a translation of any source word, so it must never reach the alignable
+        target tokens, but it is still the team's text and belongs on screen.
+        Absent for projects imported before #180 and for books with no headings
+        -- an empty dict, not an error.
+        """
+        p = self.book_dir / f'{chapter}.headings.json'
+        if not p.exists():
+            return {}
+        data = _read_json(p)
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(verse): [h for h in items if isinstance(h, dict)]
+            for verse, items in data.items()
+            if isinstance(items, list)
+        }
+
     def usfm_path(self) -> Path | None:
         candidates = list(self.path.glob('*.usfm')) + list(self.path.glob('*.USFM')) + list(self.path.glob('*.sfm')) + list(self.path.glob('*.SFM'))
         return candidates[0] if candidates else None

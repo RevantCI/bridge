@@ -1321,7 +1321,15 @@ class BridgeEngine:
                 "alignment": self.project.load_verse_alignment(chapter, v).to_dict(),
                 "alignmentStatus": self._alignment_verse_status(self.project, chapter, v),
             }
-        return {"chapter": chapter, "verses": out}
+        # Headings ride along on the same call rather than earning an RPC of
+        # their own: the editor needs them exactly when it needs the verses, and
+        # this call exists precisely to avoid a second round trip (#180). Keyed
+        # by the verse each heading introduces; `{}` for a project imported
+        # before #180 or a book with no headings.
+        return {
+            "chapter": chapter, "verses": out,
+            "headings": self.project.chapter_headings(chapter),
+        }
 
     def list_checks_for_verse(self, chapter: str, verse: str) -> dict[str, Any]:
         self._require_project()

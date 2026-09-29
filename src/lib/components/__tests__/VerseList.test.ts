@@ -23,6 +23,7 @@ import {
   alignmentStatusByVerse,
   nativeChecksByVerse,
   aiCheckReviewsByVerse,
+  headingsByVerse,
   selectedVerse,
   verseKey,
 } from "../../stores";
@@ -69,6 +70,7 @@ function seed(text: string, findings: QaFinding[] = []): void {
   currentChapter.set("1");
   chapterVerseNums.set({ "1": ["6"] });
   verseTexts.set({ [verseKey("1", "6")]: text });
+  headingsByVerse.set({});
   findingsByVerse.set({ [verseKey("1", "6")]: findings });
   checkStatusByVerse.set({});
   alignmentStatusByVerse.set({});
@@ -559,5 +561,49 @@ describe("VerseList verse context menu (issue #69)", () => {
     const menu = screen.getByRole("menu", { name: /Actions for verse 6/i });
     await fireEvent.keyDown(menu, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+});
+
+describe("VerseList section headings (#180)", () => {
+  beforeEach(() => seed("कि जिसने तुम में अच्छा काम आरम्भ किया है।"));
+
+  it("renders a heading above the verse it introduces", () => {
+    headingsByVerse.set({ [verseKey("1", "6")]: [{ tag: "s", text: "पहला दिन—उजियाला" }] });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+
+    const heading = screen.getByRole("heading", { name: "पहला दिन—उजियाला" });
+    expect(heading).toBeInTheDocument();
+    // Above, not inside: a heading used to be stored in the previous verse's
+    // text, which is what put its words into the alignable target list.
+    expect(heading.compareDocumentPosition(verseRow()))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(verseRow().textContent).not.toContain("पहला दिन—उजियाला");
+  });
+
+  it("is not part of the selectable verse row", async () => {
+    const onSelect = vi.fn();
+    headingsByVerse.set({ [verseKey("1", "6")]: [{ tag: "s", text: "The work in Crete" }] });
+    render(VerseList, { props: { onSelect } });
+
+    await fireEvent.click(screen.getByRole("heading", { name: "The work in Crete" }));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("renders every heading when a verse carries more than one", () => {
+    headingsByVerse.set({
+      [verseKey("1", "6")]: [
+        { tag: "ms", text: "Book Two" },
+        { tag: "s", text: "A psalm of David" },
+      ],
+    });
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(screen.getByRole("heading", { name: "Book Two" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "A psalm of David" })).toBeInTheDocument();
+  });
+
+  it("renders nothing extra for a project imported before headings were split out", () => {
+    headingsByVerse.set({});
+    render(VerseList, { props: { onSelect: vi.fn() } });
+    expect(document.querySelectorAll(".section-heading")).toHaveLength(0);
   });
 });
