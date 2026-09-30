@@ -686,6 +686,39 @@ def test_language_qa_verse_lists_one_verses_findings_open_and_decided(staged_eng
     assert not call(engine, "languageQa.verse", {"projectPath": project, "chapter": 1, "verse": "1"})["success"]
 
 
+def _windows_short_path(path: str) -> str | None:
+    """The 8.3 spelling of `path`, or None where the volume has none."""
+    if os.name != "nt":
+        return None
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(1024)
+    length = ctypes.windll.kernel32.GetShortPathNameW(path, buffer, len(buffer))
+    return buffer.value if 0 < length < len(buffer) and buffer.value != path else None
+
+
+def test_language_qa_accepts_the_open_project_under_another_spelling(staged_engine, tmp_path):
+    """The check compared raw strings, so the same folder spelled differently was
+    "a different project". Every GitHub runner's TEMP is an 8.3 short name
+    (C:\\Users\\RUNNER~1\\...), which failed the CI latency gate on every run."""
+    engine, _ = staged_engine
+    project = str(engine.project.path)
+    spellings = [project, project.replace("\\", "/"), project + os.sep]
+    if os.name == "nt":
+        spellings.append(project.upper())
+    short = _windows_short_path(project)
+    if short:
+        spellings.append(short)
+    for spelling in spellings:
+        response = call(engine, "languageQa.status", {"projectPath": spelling, "limit": 5})
+        assert response["success"], (spelling, response)
+
+    for other in ("elsewhere", "", str(tmp_path), None, 42):
+        response = call(engine, "languageQa.status", {"projectPath": other, "limit": 5})
+        assert not response["success"], other
+        assert "different project" in response["error"]["message"]
+
+
 def test_a_job_without_the_stage_carries_no_language_qa(staged_engine):
     _, run_job = staged_engine
     snapshot = run_job(["local"])
