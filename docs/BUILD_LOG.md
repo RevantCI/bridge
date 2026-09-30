@@ -13813,3 +13813,25 @@ second, header-only reader. (An earlier alternating benchmark that ran the previ
 that preview warmed both caches, so it is not the cold number.) A single aligned
 Psalms: 4.6 s → 9.0 s preview-plus-import. No frontend or Rust changes, so
 npm/cargo gates were not re-run. Desktop not run.
+
+**Decision (maintainer, 2026-09-30, while rebasing the branch onto `main` efb2683 for
+merge):** raise the smoke's default `--max-import-seconds` from 10 to 15 rather than
+add a header-only regex reader back. The +0.8 s is the parser doing real work on the
+first book and 66 preambles, so the new limit carries that cost in its failure message;
+a miss beyond it is a regression. A perf issue for `identify_usfm` is filed separately.
+The rebase itself conflicted only in this file (both sides appended a section) and was
+resolved by keeping both in date order. The full suite on the rebased branch:
+4,670 passed, 1 skipped, 3 xfailed, and one failure —
+`test_progress_cache.py::test_a_decision_is_one_workbench_commit_per_table_not_one_per_row`
+— which passes alone on both the branch and `main`, so it is flaky under `-n auto`,
+not a parser regression; filed rather than fixed here.
+
+Re-measured on the maintainer's machine after the rebase, three cold runs each of the
+same `project.import` alternating a frozen build of `main` efb2683 and the rebased
+branch (`C:\code	amil\IRV_Tamil`, 66 books): main 18.2 / 17.3 / 19.9 s, branch
+19.2 / 20.0 / 17.8 s. The branch is inside main's own spread, so no regression — but
+this machine is roughly twice as slow on this import as the one the 10.2–10.7 s came
+from, and the new 15 s default fails here for `main` too. The optional gate is a
+per-machine benchmark; the number that matters is branch against main on the same
+box, and the budget default is left at 15 s pending a decision on whether it should
+track a slower reference machine.
