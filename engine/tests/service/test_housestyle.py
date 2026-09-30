@@ -10,7 +10,7 @@ from tc_ai_bridge.housestyle import (
     project_proposals, validate_entry,
 )
 from tc_ai_bridge.language_qa_jobs import LanguageQaManager
-from tests.service.test_bridge_service import _write_minimal_book, call, fixture_project  # noqa: F401
+from tests.support.projects import _write_minimal_book, call, fixture_project  # noqa: F401
 from tests.service.test_language_qa import issue_for, wait
 
 VALLINAM = "ta-irv/sandhi.vallinam.demonstrative"

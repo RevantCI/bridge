@@ -13,7 +13,7 @@ from tc_ai_bridge.language_packs.tamil_distance import clusters, substitution_co
 from tc_ai_bridge.language_qa import RULE_VERSION, rule_fields, suggestion, word_occurrences
 from tc_ai_bridge.language_qa_jobs import LanguageQaManager
 from tests.service.test_language_qa import project_at, wait
-from tests.service.test_bridge_service import fixture_project  # noqa: F401
+from tests.support.projects import fixture_project  # noqa: F401
 
 
 # ---- 5.2 confusion-set distance -------------------------------------------------

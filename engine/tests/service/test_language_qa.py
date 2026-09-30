@@ -16,7 +16,7 @@ from tc_ai_bridge.language_qa import (
 from tc_ai_bridge.language_qa_jobs import (
     LanguageQaManager, MAX_CHAPTER_BYTES, MAX_BOOK_FINDINGS, apply_decisions, decision_effect,
 )
-from tests.service.test_bridge_service import fixture_project, call
+from tests.support.projects import fixture_project, call
 from tests.support.paths import REPO_ROOT
 from bridge_service import BridgeEngine
 
@@ -603,7 +603,7 @@ def test_other_decisions_still_update_review_progress(fixture_project, issue):
 
 @pytest.fixture
 def staged_engine(fixture_project):
-    from tests.service.test_bridge_service import wait_for_job
+    from tests.support.projects import wait_for_job
 
     engine = BridgeEngine()
     engine._language_qa = LanguageQaManager(debounce=0, yield_seconds=0)

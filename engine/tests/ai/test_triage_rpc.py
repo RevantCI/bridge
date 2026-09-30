@@ -15,7 +15,7 @@ from bridge_service import BridgeEngine
 from tc_ai_bridge.tc_project import TranslationCoreProject
 from tc_ai_bridge.triage import triage_hash
 
-from tests.service.test_bridge_service import call, fixture_project, two_book_collection  # noqa: F401
+from tests.support.projects import call, fixture_project, two_book_collection  # noqa: F401
 from tests.support.waits import job_timeout
 
 

@@ -10,7 +10,7 @@ from bridge_service import BridgeEngine
 from collection_jobs import CollectionJobConflict, CollectionJobManager, CollectionJobSpec
 from tc_ai_bridge.language_qa_jobs import LanguageQaManager
 from tc_ai_bridge.project_import import collection_qa_runs
-from tests.service.test_bridge_service import _write_minimal_book, call
+from tests.support.projects import _write_minimal_book, call
 from tests.support.waits import job_timeout
 
 

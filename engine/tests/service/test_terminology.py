@@ -9,7 +9,7 @@ from tc_ai_bridge.language_qa_jobs import LanguageQaManager
 from tc_ai_bridge.tc_project import ProjectError, TranslationCoreProject
 from tc_ai_bridge.terminology import MAX_PHRASE_WORDS, TermIndex, find_deprecated_forms, phrase_tokens
 from tests.persistence.test_workbench_repository import _build_minimal_project
-from tests.service.test_bridge_service import call, fixture_project
+from tests.support.projects import call, fixture_project
 from tests.service.test_language_qa import project_at, wait
 
 
