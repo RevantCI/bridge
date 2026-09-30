@@ -13835,3 +13835,39 @@ from, and the new 15 s default fails here for `main` too. The optional gate is a
 per-machine benchmark; the number that matters is branch against main on the same
 box, and the budget default is left at 15 s pending a decision on whether it should
 track a slower reference machine.
+
+## 2026-09-30 — A Scripture write survives a reader holding the file (#184)
+
+CI failed on `test_job_path_and_live_path_produce_identical_findings` with
+
+    [WinError 5] Access is denied: ...\pytest-0\...\rut\rut\1.json
+
+4649 passed, 1 error. The test passes locally in isolation in 4 seconds.
+
+**The mechanism.** On Windows `os.replace` fails with `PermissionError` if ANY
+handle holds the destination -- Python's `open()` does not request
+FILE_SHARE_DELETE. Language QA's background pass reads every chapter of the book
+(`language_qa_jobs.py` `_scan_locked` globs `*.json` and reads each), and the read
+window is only a few milliseconds, but a `verse.edit` landing inside it is refused
+outright. `apply_scripture_edit` writes through `_write_json_atomic`, whose last
+step is exactly that replace.
+
+**The fix is a bounded retry, not coordination.** `_replace_retrying` retries for
+two seconds with exponential backoff, then raises the original error. Retrying
+rather than quiescing the scanner, because the scanner is not the only thing that
+opens these files: on Windows an antivirus or the search indexer does the same,
+and no amount of internal coordination helps there.
+
+It does not weaken the write. `os.replace` stays atomic; the retry only chooses a
+later moment, and the temp file has already been written, fsynced and validated.
+And it is not silent -- a permanently locked file still fails loudly after the
+budget, so a real permission problem is not absorbed.
+
+**Both tests were confirmed to fail without it**: with the retry reverted, the
+first reproduces the exact CI error (`PermissionError: [WinError 5] Access is
+denied`) and the second shows the write giving up in 0.0 s. The second also pins
+the budget behaviour -- it must raise after roughly a second or two, not hang and
+not swallow.
+
+**Verification.** `tests/persistence` + `tests/service/test_language_qa.py` +
+`tests/project_io`: 541 passed.
