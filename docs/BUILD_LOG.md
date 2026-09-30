@@ -13760,3 +13760,31 @@ not swallow.
 
 **Verification.** `tests/persistence` + `tests/service/test_language_qa.py` +
 `tests/project_io`: 541 passed.
+
+## 2026-09-30 — The write retry polls flat, not exponential (#184, #189)
+
+The retry added earlier the same day (`d077aa0`) fixed the `WinError 5` failure
+but took the Language QA latency gate from **112 ms to 410 ms p95** on CI, over
+the 300 ms budget set in `efb2683`. So the fix traded a rare hard failure for a
+slower write under contention -- a bad trade on a path a translator hits.
+
+**Cause: the backoff, not the retrying.** The delay doubled 5 -> 10 -> 20 -> 40
+-> 80 -> 100 ms, so a write that needed five attempts idled about 155 ms *after*
+the reader had already let go. On a developer machine that is invisible (measured
+15.89 ms without the retry, 19.37 ms with it, +3.5 ms); on two contended CI cores
+the scanner holds files longer, more attempts miss, and the idle time dominates.
+
+Replaced with a **flat 1 ms poll**. The reader holds the file for single-digit
+milliseconds, so what matters is noticing quickly that it has let go, not being
+polite about asking. Local p95 19.37 -> **17.39 ms**, and the CI number should
+fall by roughly the idle time the doubling was adding.
+
+The two-second ceiling is unchanged, and so is the behaviour it guards: a
+permanently locked file still raises the original `PermissionError` rather than
+hanging or being swallowed. Both race tests still pass, including the one that
+pins the give-up budget.
+
+**Worth stating plainly**: the first version of this fix was measured only
+locally, where its cost was 3.5 ms and invisible. It took a CI run to show the
+cost was contention-dependent. A latency budget in CI is what caught it -- the
+same gate that had been failing to report anything at all until this morning.
