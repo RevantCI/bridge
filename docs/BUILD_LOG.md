@@ -13591,3 +13591,46 @@ clean run:
 
 `continue-on-error` is gone from `release.yml` and CLAUDE.md's standing warning
 is updated to match.
+
+## 2026-09-30 — The Language QA project guard compared paths as strings (#184)
+
+`main` was red from the language-qa merge. The Python suite itself passed
+(4649); what failed was the separate **Language QA foreground latency gate**
+step, with `project_error: Language QA request belongs to a different project.`
+
+**The guard** (`bridge_service.py`, the five `languageQa.*` methods) was
+
+```python
+if p.get("projectPath") != str(self.project.path):
+```
+
+a raw string comparison. `project.open` *resolves* the path it is given, so a
+caller echoing back the path it used is rejected whenever the two spellings
+differ. On Windows `tempfile.TemporaryDirectory()` returns the 8.3 short name:
+
+```
+raw     : C:\Users\REVANT~1\AppData\Local\Temp\...\project     <- what the client sends
+resolved: C:\Users\Revant C Idikulay\AppData\Local\Temp\...\project   <- what the engine stored
+```
+
+Every UI path worked, which is why this never showed in the app: the UI only
+ever echoes a path the engine itself produced. `scripts/benchmark_language_qa.py`
+builds its own project under a temp root and sends that spelling, so it was the
+one caller that could trip it.
+
+Now compared with `canonical_path_key()` — the helper that already existed in
+`project_registry.py` for exactly this ("treats Windows path aliases
+consistently"). Symlinked temp roots and case differences are covered by the
+same change.
+
+**Why three earlier reproductions found nothing.** The assertions discarded the
+engine's response, so every run printed only `assert False`. `b48f202` made 25
+of them report the response; the very next CI run named the cause. Worth
+remembering: the fix was two lines, and the cost was entirely in not being able
+to see the error.
+
+**Verification.** The gate itself now exits 0 (p95 within budget: ping 1.26 ms,
+`languageQa.status` and the other owned RPCs under their 50 ms contract). The
+new test was confirmed to fail with the canonical comparison reverted, and it
+also asserts a genuinely different path is still refused, so the guard still
+guards. `tests/service`: 3488 passed.

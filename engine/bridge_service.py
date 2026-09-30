@@ -58,7 +58,9 @@ from tc_ai_bridge.housestyle import (
 from tc_ai_bridge.original_language_resources import resource_inventory
 from tc_ai_bridge.lexicon_resources import lexicon_entry_for_strong, HEBREW_PREFIX_LABELS
 from tc_ai_bridge.morphology_codes import decode_morph
-from tc_ai_bridge.project_registry import ProjectIdentityError, ProjectRegistry, source_fingerprints
+from tc_ai_bridge.project_registry import (
+    ProjectIdentityError, ProjectRegistry, canonical_path_key, source_fingerprints,
+)
 from tc_ai_bridge.passage_semantic_repository import (
     DATABASE_SCHEMA_VERSION,
     FoundationConflict,
@@ -4595,7 +4597,15 @@ class BridgeEngine:
             if m in {Methods.LANGUAGE_QA_STATUS, Methods.LANGUAGE_QA_PAUSE, Methods.LANGUAGE_QA_INLINE,
                      Methods.LANGUAGE_QA_HISTORY, Methods.LANGUAGE_QA_VERSE}:
                 self._require_project()
-                if p.get("projectPath") != str(self.project.path):
+                # Compared canonically, not as strings. `project.open` resolves
+                # the path it is given, so a caller echoing back the path *it*
+                # used is rejected whenever the two spellings differ: an 8.3
+                # short name on Windows (`REVANT~1` vs `Revant C Idikulay`, which
+                # is what `tempfile` hands out), a symlinked temp root, or a
+                # difference in case. That is what failed the Language QA
+                # latency gate in CI while every UI path worked, because the UI
+                # only ever echoes a path the engine itself produced.
+                if canonical_path_key(str(p.get("projectPath") or "")) != canonical_path_key(self.project.path):
                     raise ProjectError("Language QA request belongs to a different project.")
                 if m == Methods.LANGUAGE_QA_PAUSE:
                     if not isinstance(p.get("paused"), bool):

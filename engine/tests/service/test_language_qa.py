@@ -1701,3 +1701,39 @@ def test_footnoted_verse_through_the_manager_has_raw_offsets_and_terminology(tmp
         finding = by_rule[rule]
         assert finding["start"] == raw.index(flagged)
         assert finding["originalText"] == raw[finding["start"]:finding["end"]] == flagged
+
+
+def test_the_project_guard_compares_paths_canonically_not_as_strings(fixture_project):
+    """The guard used `p["projectPath"] != str(self.project.path)`.
+
+    `project.open` resolves the path it is given, so a caller echoing back the
+    path *it* used was rejected whenever the two spellings differ — an 8.3 short
+    name on Windows (`REVANT~1` versus `Revant C Idikulay`, which is exactly what
+    `tempfile` hands out), a symlinked temp root, or a difference in case.
+
+    Every UI path worked, because the UI only echoes a path the engine itself
+    produced. What failed was the Language QA foreground latency gate in CI,
+    which builds its own project under `tempfile.TemporaryDirectory()`.
+    """
+    from pathlib import Path
+
+    engine = BridgeEngine()
+    opened = call(engine, "project.open", {"path": str(fixture_project)})
+    assert opened["success"], opened
+    resolved = str(Path(fixture_project).resolve())
+
+    # The spelling the engine settled on is accepted.
+    assert call(engine, "languageQa.status", {"projectPath": resolved, "limit": 5})["success"]
+
+    # So is an equivalent spelling that is not string-equal: a trailing separator
+    # and a redundant "." component name the same directory.
+    aliased = str(Path(fixture_project)) + os.sep + "." + os.sep
+    assert aliased != resolved
+    result = call(engine, "languageQa.status", {"projectPath": aliased, "limit": 5})
+    assert result["success"], result
+
+    # A genuinely different project is still refused — the guard still guards.
+    other = call(engine, "languageQa.status",
+                 {"projectPath": str(Path(fixture_project).parent / "not-this-project"), "limit": 5})
+    assert other["success"] is False
+    assert "different project" in other["error"]["message"]
