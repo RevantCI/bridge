@@ -4549,6 +4549,26 @@ class BridgeEngine:
         if not self.project:
             raise ProjectError("No project open — call project.open first")
 
+    def _is_open_project_path(self, value: Any) -> bool:
+        """Does a request's `projectPath` name the project that is open?
+
+        Compared as a location, not a spelling. `project.path` is resolved, so a
+        caller holding the same folder under another spelling -- a Windows 8.3
+        short name (`C:\\Users\\RUNNER~1\\...` on every GitHub runner), a different
+        letter case, `/` for `\\` -- was told its own project was "a different
+        project". The UI never hit it, because it echoes the path project.open
+        returned; the CI latency gate did, on every run.
+        """
+        if not isinstance(value, str) or not value.strip():
+            return False
+        if value == str(self.project.path):
+            return True  # the UI's case: no filesystem call on every poll
+        try:
+            candidate = Path(value).resolve()
+        except (OSError, RuntimeError, ValueError):
+            return False
+        return os.path.normcase(str(candidate)) == os.path.normcase(str(self.project.path))
+
     # -- terminology ----------------------------------------------------
 
     def terminology_list(self) -> dict[str, Any]:
@@ -4595,7 +4615,7 @@ class BridgeEngine:
             if m in {Methods.LANGUAGE_QA_STATUS, Methods.LANGUAGE_QA_PAUSE, Methods.LANGUAGE_QA_INLINE,
                      Methods.LANGUAGE_QA_HISTORY, Methods.LANGUAGE_QA_VERSE}:
                 self._require_project()
-                if p.get("projectPath") != str(self.project.path):
+                if not self._is_open_project_path(p.get("projectPath")):
                     raise ProjectError("Language QA request belongs to a different project.")
                 if m == Methods.LANGUAGE_QA_PAUSE:
                     if not isinstance(p.get("paused"), bool):

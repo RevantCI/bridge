@@ -13591,3 +13591,31 @@ clean run:
 
 `continue-on-error` is gone from `release.yml` and CLAUDE.md's standing warning
 is updated to match.
+
+## 2026-09-30 — The Language QA latency gate rejected its own project on CI (#186)
+
+**Symptom.** CI on `main` red on every push since the `language-qa` merge
+(f37e8d9, b48f202, 0104670), and every PR with it (#185): the engine tests pass,
+then **Language QA foreground latency gate** (`scripts/benchmark_language_qa.py
+--gate`) dies on its fourth request — `languageQa.status` → `Language QA request
+belongs to a different project.`
+
+**Cause.** `handle_request` compared `params["projectPath"]` to
+`str(self.project.path)` as raw strings, and `project.path` is
+`Path(...).resolve()`, which on Windows expands 8.3 short names. A GitHub runner's
+`%TEMP%` is `C:\Users\RUNNER~1\...`: the script sent the short spelling, the open
+project held the long one. Invisible locally because `C:\Users\Benz` has no short
+form; reproduced on demand by pointing `TEMP` at a short-name directory (same
+assertion, same request id). Not #184 — that is intermittent `-n auto` test
+errors; this fails deterministically, and only on the gate.
+
+**Fix.** `BridgeEngine._is_open_project_path`: exact string first (the UI echoes
+the path `project.open` returned, so polls stay syscall-free), else compare
+`normcase(resolve())`. Non-string or empty still refused.
+
+**Verification.** New `test_language_qa_accepts_the_open_project_under_another_spelling`
+(forward slashes, trailing separator, upper case, the real 8.3 name via
+`GetShortPathNameW`; plus five values still refused) fails on the old check and
+passes on the new one. `tests/service`: 3,488 passed. The gate itself, locally:
+exit 0 with `TEMP` on a short-name directory (failed before the fix) and with the
+ordinary `TEMP`.
