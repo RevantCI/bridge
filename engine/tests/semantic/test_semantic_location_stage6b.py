@@ -9,49 +9,23 @@ import unicodedata
 
 import pytest
 
-from bridge_service import BridgeEngine
-from greek_room_engine.protocol import EngineRequest
 from tc_ai_bridge.passage_semantic_models import Cardinality, TokenLayer
 from tc_ai_bridge.semantic_location import (
     LocationSearchPolicy, SemanticEmbeddingProvider, SemanticLocationEngine,
 )
 from tc_ai_bridge.passage_semantic_runtime import PassageSemanticRuntime
 from tc_ai_bridge.tc_project import TranslationCoreProject
+from tests.support.semantic import TAMIL, semantic_runtime
 
 
-TAMIL = {
-    "3": "நற்செய்தி உங்களுக்கு அறிவிக்கப்பட்ட நாள் முதல் இதுவரைக்கும் நீங்கள் எங்களோடு ஊழியத்தில் ஐக்கியப்பட்டிருப்பதால்,",
-    "4": "நான் பண்ணுகிற ஒவ்வொரு விண்ணப்பத்திலும் உங்கள் அனைவருக்காகவும் எப்பொழுதும் மகிழ்ச்சியோடு ஜெபம் செய்து,",
-    "5": "உங்களில் நல்ல செயலைத் தொடங்கினவர் அதை இயேசு கிறிஸ்துவின் நாள் வரை நடத்தி வருவார் என்று நம்பி,",
-    "6": "நான் உங்களை நினைக்கும் போதெல்லாம் என் தேவனை ஸ்தோத்திரிக்கிறேன்.",
-}
 
 
-def _runtime(tmp_path: Path, *, book: str = "PHP", language: str = "ta",
-             chapters: dict[str, dict[str, str]] | None = None) -> PassageSemanticRuntime:
-    root = tmp_path / f"{book}-{language}"
-    lower = book.lower()
-    (root / lower).mkdir(parents=True)
-    alignment = root / ".apps" / "translationCore" / "alignmentData" / lower
-    alignment.mkdir(parents=True)
-    chapters = chapters or {"1": TAMIL}
-    (root / "manifest.json").write_text(json.dumps({
-        "project": {"id": lower, "name": book}, "target_language": {"id": language},
-        "resource": {"id": "test"}, "tc_version": "8",
-    }), encoding="utf-8")
-    for chapter, verses in chapters.items():
-        (root / lower / f"{chapter}.json").write_text(
-            json.dumps(verses, ensure_ascii=False), encoding="utf-8",
-        )
-        (alignment / f"{chapter}.json").write_text(json.dumps({
-            ref: {"alignments": [], "wordBank": []} for ref in verses
-        }), encoding="utf-8")
-    lines = [f"\\id {book}"]
-    for chapter, verses in chapters.items():
-        lines.extend([f"\\c {chapter}", "\\p"])
-        lines.extend(f"\\v {verse} OLD IMPORTED" for verse in verses)
-    (root / f"{lower}.usfm").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return PassageSemanticRuntime(TranslationCoreProject(root), f"location-{book}-{language}-{tmp_path.name}")
+def _runtime(tmp_path: Path, **kwargs) -> PassageSemanticRuntime:
+    """The shared builder, with this file's own project prefix (#74 phase 4).
+
+    Kept as a local name so the call sites below are untouched: this phase
+    moves and de-duplicates, it does not rewrite tests."""
+    return semantic_runtime(tmp_path, project_prefix="location", **kwargs)
 
 
 def norm(value: str) -> str:
@@ -404,28 +378,6 @@ def test_unsupported_analysis_and_no_qa_or_native_alignment_writes(tmp_path: Pat
         assert conn.execute("SELECT COUNT(*) FROM qa_findings").fetchone()[0] == 0
 
 
-def test_semantic_location_protocol_inspection_apis(tmp_path: Path) -> None:
-    runtime = _runtime(tmp_path, language="en", chapters={"1": {"3": "unrelated"}})
-    bridge = BridgeEngine(); bridge.project = runtime.project
-    bridge.passage_semantic_runtime = runtime
-    response = bridge.handle_request(EngineRequest(
-        id="run", method="semanticLocation.runRange",
-        params={"chapter": "1", "verse": "3"},
-    )).to_dict()
-    assert response["success"] is True, response
-    run = response["result"]
-    relationship_id = run["relationships"][0]["id"]
-    calls = [
-        ("semanticLocation.status", {"runId": run["id"]}),
-        ("semanticLocation.getRange", {"runId": run["id"]}),
-        ("semanticLocation.getRelationship", {"relationshipId": relationship_id}),
-        ("semanticLocation.getCandidates", {"runId": run["id"]}),
-        ("semanticLocation.getDiagnostics", {"runId": run["id"]}),
-    ]
-    assert all(
-        bridge.handle_request(EngineRequest(id=str(index), method=method, params=params)).to_dict()["success"]
-        for index, (method, params) in enumerate(calls)
-    )
 
 
 @pytest.mark.parametrize(("book", "chapter", "verse", "target", "pairs", "expected_kind"), [
