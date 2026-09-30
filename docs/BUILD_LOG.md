@@ -13694,3 +13694,33 @@ after. Neither review nor type checking would have found any of them.
 
 **Take it up again** if the suite becomes slow enough to be painful; the analysis
 above is the starting point, not something to redo.
+
+## 2026-09-30 — The Language QA latency gate gets a CI-only budget (#189)
+
+Fixing the project-guard path comparison (#184) let this gate reach its
+assertions for the first time since it was added, and it then failed:
+`verse.decide (languageQa)` p95 **112.27 ms** against a 50 ms contract. So the
+budget had been going unevaluated, not passing -- the script died before the
+check, and the step reported neither outcome.
+
+Identical code measures **13.79 ms** p95 on a Windows dev machine and 112.27 ms
+on the CI runner's two contended cores. About 8x, for an environment no
+translator uses. The pure scan is fine on both (p95 0.84 ms on CI), so this is
+the foreground RPC under contention rather than the scanner.
+
+**The maintainer chose to raise the budget so CI stops failing.** It is applied
+as `--p95-budget-ms 300` on the CI step only; the script's default stays 50 ms,
+which is what a developer gets locally and what the contract actually means.
+Raising the default instead would have let a 20x local regression through
+unnoticed -- the measured local number is 13.79 ms, so a flat 300 ms budget would
+not notice anything short of catastrophe.
+
+No code changed: `benchmark_language_qa.py` already took `--p95-budget-ms`.
+
+**What this does and does not buy.** A green CI run now means the gate ran and
+nothing took longer than 300 ms on two contended cores. It does not mean the
+50 ms contract holds; only a local run says that. If the CI step starts failing
+at 300 ms, that is a real signal rather than runner noise.
+
+Verified locally: `--p95-budget-ms 300` passes (exit 0); the default 50 ms also
+passes locally at 13.79 ms, so the local gate keeps its teeth.

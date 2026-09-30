@@ -244,16 +244,29 @@ jobs:
 
       - name: Language QA foreground latency gate
         # Layered-rules performance contract: while a Language QA pass runs,
-        # the RPCs Language QA owns or runs beside must keep a p95 under 50 ms,
-        # with the engine pinned to 2 cores. Those RPCs are ping, verse.get,
-        # a Language QA verse.decide, languageQa.status and languageQa.inline.
-        # It uses a synthetic 400-verse project, no translator data. The shared
-        # write paths (another verse.decide, verse.edit, project.open) are
-        # printed but not gated: they are over budget with or without a scan
-        # (BUILD_LOG 2026-09-24, Phase 2), which is not a Language QA cost.
+        # the RPCs Language QA owns or runs beside must keep a p95 under the
+        # budget, with the engine pinned to 2 cores. Those RPCs are ping,
+        # verse.get, a Language QA verse.decide, languageQa.status and
+        # languageQa.inline. It uses a synthetic 400-verse project, no
+        # translator data. The shared write paths (another verse.decide,
+        # verse.edit, project.open) are printed but not gated: they are over
+        # budget with or without a scan (BUILD_LOG 2026-09-24, Phase 2), which
+        # is not a Language QA cost.
+        #
+        # 300 ms HERE ONLY; the script's default stays 50 ms, which is what a
+        # developer gets locally and what the contract actually means (#189).
+        # Identical code measures 13.79 ms p95 on a dev machine and 112.27 ms on
+        # this runner's two contended cores -- roughly 8x, for an environment no
+        # translator uses. Raising the default instead would let a 20x local
+        # regression through unnoticed.
+        #
+        # This budget went unevaluated from the gate being added until
+        # 2026-09-30: the script died before its assertions on an unresolved
+        # project path (#184), so the step reported neither pass nor fail. If it
+        # starts failing at 300 ms, that is a real signal, not runner noise.
         env:
           PYTHONDONTWRITEBYTECODE: '1'
-        run: python ../scripts/benchmark_language_qa.py --gate --cores 2
+        run: python ../scripts/benchmark_language_qa.py --gate --cores 2 --p95-budget-ms 300
 
       - name: Language QA human-label accuracy gate
         # A Tamil reviewer's verdicts on the engine's own findings
