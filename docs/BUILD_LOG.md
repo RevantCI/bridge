@@ -13634,3 +13634,63 @@ to see the error.
 new test was confirmed to fail with the canonical comparison reverted, and it
 also asserts a genuinely different path is still refused, so the guard still
 guards. `tests/service`: 3488 passed.
+
+## 2026-09-30 — #74 phase 4, stopped deliberately with the numbers written down
+
+Phase 4 set out to take `bridge_service` importers among the tests from 32 to
+~15, so that affected-test selection (phase 3) would stop degrading to a full
+run. Two slices landed; the rest was stopped after measuring what it would cost
+and what the ceiling actually is.
+
+**What landed.**
+- `tests/support/semantic.py`: one `semantic_runtime` builder replacing three
+  drifted copies of `_runtime`, plus the `TAMIL` fixture that was byte-identical
+  in all three files. Stage 6B/7/8's protocol tests moved to
+  `tests/service/test_semantic_protocol_apis.py`; those three stage files no
+  longer import the dispatcher.
+- `tests/support/projects.py`: `fixture_project`, `two_book_collection`,
+  `_write_minimal_book`, `call` and `wait_for_job`, which seven modules had been
+  importing out of `tests/service/test_bridge_service.py`. **Cross-test imports
+  7 -> 0** — a test module importing another test module was phase 1's
+  unfinished business, and it also meant every borrower inherited the dispatcher
+  transitively.
+
+Importers 44 -> 42. The count moves slowly because freeing N files while creating
+one destination file nets N-1.
+
+**Why the rest was not worth doing.** Of the 42, **11 are inside
+`tests/service/` and should import the dispatcher**, and **14 more are genuinely
+coupled** — the dispatcher is used by a module-level helper every test in the
+file calls, or every test in the file is a protocol test. Only **18 are
+freeable**, and freeing all of them costs about four to five hours and lands at
+roughly 29 importers once destination files are counted, not the 15 the issue
+assumed. The issue's target appears to have been set without separating
+legitimate importers from incidental ones.
+
+At 29, a change to any `tc_ai_bridge` module still reaches about a third of the
+suite, and `scripts/affected_tests.py` falls back to a full run at 60%. So
+finishing phase 4 would most likely still not make phase 3 pay off.
+
+The correction family alone illustrates the ratio: 5 files, 7 tests, **net -4
+importers**, and it requires extracting 370 lines of helpers (`_publish_evidence`
+157, `_fixture` 110, `_analysis_job` 63) that are each still used by 4-19 tests
+staying behind — in the Stage 9B correction-ledger tests, the most
+safety-critical area in the suite.
+
+**Three mechanical hazards, all caught by running the tests, none by review.**
+Recorded because the next person to attempt this will hit them:
+- `ast.get_source_segment()` starts at the `def`, not the decorator. Copying that
+  way dropped `@pytest.fixture` from two fixtures; removing that way left the
+  decorators orphaned above whatever followed. 99 errors.
+- An extracted `wait_for_job` called `job_timeout`, imported at the top of the
+  file it came from. The copy lost the import and every job-waiting test raised
+  `NameError`.
+- A shared constant assembled from a partial read (`head -5`) silently lost the
+  fourth verse of a four-verse fixture.
+
+The guard that caught all three quickly was running `--collect-only` after every
+move (one second, and the count must stay at 4659) and the touched files straight
+after. Neither review nor type checking would have found any of them.
+
+**Take it up again** if the suite becomes slow enough to be painful; the analysis
+above is the starting point, not something to redo.

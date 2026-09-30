@@ -42,11 +42,38 @@ pytest tests/correction   # one area; tests/ is packaged by engine area (see bel
 engine: `service` (dispatcher, stdio, protocol), `jobs`, `persistence`,
 `semantic` (Stages 3–8), `review` (9A), `correction` (9B), `alignment`, `ai`,
 `project_io`, `connectors`, `resources`, `versification`; shared helpers in
-`tests/support/` (`paths.py` for repo paths — never `Path(__file__).parents[N]`).
+`tests/support/` (`paths.py` for repo paths — never `Path(__file__).parents[N]`;
+`projects.py` for fixture projects and the protocol `call`/`wait_for_job`;
+`semantic.py` for a passage-semantic runtime).
 Markers are registered with `--strict-markers` (`slow`, `subprocess`, `desktop`,
 `resources`, `stage3db`, `external`); directory- and file-level ones are applied
-automatically in `tests/conftest.py`. Selection by module (`scripts/affected_tests.py`)
-is #74 step 3 and not built yet.
+automatically in `tests/conftest.py`. `scripts/affected_tests.py` runs the tests
+your uncommitted changes could affect — useful for frontend, docs and test-only
+edits, but it degrades to the full suite for any engine module, for the reason in
+the next paragraph. The full suite on every push to `main` is the gate; there is
+no nightly or weekly run.
+
+**Two rules when adding an engine test.** Both exist because
+`bridge_service.py` is 5,300 lines and 42 test files import it, so "which tests
+could this change affect?" has no useful answer (#74 phase 4, stopped
+deliberately — see `docs/BUILD_LOG.md` 2026-09-30 for why finishing it does not
+pay off):
+
+1. **A test that drives an RPC belongs in `tests/service/`**, not appended to the
+   test file for the module behind it. One protocol test at the bottom of a stage
+   file makes that entire file import the dispatcher; that is how six stage files
+   ended up coupled to it. `tests/service/test_semantic_protocol_apis.py` is
+   where the Stage 6B/7/8 ones live.
+2. **Never import from another test module.** `from tests.service.test_bridge_service
+   import fixture_project` was in seven files and is now gone: a borrowed helper
+   drags the whole importing module's dependencies with it. Shared builders go in
+   `tests/support/`.
+
+**If you extract a helper**, take its decorators and its imports with it.
+`ast.get_source_segment()` starts at the `def`, so a copy loses `@pytest.fixture`
+and a removal leaves it orphaned on whatever follows; and a helper that calls
+something imported at the top of its old file breaks silently in its new one.
+Both happened during #74 phase 4 and both were caught only by running the tests.
 
 Single test file or test: `pytest tests/service/test_bridge_service.py -v` or
 `pytest tests/service/test_bridge_service.py::test_open_real_fixture_project -v`.
