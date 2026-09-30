@@ -13828,7 +13828,7 @@ not a parser regression; filed rather than fixed here.
 
 Re-measured on the maintainer's machine after the rebase, three cold runs each of the
 same `project.import` alternating a frozen build of `main` efb2683 and the rebased
-branch (`C:\code	amil\IRV_Tamil`, 66 books): main 18.2 / 17.3 / 19.9 s, branch
+branch (`C:\code\tamil\IRV_Tamil`, 66 books): main 18.2 / 17.3 / 19.9 s, branch
 19.2 / 20.0 / 17.8 s. The branch is inside main's own spread, so no regression — but
 this machine is roughly twice as slow on this import as the one the 10.2–10.7 s came
 from, and the new 15 s default fails here for `main` too. The optional gate is a
