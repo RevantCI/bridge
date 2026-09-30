@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,6 +34,42 @@ def _read_json(path: Path) -> Any:
         return json.load(f)
 
 
+def _replace_retrying(temp_name: str, path: Path, *, seconds: float = 2.0) -> None:
+    """`os.replace`, retried briefly while Windows says the target is in use.
+
+    On Windows a replace fails with `PermissionError` (WinError 5 / 32) if ANY
+    handle holds the destination -- Python's `open()` does not request
+    FILE_SHARE_DELETE. A reader that only holds the file for a few milliseconds
+    is still enough: Language QA's background pass reads every chapter of the
+    book, so a Scripture edit landing inside that window was refused outright
+    (#184, seen as `[WinError 5] Access is denied` on `rut/1.json` in CI).
+
+    Retrying rather than coordinating with the scanner, because the scanner is
+    not the only thing that opens these files: on Windows an antivirus or the
+    search indexer will do the same, and no amount of internal quiescing helps
+    there.
+
+    Deliberately NOT silent: after `seconds` the original error is raised. A
+    permission problem that is actually permanent must still fail loudly rather
+    than be absorbed by a retry loop.
+
+    This does not weaken the write. `os.replace` remains atomic; retrying only
+    chooses a later moment to perform it, and the temp file has already been
+    written, fsynced and validated by the caller.
+    """
+    deadline = time.monotonic() + seconds
+    delay = 0.005
+    while True:
+        try:
+            os.replace(temp_name, path)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)
+
+
 def _write_json_atomic(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(prefix=path.name + '.', suffix='.tmp', dir=str(path.parent))
@@ -44,7 +81,7 @@ def _write_json_atomic(path: Path, data: Any) -> None:
             os.fsync(f.fileno())
         # Validate the exact bytes before replacement.
         _read_json(Path(temp_name))
-        os.replace(temp_name, path)
+        _replace_retrying(temp_name, path)
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
