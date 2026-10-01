@@ -211,6 +211,41 @@ def test_input_the_parser_cannot_read_is_a_parse_error(monkeypatch):
         parse_usfm("\\id TIT\n\\c 1\n\\v 1 a\n")
 
 
+def test_structure_lists_chapters_verses_and_paragraph_markers_with_the_verse_they_introduce():
+    source = (
+        "\\id PSA\n\\c 1\n\\s Book One\n\\p\n"
+        "\\v 1 Blessed is the man.\n"
+        "\\q2 who walks not.\n"
+        "\\s The wicked\n\\q1 \\v 2 Not so,\n"
+        "\\b\n\\c 2\n\\p\n\\v 1 Why do the nations rage?\n"
+    )
+    parsed = parse_usfm(source)
+    assert [(s.kind, s.marker, s.chapter, s.verse) for s in parsed.structure] == [
+        ("chapter", "c", "1", "1"),
+        ("para", "s", "1", "1"),
+        ("para", "p", "1", "1"),
+        ("verse", "v", "1", "1"),
+        ("para", "q2", "1", "2"),      # a continuation line's marker introduces the NEXT verse
+        ("para", "s", "1", "2"),
+        ("para", "q1", "1", "2"),      # the `\q1` that opens the mid-line `\v 2`
+        ("verse", "v", "1", "2"),
+        ("para", "b", "1", ""),        # after a chapter's last verse: introduces no verse
+        ("chapter", "c", "2", "1"),
+        ("para", "p", "2", "1"),
+        ("verse", "v", "2", "1"),
+    ]
+    offsets = [s.offset for s in parsed.structure]
+    assert offsets == sorted(offsets) and all(source[o] == "\\" for o in offsets)
+
+
+def test_structure_on_real_files_has_one_verse_entry_per_verse(tamil_php_usfm, tamil_luk_usfm):
+    for path in (tamil_php_usfm, tamil_luk_usfm):
+        parsed = parse_usfm(path.read_text(encoding="utf-8-sig"))
+        verse_entries = [s for s in parsed.structure if s.kind == "verse"]
+        assert [(s.chapter, s.verse) for s in verse_entries] == [(v.chapter, v.verse) for v in parsed.verses]
+        assert [s.chapter for s in parsed.structure if s.kind == "chapter"] == list(parsed.chapters)
+
+
 def _text_from_spans(source: str, verse) -> str:
     head = source[verse.start:verse.head_end]
     tail = [source[a:b] for a, b in verse.tail_spans]

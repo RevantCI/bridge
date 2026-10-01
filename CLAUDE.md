@@ -529,10 +529,14 @@ change. **This is scheduled work, not accepted behaviour.**
     `display: {plain, notes, removed, styles, warnings}` (code points); the
     `verseDisplay` store holds it, `utils/verseDisplay.ts` maps raw finding
     offsets onto it, and `usfmNotes.ts` is layout only. A verse with no display
-    (an optimistic save in flight) renders its raw text. Still not on it:
-    `usfm_passages.py` and `passage_semantic_runtime.py` for Stages 4–8 — see
-    #91. No new module, engine or frontend, may regex-parse USFM: it calls one
-    of these two.
+    (an optimistic save in flight) renders its raw text. **Stages 4–8's passage
+    index is on it too** (Phase 3b): `UsfmPassageIndex.from_text` builds one
+    segment per parsed verse with `plain_text` and its window boundaries from
+    `ParsedUsfm.structure` (chapter/verse/paragraph events in document order,
+    each with the verse it introduces); `strip_usfm_inline` is an alias. Still
+    not on it: `passage_semantic_runtime.build_current_text_overlay`'s source
+    skeleton (Phase 3c). No new module, engine or frontend, may regex-parse
+    USFM: it calls one of these two.
 
 ## Working in this repo
 

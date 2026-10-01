@@ -14204,3 +14204,39 @@ under it.
 this one; five cache tests (`test_overlay_cache.py`); the 34 runtime tests
 unchanged; full suite and frozen smoke in the commit. Both goldens pass by name
 and their fixture files are untouched.
+
+## 2026-10-01 — Phase 3b: the passage index reads through the parser (#91)
+
+**What.** `ParsedUsfm` gained `structure`: every chapter, verse and
+paragraph-level marker of the body in document order, each with the verse it
+introduces (a `\p` or `\s` before `\v 3` carries "3"; one after a chapter's last
+verse carries ""). `UsfmPassageIndex.from_text` now builds one segment per parsed
+verse, its text from `usfm_verse.plain_text`, and a window boundary before the
+first verse of a chapter and before any verse preceded by a strong paragraph
+marker (`_STRONG_BOUNDARY_MARKERS`, unchanged); the terminal-punctuation flush is
+unchanged. `strip_usfm_inline` is an alias for `plain_text`; the index's seven
+regexes and its non-Scripture marker set are gone. `from_path` decodes through
+`read_usfm_text`. Public API unchanged; the runtime's three call sites and the
+Stage 3 tests needed no edit.
+
+**What the snapshot caught.** Window boundaries: **zero moved**, across IRV PHP
+(84 windows), IRV LUK (983) and the three overlay shapes; structure markers and
+mismatches identical. Segment text: 150 Tamil Luke verses changed, every one by
+spacing only and every one longer than before — the old `_INLINE_MARKER_RE`
+(`\[A-Za-z0-9]+\*?(?:\s+)?`) deleted the whitespace after a *closing* marker as
+well as an opener's, so `\wj text\wj* more` read as "textmore". The fragment
+reader keeps a closer's following space (a rule pinned since Phase 1a). Those 150
+fingerprints are the whole diff of the re-recorded snapshot (300 lines: 150
+segment hashes, 150 window fingerprints), done in its own commit. Nothing reads
+Luke's segment text into a golden; Stage 6B's fixture verses carry no markup.
+
+**Also fixed on the way, by construction:** a mid-line `\q1 \v 1` is a verse for
+the index now (the regex folded it into the previous verse with the number as
+text), and `\d` superscriptions and verse continuation lines behave exactly as
+before (they were in the verse's text region already).
+
+**Verified.** Two new parser tests (structure events on a synthetic book; one
+verse entry per verse on both IRV files); the snapshot test against the
+re-recorded file; `test_semantic_mapping_stage3.py`, the runtime and cache tests,
+and **both goldens by name** — 114 tests in that targeted run; full suite and
+frozen smoke in the commit. Fixture files other than the snapshot untouched.

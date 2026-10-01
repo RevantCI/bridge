@@ -111,6 +111,21 @@ class UsfmVerse:
 
 
 @dataclass(frozen=True)
+class UsfmStructure:
+    """One structural element of the book body, in document order (#91 Phase 3b):
+    a chapter, a verse, or a paragraph-level marker (`\\p`, `\\q1`, `\\s`, `\\b` …).
+    `verse` is the verse this element belongs to or introduces: for a verse,
+    itself; for a chapter or a paragraph marker, the next verse that follows it
+    in the same chapter, or "" when none does. `offset` is the code-point
+    offset of the marker in the source."""
+    kind: str      # "chapter" | "verse" | "para"
+    marker: str    # "c", "v", or the paragraph style lower-cased
+    chapter: str
+    verse: str
+    offset: int
+
+
+@dataclass(frozen=True)
 class ParsedUsfm:
     book_code: str  # as written after \id, upper-cased; "" when there is no \id
     id_line: str    # everything after "\id " on that line
@@ -119,6 +134,7 @@ class ParsedUsfm:
     verses: tuple[UsfmVerse, ...]
     headings: tuple[UsfmHeading, ...]
     warnings: tuple[str, ...]
+    structure: tuple[UsfmStructure, ...] = ()
 
     def header(self, tag: str) -> str:
         for item in self.headers:
@@ -300,8 +316,12 @@ def parse_usfm(text: str) -> ParsedUsfm:
             if not seen_chapter:
                 headers.append(UsfmHeader(marker.group("tag") if marker else style, ""))
                 events.append(("header", at, str(len(headers) - 1)))
-            elif style.lower() in HEADING_MARKERS:
-                events.append(("h", at, style.lower()))
+            else:
+                # Every paragraph-level marker in the body is structure; the
+                # heading ones are also cut out of verse text (the "h" event).
+                events.append(("p", at, style.lower()))
+                if style.lower() in HEADING_MARKERS:
+                    events.append(("h", at, style.lower()))
 
     blocks.sort()
     events.sort(key=lambda item: item[1])
@@ -323,6 +343,11 @@ def parse_usfm(text: str) -> ParsedUsfm:
     chapters: list[str] = []
     verses: list[UsfmVerse] = []
     headings: list[UsfmHeading] = []
+    # Document structure: chapters, verses and paragraph markers in order. A
+    # chapter's or paragraph marker's `verse` is the next verse in its chapter,
+    # filled in when that verse opens (`open_structure` holds the indexes).
+    structure: list[UsfmStructure] = []
+    open_structure: list[int] = []
     chapter = ""
     # Headings seen since the last verse opened, waiting to learn which verse
     # they introduce.
@@ -391,6 +416,12 @@ def parse_usfm(text: str) -> ParsedUsfm:
             headings.append(UsfmHeading(chapter, verse, tag, heading_text))
         pending.clear()
 
+    def resolve_open_structure(verse: str) -> None:
+        for index in open_structure:
+            item = structure[index]
+            structure[index] = UsfmStructure(item.kind, item.marker, item.chapter, verse, item.offset)
+        open_structure.clear()
+
     for kind, at, value in events:
         if kind == "c":
             close_verse(at)
@@ -399,9 +430,15 @@ def parse_usfm(text: str) -> ParsedUsfm:
                 # introduce; filing it a verse early beats losing it.
                 file_pending(verses[-1].verse)
             pending.clear()
+            open_structure.clear()  # nothing after a chapter's last verse introduces one
             chapter = value
             if value not in chapters:
                 chapters.append(value)
+            structure.append(UsfmStructure("chapter", "c", chapter, "", at))
+            open_structure.append(len(structure) - 1)
+        elif kind == "p":
+            structure.append(UsfmStructure("para", value, chapter, "", at))
+            open_structure.append(len(structure) - 1)
         elif kind == "v" and not value.strip():
             # `\v` with no number (`\v \x - \xo 61:2 ...` in a real IRV Isaiah).
             # The line regex this replaced stored the text under the key "\x".
@@ -423,6 +460,8 @@ def parse_usfm(text: str) -> ParsedUsfm:
         elif kind == "v":
             close_verse(at)
             file_pending(value)
+            resolve_open_structure(value)
+            structure.append(UsfmStructure("verse", "v", chapter, value, at))
             marker = _VERSE_MARKER_AT.match(text, at)
             current = {
                 "chapter": chapter, "verse": value,
@@ -446,4 +485,5 @@ def parse_usfm(text: str) -> ParsedUsfm:
         verses=tuple(verses),
         headings=tuple(headings),
         warnings=tuple(bridge_warnings) + tuple(_warning_text(error) for error in errors),
+        structure=tuple(structure),
     )

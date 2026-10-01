@@ -13,19 +13,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-import re
 from pathlib import Path
 from typing import Iterable, Iterator
 
-_VERSE_RE = re.compile(r"^\\v\s+([^\s]+)\s*(.*)$")
-_CHAPTER_RE = re.compile(r"^\\c\s+([^\s]+)")
-_ID_RE = re.compile(r"^\\id\s+([^\s]+)")
-_MARKER_RE = re.compile(r"^\\([A-Za-z0-9]+)\*?\s*(.*)$")
-_FOOTNOTE_RE = re.compile(r"\\f\s+.*?\\f\*", re.DOTALL)
-_XREF_RE = re.compile(r"\\x\s+.*?\\x\*", re.DOTALL)
-_W_RE = re.compile(r"\\w\s+([^|\\]+?)(?:\|[^\\]*?)?\\w\*")
-_INLINE_MARKER_RE = re.compile(r"\\[A-Za-z0-9]+\*?(?:\s+)?")
-_WS_RE = re.compile(r"\s+")
+from .usfm_parser import UsfmParseError, parse_usfm, read_usfm_text
+from .usfm_verse import plain_text
 
 # Strong boundaries are structural hints. Poetry/list line markers are not
 # boundaries by themselves; otherwise poetic passages would degenerate to one
@@ -34,21 +26,18 @@ _STRONG_BOUNDARY_MARKERS = {
     "p", "m", "b", "s", "s1", "s2", "s3", "s4", "ms", "ms1", "ms2",
     "mr", "r", "sr", "cl", "cd", "qa",
 }
-_NON_SCRIPTURE_MARKERS = {
-    "id", "ide", "h", "h1", "h2", "h3", "toc1", "toc2", "toc3",
-    "mt", "mt1", "mt2", "mt3", "mte", "mte1", "mte2", "rem",
-    "s", "s1", "s2", "s3", "s4", "ms", "ms1", "ms2", "mr", "r", "sr",
-}
 _TERMINAL_PUNCT = tuple(".!?…।॥؟。！？")
 
 
 def strip_usfm_inline(text: str) -> str:
-    """Return visible Scripture text while dropping notes/xrefs/USFM markup."""
-    value = _FOOTNOTE_RE.sub("", text)
-    value = _XREF_RE.sub("", value)
-    value = _W_RE.sub(lambda m: m.group(1), value)
-    value = _INLINE_MARKER_RE.sub("", value)
-    return _WS_RE.sub(" ", value).strip()
+    """Visible Scripture text of one verse string, whitespace collapsed.
+
+    Since #91 Phase 3b this is the fragment reader (`usfm_verse.plain_text`),
+    the same text checks, alignment and the reader show. The regex it replaced
+    deleted the space after a *closing* style marker too (`\\wj text\\wj* more`
+    read as "textmore"); the reader keeps it.
+    """
+    return plain_text(text)
 
 
 def _verse_bounds(verse: str) -> tuple[int | None, int | None]:
@@ -120,85 +109,52 @@ class UsfmPassageIndex:
 
     @classmethod
     def from_path(cls, path: str | Path, *, book_hint: str = "") -> "UsfmPassageIndex":
-        return cls.from_text(Path(path).read_text(encoding="utf-8-sig"), book_hint=book_hint)
+        return cls.from_text(read_usfm_text(path), book_hint=book_hint)
 
     @classmethod
     def from_text(cls, text: str, *, book_hint: str = "") -> "UsfmPassageIndex":
-        book = book_hint.upper().strip()
-        chapter = "0"
-        raw_segments: list[dict[str, object]] = []
-        current: dict[str, object] | None = None
-        pending_boundary = True
+        r"""One segment per verse the document parser finds, windows from its
+        structure (#91 Phase 3b).
 
-        def finish_current() -> None:
-            nonlocal current
-            if current is None:
-                return
-            parts = [p for p in current.get("parts", []) if isinstance(p, str) and p.strip()]
-            current["text"] = _WS_RE.sub(" ", " ".join(parts)).strip()
-            raw_segments.append(current)
-            current = None
-
-        for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
-            line = raw_line.strip("\ufeff")
-            if not line.strip():
-                continue
-            mid = _ID_RE.match(line)
-            if mid:
-                if not book:
-                    book = mid.group(1).upper()
-                continue
-            mch = _CHAPTER_RE.match(line)
-            if mch:
-                finish_current()
-                chapter = mch.group(1)
-                pending_boundary = True
-                continue
-            mv = _VERSE_RE.match(line)
-            if mv:
-                finish_current()
-                verse, body = mv.group(1), mv.group(2)
-                current = {
-                    "chapter": chapter,
-                    "verse": verse,
-                    "parts": [strip_usfm_inline(body)] if body.strip() else [],
-                    "boundary_before": pending_boundary,
-                }
-                pending_boundary = False
-                continue
-
-            mm = _MARKER_RE.match(line)
-            if mm:
-                marker, body = mm.group(1).lower(), mm.group(2)
-                if marker in _STRONG_BOUNDARY_MARKERS:
-                    # Boundary affects the *next* verse. Text on a paragraph/poetry
-                    # line after a verse marker still belongs to the active verse.
-                    pending_boundary = True
-                if current is not None and body.strip() and marker not in _NON_SCRIPTURE_MARKERS:
-                    visible = strip_usfm_inline(body)
-                    if visible:
-                        current.setdefault("parts", []).append(visible)
-                continue
-
-            if current is not None:
-                visible = strip_usfm_inline(line)
-                if visible:
-                    current.setdefault("parts", []).append(visible)
-
-        finish_current()
+        Where a verse starts and ends is `usfm_parser.parse_usfm`'s decision --
+        the same one import makes, so a mid-line ``\q1 \v 1`` is a verse here
+        too (the line regex this replaced folded it into the previous verse).
+        A segment's text is what the verse shows (`usfm_verse.plain_text`),
+        headings already cut out by the parser. A window boundary falls before
+        the first verse of a chapter and before any verse preceded by a strong
+        paragraph-level marker (`_STRONG_BOUNDARY_MARKERS`); a window also ends
+        after a verse that ends in terminal punctuation.
+        """
+        try:
+            parsed = parse_usfm(text)
+        except UsfmParseError as exc:
+            raise ValueError(f"USFM could not be parsed: {exc}") from exc
+        book = (book_hint or parsed.book_code).upper().strip()
         if not book:
             raise ValueError("USFM has no \\id marker and no book_hint was supplied")
 
+        # Boundaries come from the structure walk: a chapter or a strong marker
+        # marks the next verse; the first verse of the book is always marked.
+        boundary_before: dict[int, bool] = {}
+        pending_boundary = True
+        verse_index = 0
+        for item in parsed.structure:
+            if item.kind == "chapter" or (item.kind == "para" and item.marker in _STRONG_BOUNDARY_MARKERS):
+                pending_boundary = True
+            elif item.kind == "verse":
+                boundary_before[verse_index] = pending_boundary
+                pending_boundary = False
+                verse_index += 1
+
         segments: list[TargetSegment] = []
         boundaries: list[bool] = []
-        for i, item in enumerate(raw_segments):
-            ch = str(item["chapter"])
-            verse = str(item["verse"])
+        for i, verse in enumerate(parsed.verses):
             segments.append(TargetSegment(
-                reference=f"{book} {ch}:{verse}", book=book, chapter=ch, verse=verse,
-                text=str(item.get("text") or ""), ordinal=i,
+                reference=f"{book} {verse.chapter}:{verse.verse}", book=book,
+                chapter=verse.chapter, verse=verse.verse,
+                text=plain_text(verse.text), ordinal=i,
             ))
-            boundaries.append(bool(item.get("boundary_before")))
+            boundaries.append(boundary_before.get(i, i == 0))
 
         windows: list[PassageWindow] = []
         acc: list[TargetSegment] = []
