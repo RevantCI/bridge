@@ -95,6 +95,30 @@ def _engine(tmp_path: Path) -> BridgeEngine:
     return BridgeEngine(settings=AppSettings(path=tmp_path / "settings.json"))
 
 
+_SCAN_SCHEMA = "translationCore.alignmentData.compatibility-scan.v1"
+
+
+def _scan_report(report: dict) -> dict:
+    """The compatibility scan's own report, chosen by schema rather than position.
+
+    `migration_report()["runs"]` holds every run for the project ordered by
+    `started_at, id`, and `alignment_compatibility_scan` saves up to two of them:
+    an `...invalidation-state.v1` run whose report is `{"staled": N}`, and the
+    compatibility scan. `runs[-1]` assumes the scan is last.
+
+    It usually is, and once was not: CI failed with `KeyError: 'quarantined'`
+    while the identical assertion passed locally and on the next run. The state
+    run has no `quarantined` key, so reading the wrong one fails in a way that
+    says nothing about why.
+    """
+    scans = [run for run in report["runs"] if run["sourceSchema"] == _SCAN_SCHEMA]
+    assert scans, (
+        "no compatibility-scan run in this report; schemas present: "
+        f"{[run['sourceSchema'] for run in report['runs']]}"
+    )
+    return scans[-1]["report"]
+
+
 def test_first_open_initializes_companion_and_second_open_is_idempotent(
     tmp_path: Path, stage4_project: Path,
 ) -> None:
@@ -472,7 +496,7 @@ def test_raw_import_stubs_are_skipped_but_real_empty_bottoms_are_not(
     report = engine.passage_semantic_runtime.migration_report()
 
     assert report["quarantineByReason"].get("LEGACY_EMPTY_BOTTOM_WORDS_AMBIGUOUS", 0) == 1
-    latest = report["runs"][-1]["report"]
+    latest = _scan_report(report)
     assert latest["rawImportStubsSkipped"] == 2
     assert latest["legacyEmptyBottomWords"] == 1
     # Skipping is not rewriting: the file on disk is untouched either way.
@@ -554,7 +578,7 @@ def test_alignment_compatibility_scan_quarantines_in_one_batch(
     report = engine.passage_semantic_runtime.migration_report()
     assert report["quarantineByReason"]["LEGACY_EMPTY_BOTTOM_WORDS_AMBIGUOUS"] == 120
     assert batches == [120]
-    assert report["runs"][-1]["report"]["quarantined"] == 120
+    assert _scan_report(report)["quarantined"] == 120
     # Memoized against the alignment folder's content digest: a second open
     # does not scan again, so it writes nothing.
     _call(engine, "project.open", {"path": str(stage4_project)})
@@ -675,3 +699,36 @@ def test_overlay_still_rejects_text_that_is_not_the_current_target(
     monkeypatch.setattr(psr, "_authoritative_current_segments", diverged)
     with pytest.raises(FoundationValidationError, match="non-authoritative"):
         build_current_text_overlay(TranslationCoreProject(root))
+
+
+def test_the_scan_report_is_found_by_schema_even_when_it_is_not_the_last_run() -> None:
+    """Pins the helper against the case that actually broke CI.
+
+    `runs` is ordered by `started_at, id`, and both runs are written inside one
+    scan call, so the ordering between them is not something a test should rely
+    on. Here the invalidation-state run is deliberately last — reading `runs[-1]`
+    would pick `{"staled": 3}` and raise `KeyError: 'quarantined'`, which is
+    exactly the CI failure on f817033.
+    """
+    report = {
+        "runs": [
+            {"sourceSchema": _SCAN_SCHEMA, "report": {"quarantined": 120}},
+            {"sourceSchema": "translationCore.alignmentData.invalidation-state.v1",
+             "report": {"staled": 3}},
+        ],
+    }
+    assert _scan_report(report) == {"quarantined": 120}
+    assert report["runs"][-1]["report"] != _scan_report(report), (
+        "if these were equal the test would pass with the old runs[-1] too"
+    )
+
+
+def test_a_report_with_no_scan_run_says_so_rather_than_raising_a_key_error() -> None:
+    """The old failure mode was `KeyError: 'quarantined'`, which names neither the
+    run that was read nor the ones available."""
+    report = {"runs": [
+        {"sourceSchema": "translationCore.alignmentData.invalidation-state.v1",
+         "report": {"staled": 0}},
+    ]}
+    with pytest.raises(AssertionError, match="no compatibility-scan run"):
+        _scan_report(report)
