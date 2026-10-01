@@ -9,13 +9,14 @@ translationCore projection.
 from __future__ import annotations
 
 from bisect import bisect_left
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 import re
+import threading
 import time
 import unicodedata
 from typing import Any, Iterable
@@ -118,8 +119,7 @@ def _json_hash(value: Any) -> str:
     return _sha256_text(payload)
 
 
-def _read_usfm(path: Path) -> str:
-    raw = path.read_bytes()
+def _decode_usfm(raw: bytes, path: Path) -> str:
     for encoding in ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
         try:
             value = raw.decode(encoding)
@@ -128,6 +128,105 @@ def _read_usfm(path: Path) -> str:
         if "\\c" in value and "\\v" in value:
             return value.replace("\r\n", "\n").replace("\r", "\n")
     raise UnicodeError(f"Cannot decode structural USFM: {path}")
+
+
+def _read_usfm(path: Path) -> str:
+    return _decode_usfm(path.read_bytes(), path)
+
+
+# --- the overlay's two caches (#91 Phase 3a) ---------------------------------
+#
+# rebuild_current_passage runs in loops -- affected re-analysis, word-alignment
+# evidence, Stage 6B once per range -- and every call rebuilt the overlay from
+# scratch: a pass over the preserved source, then two whole-book parses of
+# synthetic USFM. Nothing in those inputs changes between calls except when a
+# verse is edited (the chapter JSON) or, rarely, the preserved file itself.
+#
+# Level 1 keys the source *skeleton* -- what the preserved file contributes:
+# chapter, verse and marker events in document order, no Scripture -- on the
+# file's SHA-256, which the overlay already computed for `structure_hash`.
+# Level 2 keys the finished overlay on (path, source hash, hash of the current
+# chapter JSON). A verse edit misses level 2 and hits level 1. A guard failure
+# raises before anything is stored, so a bad build is never served again.
+
+_METADATA_MARKERS = frozenset({"id", "ide", "h", "h1", "h2", "h3", "toc1", "toc2", "toc3"})
+_CACHE_LIMIT = 8
+_CACHE_LOCK = threading.Lock()
+_SKELETON_CACHE: "OrderedDict[str, tuple[_SkeletonEvent, ...]]" = OrderedDict()
+_OVERLAY_CACHE: "OrderedDict[tuple[str, str, str], CurrentTextOverlay]" = OrderedDict()
+
+
+@dataclass(frozen=True)
+class _SkeletonEvent:
+    """One line of the preserved source that carries structure.
+
+    ``kind`` is "c" (chapter; value = number), "v" (verse; value = the
+    structural verse as written) or "m" (any other marker line; value = the
+    marker, lower-cased). ``inline`` are the character markers found on the
+    rest of that line, in order. ``keep`` says whether a marker line survives
+    into the synthetic text (metadata markers do not).
+    """
+    kind: str
+    value: str
+    inline: tuple[str, ...] = ()
+    keep: bool = True
+
+
+def _source_skeleton(source: str) -> tuple[_SkeletonEvent, ...]:
+    """The preserved file's structure, with every body discarded. A pure
+    function of the source text, which is why it can be cached by its hash."""
+    events: list[_SkeletonEvent] = []
+    for raw_line in source.split("\n"):
+        chapter_match = _CHAPTER.match(raw_line)
+        if chapter_match:
+            events.append(_SkeletonEvent("c", chapter_match.group(1)))
+            continue
+        verse_match = _VERSE.match(raw_line)
+        if verse_match:
+            events.append(_SkeletonEvent(
+                "v", verse_match.group(1), tuple(_INLINE_MARKER.findall(verse_match.group(2))),
+            ))
+            continue
+        marker_match = _LINE_MARKER.match(raw_line)
+        if marker_match:
+            marker = marker_match.group(1).lower()
+            events.append(_SkeletonEvent(
+                "m", marker, tuple(_INLINE_MARKER.findall(marker_match.group(2))),
+                keep=marker not in _METADATA_MARKERS,
+            ))
+    return tuple(events)
+
+
+def _lru_get(cache: "OrderedDict", key: Any) -> Any:
+    with _CACHE_LOCK:
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+    return None
+
+
+def _lru_put(cache: "OrderedDict", key: Any, value: Any) -> None:
+    with _CACHE_LOCK:
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > _CACHE_LIMIT:
+            cache.popitem(last=False)
+
+
+def _skeleton_for(source_hash: str, source: str) -> tuple[_SkeletonEvent, ...]:
+    cached = _lru_get(_SKELETON_CACHE, source_hash)
+    if cached is None:
+        cached = _source_skeleton(source)
+        _lru_put(_SKELETON_CACHE, source_hash, cached)
+    return cached
+
+
+def clear_overlay_caches() -> None:
+    """Drop both caches. Tests use it; production never needs to, because every
+    key already changes when its inputs do."""
+    with _CACHE_LOCK:
+        _SKELETON_CACHE.clear()
+        _OVERLAY_CACHE.clear()
 
 
 def _verse_key(value: str) -> tuple[int, int, str]:
@@ -277,7 +376,8 @@ def build_current_text_overlay(project: Any) -> CurrentTextOverlay:
 
     source_path = Path(path)
     try:
-        source = _read_usfm(source_path)
+        source_bytes = source_path.read_bytes()
+        source = _decode_usfm(source_bytes, source_path)
     except (OSError, UnicodeError) as exc:
         # Safe fallback still uses only current text.
         class NoUsfmProject:
@@ -306,6 +406,13 @@ def build_current_text_overlay(project: Any) -> CurrentTextOverlay:
             overlay.index, overlay.structure_markers, (mismatch,),
             _sha256_text("UNREADABLE_PRESERVED_USFM"), str(source_path),
         )
+
+    source_hash = hashlib.sha256(source_bytes).hexdigest()
+    overlay_key = (str(source_path), source_hash, _json_hash(by_chapter))
+    cached_overlay = _lru_get(_OVERLAY_CACHE, overlay_key)
+    if cached_overlay is not None:
+        return cached_overlay
+    events = _skeleton_for(source_hash, source)
 
     synthetic: list[str] = [f"\\id {book}"]
     markers: list[PassageStructureMarker] = []
@@ -351,21 +458,19 @@ def build_current_text_overlay(project: Any) -> CurrentTextOverlay:
                 })
                 append_current(verse)
 
-    for raw_line in source.split("\n"):
-        chapter_match = _CHAPTER.match(raw_line)
-        if chapter_match:
+    for event in events:
+        if event.kind == "c":
             if chapter != "0":
                 flush_unseen(chapter)
-            chapter = chapter_match.group(1)
+            chapter = event.value
             synthetic.append(f"\\c {chapter}")
             markers.append(PassageStructureMarker(
                 PassageStructureKind.CHAPTER, "c", f"{book} {chapter}:front",
                 None, None, order,
             )); order += 1
             continue
-        verse_match = _VERSE.match(raw_line)
-        if verse_match:
-            structural_verse = verse_match.group(1)
+        if event.kind == "v":
+            structural_verse = event.value
             current_keys = list(by_chapter.get(chapter, {}))
             matches = [key for key in current_keys if key == structural_verse]
             if not matches:
@@ -389,24 +494,23 @@ def build_current_text_overlay(project: Any) -> CurrentTextOverlay:
                     PassageStructureKind.VERSE_BRIDGE, "v",
                     f"{book} {chapter}:{matches[0]}", None, None, order,
                 )); order += 1
-            for inline in _INLINE_MARKER.findall(verse_match.group(2)):
+            for inline in event.inline:
                 markers.append(PassageStructureMarker(
                     _structure_kind(inline), inline.lower(),
                     f"{book} {chapter}:{matches[0]}" if matches else None,
                     None, None, order,
                 )); order += 1
             continue
-        marker_match = _LINE_MARKER.match(raw_line)
-        if marker_match:
-            marker = marker_match.group(1).lower()
+        if event.kind == "m":
+            marker = event.value
             # Metadata/id text and every marker body are discarded. Only the
             # marker itself survives as structure.
-            if marker not in {"id", "ide", "h", "h1", "h2", "h3", "toc1", "toc2", "toc3"}:
+            if event.keep:
                 synthetic.append(f"\\{marker}")
             markers.append(PassageStructureMarker(
                 _structure_kind(marker), marker, None, None, None, order,
             )); pending_marker_indexes.append(len(markers) - 1); order += 1
-            for inline in _INLINE_MARKER.findall(marker_match.group(2)):
+            for inline in event.inline:
                 markers.append(PassageStructureMarker(
                     _structure_kind(inline), inline.lower(), None, None, None, order,
                 )); pending_marker_indexes.append(len(markers) - 1); order += 1
@@ -430,10 +534,11 @@ def build_current_text_overlay(project: Any) -> CurrentTextOverlay:
             raise FoundationValidationError(
                 f"Current-text overlay produced non-authoritative text at {segment.reference}"
             )
-    return CurrentTextOverlay(
-        index, tuple(markers), tuple(mismatches), hashlib.sha256(source_path.read_bytes()).hexdigest(),
-        str(source_path),
+    overlay = CurrentTextOverlay(
+        index, tuple(markers), tuple(mismatches), source_hash, str(source_path),
     )
+    _lru_put(_OVERLAY_CACHE, overlay_key, overlay)
+    return overlay
 
 
 def project_current_passage_index(project: Any) -> UsfmPassageIndex:

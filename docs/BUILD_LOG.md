@@ -14157,3 +14157,50 @@ the engine is the only side.
 click-budget timing test failed once under another session's cargo build and
 passed twice alone); `npm run build` clean. Engine untouched in this slice except
 that comment. Not run: desktop (QA matrix A92).
+
+## 2026-10-01 — Phase 3a: a snapshot of the passage windows, and a two-level cache on the overlay (#91)
+
+**Why first.** Phases 3b/3c move `UsfmPassageIndex.from_text` and
+`build_current_text_overlay` from their line regexes onto `usfm_parser`. Window
+boundaries feed Stage 6B's structural scopes and the passage fingerprint, so a
+boundary that moves would move the Stage 6B golden — and a moved golden is a
+finding, never a re-baseline. So before anything is swapped: record what today's
+code produces, and make the overlay cheap enough that a parser twenty times slower
+than the regex can sit under `rebuild_current_passage`, which runs in loops.
+
+**The snapshot.** `tests/semantic/test_passage_windows_snapshot.py` records, for
+both IRV fixtures (`UsfmPassageIndex.from_path`) and three fixture-project shapes
+(`build_current_text_overlay` on the shared `semantic_runtime` project, the Stage
+6A test's heading-and-`\q1` shape, and the runtime test's marker-bearing chapter
+JSON): every window's id, references and fingerprint, every segment's reference
+and text hash, the structure markers and the mismatches. IRV PHP: 104 segments in
+84 windows; IRV LUK: 1,140 in 983. The file,
+`tests/fixtures/passage-windows-snapshot-v1.json`, has no `golden` in its name on
+purpose — it is a characterisation snapshot, written from **main's module before
+this refactor** (checked: the module that wrote it has no `clear_overlay_caches`),
+and it is deleted in Phase 4. Regenerating it is `BRIDGE_WRITE_PASSAGE_SNAPSHOT=1`,
+a deliberate act.
+
+**The cache.** `build_current_text_overlay` used to interleave the regex pass over
+the preserved source with the current-text matching, so nothing could be cached.
+The pass is now `_source_skeleton(source)`: a pure function of the file text that
+yields chapter/verse/marker events in document order with every body discarded.
+Level 1 caches those events by the file's SHA-256, which the overlay already
+computed for `structure_hash` (the file is now read once, not twice). Level 2
+caches the finished `CurrentTextOverlay` by `(path, source hash, hash of the
+current chapter JSON)`. A verse edit misses level 2 and hits level 1; a changed
+source misses both; the authoritative-text guard runs on every fill and raises
+before anything is stored, so a bad build is never served. Both are small LRUs
+(8 entries) behind one lock; `clear_overlay_caches()` exists for tests.
+
+**Measured** (`pytest tests/semantic --durations=40`, each run alone):
+233 tests in 311.8 s before; 239 tests (the six new ones included) in 277.3 s
+after. Over the 34 slowest tests present in both lists: 183.8 s → 149.2 s. The
+biggest single moves are the Stage 8/9B tests that rebuild passages repeatedly
+(7.8 s → 4.4 s, 8.8 s → 5.6 s). This is the unchanged regex code; 3c puts usfmtc
+under it.
+
+**Verified.** The snapshot test passes against both the pre-refactor module and
+this one; five cache tests (`test_overlay_cache.py`); the 34 runtime tests
+unchanged; full suite and frozen smoke in the commit. Both goldens pass by name
+and their fixture files are untouched.
