@@ -84,6 +84,18 @@ def plain_text(raw: str) -> str:
     return " ".join(lift_verse(raw).plain.split())
 
 
+def marker_names(raw: str) -> tuple[str, ...]:
+    """Every USFM marker token in `raw`, in order, by name: `\\f`, `\\ft`,
+    `\\f*`, `\\nd`, `\\nd*` give ("f", "ft", "f", "nd", "nd"). Notes are not
+    skipped and closers are listed like openers, because the caller
+    (`passage_semantic_runtime`'s structure markers, #91 Phase 3c) records
+    where markup *occurs*, not what it shows. A nested `\\+nd` is "nd"; a
+    milestone's bare `\\*` is not a marker and is left out."""
+    return tuple(
+        match.group(2) for match in _MARKER.finditer(raw) if match.group(2) is not None
+    )
+
+
 def tokens(raw: str) -> list[str]:
     """Whitespace tokens of the visible text, punctuation trimmed from both
     ends, empties dropped -- the tC word inventory of a verse."""

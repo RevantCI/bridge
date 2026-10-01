@@ -533,10 +533,16 @@ change. **This is scheduled work, not accepted behaviour.**
     index is on it too** (Phase 3b): `UsfmPassageIndex.from_text` builds one
     segment per parsed verse with `plain_text` and its window boundaries from
     `ParsedUsfm.structure` (chapter/verse/paragraph events in document order,
-    each with the verse it introduces); `strip_usfm_inline` is an alias. Still
-    not on it: `passage_semantic_runtime.build_current_text_overlay`'s source
-    skeleton (Phase 3c). No new module, engine or frontend, may regex-parse
-    USFM: it calls one of these two.
+    each with the verse it introduces); `strip_usfm_inline` is an alias. And so
+    is the overlay (Phase 3c): `passage_semantic_runtime._source_skeleton` is
+    `ParsedUsfm.headers` + `structure`, with inline markers from
+    `usfm_verse.marker_names`; the runtime's only remaining regexes parse verse
+    *references*, not USFM. **Every USFM reader in the engine and the frontend
+    now goes through `usfm_parser.py` or `usfm_verse.py`.** No new module may
+    regex-parse USFM: it calls one of these two. (usfmtc quirk the parser
+    hides: it opens an *implicit* `\p` when a verse follows `\c` with no
+    paragraph marker, reported at the chapter's position; the parser drops it,
+    because it is not in the source.)
 
 ## Working in this repo
 

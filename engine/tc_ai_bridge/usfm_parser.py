@@ -213,7 +213,13 @@ def read_usfm_text(path: Any) -> str:
     Scripture. Raises :class:`UsfmParseError` when nothing fits; the caller
     decides whether that is an import refusal or an export fallback.
     """
-    raw = Path(path).read_bytes()
+    return decode_usfm_text(Path(path).read_bytes(), Path(path).name)
+
+
+def decode_usfm_text(raw: bytes, name: str = "") -> str:
+    """`read_usfm_text` for bytes already in hand (a caller that also hashes
+    them reads the file once). Same encodings, same newline normalisation,
+    same refusal."""
     for encoding in _USFM_ENCODINGS:
         try:
             text = raw.decode(encoding)
@@ -221,7 +227,7 @@ def read_usfm_text(path: Any) -> str:
             continue
         if "\\" in text:
             return text.replace("\r\n", "\n").replace("\r", "\n")
-    raise UsfmParseError(f"{Path(path).name} is not UTF-8 or UTF-16 USFM text.")
+    raise UsfmParseError(f"{name or 'USFM input'} is not UTF-8 or UTF-16 USFM text.")
 
 
 @dataclass(frozen=True)
@@ -313,6 +319,13 @@ def parse_usfm(text: str) -> ParsedUsfm:
                 events.append(("v", at, str(element.get("number") or "")))
         elif tag == "para":
             style = str(element.get("style") or "")
+            source_tag = marker.group("tag").lower() if marker else ""
+            if source_tag != style.lower():
+                # usfmtc opens an implicit paragraph when a verse follows a
+                # chapter with no `\p` between them, and reports it at the
+                # chapter marker's position. It is not in the source; it is
+                # not structure (#91 Phase 3c).
+                continue
             if not seen_chapter:
                 headers.append(UsfmHeader(marker.group("tag") if marker else style, ""))
                 events.append(("header", at, str(len(headers) - 1)))

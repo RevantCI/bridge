@@ -14240,3 +14240,45 @@ verse entry per verse on both IRV files); the snapshot test against the
 re-recorded file; `test_semantic_mapping_stage3.py`, the runtime and cache tests,
 and **both goldens by name** — 114 tests in that targeted run; full suite and
 frozen smoke in the commit. Fixture files other than the snapshot untouched.
+
+## 2026-10-01 — Phase 3c: the overlay's skeleton comes from the parser; no USFM regex left in the engine (#91)
+
+**What.** `passage_semantic_runtime._source_skeleton` -- the pure, cached
+(Phase 3a) function that turns the preserved source into chapter/verse/marker
+events -- now reads `ParsedUsfm.headers` (the pre-chapter `\id`, `\usfm`, `\ide`,
+`\h`, `\toc*`, `\mt*` lines, with the metadata ones still kept out of the
+synthetic text) and `ParsedUsfm.structure` (every chapter, verse and paragraph
+marker of the body, in order). The inline markers recorded for a verse or
+paragraph line are `usfm_verse.marker_names` of that line after its own marker,
+cut at the next structural element -- so a mid-line `\q1 \v 2` is a paragraph
+event then a verse event, where the line regex saw a paragraph whose body
+contained a `\v`. A `\c` that does not start its line is a chapter now. The
+runtime's `_CHAPTER`, `_VERSE`, `_LINE_MARKER` and `_INLINE_MARKER` regexes are
+gone; `_decode_usfm` is `usfm_parser.decode_usfm_text` plus this module's own
+"no `\c` or `\v` means no skeleton" fallback. The synthetic text, the matching
+against current verses, the mismatches and the authoritative-text guard are
+untouched.
+
+**One usfmtc quirk surfaced, fixed in the parser.** usfmtc opens an *implicit*
+`\p` when a verse follows `\c` with no paragraph marker between them, and reports
+it at the chapter marker's position. `parse_usfm` passed it into `structure` as a
+paragraph, which put a phantom PARAGRAPH marker into the overlay (the Phase 3a
+snapshot caught it on the Stage 6A shape: order 5 was `p` where `v` had been). A
+real paragraph's source marker matches its style; the phantom's does not, so the
+parser now drops it. This also tightens Phase 3b's `from_text`, which had been
+taking a boundary from it -- harmless there, because it only ever sat before a
+chapter's first verse, which is a boundary anyway.
+
+**Verified.** `test_overlay_skeleton.py` (the event stream for a book with
+headers, notes, styles, a mid-line verse and a mid-line chapter; the overlay's
+structure markers for a note and a style on the verse line); the Phase 3a
+snapshot **identical, structure markers and mismatches included**; the runtime,
+cache, parser, reader and import tests -- 122 in the targeted run; both goldens
+by name; full suite and frozen smoke in the commit.
+
+**Where #91 stands after Phase 3.** Import, export, checks, alignment, the
+reader, Language QA and Stages 4–8 all read USFM through two modules:
+`usfm_parser.py` for a book, `usfm_verse.py` for a verse. What remains is Phase
+4: delete the Phase 1b characterisation test and the Phase 3a snapshot, the
+`export_aligned` header regexes, `paratext_notes`' `startswith("\v ")`, and
+bring ARCHITECTURE/INVARIANTS/IMPORTS up to date.

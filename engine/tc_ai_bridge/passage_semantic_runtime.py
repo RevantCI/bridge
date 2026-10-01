@@ -47,7 +47,9 @@ from .passage_semantic_repository import (
 )
 from .qa_target_hash import canonical_text_hash
 from .unicode_coordinates import grapheme_boundaries
+from .usfm_parser import UsfmParseError, decode_usfm_text, parse_usfm
 from .usfm_passages import PassageWindow, TargetSegment, UsfmPassageIndex
+from .usfm_verse import marker_names
 from . import versification
 from .source_semantic_inventory import SourceSemanticInventory
 from .target_semantic_inventory import TargetSemanticInventory
@@ -65,10 +67,7 @@ DEFAULT_TOKENIZER = "bridge-unicode-word-v1"
 TC_COMPATIBILITY_TOKENIZER = "tc-whitespace-v1"
 NORMALIZATION_PROFILE = "NFC-v1"
 
-_CHAPTER = re.compile(r"^[ \t]*\\c\s+(\S+)", re.IGNORECASE)
-_VERSE = re.compile(r"^[ \t]*\\v\s+(\S+)(.*)$", re.IGNORECASE)
-_LINE_MARKER = re.compile(r"^[ \t]*\\([A-Za-z0-9]+)\*?\b(.*)$")
-_INLINE_MARKER = re.compile(r"\\([A-Za-z0-9]+)\*?")
+# Reference shapes, not USFM: USFM itself is read through usfm_parser (#91).
 _BRIDGE = re.compile(r"^(\d+)[-–](\d+)$")
 _LETTERED = re.compile(r"^\d+[A-Za-z]+$")
 
@@ -120,18 +119,16 @@ def _json_hash(value: Any) -> str:
 
 
 def _decode_usfm(raw: bytes, path: Path) -> str:
-    for encoding in ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
-        try:
-            value = raw.decode(encoding)
-        except UnicodeError:
-            continue
-        if "\\c" in value and "\\v" in value:
-            return value.replace("\r\n", "\n").replace("\r", "\n")
-    raise UnicodeError(f"Cannot decode structural USFM: {path}")
-
-
-def _read_usfm(path: Path) -> str:
-    return _decode_usfm(path.read_bytes(), path)
+    """The preserved source as text, through the one USFM decoder (#91), with
+    this module's own requirement kept: a file with no `\\c` or no `\\v` is
+    not a structural skeleton, and the caller falls back to current text only."""
+    try:
+        value = decode_usfm_text(raw, path.name)
+    except UsfmParseError as exc:
+        raise UnicodeError(f"Cannot decode structural USFM: {path}: {exc}") from exc
+    if "\\c" not in value or "\\v" not in value:
+        raise UnicodeError(f"Cannot decode structural USFM: {path}")
+    return value
 
 
 # --- the overlay's two caches (#91 Phase 3a) ---------------------------------
@@ -174,26 +171,38 @@ class _SkeletonEvent:
 
 def _source_skeleton(source: str) -> tuple[_SkeletonEvent, ...]:
     """The preserved file's structure, with every body discarded. A pure
-    function of the source text, which is why it can be cached by its hash."""
+    function of the source text, which is why it can be cached by its hash.
+
+    Since #91 Phase 3c the structure is the parser's: the pre-chapter header
+    lines (`\\id`, `\\usfm`, `\\h`, `\\toc1`, `\\mt` …) come from
+    `ParsedUsfm.headers`, and every chapter, verse and paragraph marker of the
+    body from `ParsedUsfm.structure`, in document order. The inline markers
+    recorded for a verse or paragraph line are those on that line after its
+    own marker, up to the next structural element -- so a mid-line
+    `\\q1 \\v 2 …` is a paragraph event followed by a verse event, where the
+    line regex this replaced saw a paragraph whose body happened to contain a
+    `\\v`. A `\\c` that does not start its line is a chapter now, too.
+    """
+    parsed = parse_usfm(source)
     events: list[_SkeletonEvent] = []
-    for raw_line in source.split("\n"):
-        chapter_match = _CHAPTER.match(raw_line)
-        if chapter_match:
-            events.append(_SkeletonEvent("c", chapter_match.group(1)))
-            continue
-        verse_match = _VERSE.match(raw_line)
-        if verse_match:
-            events.append(_SkeletonEvent(
-                "v", verse_match.group(1), tuple(_INLINE_MARKER.findall(verse_match.group(2))),
-            ))
-            continue
-        marker_match = _LINE_MARKER.match(raw_line)
-        if marker_match:
-            marker = marker_match.group(1).lower()
-            events.append(_SkeletonEvent(
-                "m", marker, tuple(_INLINE_MARKER.findall(marker_match.group(2))),
-                keep=marker not in _METADATA_MARKERS,
-            ))
+    for header in parsed.headers:
+        tag = header.tag.lower()
+        events.append(_SkeletonEvent(
+            "m", tag, marker_names(header.content), keep=tag not in _METADATA_MARKERS,
+        ))
+    items = parsed.structure
+    for index, item in enumerate(items):
+        line_end = source.find("\n", item.offset)
+        line_end = len(source) if line_end < 0 else line_end
+        if index + 1 < len(items):
+            line_end = min(line_end, items[index + 1].offset)
+        inline = marker_names(source[item.offset:line_end])[1:]  # [0] is this marker itself
+        if item.kind == "chapter":
+            events.append(_SkeletonEvent("c", item.chapter))
+        elif item.kind == "verse":
+            events.append(_SkeletonEvent("v", item.verse, inline))
+        else:
+            events.append(_SkeletonEvent("m", item.marker, inline, keep=item.marker not in _METADATA_MARKERS))
     return tuple(events)
 
 
