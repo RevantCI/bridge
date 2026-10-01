@@ -13,7 +13,7 @@ from typing import Any
 
 import regex
 
-from .usfm import marker_balance_issues
+from .usfm_verse import lift_verse
 
 RULE_VERSION = "language-qa-7"
 MAX_VERSE_CHARS = 20_000
@@ -289,18 +289,9 @@ def detect_language(sample: str, declared: str = "") -> dict[str, Any]:
     }
 
 
-# Same note shape as the frontend's parseVerseNotes (src/lib/utils/usfmNotes.ts
-# NOTE_RE): \f or \x, whitespace, then everything up to the matching closer.
-_NOTE = regex.compile(r"\\([fx])\s.*?\\\1\*", regex.DOTALL)
-_NOTE_FAMILY = regex.compile(r"\\(?!fig\b)[fx][A-Za-z]*\b")  # \fig is a figure, not a note
-# USFM 3 attributes (`\w word|lemma="..."\w*`, a milestone's `|who="..."\*`):
-# the bar up to the closing marker is not visible text.
-_ATTRIBUTES = regex.compile(r"\|[^\\]*(?=\\(?:\+?[A-Za-z0-9_-]+)?\*)")
-# Any other marker token: character markers (\wj, \add, \nd, \qt, \w, nested
-# \+nd ...), their closers, and a milestone's bare `\*`. Group 1 is the
-# closer's star; group 2 an opener's one following space, which belongs to the
-# marker syntax.
-_MARKER = regex.compile(r"\\(?:\+?[A-Za-z0-9_-]+(\*)?|(\*))( )?")
+# What a verse shows is decided by usfm_verse.lift_verse (#91): notes lifted
+# with the frontend's swallow rule, attributes and markers removed, content
+# kept. The note/attribute/marker regexes that used to live here are there now.
 CROSSING_LIMITATION = "candidate(s) spanning inline USFM markup omitted."
 # Chapter JSON keeps a verse's USFM line structure: poetry is stored as
 # "…;\n\q நான் …\n\q". In USFM a line break is whitespace, so it is never
@@ -337,51 +328,16 @@ def lift_inline_usfm(raw: str) -> tuple[LiftedVerse | None, str]:
     Returns (None, reason) instead of guessing when the markup cannot be lifted
     safely: unbalanced paired markers (usfm.marker_balance_issues), note markup
     outside a complete note, or a backslash that is not a marker."""
-    issues = marker_balance_issues(raw)
-    if issues:
-        return None, f"{'; '.join(issues)}; verse not checked."
-    removed = bytearray(len(raw))
-
-    def remove(start: int, end: int) -> None:
-        removed[start:end] = b"\x01" * (end - start)
-
-    for match in _NOTE.finditer(raw):
-        start, end = match.span()
-        # Removing a note between two spaces would leave a double space behind.
-        if start == 0 or raw[start - 1].isspace():
-            if end < len(raw) and raw[end].isspace():
-                end += 1
-        elif end == len(raw) and raw[start - 1].isspace():
-            start -= 1
-        remove(start, end)
-    for match in _NOTE_FAMILY.finditer(raw):
-        if not removed[match.start()]:
-            return None, ("Footnote or cross-reference markup outside a complete "
-                          "\\f … \\f* or \\x … \\x* note; verse not checked.")
-    for match in _ATTRIBUTES.finditer(raw):
-        if not removed[match.start()]:
-            remove(*match.span())
-    for match in _MARKER.finditer(raw):
-        if removed[match.start()]:
-            continue
-        end = match.end()
-        if match.group(3) and (match.group(1) or match.group(2)):
-            end -= 1  # the space after a closer is text, not marker syntax
-        remove(match.start(), end)
-    index = tuple(i for i in range(len(raw)) if not removed[i])
-    visible = "".join(raw[i] for i in index)
-    stray = visible.find("\\")
-    if stray != -1:
-        return None, f"Backslash that is not a USFM marker at code-point {index[stray]}; verse not checked."
-    # Attributes whose marker never closes properly (seen for real: a custom
-    # `\zsem-s |x-note="..."*` milestone ending in a bare `*`) would otherwise
-    # leak glosses, Greek and notes into the "visible" text and be scanned as
-    # Scripture.
-    bar = visible.find("|")
-    if bar != -1:
-        return None, (f"Word attributes not closed by a USFM marker at code-point {index[bar]}; "
-                      "verse not checked.")
-    return LiftedVerse(visible, index), ""
+    # The lifting itself is usfm_verse.lift_verse (#91 Phase 1a), the one
+    # fragment reader; this keeps Language QA's refusal: a verse whose markup
+    # could not be lifted cleanly is not scanned, and the first problem is the
+    # reason (all of them when markers are unbalanced, as before).
+    lifted = lift_verse(raw)
+    if lifted.warnings:
+        unbalanced = [w for w in lifted.warnings if w.startswith("Unbalanced ")]
+        reason = "; ".join(unbalanced) if unbalanced else lifted.warnings[0]
+        return None, f"{reason}; verse not checked."
+    return LiftedVerse(lifted.plain, lifted.raw_index), ""
 
 
 def scan_text(text: str, *, book: str, chapter: str, verse: str,

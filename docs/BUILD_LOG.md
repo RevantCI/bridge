@@ -13948,3 +13948,69 @@ Not changed: `export_aligned`'s `\usfm 3.0` insertion still uses its two small
 regexes on the *rendered* output — they operate on text this function just
 produced, not on a parse of the source, and the plan's note to move them to
 `ParsedUsfm.header()` is left for Phase 4 cleanup.
+
+## 2026-10-01 — One fragment reader: `usfm_verse.lift_verse` (#91 Phase 1a)
+
+**What.** `engine/tc_ai_bridge/usfm_verse.py` is the one answer to "what does
+this stored verse string show": `lift_verse(raw) -> LiftedVerse` with `plain`,
+`notes` (kind, caller, reference, parts, text, position — the frontend's
+`parseVerseNotes` shape), `styles` (character-style spans on the plain text),
+`removed` (merged raw ranges), `raw_index`, `map_offset`, `raw_span` and
+`to_dict` (the display payload Phase 2 will carry). Built by deletion only, so a
+plain span that crosses no removed range is byte-identical to its raw span.
+Total: it never refuses a verse; problems are `warnings`.
+
+**Grown from, not beside.** The scanner is `language_qa.lift_inline_usfm`'s,
+generalised: that function is now a thin adapter (`LiftedVerse(visible,
+raw_index)` from `lift_verse`, and the refusal it always had — unbalanced
+markers, note markup outside a note, a stray backslash, an unclosed attribute
+bar — reads `warnings`, with the same message texts). Its 290+ tests pass
+unchanged, including the lift table that mirrors the frontend's swallow rule.
+The four regexes that lived in `language_qa.py` are gone.
+
+**Marker classes** (the one list the parity test guards): notes `\f \fe \ef \x
+\ex` removed with content and recorded; non-Scripture character content `\va
+\vp \ca \cp \fig \rq` removed with content (the old lifter kept the alternate
+verse *number* as text); attributes `|…` removed; every other marker token
+removed, content kept, an opener's one following space going with it and a
+closer's staying. `\fe`/`\ef`/`\ex` are new as notes — the old lifter refused
+such a verse as "note markup outside a complete note"; now it is lifted.
+
+**Not usfmtc, and why — measured.** usfmtc has element positions but no
+text-node offsets, and per-verse readers run on every chapter open, check and
+save. Instead `tests/project_io/test_usfm_verse.py` carries the parity test:
+for every stored verse of both IRV fixtures (104 + 1,140), `lift_verse(s).plain`
+collapsed equals the text walked out of usfmtc's own parse of `\id X\n\c 1\n\v 1
+{s}` — **1,244/1,244 agree**, plus a hand-written edge table (nested `\+it`,
+`\w|attr`, `\zaln`, `\qt-s` milestones, `\fe`, `\va`, `\rb|gloss`, an inline
+`\q2`). The USX walker lives in the test; production has one fragment reader.
+
+**Characterisation of today's `strip_usfm` against the new reader** (the input
+Phase 1b needs before switching it; nothing switched here):
+
+| Book | verses | `strip_usfm` text differs | `whitespace_tokens` differ |
+|---|---|---|---|
+| IRV PHP | 104 | 0 | 0 |
+| IRV LUK | 1,140 | 14 | 0 |
+| IRV PSA | 2,461 | 7 | 0 |
+| ESV PSA | 2,461 | 383 | 7 |
+| ESV JOB | 1,070 | 4 | 0 |
+| ESV LUK | 1,149 | 45 | 45 |
+
+Three causes, all understood. (1) `strip_usfm` replaces a marker with a *space*,
+so `\nd Lord\nd*,` becomes `Lord ,` — text differs, tokens do not; the new
+reader is right. (2) `\nd Lord\nd*’s` → old tokens `Lord`, `s`; new `Lord’s`
+(ESV PSA's 7) — the new reader is right. (3) **A character-style opener glued to
+the previous word**: ESV Luke has `lepers\wj*\wj in Israel` 45 times, and the
+spec reading — the opener's following space is marker syntax — yields
+`lepersin`. **usfmtc reads it the same way** (checked), so the scanner is
+faithful to the reference and the parity test holds; the ESV file relies on a
+space its markup does not provide. Whether Bridge should keep the word boundary a
+reader would see there is a Phase 1b decision, recorded here rather than taken
+quietly: today's `strip_usfm` happens to give `lepers in`, and switching it
+changes alignment tokens on that text.
+
+**Verified.** 18 new tests; `tests/service/test_language_qa.py` unchanged and
+green; full suite and frozen smoke in the commit message. Frontend untouched
+(`usfmNotes.ts` still parses until Phase 2; its "change both or neither" parity
+comment in `test_language_qa.py` stays true).

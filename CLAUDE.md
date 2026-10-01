@@ -511,9 +511,18 @@ change. **This is scheduled work, not accepted behaviour.**
     each verse's parser-reported span (`UsfmVerse.start`/`head_end`/`tail_spans`)
     and touches nothing else, so between-verse headings survive and a mid-line
     `\v` is written back; `read_usfm_text` is the one decoder for the preserved
-    source. The other USFM readers (`usfm.py`'s `strip_usfm` on stored verse
-    strings, `usfm_passages.py` and `passage_semantic_runtime.py` for Stages 4–8,
-    `aligned_usfm.py`, the frontend's `usfmNotes.ts`) are not on it yet — see #91.
+    source. **The fragment reader is `engine/tc_ai_bridge/usfm_verse.py`**
+    (`lift_verse`, #91 Phase 1a): what one *stored verse string* shows — plain
+    text, notes, style spans, a raw→plain offset map — by deletion only, total
+    (warnings, never a refusal). It is Bridge's own scanner, not usfmtc (usfmtc
+    has no text-node offsets and these run per verse on hot paths), and
+    `tests/project_io/test_usfm_verse.py` binds it to usfmtc with a parity test
+    over every stored verse of both IRV fixtures; the USJ walker lives only in
+    that test. Language QA's `lift_inline_usfm` is an adapter over it. The other
+    USFM readers (`usfm.py`'s `strip_usfm`/`whitespace_tokens`, `aligned_usfm.py`,
+    `usfm_passages.py` and `passage_semantic_runtime.py` for Stages 4–8, the
+    frontend's `usfmNotes.ts`) are not on it yet — see #91. No new module may
+    regex-parse USFM: it calls one of these two.
 
 ## Working in this repo
 
