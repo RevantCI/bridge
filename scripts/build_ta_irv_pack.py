@@ -45,6 +45,7 @@ import regex  # noqa: E402
 from tc_ai_bridge import language_qa_benchmark as bench  # noqa: E402
 from tc_ai_bridge.language_packs import loader  # noqa: E402
 from tc_ai_bridge.language_qa import WORD, lift_inline_usfm, scan_text  # noqa: E402
+from tc_ai_bridge.usfm_verse import lift_verse  # noqa: E402
 from tc_ai_bridge.project_import import imported_verse_text, parse_scripture_file  # noqa: E402
 
 PACK_DIR = REPO / "engine" / "tc_ai_bridge" / "language_packs" / "ta-irv"
@@ -136,7 +137,6 @@ def corpus(irv_dir: Path) -> list[tuple[str, str, str, str]]:
     return verses
 
 
-NOTE = regex.compile(r"\\([fx])\s.*?\\\1\*", regex.DOTALL)
 
 
 def raw_note_examples(pack, rule_id: str) -> dict[str, list]:
@@ -144,9 +144,12 @@ def raw_note_examples(pack, rule_id: str) -> dict[str, list]:
     so the snippet stays well-formed markup."""
     incorrect, correct = [], []
     for book, chapter, verse, text in RAW_VERSES:
-        for m in NOTE.finditer(text):
-            before = regex.search(r"\S+\s*$", text[:m.start()])
-            snippet = (before.group() if before else "") + m.group()
+        # The fragment reader finds the notes (#91 Phase 1b); its raw range may
+        # include the one space it swallows with a note, hence the strip.
+        for note in lift_verse(text).notes:
+            raw_note = text[note.raw_start:note.raw_end].strip()
+            before = regex.search(r"\S+\s*$", text[:note.raw_start].rstrip() + " ")
+            snippet = (before.group() if before else "") + raw_note
             findings = [f for f in scan_text(snippet, book="x", chapter="1", verse="1", tamil=True, pack=pack)["findings"]
                         if f["ruleId"] == f"ta-irv/{rule_id}"]
             item = {"text": snippet, "origin": f"{book.upper()} {chapter}:{verse}"}

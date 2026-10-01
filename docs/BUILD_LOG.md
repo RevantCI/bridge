@@ -14055,3 +14055,35 @@ and `\w` untouched), the RPC test that gets three findings on ESV Luke 4:27 and
 applies them through `verse.edit` until none remain, the script test (dry run
 changes nothing; `--write` keeps a UTF-8 BOM and UTF-16 with CRLF). Full suite and
 frozen smoke in the commit. Desktop not run (QA matrix A89).
+
+## 2026-10-01 — The tokeniser, the aligned exporter and the names check read through the fragment reader (#91 Phase 1b)
+
+**What moved.** `usfm.py` is now a shim: `strip_usfm` is `usfm_verse.plain_text`
+(visible text, whitespace collapsed -- collapsed on purpose, because tN/tW
+selection counting in `tc_project._normalize_check_selections` and the dead
+`TA_DOUBLE_SPACE` check, #191, both read it) and `whitespace_tokens` is
+`usfm_verse.tokens`; `PAIRED_MARKERS`, `marker_balance_issues` and the one copy of
+`WHITESPACE_TOKEN_TRIM_CHARS` live in `usfm_verse.py`. Every producer and locator
+of tC `word/occurrence/occurrences` tokens -- import's word bank, the alignment
+context, the edit reconcile, checks, the aligned exporter, the names check --
+therefore tokenises the same text, which is the property that makes an alignment
+written at import still match at check time. `aligned_usfm._masked_ranges` is the
+reader's `removed` ranges; `bridge_service._first_token_span` looks for the token
+in the plain text and maps the span back through `raw_span`, so a names finding on
+`\nd Lord\nd*,` now gets offsets where the raw-string scan could not see it.
+`scripts/build_ta_irv_pack.py`'s own `NOTE` regex is gone too (`lift_verse().notes`).
+
+**What changed, measured, and pinned.** `tests/project_io/test_usfm_tokens_characterisation.py`
+carries a verbatim copy of the regex implementation and asserts, over every stored
+verse of both IRV fixtures (1,244): **tokens identical**, and the collapsed text
+differing on exactly 0 (PHP) and 14 (LUK) verses, each by nothing but the space the
+old code inserted for a marker next to punctuation. On English: `Lord’s` is one
+token where the old code gave `Lord`, `s`; `\w word|x-occurrence="1"\w*` tokenises
+as `word`, not `word|x-occurrence="1`. Both are corrections; both change tokens on
+texts that have them, and pre-release that is a re-import, not a migration. The
+glued-opener case (`lepers\wj*\wj in`) was settled by #203: the markup is repaired,
+the reader is not bent. Delete the characterisation test in Phase 4.
+
+**Verified.** 488 tests across every moved consumer (`tests/alignment`, names check,
+Language QA, language pack, import, the #203 check) green; full suite and frozen smoke
+in the commit. Not run: desktop (QA matrix A90).

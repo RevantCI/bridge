@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-import re
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
 from .models import TokenRef, VerseAlignment
 from .usfm import whitespace_tokens
+from .usfm_verse import lift_verse
 
 
 class AlignedUsfmError(ValueError):
     pass
-
-
-_EXCLUDED_RE = re.compile(r"\\(?P<marker>f|x)\s.*?\\(?P=marker)\*", re.IGNORECASE | re.DOTALL)
-_MARKER_RE = re.compile(r"\\[A-Za-z0-9+_-]+\*?")
 
 
 @dataclass(frozen=True)
@@ -36,12 +32,14 @@ def _target_tokens(text: str) -> list[TokenRef]:
 
 
 def _masked_ranges(text: str) -> list[bool]:
+    """Which code points of the raw verse are markup or note content, so a
+    target token is never located inside them. The fragment reader decides
+    (#91 Phase 1b): exactly the ranges it removes to make the visible text,
+    which is also what `whitespace_tokens` tokenised, so every token is
+    locatable in what remains."""
     masked = [False] * len(text)
-    for match in _EXCLUDED_RE.finditer(text):
-        for index in range(match.start(), match.end()):
-            masked[index] = True
-    for match in _MARKER_RE.finditer(text):
-        for index in range(match.start(), match.end()):
+    for start, end in lift_verse(text).removed:
+        for index in range(start, end):
             masked[index] = True
     return masked
 

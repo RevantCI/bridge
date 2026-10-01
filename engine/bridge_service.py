@@ -100,6 +100,7 @@ from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.workspace_repository import WorkspaceRepository, project_path_key
 from tc_ai_bridge.resource_materializer import materialize_book_checks
 from tc_ai_bridge.usfm import strip_usfm, whitespace_tokens
+from tc_ai_bridge.usfm_verse import WHITESPACE_TOKEN_TRIM_CHARS, lift_verse
 from tc_ai_bridge.usfm_parser import UsfmParseError, parse_usfm, read_usfm_text
 from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_gaps
@@ -226,25 +227,25 @@ def _stable_finding_id(*, chapter: str, verse: str, engine: str,
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:20]
 
 
-_WHITESPACE_TOKEN_TRIM_CHARS = ' \t\r\n.,;:!?“”‘’"\'()[]{}<>—–…।॥'
-
-
 def _first_token_span(text: str, token: str) -> Optional[tuple[int, int]]:
-    """Locate `token`'s first whole-word occurrence in `text`, using the
-    same whitespace + punctuation-trim boundary rule as tc_ai_bridge.usfm's
-    whitespace_tokens — but computed directly against the caller's raw
-    string rather than that function's strip_usfm()'d copy, since the
-    result must index into the exact same string a QaFinding's
-    start_offset/end_offset is highlighted against on the frontend, and
-    strip_usfm's whitespace collapsing can shift character positions."""
-    for match in re.finditer(r"\S+", text):
-        raw = match.group()
-        stripped = raw.strip(_WHITESPACE_TOKEN_TRIM_CHARS)
+    """Locate `token`'s first whole-word occurrence in the raw verse string,
+    as code-point offsets into that string -- the one a QaFinding's
+    start_offset/end_offset is highlighted against on the frontend.
+
+    The token came from `whitespace_tokens`, i.e. from the visible text, so
+    it is looked for there with the same boundary rule and the fragment
+    reader maps the span back to raw offsets (#91 Phase 1b). A token that
+    sits against markup (`\\nd Lord\\nd*,`) is found this way where a scan of
+    the raw string could not see it; one whose span would cross removed
+    markup has no single raw span and gets None, as before."""
+    lifted = lift_verse(text)
+    for match in re.finditer(r"\S+", lifted.plain):
+        chunk = match.group()
+        stripped = chunk.strip(WHITESPACE_TOKEN_TRIM_CHARS)
         if stripped != token:
             continue
-        offset = raw.index(stripped)
-        start = match.start() + offset
-        return start, start + len(stripped)
+        start = match.start() + chunk.index(stripped)
+        return lifted.raw_span(start, start + len(stripped))
     return None
 
 

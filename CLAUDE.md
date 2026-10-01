@@ -518,11 +518,15 @@ change. **This is scheduled work, not accepted behaviour.**
     has no text-node offsets and these run per verse on hot paths), and
     `tests/project_io/test_usfm_verse.py` binds it to usfmtc with a parity test
     over every stored verse of both IRV fixtures; the USJ walker lives only in
-    that test. Language QA's `lift_inline_usfm` is an adapter over it. The other
-    USFM readers (`usfm.py`'s `strip_usfm`/`whitespace_tokens`, `aligned_usfm.py`,
-    `usfm_passages.py` and `passage_semantic_runtime.py` for Stages 4–8, the
-    frontend's `usfmNotes.ts`) are not on it yet — see #91. No new module may
-    regex-parse USFM: it calls one of these two.
+    that test. On it since Phase 1b: Language QA's `lift_inline_usfm`,
+    `usfm.py`'s `strip_usfm`/`whitespace_tokens` (now re-exports of
+    `usfm_verse.plain_text`/`tokens`, so every tC `occurrence` count in import,
+    checks, alignment and tN/tW selections tokenises the same text),
+    `aligned_usfm._masked_ranges`, and the names check's `_first_token_span`
+    (found in the plain text, mapped back through `raw_span`). Still not on it:
+    `usfm_passages.py` and `passage_semantic_runtime.py` for Stages 4–8, and the
+    frontend's `usfmNotes.ts` — see #91. No new module may regex-parse USFM: it
+    calls one of these two.
 
 ## Working in this repo
 

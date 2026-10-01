@@ -55,7 +55,45 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from .usfm import marker_balance_issues
+# The tokeniser's boundary rule, shared by every consumer that produces or
+# locates tC `word/occurrence/occurrences` tokens (#91 Phase 1b). Split on
+# whitespace only -- Tamil and Hebrew combining marks must stay attached --
+# then trim ordinary punctuation from both ends of each token.
+WHITESPACE_TOKEN_TRIM_CHARS = ' \t\r\n.,;:!?“”‘’"\'()[]{}<>—–…।॥'
+
+# Paired markers whose open/close counts are checked. The messages are pinned
+# by Language QA's tests, so the text here is a contract.
+PAIRED_MARKERS = ('f', 'x', 'add', 'nd', 'wj', 'qt', 'k', 'bd', 'it', 'em')
+
+
+def marker_balance_issues(text: str) -> list[str]:
+    issues: list[str] = []
+    for marker in PAIRED_MARKERS:
+        opens = len(re.findall(rf'\\{re.escape(marker)}(?:\s|\+)', text))
+        closes = len(re.findall(rf'\\{re.escape(marker)}\*', text))
+        if opens != closes:
+            issues.append(f'Unbalanced \\{marker}: {opens} open, {closes} close')
+    return issues
+
+
+def plain_text(raw: str) -> str:
+    """The verse's visible text with whitespace collapsed to single spaces --
+    what checks, tN/tW selection counting and AI prompts read. Whitespace is
+    collapsed on purpose: `usfm.strip_usfm` always did, and callers count
+    selections against it (`tc_project._normalize_check_selections`)."""
+    return " ".join(lift_verse(raw).plain.split())
+
+
+def tokens(raw: str) -> list[str]:
+    """Whitespace tokens of the visible text, punctuation trimmed from both
+    ends, empties dropped -- the tC word inventory of a verse."""
+    out: list[str] = []
+    for word in lift_verse(raw).plain.split():
+        token = word.strip(WHITESPACE_TOKEN_TRIM_CHARS)
+        if token:
+            out.append(token)
+    return out
+
 
 # Notes: opener, one whitespace char, body, the same marker's closer.
 _NOTE = re.compile(r"\\(fe|ef|ex|f|x)\s.*?\\\1\*", re.DOTALL)
