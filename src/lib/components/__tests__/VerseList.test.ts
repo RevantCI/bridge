@@ -15,6 +15,7 @@ vi.mock("../../api/bridgeClient", () => ({
   bridge: { decideVerse, editVerse, runVerseChecks, languageQaHistory, housestyleRecord, housestyleSetState },
 }));
 import { lqaFinding } from "./languageQaFixture";
+import { displayFor } from "./verseDisplayFixtures";
 import type { LanguageQaSuggestion } from "../../types/languageQa";
 
 import VerseList from "../VerseList.svelte";
@@ -22,6 +23,7 @@ import {
   chapterVerseNums,
   currentChapter,
   verseTexts,
+  verseDisplay,
   findingsByVerse,
   checkStatusByVerse,
   checkingProgress,
@@ -77,6 +79,9 @@ function seed(text: string, findings: QaFinding[] = []): void {
   currentChapter.set("1");
   chapterVerseNums.set({ "1": ["6"] });
   verseTexts.set({ [verseKey("1", "6")]: text });
+  // What the engine sends alongside the raw text (#91 Phase 2b): the display
+  // fixtures are the engine's own output for these strings.
+  verseDisplay.set({ [verseKey("1", "6")]: displayFor(text) });
   headingsByVerse.set({});
   findingsByVerse.set({ [verseKey("1", "6")]: findings });
   checkStatusByVerse.set({});
@@ -118,9 +123,12 @@ describe("VerseList footnote handling", () => {
     expect(document.body.textContent).not.toContain("\\fr");
   });
 
-  it("leaves styling markers in the text", () => {
+  it("does not show styling markers, only their text", () => {
+    // Flipped deliberately in #91 Phase 2b: the engine lifts character styles
+    // out of the display and reports them as spans, so `\it` is never shown.
     render(VerseList, { props: { onSelect: vi.fn() } });
-    expect(document.body.textContent).toContain("\\it");
+    expect(document.body.textContent).not.toContain("\\it");
+    expect(document.body.textContent).toContain("मुझे इस बात का भरोसा है");
   });
 
   it("does not show the footnote text inline with the verse", () => {

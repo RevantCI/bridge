@@ -1,5 +1,5 @@
 import { writable, derived, get } from "svelte/store";
-import type { AiCheckReview, AlignmentWorkStatus, NativeCheckReview, NavigationSyncState, ProjectInfo, QaFinding, VerseHeading } from "./types/finding";
+import type { AiCheckReview, AlignmentWorkStatus, NativeCheckReview, NavigationSyncState, ProjectInfo, QaFinding, VerseDisplay, VerseHeading } from "./types/finding";
 import type { LanguageQaFinding } from "./types/languageQa";
 import type { EngineLogEntry } from "./api/bridgeClient";
 
@@ -17,6 +17,10 @@ export const chapterVerseNums = writable<Record<string, string[]>>({});
 // without collisions — needed for chapter switching and "Run whole book"
 // (verse "1" in chapter 1 and verse "1" in chapter 2 are different keys).
 export const verseTexts = writable<Record<string, string>>({});
+/** What the reader shows for each verse, from the engine (#91 Phase 2b): plain
+ *  text, notes, style spans and the removed raw ranges. A verse with no entry
+ *  (an optimistic save awaiting the engine's answer) renders its raw text. */
+export const verseDisplay = writable<Record<string, VerseDisplay>>({});
 /** Section headings keyed by the verse they INTRODUCE, so a heading renders
  *  above that verse rather than glued to the end of the previous one (#180). */
 export const headingsByVerse = writable<Record<string, VerseHeading[]>>({});
@@ -71,6 +75,7 @@ export const selectedVerseSet = writable<string[]>([]);
 export function resetBookState(): void {
   chapterVerseNums.set({});
   verseTexts.set({});
+  verseDisplay.set({});
   headingsByVerse.set({});
   findingsByVerse.set({});
   checkStatusByVerse.set({});

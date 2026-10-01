@@ -19,6 +19,7 @@ import {
   findingsByVerse,
   languageQaFindingsByVerse,
   verseKey,
+  verseDisplay,
   verseTexts,
 } from "../../stores";
 import type { QaFinding } from "../../types/finding";
@@ -193,5 +194,49 @@ describe("applyLanguageQaSuggestedFix", () => {
     expect(result.ok).toBe(true);
     expect(editVerse).toHaveBeenCalledWith(
       "1", "6", "அவன் சொன்னான்\\f + \\ft குறிப்பு\\f* அந்தக் காகம் பறந்தது.");
+  });
+});
+
+describe("the display payload after a save (#91 Phase 2b)", () => {
+  const key = verseKey("1", "6");
+  const display = (plain: string) => ({ plain, notes: [], removed: [], styles: [], warnings: [] });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cancelVerseEdit();
+    checkingProgress.set({
+      running: false, percent: 0, label: "", jobId: "", state: "idle", error: "", scope: "chapter",
+    });
+    verseTexts.set({ [key]: "alpha beta" });
+    verseDisplay.set({ [key]: display("alpha beta") });
+    findingsByVerse.set({ [key]: [finding()] });
+    runVerseChecks.mockResolvedValue([]);
+  });
+
+  it("stores what the engine says the saved text shows", async () => {
+    editVerse.mockResolvedValue({ issueResolutionsNeedingRecheck: 0, display: display("omega beta") });
+    const result = await applySuggestedFindingFix(finding());
+    expect(result.ok).toBe(true);
+    expect(get(verseDisplay)[key]).toEqual(display("omega beta"));
+  });
+
+  it("drops the old display while an optimistic save is in flight, then takes the engine's", async () => {
+    let seen: unknown = "unset";
+    editVerse.mockImplementation(async () => {
+      seen = get(verseDisplay)[key];  // during the round trip
+      return { issueResolutionsNeedingRecheck: 0, display: display("alpha gamma") };
+    });
+    const mark = languageQaFinding({ start: 6, end: 10, originalText: "beta", suggestedReplacement: "gamma" });
+    const result = await applyLanguageQaSuggestedFix(mark);
+    expect(result.ok).toBe(true);
+    expect(seen).toBeUndefined();  // the old "alpha beta" display never described the new text
+    expect(get(verseDisplay)[key]).toEqual(display("alpha gamma"));
+  });
+
+  it("keeps rendering raw text when an older engine sends no display", async () => {
+    editVerse.mockResolvedValue({ issueResolutionsNeedingRecheck: 0 });
+    const result = await applySuggestedFindingFix(finding());
+    expect(result.ok).toBe(true);
+    expect(get(verseDisplay)[key]).toBeUndefined();
   });
 });

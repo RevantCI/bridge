@@ -523,10 +523,16 @@ change. **This is scheduled work, not accepted behaviour.**
     `usfm_verse.plain_text`/`tokens`, so every tC `occurrence` count in import,
     checks, alignment and tN/tW selections tokenises the same text),
     `aligned_usfm._masked_ranges`, and the names check's `_first_token_span`
-    (found in the plain text, mapped back through `raw_span`). Still not on it:
-    `usfm_passages.py` and `passage_semantic_runtime.py` for Stages 4–8, and the
-    frontend's `usfmNotes.ts` — see #91. No new module may regex-parse USFM: it
-    calls one of these two.
+    (found in the plain text, mapped back through `raw_span`). **The frontend
+    never parses USFM** (Phase 2): `verse.get`, `chapter.verseData`, the
+    `verse.edit` result and a correction's `canonicalEdit` carry
+    `display: {plain, notes, removed, styles, warnings}` (code points); the
+    `verseDisplay` store holds it, `utils/verseDisplay.ts` maps raw finding
+    offsets onto it, and `usfmNotes.ts` is layout only. A verse with no display
+    (an optimistic save in flight) renders its raw text. Still not on it:
+    `usfm_passages.py` and `passage_semantic_runtime.py` for Stages 4–8 — see
+    #91. No new module, engine or frontend, may regex-parse USFM: it calls one
+    of these two.
 
 ## Working in this repo
 

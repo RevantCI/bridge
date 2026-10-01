@@ -651,10 +651,58 @@ export interface BookProgressEntry {
   progress: BookProgressSummary | null;
 }
 
+export type VerseNoteKind = "footnote" | "xref";
+
+export interface VerseNotePart {
+  /** USFM marker without its backslash, e.g. "fr", "fq", "ft", "xo", "xt". */
+  marker: string;
+  text: string;
+}
+
+/** A footnote or cross-reference lifted out of the verse by the engine. */
+export interface VerseNote {
+  kind: VerseNoteKind;
+  /** The caller glyph USFM puts right after \f / \x — usually "+". */
+  caller: string;
+  /** Verse reference from \fr (footnote) or \xo (xref), when present. */
+  reference: string;
+  parts: VerseNotePart[];
+  /** Everything the note says, flattened, for a plain one-line rendering. */
+  text: string;
+  /** Code-point offset into `VerseDisplay.plain` where this note sat. */
+  position: number;
+}
+
+/** A character style (`\nd`, `\wj`, `\it` …) spanning `plain[start, end)`, code points. */
+export interface StyleSpan {
+  marker: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * What the reader shows for one verse, computed by the engine's fragment
+ * reader (`usfm_verse.lift_verse`, #91) next to the text it describes. The
+ * frontend renders this and never parses USFM. Every offset is a Unicode
+ * code point, like every engine finding's; convert with codePointToUtf16
+ * before slicing a JS string.
+ */
+export interface VerseDisplay {
+  /** The raw verse with notes, markers and attributes removed — deletion only. */
+  plain: string;
+  notes: VerseNote[];
+  /** Raw code-point ranges `[start, end)` that were removed, merged and sorted. */
+  removed: [number, number][];
+  styles: StyleSpan[];
+  warnings: string[];
+}
+
 export interface VerseData {
   chapter: string;
   verse: string;
+  /** The raw stored string: what the editor edits and fixes splice. */
   text: string;
+  display: VerseDisplay;
   alignment: VerseAlignment;
   alignmentStatus: AlignmentWorkStatus;
 }

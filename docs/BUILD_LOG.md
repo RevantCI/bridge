@@ -14115,3 +14115,45 @@ that `canonicalEdit.display.plain` is the corrected text. The frozen smoke's
 Titus fixture gained `\nd eternal\nd*` in verse 2 and asserts `display.plain`
 and the `nd` span in the frozen exe. Full suite and frozen smoke in the commit.
 No frontend change; QA matrix A91.
+
+## 2026-10-01 — The reader stops parsing USFM (#91 Phase 2b)
+
+**What.** `usfmNotes.parseVerseNotes`, its `NOTE_RE` and its offset map are gone.
+`VerseList` renders the engine's `display` (Phase 2a): `verseDisplay` is a store
+keyed by `verseKey`, filled by `App.ensureChapterData` from `chapter.verseData`,
+refreshed by `verseEditor` from the `verse.edit` result and a correction
+application's `canonicalEdit.display`, cleared by `resetBookState`. The raw-offset
+remap that `parseVerseNotes` used to do is `utils/verseDisplay.ts`: `plainOffset`
+walks the engine's `removed` ranges (an offset inside one collapses to where the
+removal left off, so a finding that lived inside a note covers nothing),
+`utf16Offset` then converts the code-point result to the UTF-16 index a JS slice
+needs, and note positions go through `plainToUtf16` before `withNoteMarkers`, which
+is all `usfmNotes.ts` still does. That second step is the latent fix: the old map
+mixed code points (engine) with UTF-16 (JS), invisible in Tamil only because Tamil
+is in the BMP. `\it`, `\nd`, `\wj` disappear from the reader; they arrive as
+`styles` spans and are not drawn yet (optional Phase 5).
+
+**Two edges decided.** (1) A verse with no display renders its raw text through
+`identityDisplay`: the optimistic Language QA "Use" shows the new raw text for one
+round trip, then the engine's display — the old display must not stay, because it
+describes the old text (`showVerseText` drops or replaces it in the same tick; the
+undo restores it). An older engine that sends no `display` leaves the reader on
+raw text, never broken. (2) `TranslationHelpsReview` counts selection occurrences
+on `display.plain`, not the raw string, so the selection editor, the reader's
+highlight and the engine's `strip_usfm` count agree by construction.
+
+**Tests.** Fixtures are the engine's own output: `verseDisplayFixtures.ts` is
+generated from `usfm_verse.lift_verse` for every raw string the frontend tests
+seed (18), with `displayFor(raw)` falling back to the identity display, so no test
+re-implements the lifter. `VerseList.test.ts`'s "leaves styling markers in the
+text" became "does not show styling markers" — the one assertion flipped on
+purpose. `verseDisplay.test.ts` carries the three offset-mapping cases that used
+to live in `usfmNotes.test.ts` plus a deletion-only check over every fixture;
+`verseEditor.test.ts` pins the optimistic-save display handling and the no-display
+fallback. `test_language_qa.py`'s "change both or neither" comment is rewritten:
+the engine is the only side.
+
+**Verified.** `npm run check` 0 errors / 0 warnings; Vitest 530 passed (one
+click-budget timing test failed once under another session's cargo build and
+passed twice alone); `npm run build` clean. Engine untouched in this slice except
+that comment. Not run: desktop (QA matrix A92).

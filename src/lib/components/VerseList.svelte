@@ -1,10 +1,12 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { verseNums, verseTexts, headingsByVerse, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress, languageQaFindingsByVerse, project } from "../stores";
+  import { verseNums, verseTexts, verseDisplay, headingsByVerse, findingsByVerse, checkStatusByVerse, alignmentStatusByVerse, selectedVerse, selectedVerseSet, currentChapter, verseKey, nativeChecksByVerse, aiCheckReviewsByVerse, checkingProgress, languageQaFindingsByVerse, project } from "../stores";
   import { rangeBetween } from "../crossVerseRange";
   import { unionInChapterOrder } from "../crossVerseSuggest";
   import { buildSegments } from "../utils/highlight";
-  import { parseVerseNotes, withNoteMarkers, type ParsedVerse, type VerseNote, type VerseNoteKind } from "../utils/usfmNotes";
+  import { withNoteMarkers, type VerseNote, type VerseNoteKind } from "../utils/usfmNotes";
+  import { identityDisplay, plainToUtf16, utf16Offset } from "../utils/verseDisplay";
+  import type { VerseDisplay } from "../types/finding";
   import VerseNotesPopup from "./VerseNotesPopup.svelte";
   import FindingContextMenu from "./FindingContextMenu.svelte";
   import { decideLanguageQaFindingOptimistically, decideLocalFinding } from "../findingActions";
@@ -553,16 +555,21 @@
    * collapses to zero length and simply covers no segment; it stays in the
    * list so the 1-based numbering still agrees with ReviewPanel.
    */
-  function remapFindings(findings: QaFinding[], parsed: ParsedVerse): QaFinding[] {
+  function remapFindings(findings: QaFinding[], display: VerseDisplay): QaFinding[] {
     return findings.map((finding) =>
       finding.start_offset !== null && finding.end_offset !== null
         ? {
             ...finding,
-            start_offset: parsed.mapOffset(finding.start_offset),
-            end_offset: parsed.mapOffset(finding.end_offset),
+            start_offset: utf16Offset(display, finding.start_offset),
+            end_offset: utf16Offset(display, finding.end_offset),
           }
         : finding,
     );
+  }
+
+  /** The engine's note positions are code points into `plain`; segments are UTF-16. */
+  function notesForLayout(display: VerseDisplay): VerseNote[] {
+    return display.notes.map((note) => ({ ...note, position: plainToUtf16(display, note.position) }));
   }
 
   /** Display only. Language QA's start/end are raw-verse code-point offsets,
@@ -571,9 +578,9 @@
    * nowhere else: the right-click menu and applyLanguageQaSuggestedFix get the
    * store's raw findings, because the fix splices the raw verse. Handing them
    * these shifted offsets put the fix before a footnote in the wrong place. */
-  function displayLanguageQaFindings(findings: LanguageQaFinding[], parsed: ParsedVerse): LanguageQaFinding[] {
+  function displayLanguageQaFindings(findings: LanguageQaFinding[], display: VerseDisplay): LanguageQaFinding[] {
     return findings.map((finding) => ({
-      ...finding, start: parsed.mapOffset(finding.start), end: parsed.mapOffset(finding.end),
+      ...finding, start: utf16Offset(display, finding.start), end: utf16Offset(display, finding.end),
     }));
   }
 
@@ -702,11 +709,11 @@
     {@const langFindings = $languageQaFindingsByVerse[key] ?? []}
     {@const openCount = findings.filter((f) => f.status === "open").length + langFindings.length}
     {@const highlightFindings = findings.filter((f) => f.status !== "ignored" && f.status !== "accepted")}
-    {@const parsed = parseVerseNotes($verseTexts[key] ?? "")}
-    {@const remapped = remapFindings(highlightFindings, parsed)}
-    {@const langDisplay = displayLanguageQaFindings(langFindings, parsed)}
-    {@const segments = buildSegments(parsed.clean, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [], langDisplay)}
-    {@const menuFindingIds = markedFindingIds(remapped, parsed.clean.length, langDisplay)}
+    {@const display = $verseDisplay[key] ?? identityDisplay($verseTexts[key] ?? "")}
+    {@const remapped = remapFindings(highlightFindings, display)}
+    {@const langDisplay = displayLanguageQaFindings(langFindings, display)}
+    {@const segments = buildSegments(display.plain, remapped, $nativeChecksByVerse[key] ?? [], $aiCheckReviewsByVerse[key] ?? [], langDisplay)}
+    {@const menuFindingIds = markedFindingIds(remapped, display.plain.length, langDisplay)}
     {@const activeFindingId = menuFindingIds[activeIndexFor(key, menuFindingIds.length)]}
     {@const isEditingThis = $editingChapter === $currentChapter && $editingVerse === v}
     <div
@@ -754,7 +761,7 @@
         </div>
       {:else}
         <div class="vtext">
-          {#each withNoteMarkers(segments, parsed.notes) as piece}
+          {#each withNoteMarkers(segments, notesForLayout(display)) as piece}
             {#if piece.kind === "note"}<button
                 class="note-btn {piece.note.kind}"
                 on:dblclick|stopPropagation

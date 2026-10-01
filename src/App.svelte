@@ -17,14 +17,14 @@
   import ProjectDashboard from "./lib/components/ProjectDashboard.svelte";
   import DiagnosticsPanel from "./lib/components/DiagnosticsPanel.svelte";
   import ProjectReportScreen from "./lib/components/ProjectReportScreen.svelte";
-  import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, ProjectReport, QaFinding, VerseHeading } from "./lib/types/finding";
+  import type { AiCheckReview, AlignmentWorkStatus, BookProgressEntry, CheckJobSnapshot, ProjectReport, QaFinding, VerseDisplay, VerseHeading } from "./lib/types/finding";
   import type {
     QaReport, ReportJobSnapshot, TriageJobSnapshot, TriageRecord,
   } from "./lib/types/report";
   import { isTriageUnavailable } from "./lib/types/report";
   import type { TriageOverrideVerdict } from "./lib/types/finding";
   import {
-    project, currentChapter, chapterVerseNums, verseTexts, headingsByVerse, findingsByVerse,
+    project, currentChapter, chapterVerseNums, verseTexts, verseDisplay, headingsByVerse, findingsByVerse,
     checkStatusByVerse, alignmentStatusByVerse, loadedChapters, selectedVerse, selectedVerseSet, checkingProgress, approvedCount, verseNums,
     verseKey, settingsOpen, exportOpen, bookApprovedSummary, resetBookState, reviewerMode,
     aiCheckReviewsByVerse, diagnosticsOpen, engineLog, appendEngineLog, navigationStatus,
@@ -690,9 +690,12 @@
     chapterVerseNums.update((m) => ({ ...m, [chapter]: verseIds }));
 
     const texts: Record<string, string> = {};
+    const displays: Record<string, VerseDisplay> = {};
     const alignmentStatuses: Record<string, AlignmentWorkStatus> = {};
     for (const [v, data] of Object.entries(verses)) {
       texts[verseKey(chapter, v)] = data.text;
+      // The engine says what the verse shows (#91); the reader never parses USFM.
+      if (data.display) displays[verseKey(chapter, v)] = data.display;
       alignmentStatuses[verseKey(chapter, v)] = data.alignmentStatus;
     }
     // Keyed by verseKey like everything else here: a bare verse number would
@@ -702,6 +705,7 @@
       headingRows[verseKey(chapter, v)] = rows;
     }
     verseTexts.update((t) => ({ ...t, ...texts }));
+    verseDisplay.update((d) => ({ ...d, ...displays }));
     headingsByVerse.update((h) => ({ ...h, ...headingRows }));
     alignmentStatusByVerse.update((existing) => ({ ...existing, ...alignmentStatuses }));
   }

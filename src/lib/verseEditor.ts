@@ -9,12 +9,12 @@ import { get, writable } from "svelte/store";
 import { bridge } from "./api/bridgeClient";
 import { decideLanguageQaFinding } from "./findingActions";
 import { nudgeLanguageQa } from "./languageQaInline";
-import type { QaFinding } from "./types/finding";
+import type { QaFinding, VerseDisplay } from "./types/finding";
 import type { LanguageQaFinding, LanguageQaSuggestion } from "./types/languageQa";
 import type { CorrectionApplicationIntent } from "./types/correctionReview";
 import {
   alignmentStatusByVerse, checkStatusByVerse, checkingProgress, findingsByVerse,
-  nativeChecksByVerse, aiCheckReviewsByVerse, languageQaFindingsByVerse, verseKey, verseTexts,
+  nativeChecksByVerse, aiCheckReviewsByVerse, languageQaFindingsByVerse, verseDisplay, verseKey, verseTexts,
 } from "./stores";
 
 // The "BOOK C:V" shape the engine's displayed references use. Verse bridges
@@ -39,12 +39,16 @@ export function refreshVerseTextFromApplication(
   const match = application.targetDisplayedReference.match(DISPLAYED_REFERENCE);
   if (!match) return "";
   const canonicalEdit = application.resultMetadata?.canonicalEdit;
-  const newText = canonicalEdit && typeof canonicalEdit === "object"
-    ? (canonicalEdit as Record<string, unknown>).newText
-    : undefined;
+  const edit = canonicalEdit && typeof canonicalEdit === "object"
+    ? (canonicalEdit as Record<string, unknown>)
+    : {};
+  const newText = edit.newText;
   if (typeof newText !== "string") return "";
   const key = verseKey(match[1], match[2]);
   verseTexts.update((t) => ({ ...t, [key]: newText }));
+  // The engine's record also says what the new text shows (#91); without it
+  // the reader falls back to the raw string until the chapter reloads.
+  setDisplay(key, isVerseDisplay(edit.display) ? edit.display : undefined);
   alignmentStatusByVerse.update((values) => ({ ...values, [key]: "invalid" }));
   return key;
 }
@@ -114,21 +118,37 @@ function withoutKey<T>(values: Record<string, T>, key: string): Record<string, T
  * (typed, a Use, a Greek Room fix); languageQaInline.ts repopulates it from
  * the next pass, and until then no mark sits on the wrong word.
  */
-function showVerseText(key: string, text: string): () => void {
+function isVerseDisplay(value: unknown): value is VerseDisplay {
+  return !!value && typeof value === "object" && typeof (value as VerseDisplay).plain === "string"
+    && Array.isArray((value as VerseDisplay).removed);
+}
+
+/** Set, or clear, what the reader shows for a verse. Cleared means "render the
+ *  raw text until the engine says otherwise" (an optimistic save in flight). */
+function setDisplay(key: string, display: VerseDisplay | undefined): void {
+  verseDisplay.update((values) => (display ? { ...values, [key]: display } : withoutKey(values, key)));
+}
+
+function showVerseText(key: string, text: string, display?: VerseDisplay): () => void {
   const before = {
     text: get(verseTexts)[key],
+    display: get(verseDisplay)[key],
     ai: get(aiCheckReviewsByVerse)[key],
     native: get(nativeChecksByVerse)[key],
     languageQa: get(languageQaFindingsByVerse)[key],
     alignment: get(alignmentStatusByVerse)[key],
   };
   verseTexts.update((t) => ({ ...t, [key]: text }));
+  // The old display describes the old text: drop it (or replace it) in the
+  // same tick, or the reader shows the old clean text over the new raw one.
+  setDisplay(key, display);
   aiCheckReviewsByVerse.update((values) => withoutKey(values, key));
   nativeChecksByVerse.update((values) => withoutKey(values, key));
   languageQaFindingsByVerse.update((values) => withoutKey(values, key));
   alignmentStatusByVerse.update((values) => ({ ...values, [key]: "invalid" }));
   return () => {
     verseTexts.update((t) => (before.text === undefined ? withoutKey(t, key) : { ...t, [key]: before.text }));
+    setDisplay(key, before.display);
     if (before.ai !== undefined) aiCheckReviewsByVerse.update((v) => ({ ...v, [key]: before.ai! }));
     if (before.native !== undefined) nativeChecksByVerse.update((v) => ({ ...v, [key]: before.native! }));
     if (before.languageQa !== undefined) languageQaFindingsByVerse.update((v) => ({ ...v, [key]: before.languageQa! }));
@@ -171,8 +191,12 @@ export async function saveVerseEdit({ optimistic = false }: { optimistic?: boole
     undo = null;
     nudgeLanguageQa();  // the edit started a new Language QA pass
     if (!optimistic) {
-      showVerseText(key, text);
+      showVerseText(key, text, editResult.display);
       cancelVerseEdit();
+    } else {
+      // The optimistic text has been showing raw; now the engine has said
+      // what it shows.
+      setDisplay(key, editResult.display);
     }
     recheckingKey.set(key);
     recheckedKey.set("");

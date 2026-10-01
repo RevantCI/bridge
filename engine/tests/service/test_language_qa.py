@@ -1629,8 +1629,8 @@ def test_word_attributes_are_not_visible_text():
 
 
 def test_lifted_text_mirrors_the_frontend_note_swallow_rule():
-    # Same table as usfmNotes.test.ts "lifts notes exactly as the engine's
-    # lift_inline_usfm does". Change both or neither.
+    # The engine is the only side now (#91 Phase 2b: usfmNotes.ts no longer parses);
+    # usfmNotes.test.ts's copy of this table was deleted with it. The rule itself lives in usfm_verse.
     for raw, visible in [
         ("a \\f + \\ft n\\f* b", "a b"),
         ("a\\f + \\ft n\\f* b", "a b"),

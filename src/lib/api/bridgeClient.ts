@@ -529,6 +529,8 @@ export const bridge = {
   editVerse(chapter: string, verse: string, newText: string): Promise<{
     committed: boolean;
     issueResolutionsNeedingRecheck: number;
+    /** What the reader shows for the saved text (#91); absent from an older engine. */
+    display?: import("../types/finding").VerseDisplay;
   }> {
     return call("verse.edit", { chapter, verse, newText });
   },

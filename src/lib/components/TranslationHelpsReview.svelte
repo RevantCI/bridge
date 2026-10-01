@@ -3,7 +3,7 @@
   import { bridge } from "../api/bridgeClient";
   import {
     aiCheckReviewsByVerse, checkStatusByVerse, currentChapter, findingsByVerse, nativeChecksByVerse,
-    allowManualOverride, selectedVerse, verseKey, verseTexts,
+    allowManualOverride, selectedVerse, verseDisplay, verseKey, verseTexts,
   } from "../stores";
   import type {
     AiCheckReview, CheckTargetSelection, DesktopConnectorState, IssueResolutionRecord,
@@ -46,6 +46,9 @@
   $: checks = $nativeChecksByVerse[key] ?? [];
   $: aiReviews = $aiCheckReviewsByVerse[key] ?? [];
   $: verseText = $verseTexts[key] ?? "";
+  // Selections are counted on what the verse shows, the same text the engine
+  // counts them on (strip_usfm) and the reader highlights them in (#91 Phase 2b).
+  $: visibleText = $verseDisplay[key]?.plain ?? verseText;
   $: pendingChecks = checks.filter((check) => check.selectionStatus === "pending");
   $: doneChecks = checks.filter(
     (check) => check.selectionStatus === "selected" || check.selectionStatus === "nothing_to_select",
@@ -305,7 +308,7 @@
   function selectionChanged(index: number): void {
     const next = rows.map((row) => ({ ...row }));
     const text = next[index].text.trim();
-    const occurrences = exactTextRanges(verseText, text).length;
+    const occurrences = exactTextRanges(visibleText, text).length;
     next[index].occurrences = occurrences;
     if (occurrences === 0) next[index].occurrence = 1;
     else if (next[index].occurrence > occurrences) next[index].occurrence = occurrences;
