@@ -38,14 +38,19 @@ def test_write_repairs_in_place_and_keeps_the_encoding(tmp_path):
     bom.write_bytes(SOURCE.encode("utf-8-sig"))
     utf16 = tmp_path / "utf16.usfm"
     utf16.write_bytes(SOURCE.replace("\n", "\r\n").encode("utf-16"))
+    no_bom = tmp_path / "no-bom.usfm"
+    no_bom.write_bytes(SOURCE.encode("utf-8"))
     clean = tmp_path / "already-clean.usfm"
     clean.write_text(REPAIRED, encoding="utf-8")
     before = clean.stat().st_mtime_ns
 
-    assert _script().main([str(bom), str(utf16), str(clean), "--write"]) == 0
+    assert _script().main([str(bom), str(utf16), str(no_bom), str(clean), "--write"]) == 0
 
     assert bom.read_bytes().startswith(b"\xef\xbb\xbf")
     assert bom.read_bytes().decode("utf-8-sig") == REPAIRED
+    # A file without a BOM must not gain one (the first run on the ESV did that).
+    assert not no_bom.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert no_bom.read_bytes() == REPAIRED.encode("utf-8")
     assert utf16.read_bytes()[:2] in (b"\xff\xfe", b"\xfe\xff")
     assert utf16.read_bytes().decode("utf-16") == REPAIRED.replace("\n", "\r\n")
     assert clean.stat().st_mtime_ns == before  # untouched: nothing to repair

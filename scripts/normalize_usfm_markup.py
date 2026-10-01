@@ -38,13 +38,20 @@ _ENCODINGS = ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be", "utf-8")
 
 
 def _decode(raw: bytes) -> tuple[str, str] | None:
-    """(text, encoding) for the first encoding that yields USFM, or None."""
+    """(text, encoding) for the first encoding that yields USFM, or None.
+
+    The encoding returned is the one to write back with: `utf-8-sig` only when
+    the file really starts with a BOM (the codec also accepts a file without
+    one, and re-encoding that as `utf-8-sig` would *add* a BOM -- which is what
+    the first run of this script did to eight ESV files)."""
     for encoding in _ENCODINGS:
         try:
             text = raw.decode(encoding)
         except UnicodeError:
             continue
         if "\\" in text:
+            if encoding == "utf-8-sig" and not raw.startswith(b"\xef\xbb\xbf"):
+                encoding = "utf-8"
             return text, encoding
     return None
 
