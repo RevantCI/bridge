@@ -196,7 +196,6 @@ because the numbered phases and stages are complete.
 | `iso-639-3` | Offline searchable language catalog for import metadata (adds ~94 KB gzip to the bundle — Vite's non-fatal 500 KB chunk warning is from this; splittable later if startup size becomes a concern). |
 | `svelte`, `svelte-check`, `@sveltejs/vite-plugin-svelte`, `@tsconfig/svelte` | Svelte 4 + TS tooling. |
 | `tailwindcss`, `postcss`, `autoprefixer` | Styling. |
-| `usfm-js` | USFM parsing/serialization on the frontend. |
 | `word-aligner` | Alignment-related utility (translationCore ecosystem package). |
 | `vite`, `typescript` | Build tooling. |
 

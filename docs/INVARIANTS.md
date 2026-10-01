@@ -258,5 +258,9 @@ verify repository reality against this document before relying on it
   and exclusive membership within each lexical layer.
 - Keep `ReviewStatus`, `LifecycleStatus`, and `QaDisposition` independent.
 - Preserve clean USFM and native translationCore behavior.
+- USFM is read only through `usfm_parser.py` (a book) and `usfm_verse.py` (a
+  verse string), engine and frontend alike; no other module parses it (#91).
+  The stored verse string is a verbatim slice of the source; the display the
+  reader shows is derived from it by deletion only, so raw offsets map exactly.
 
 ---

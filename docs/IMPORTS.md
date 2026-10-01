@@ -85,6 +85,14 @@ first opened, not in the preview. A full usfmtc parse runs at roughly 2 µs per
 character, about 20× the old regex: a whole Tamil IRV Bible is ~11 s and an
 aligned Psalms ~5–8 s, which is why the preview does not parse every book.
 
+What a stored verse *shows* — plain text, footnotes and cross-references,
+character-style spans, the raw ranges removed — is the other half of the same
+design: `engine/tc_ai_bridge/usfm_verse.py`'s `lift_verse`, Bridge's own
+deletion-only scanner, bound to usfmtc by a parity test over every stored verse
+of both IRV fixtures. Checks, alignment tokens, the names check, Language QA, the
+passage index and the reader all read it; the frontend receives it as `display`
+on every verse read and never parses USFM.
+
 ## Normalized project data
 
 For a single-book import and the first book of a collection, Bridge creates or

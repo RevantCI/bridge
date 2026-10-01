@@ -268,7 +268,7 @@ running, and cancel-wait every 400 ms.
 
 | Subsystem | Main modules (LOC) |
 |---|---|
-| Project I/O and import | `tc_project.py` 2980, `project_import.py` 992, `project_registry.py` 531, `usfm_parser.py` (the one USFM document parser: usfmtc behind Bridge's own walker, #91), `usfm.py`, `usfm_passages.py` 308 |
+| Project I/O and import | `tc_project.py` 2980, `project_import.py` 992, `project_registry.py` 531, `usfm_parser.py` (reads a book: usfmtc behind Bridge's own walker; verse boundaries, headings, structure, headers, #91), `usfm_verse.py` (reads a verse string: plain text, notes, styles, offset map — the one fragment reader), `usfm.py` (aliases over it), `usfm_passages.py` (passage windows from the parser's structure) |
 | translationCore compatibility and resources | `resource_materializer.py` 364, `original_language_resources.py` 288, `lexicon_resources.py` 196, `knowledge_base.py` 450, `local_checks.py`, `plugins.py` 251 |
 | Word alignment | `alignment_engine.py` 204, `aligned_usfm.py` 166, `word_alignment_evidence.py` 284, `alignment_statistics.py` 372 (backs the consistency finding), `alignment_reliability.py` 428 and `semantic_alignment_guard.py` 124 (AI proposals; removal decided) |
 | Stages 4 to 8 | `passage_semantic_repository.py` 5070, `passage_semantic_runtime.py` 1364, `passage_semantic_models.py` 1171, `source_semantic_inventory.py` 779, `target_semantic_inventory.py` 392, `semantic_location.py` 853, `meaning_analysis.py` 560, `qa_audit.py` 822, `analysis_jobs.py` 724 |

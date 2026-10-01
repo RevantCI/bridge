@@ -497,52 +497,31 @@ change. **This is scheduled work, not accepted behaviour.**
     PyInstaller bootloader alone leaves the real Python child holding the
     file. A sidecar busy inside a long request when the app dies abruptly can
     still orphan; `Stop-Process -Name bridge-engine -Force` clears it.
-14. **Where a verse starts and ends is decided by one parser**
-    (`engine/tc_ai_bridge/usfm_parser.py`, usfmtc 0.4.8 pinned exactly, #91), and
-    it is the only module that may import usfmtc. The stored verse string is still
-    a verbatim slice of the source — the parser picks the boundaries from its
-    element positions, it does not re-serialise — so offsets, `\zaln`/`\w` markup
-    and notes survive byte-for-byte. usfmtc's lexer is quadratic in input length
-    (a whole aligned Psalms took 277 s), so books are parsed a chapter at a time;
-    it is still ~20x slower than a regex, so the import preview reads identity from
-    the preamble only and fully parses just the first book. Never hand usfmtc a
-    bare string: it opens anything `os.path.exists` accepts as a file. **Export
-    is on it too (#190):** `_source_preserving_usfm` writes current text into
-    each verse's parser-reported span (`UsfmVerse.start`/`head_end`/`tail_spans`)
-    and touches nothing else, so between-verse headings survive and a mid-line
-    `\v` is written back; `read_usfm_text` is the one decoder for the preserved
-    source. **The fragment reader is `engine/tc_ai_bridge/usfm_verse.py`**
-    (`lift_verse`, #91 Phase 1a): what one *stored verse string* shows — plain
-    text, notes, style spans, a raw→plain offset map — by deletion only, total
-    (warnings, never a refusal). It is Bridge's own scanner, not usfmtc (usfmtc
-    has no text-node offsets and these run per verse on hot paths), and
-    `tests/project_io/test_usfm_verse.py` binds it to usfmtc with a parity test
-    over every stored verse of both IRV fixtures; the USJ walker lives only in
-    that test. On it since Phase 1b: Language QA's `lift_inline_usfm`,
-    `usfm.py`'s `strip_usfm`/`whitespace_tokens` (now re-exports of
-    `usfm_verse.plain_text`/`tokens`, so every tC `occurrence` count in import,
-    checks, alignment and tN/tW selections tokenises the same text),
-    `aligned_usfm._masked_ranges`, and the names check's `_first_token_span`
-    (found in the plain text, mapped back through `raw_span`). **The frontend
-    never parses USFM** (Phase 2): `verse.get`, `chapter.verseData`, the
-    `verse.edit` result and a correction's `canonicalEdit` carry
-    `display: {plain, notes, removed, styles, warnings}` (code points); the
-    `verseDisplay` store holds it, `utils/verseDisplay.ts` maps raw finding
-    offsets onto it, and `usfmNotes.ts` is layout only. A verse with no display
-    (an optimistic save in flight) renders its raw text. **Stages 4–8's passage
-    index is on it too** (Phase 3b): `UsfmPassageIndex.from_text` builds one
-    segment per parsed verse with `plain_text` and its window boundaries from
-    `ParsedUsfm.structure` (chapter/verse/paragraph events in document order,
-    each with the verse it introduces); `strip_usfm_inline` is an alias. And so
-    is the overlay (Phase 3c): `passage_semantic_runtime._source_skeleton` is
-    `ParsedUsfm.headers` + `structure`, with inline markers from
-    `usfm_verse.marker_names`; the runtime's only remaining regexes parse verse
-    *references*, not USFM. **Every USFM reader in the engine and the frontend
-    now goes through `usfm_parser.py` or `usfm_verse.py`.** No new module may
-    regex-parse USFM: it calls one of these two. (usfmtc quirk the parser
-    hides: it opens an *implicit* `\p` when a verse follows `\c` with no
-    paragraph marker, reported at the chapter's position; the parser drops it,
-    because it is not in the source.)
+14. **USFM is read by exactly two modules, and nothing else may regex-parse it**
+    (#91, complete 2026-10-01). `engine/tc_ai_bridge/usfm_parser.py` reads a
+    *book*: usfmtc 0.4.8 pinned exactly, the only module that may import it,
+    behind Bridge's own walker. It decides where each verse starts and ends,
+    which paragraphs are headings, and exposes `structure` (chapter/verse/
+    paragraph events in order) and `headers`; the stored verse string is cut
+    **verbatim** from the source at its element positions, so offsets, `\zaln`/
+    `\w` markup and notes survive byte-for-byte, and export writes current text
+    back into those same spans. `engine/tc_ai_bridge/usfm_verse.py` reads a
+    *verse string*: `lift_verse` gives plain text, notes, style spans, the
+    removed ranges and a raw→plain offset map, by deletion only and never
+    refusing (warnings instead). It is Bridge's own scanner, not usfmtc (usfmtc
+    has no text-node offsets and this runs per verse on hot paths), bound to
+    usfmtc by a parity test over every stored verse of both IRV fixtures. On
+    them: import, export, `strip_usfm`/`whitespace_tokens` (so every tC
+    `occurrence` tokenises one text), the aligned exporter, the names check's
+    offsets, Language QA, the passage index and the Stage 4 overlay, and the
+    frontend, which receives `display` on every verse read and never parses.
+    usfmtc quirks the parser hides: a string argument that `os.path.exists`
+    accepts is opened as a file (always pass a StringIO); its lexer is
+    quadratic, so books are parsed a chapter at a time and the import preview
+    parses only the first book; it opens an implicit `\p` after a `\c` with no
+    paragraph marker, reported at the chapter's position, which the parser
+    drops. A new USFM edge case is fixed in one of these two modules, with a
+    parity or snapshot test, never with a regex elsewhere.
 
 ## Working in this repo
 

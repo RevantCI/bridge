@@ -14282,3 +14282,48 @@ reader, Language QA and Stages 4–8 all read USFM through two modules:
 4: delete the Phase 1b characterisation test and the Phase 3a snapshot, the
 `export_aligned` header regexes, `paratext_notes`' `startswith("\v ")`, and
 bring ARCHITECTURE/INVARIANTS/IMPORTS up to date.
+
+## 2026-10-01 — Phase 4: cleanup, and #91 closed
+
+**Deleted.** `tests/project_io/test_usfm_tokens_characterisation.py` carried a
+verbatim copy of the regex tokeniser to prove Phase 1b changed no Tamil token;
+that regex is gone, so the copy has nothing to characterise. `tests/semantic/
+test_passage_windows_snapshot.py` and `tests/fixtures/passage-windows-snapshot-v1.json`
+guarded Phases 3b/3c; both landed with every boundary unchanged. Neither was a
+golden, and the goldens -- which exercise the same pipeline end to end -- stay.
+`test_overlay_cache.py` stays too: the cache is production behaviour.
+
+**The last two small readers.** `export_aligned` found or inserted `\usfm 3.0`
+with two regexes over the rendered output; `UsfmHeader` now carries the marker's
+source offset and the exporter uses `parse_usfm(content).headers` to replace the
+version line or insert after the `\id` line. `paratext_notes._verse_snapshot`'s
+`startswith("\v ")` is left alone on purpose: it tests whether a snapshot string
+is already in Paratext's CommentList shape, which is a format check on Bridge's
+own output, not a read of USFM.
+
+**Frontend.** `usfm-js` was a listed dependency with no import anywhere in
+`src/`; removed, and its row in DEVELOPER_GUIDE's dependency table with it. The
+frontend has no USFM parser, in code or in `node_modules`.
+
+**Docs.** CLAUDE.md gotcha 14 is rewritten as the end state rather than a phase
+log: two modules, what each owns, the usfmtc quirks the parser hides, and the
+rule that a new USFM edge case is fixed in one of them with a parity or snapshot
+test, never with a regex elsewhere. ARCHITECTURE's module table names both
+modules; INVARIANTS §44.8 gains the rule; IMPORTS describes the fragment reader
+beside the document parser.
+
+**What #91 delivered, in one place.** usfmtc behind `usfm_parser.py` decides verse
+boundaries, headings, structure and headers for import and export; `usfm_verse.py`
+decides what a verse shows for checks, tokens, alignment export, the names check,
+Language QA, the passage index and the reader; the protocol carries `display`
+and the frontend renders it. Corpus parity: 443 files / 209,715 verses identical
+to the old import except its own errors; 1,244 fixture verses identical between
+the fragment reader and usfmtc; zero passage-window boundaries moved. Found and
+fixed on the way: export lost between-verse headings (#190); `\wj*\wj ` pairs glued
+words in the ESV (#203, check + script); the regex index glued words after a
+closing marker (150 Luke verses); usfmtc's implicit paragraph. Filed, not fixed:
+#191 dead double-space check, #192 preview parser cost, #193 flaky test. Left as
+the maintainer decided: the 15 s import smoke budget.
+
+**Verified.** Export and parser tests; full engine suite, `npm run check`/`test`/
+`build` and the frozen smoke in the commit.

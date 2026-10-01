@@ -81,6 +81,7 @@ class UsfmParseError(ValueError):
 class UsfmHeader:
     tag: str
     content: str
+    offset: int = -1  # code-point offset of the marker in the source; -1 when unknown
 
 
 @dataclass(frozen=True)
@@ -305,12 +306,15 @@ def parse_usfm(text: str) -> ParsedUsfm:
             book_code = str(element.get("code") or "").upper()
             line_end = text.find("\n", at)
             id_line = text[marker_end:line_end if line_end >= 0 else len(text)].strip()
-            headers.append(UsfmHeader("id", id_line))
+            headers.append(UsfmHeader("id", id_line, at))
             # usfmtc folds \usfm into the document's version attribute rather
             # than giving it an element, so it is read back from the source.
             usfm_version = _USFM_VERSION.match(text, line_end if line_end >= 0 else len(text))
             if usfm_version:
-                headers.append(UsfmHeader("usfm", usfm_version.group("version")))
+                headers.append(UsfmHeader(
+                    "usfm", usfm_version.group("version"),
+                    text.find(chr(92) + "usfm", line_end if line_end >= 0 else len(text)),
+                ))
         elif tag == "chapter":
             seen_chapter = True
             events.append(("c", at, str(element.get("number") or "")))
@@ -327,7 +331,7 @@ def parse_usfm(text: str) -> ParsedUsfm:
                 # not structure (#91 Phase 3c).
                 continue
             if not seen_chapter:
-                headers.append(UsfmHeader(marker.group("tag") if marker else style, ""))
+                headers.append(UsfmHeader(marker.group("tag") if marker else style, "", at))
                 events.append(("header", at, str(len(headers) - 1)))
             else:
                 # Every paragraph-level marker in the body is structure; the
@@ -351,7 +355,7 @@ def parse_usfm(text: str) -> ParsedUsfm:
     for kind, at, value in events:
         if kind == "header":
             index = int(value)
-            headers[index] = UsfmHeader(headers[index].tag, marker_content(at))
+            headers[index] = UsfmHeader(headers[index].tag, marker_content(at), at)
 
     chapters: list[str] = []
     verses: list[UsfmVerse] = []

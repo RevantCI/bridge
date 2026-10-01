@@ -4438,12 +4438,20 @@ class BridgeEngine:
                         continue
                     lines.append(f"\\v {verse} {render(chapter, verse)}")
             content = "\n".join(lines) + "\n"
-        version_pattern = re.compile(r"(?im)^[ \t]*\\usfm\s+\S+[^\r\n]*$")
-        if version_pattern.search(content):
-            content = version_pattern.sub(r"\\usfm 3.0", content, count=1)
+        # Aligned USFM declares its version. The parser says where the `\usfm`
+        # header is, or where the `\id` line ends so one can be inserted (#91).
+        headers = {h.tag.lower(): h for h in parse_usfm(content).headers}
+        version = headers.get("usfm")
+        if version is not None and version.offset >= 0:
+            line_end = content.find("\n", version.offset)
+            line_end = len(content) if line_end < 0 else line_end
+            content = content[:version.offset] + "\\usfm 3.0" + content[line_end:]
         else:
-            id_line = re.search(r"(?im)^[ \t]*\\id\s+[^\r\n]*(?:\r?\n|$)", content)
-            insert_at = id_line.end() if id_line else 0
+            book_id = headers.get("id")
+            insert_at = 0
+            if book_id is not None and book_id.offset >= 0:
+                line_end = content.find("\n", book_id.offset)
+                insert_at = len(content) if line_end < 0 else line_end + 1
             content = content[:insert_at] + "\\usfm 3.0\n" + content[insert_at:]
         Path(output_path).write_text(content, encoding="utf-8")
         ledger = self._write_export_ledger(output_path)
