@@ -206,7 +206,9 @@ def main() -> int:
                 # (tc_ai_bridge/usfm_parser.py, #91), whose pure-Python grammar
                 # is exactly what a freeze can drop without failing to build.
                 "\\id TIT\n\\h Titus\n\\c 1\n\\v 1 Paul, a servant of God.\n"
-                "\\s The work in Crete\n\\q1 \\v 2 In hope of eternal life.\n",
+                # A character style in verse 2: the frozen exe must hand the
+                # reader clean display text with the style as a span (#91 Phase 2).
+                "\\s The work in Crete\n\\q1 \\v 2 In hope of \\nd eternal\\nd* life.\n",
                 encoding="utf-8",
             )
             raw_import = request("original-language-import", "project.import", {
@@ -234,10 +236,13 @@ def main() -> int:
                 verse: (item or {}).get("text")
                 for verse, item in (parsed_result.get("verses") or {}).items()
             }
+            display_two = ((parsed_result.get("verses") or {}).get("2") or {}).get("display") or {}
             if (
                 not parsed_chapter.get("success")
                 or parsed_verses.get("1") != "Paul, a servant of God."
-                or parsed_verses.get("2") != "In hope of eternal life."
+                or parsed_verses.get("2") != "In hope of \\nd eternal\\nd* life."
+                or display_two.get("plain") != "In hope of eternal life."
+                or [s.get("marker") for s in display_two.get("styles") or []] != ["nd"]
                 or (parsed_result.get("headings") or {}).get("2", [{}])[0].get("text") != "The work in Crete"
             ):
                 raise SystemExit(f"Frozen USFM parser did not bound verses and headings: {parsed_chapter}")

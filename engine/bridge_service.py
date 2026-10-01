@@ -227,6 +227,14 @@ def _stable_finding_id(*, chapter: str, verse: str, engine: str,
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:20]
 
 
+def verse_display(text: str) -> dict[str, Any]:
+    """The display payload for one stored verse string (#91 Phase 2):
+    `{plain, notes, removed, styles, warnings}` from the fragment reader, all
+    offsets in code points. Attached wherever the protocol hands the frontend
+    a verse's text, so the frontend never parses USFM."""
+    return lift_verse(text).to_dict()
+
+
 def _first_token_span(text: str, token: str) -> Optional[tuple[int, int]]:
     """Locate `token`'s first whole-word occurrence in the raw verse string,
     as code-point offsets into that string -- the one a QaFinding's
@@ -1407,6 +1415,7 @@ class BridgeEngine:
         return {
             "chapter": chapter, "verse": verse,
             "text": text,
+            "display": verse_display(text),
             "alignment": alignment.to_dict(),
             "alignmentStatus": self._alignment_verse_status(self.project, chapter, verse),
         }
@@ -1422,8 +1431,14 @@ class BridgeEngine:
         verses = self.project.verses(chapter)
         out: dict[str, Any] = {}
         for v in verses:
+            text = self.project.target_verse_text(chapter, v)
             out[v] = {
-                "text": self.project.target_verse_text(chapter, v),
+                "text": text,
+                # What the reader shows (#91 Phase 2): plain text, notes, style
+                # spans and the raw ranges removed, all code-point offsets. The
+                # frontend renders this and never parses USFM itself. `text`
+                # stays: the editor edits the raw string and fixes splice it.
+                "display": verse_display(text),
                 "alignment": self.project.load_verse_alignment(chapter, v).to_dict(),
                 "alignmentStatus": self._alignment_verse_status(self.project, chapter, v),
             }
@@ -4239,6 +4254,9 @@ class BridgeEngine:
                 1 for item in resolutions
                 if str((item.get("recheck") or {}).get("status") or "") == "stale"
             ),
+            # The saved text's display payload, so the reader refreshes from
+            # the response instead of parsing the new string itself (#91).
+            "display": verse_display(str(result.get("newText", new_text))),
             **result,
         }
 

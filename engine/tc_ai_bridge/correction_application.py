@@ -16,6 +16,7 @@ from .passage_semantic_models import (
     StrictScriptureEditContext,
 )
 from .passage_semantic_repository import FoundationConflict, FoundationValidationError
+from .usfm_verse import lift_verse
 
 
 class CorrectionApplicationService:
@@ -292,7 +293,11 @@ class CorrectionApplicationService:
             application["applicationId"], expected_state=application["applicationState"],
             expected_state_revision=int(application["stateRevision"]),
             new_state=CorrectionApplicationState.APPLIED_SCRIPTURE,
-            result_metadata={"canonicalEdit": result},
+            # `display` is what the reader shows for the new text (#91 Phase 2),
+            # so the frontend can refresh from this record without parsing USFM.
+            result_metadata={"canonicalEdit": {
+                **result, "display": lift_verse(str(result.get("newText", ""))).to_dict(),
+            }},
         )
         self.repository.apply_target_invalidation(
             application["pendingInvalidationId"], actual_text_hash=actual_hash,

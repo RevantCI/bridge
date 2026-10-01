@@ -14087,3 +14087,31 @@ the reader is not bent. Delete the characterisation test in Phase 4.
 **Verified.** 488 tests across every moved consumer (`tests/alignment`, names check,
 Language QA, language pack, import, the #203 check) green; full suite and frozen smoke
 in the commit. Not run: desktop (QA matrix A90).
+
+## 2026-10-01 — The protocol carries what the reader shows (#91 Phase 2a)
+
+**What.** `bridge_service.verse_display(text)` is `lift_verse(text).to_dict()`:
+`{plain, notes, removed, styles, warnings}`, every offset a code point, the same
+unit engine findings use. It rides on `verse.get`, on every row of
+`chapter.verseData`, on the `verse.edit` result (the saved text's display, so the
+reader refreshes from the response) and inside a correction application's
+`canonicalEdit` result metadata (the frontend already reads `newText` there to
+refresh a verse after Stage 9B.3b applies). `text` stays on every one of those:
+the editor edits the raw string and suggested fixes splice it by raw offset.
+
+**Why engine-side.** The frontend's `usfmNotes.ts` parses the raw string live on
+every render and remaps finding offsets through its own map. With the payload
+here, Phase 2b deletes that parser: one definition of "what the verse shows",
+computed once per read next to the text it describes, instead of twice on two
+sides of the protocol with a "change both or neither" comment holding them
+together. Cost: `lift_verse` is microseconds per verse; `chapter.verseData` for
+Psalm 119 (176 verses) adds well under a millisecond.
+
+**Verified.** Four RPC tests (`test_verse_display_payload.py`: a footnoted,
+styled Tamil verse through `chapter.verseData` and `verse.get`; `verse.edit`
+returns the new text's display and a later read agrees; a plain verse has an
+identity display) and one assertion in the production correction walkthrough
+that `canonicalEdit.display.plain` is the corrected text. The frozen smoke's
+Titus fixture gained `\nd eternal\nd*` in verse 2 and asserts `display.plain`
+and the `nd` span in the frozen exe. Full suite and frozen smoke in the commit.
+No frontend change; QA matrix A91.

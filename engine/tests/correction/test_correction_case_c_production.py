@@ -138,7 +138,12 @@ def test_real_case_c_survives_help_resource_revision_and_affected_reanalysis(
         root / ".apps" / "translationCore" / "tools" / "wordAlignment"
         / "invalid" / "1" / "6.json"
     ).is_file()
-    attempts = runtime.repository.application_intent(applied["applicationId"])[
-        "resultMetadata"
-    ]["affectedAnalysisAttempts"]
+    result_metadata = runtime.repository.application_intent(applied["applicationId"])["resultMetadata"]
+    attempts = result_metadata["affectedAnalysisAttempts"]
     assert attempts[-1]["analysisJobId"] == completed["jobId"]
+    # The applied edit's record carries what the reader shows for the new text
+    # (#91 Phase 2a), so the frontend refreshes from it without parsing USFM.
+    canonical = result_metadata["canonicalEdit"]
+    assert canonical["newText"] == project.target_verse_text("1", "6")
+    assert canonical["display"]["plain"].startswith(f"{CORRECTED_WORD} remembrance")
+    assert set(canonical["display"]) == {"plain", "notes", "removed", "styles", "warnings"}
