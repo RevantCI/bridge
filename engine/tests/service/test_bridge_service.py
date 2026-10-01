@@ -1404,6 +1404,73 @@ def test_non_aligned_export_preserves_usfm_esfm_structure(tmp_path, source_encod
     assert preview["books"][0]["verseCount"] == 2
 
 
+def test_export_keeps_a_heading_between_verses_and_writes_back_a_mid_line_verse(tmp_path):
+    """#190: the export used to replace everything from a `\\v` to the next `\\v`, so a
+    heading that #180 moved out of the verse text was overwritten and lost, and a
+    verse whose `\\v` did not start its line was never matched, so its edit was
+    silently dropped. Both are decided by the parser's verse spans now."""
+    source = tmp_path / "PSA.usfm"
+    source.write_text(
+        "\\id PSA\n"
+        "\\c 1\n"
+        "\\s Book One\n"
+        "\\p\n"
+        "\\v 1 Blessed is the man.\n"
+        "\\s The wicked\n"
+        "\\q1 \\v 2 The wicked are not so,\n"
+        "\\q2 but are like chaff.\n"
+        "\\v 3 Therefore they will not stand.\n",
+        encoding="utf-8",
+    )
+    engine = BridgeEngine()
+    imported = call(engine, "project.import", {
+        "path": str(source),
+        "destinationRoot": str(tmp_path / "projects"),
+        "metadata": {
+            "languageId": "eng", "languageName": "English", "languageDirection": "ltr",
+            "projectName": "Psalms", "bibleName": "Test Bible",
+        },
+    })
+    assert imported["success"] is True
+    verses = call(engine, "chapter.verseData", {"chapter": "1"})["result"]
+    assert verses["verses"]["1"]["text"] == "Blessed is the man."
+    assert verses["verses"]["2"]["text"] == "The wicked are not so,\n\\q2 but are like chaff."
+    assert verses["headings"]["2"][0]["text"] == "The wicked"
+
+    edited = call(engine, "verse.edit", {
+        "chapter": "1", "verse": "2", "newText": "The wicked are not so,\n\\q2 but are like chaff blown away.",
+    })
+    assert edited["success"] is True, edited
+    edited_one = call(engine, "verse.edit", {"chapter": "1", "verse": "1", "newText": "Blessed is the one."})
+    assert edited_one["success"] is True
+
+    out_path = tmp_path / "exported.usfm"
+    exported = call(engine, "export.nonAligned", {"outputPath": str(out_path)})["result"]
+    assert exported["fidelity"] == "source-preserving"
+    content = out_path.read_text(encoding="utf-8")
+
+    # The heading between verses 1 and 2 survives, once, in its own place.
+    assert content.count("\\s The wicked") == 1
+    assert "\\v 1 Blessed is the one.\n\\s The wicked\n\\q1 \\v 2 The wicked are not so,\n" in content
+    # The mid-line verse's edit is written back; the old text is gone.
+    assert "chaff blown away." in content
+    assert "like chaff.\n" not in content
+    assert content.count("\\v 2 ") == 1
+
+    # And the export re-imports to the same project.
+    from tc_ai_bridge.project_import import import_source
+    from tc_ai_bridge.tc_project import TranslationCoreProject
+    reimported = import_source(out_path, tmp_path / "reimported", {
+        "languageId": "eng", "languageName": "English", "languageDirection": "ltr",
+        "projectName": "Round trip", "bibleName": "Round trip Bible",
+    })
+    project = TranslationCoreProject(reimported["primaryProjectPath"])
+    assert project.target_verse_text("1", "1") == "Blessed is the one."
+    assert project.target_verse_text("1", "2") == "The wicked are not so,\n\\q2 but are like chaff blown away."
+    assert project.target_verse_text("1", "3") == "Therefore they will not stand."
+    assert [h["text"] for h in project.chapter_headings("1")["2"]] == ["The wicked"]
+
+
 def test_non_aligned_export_has_explicit_fallback_without_source(fixture_project, tmp_path):
     (fixture_project / "rut.usfm").unlink()
     engine = BridgeEngine()

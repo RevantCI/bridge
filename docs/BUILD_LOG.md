@@ -13899,3 +13899,52 @@ pins the give-up budget.
 locally, where its cost was 3.5 ms and invisible. It took a CI run to show the
 cost was contention-dependent. A latency budget in CI is what caught it -- the
 same gate that had been failing to report anything at all until this morning.
+
+## 2026-10-01 — Export writes into the parser's verse spans (#190, #91 Phase 0.5)
+
+**The bug.** `bridge_service._source_preserving_usfm` rebuilt an export by
+replacing everything from each `\v N` up to the next `\v`/`\c` with the current
+stored text. Two things sat inside that range after #180 and #91:
+
+- Section headings. #180 moved the `\s …` line and the `\p` after it out of the
+  verse text into `<chapter>.headings.json`, so the export overwrote the source
+  lines that held them and never wrote them back. Measured on an *unedited*
+  import of Tamil IRV Luke: 285 source lines missing from the export, 174 of them
+  heading lines; ESV Job lost 14. The existing export test only had a heading
+  before verse 1, outside any replacement range, so it passed.
+- Mid-line verses. The `^[ \t]*\v` regex never matched `\q1 \v 1 …`, so those
+  verses — the ones #91 step 2 started importing — had their edits silently not
+  exported.
+
+**The fix.** The parser already knows where each verse's text came from; it now
+says so. `UsfmVerse` gained `start` (just after the `\v N ` marker), `head_end`
+(end of the verse's text before any heading inside it, whitespace excluded) and
+`tail_spans` (Scripture lines that followed a heading *inside* the verse and were
+folded into the stored text). `close_verse` computes ranges instead of strings
+and derives `text` from them, so the 20 existing parser tests prove the text did
+not move; a new test asserts the spans reproduce `text` for every verse of both
+IRV fixtures. The exporter writes the current text into `[start, head_end)`,
+deletes each tail span (the whole text is now at the head), and touches nothing
+else. A numberless `\v` marker token the parser dropped at import is inside the
+head region, so an export no longer carries it — the text it introduced is
+already in the verse.
+
+`read_usfm_text` in `usfm_parser.py` is now the one decoder for the preserved
+source (UTF-8 with or without BOM, then the UTF-16 variants, newlines
+normalised); `project_import._read_text` delegates to it and the exporter's
+inline copy is gone. `passage_semantic_runtime._read_usfm` is the third copy and
+moves in Phase 3, which rewrites that file anyway.
+
+**Verified.** Engine: the new export test (heading between verses + `\q1 \v 2`
+edited + round-trip re-import), two span tests, the existing export/aligned
+round-trip tests unchanged; full suite below. Real data, unedited export diffed
+against source: ESV Psalms, ESV Job, IRV Luke, IRV Psalms **all byte-identical**
+on this branch (on `main`: Luke −285 lines, Job −14, the two Psalms identical
+because their headings sit before verse 1). Frozen: sidecars rebuilt and the
+release-style smoke run (see the commit). Not run: desktop export; QA matrix A88
+says so.
+
+Not changed: `export_aligned`'s `\usfm 3.0` insertion still uses its two small
+regexes on the *rendered* output — they operate on text this function just
+produced, not on a parse of the source, and the plan's note to move them to
+`ParsedUsfm.header()` is left for Phase 4 cleanup.

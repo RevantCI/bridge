@@ -175,6 +175,17 @@ not by the target translation's language.
   template while replacing verse payloads with the current project text.
 - Non-aligned export uses the same source-preserving template without alignment
   milestones.
+- Which bytes of the template each verse's text replaces is the parser's
+  decision (#190, 2026-10-01): `usfm_parser.parse_usfm` reports every verse's
+  `start`/`head_end` span and any `tail_spans` (Scripture that followed a
+  heading inside the verse), and the exporter writes the current text into
+  that span only. Section headings between verses, the `\p`/`\q` markers
+  around them, and a `\v` that does not start its line are left exactly as the
+  source had them. Before this the exporter replaced everything up to the next
+  `\v`, which dropped every heading #180 had moved into `headings.json` (174
+  heading lines in Tamil IRV Luke) and never matched a mid-line `\v` at all.
+  An unedited project exports byte-identical to its source; four real books
+  (ESV Psalms and Job, IRV Luke and Psalms) are the measured evidence.
 - If a legacy project has no retained source USFM, both exporters say that they
   used the simplified `\id`/`\c`/`\v` fallback.
 - An aligned verse must contain the exact current target-token inventory.

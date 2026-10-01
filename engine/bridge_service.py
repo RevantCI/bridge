@@ -100,6 +100,7 @@ from tc_ai_bridge.secret_store import AppSettings
 from tc_ai_bridge.workspace_repository import WorkspaceRepository, project_path_key
 from tc_ai_bridge.resource_materializer import materialize_book_checks
 from tc_ai_bridge.usfm import strip_usfm, whitespace_tokens
+from tc_ai_bridge.usfm_parser import UsfmParseError, parse_usfm, read_usfm_text
 from tc_ai_bridge import versification as versification_tool
 from tc_ai_bridge import alignment_gaps
 from tc_ai_bridge import alignment_statistics as corpus_stats_tool
@@ -4247,83 +4248,54 @@ class BridgeEngine:
     def _source_preserving_usfm(
         self, verse_renderer: Optional[Callable[[str, str], str]] = None,
     ) -> str | None:
+        # The parser that imported the book decides where each verse's text
+        # sits in the preserved source (#91), and only that span is replaced
+        # (#190). Everything between verses -- the section headings #180 moved
+        # into headings.json, paragraph and poetry markers, blank lines -- is
+        # left exactly as written, and a verse whose `\v` does not start its
+        # line is written back like any other. The regex this replaced took
+        # everything up to the next `\v`, which overwrote those headings, and
+        # never matched a mid-line `\v`, which silently dropped its edit.
         source_path = self.project.usfm_path()
         if source_path is None:
             return None
         try:
-            raw_source = source_path.read_bytes()
-        except OSError:
+            source = read_usfm_text(source_path)
+            parsed = parse_usfm(source)
+        except (OSError, UsfmParseError):
             return None
-        source = ""
-        for encoding in ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
-            try:
-                candidate = raw_source.decode(encoding)
-            except UnicodeError:
-                continue
-            if "\\c" in candidate and "\\v" in candidate:
-                source = candidate
-                break
-        if not source:
-            return None
-        # Avoid mixed or doubled CRLF when the rendered string is written
-        # through Python's platform-aware text layer on Windows.
-        source = source.replace("\r\n", "\n").replace("\r", "\n")
-
-        chapter_pattern = re.compile(
-            r"(?im)^[ \t]*\\c\s+(?P<number>\S+)(?:[ \t].*)?(?:\r?\n|$)"
-        )
-        verse_pattern = re.compile(
-            r"(?im)^[ \t]*\\v\s+(?P<number>\S+)(?P<separator>[ \t]*)"
-        )
-        chapters = list(chapter_pattern.finditer(source))
-        verses = list(verse_pattern.finditer(source))
-        if not chapters or not verses:
+        if not parsed.chapters or not parsed.verses:
             return None
 
         replacements: list[tuple[int, int, str]] = []
-        chapter_index = -1
         available_chapters = set(self.project.chapters())
         verse_cache: dict[str, set[str]] = {}
-        for verse_index, verse_match in enumerate(verses):
-            while (
-                chapter_index + 1 < len(chapters)
-                and chapters[chapter_index + 1].start() < verse_match.start()
-            ):
-                chapter_index += 1
-            if chapter_index < 0:
+        for entry in parsed.verses:
+            if entry.chapter not in available_chapters:
                 continue
-            chapter = chapters[chapter_index].group("number")
-            verse = verse_match.group("number")
-            if chapter not in available_chapters:
-                continue
-            chapter_verses = verse_cache.setdefault(chapter, set(self.project.verses(chapter)))
-            if verse not in chapter_verses:
-                continue
-
-            next_verse = (
-                verses[verse_index + 1].start()
-                if verse_index + 1 < len(verses)
-                else len(source)
+            chapter_verses = verse_cache.setdefault(
+                entry.chapter, set(self.project.verses(entry.chapter)),
             )
-            next_chapter = (
-                chapters[chapter_index + 1].start()
-                if chapter_index + 1 < len(chapters)
-                else len(source)
-            )
-            content_end = min(next_verse, next_chapter)
+            if entry.verse not in chapter_verses:
+                continue
             current_text = (
-                verse_renderer(chapter, verse)
+                verse_renderer(entry.chapter, entry.verse)
                 if verse_renderer is not None
-                else self.project.target_verse_text(chapter, verse)
+                else self.project.target_verse_text(entry.chapter, entry.verse)
             ).strip()
-            if current_text and not verse_match.group("separator"):
+            if current_text and entry.start > 0 and not source[entry.start - 1].isspace():
                 current_text = " " + current_text
-            replacements.append(
-                (verse_match.end(), content_end, current_text.rstrip() + "\n")
-            )
+            replacements.append((entry.start, entry.head_end, current_text))
+            # Scripture that followed a heading inside this verse was folded
+            # into its stored text, which is now all written at the head, so
+            # the old copies go (with their line break).
+            for tail_start, tail_end in entry.tail_spans:
+                drop_end = tail_end + 1 if source[tail_end:tail_end + 1] == "\n" else tail_end
+                replacements.append((tail_start, drop_end, ""))
 
         if not replacements:
             return None
+        replacements.sort()
         pieces: list[str] = []
         cursor = 0
         for start, end, replacement in replacements:

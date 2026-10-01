@@ -209,3 +209,45 @@ def test_input_the_parser_cannot_read_is_a_parse_error(monkeypatch):
     monkeypatch.setattr(usfmtc.USX, "fromUsfm", boom)
     with pytest.raises(UsfmParseError, match="grammar exploded"):
         parse_usfm("\\id TIT\n\\c 1\n\\v 1 a\n")
+
+
+def _text_from_spans(source: str, verse) -> str:
+    head = source[verse.start:verse.head_end]
+    tail = [source[a:b] for a, b in verse.tail_spans]
+    return "\n".join(head.split("\n") + tail).strip()
+
+
+def test_verse_spans_reproduce_the_verse_text_on_real_files(tamil_php_usfm, tamil_luk_usfm):
+    """An export writes current text back at [start, head_end) and deletes the
+    tail spans (#190), so those offsets must be exactly where `text` came from."""
+    for path in (tamil_php_usfm, tamil_luk_usfm):
+        source = path.read_text(encoding="utf-8-sig")
+        parsed = parse_usfm(source)
+        for verse in parsed.verses:
+            assert _text_from_spans(source, verse) == verse.text, (path.name, verse.chapter, verse.verse)
+            assert verse.start <= verse.head_end
+            assert source[verse.start - 1] in " \t", (verse.chapter, verse.verse)
+
+
+def test_verse_spans_for_a_heading_inside_a_verse_and_a_mid_line_verse():
+    source = (
+        "\\id PSA\n\\c 1\n\\p\n"
+        "\\v 1 Blessed is the man.\n"
+        "\\s The wicked\n"
+        "\\q1 \\v 2 Not so,\n\\q2 like chaff.\n"
+        "\\v 3 Head text\n\\s Odd heading mid-verse\n\\p\nTail scripture line.\n"
+    )
+    parsed = parse_usfm(source)
+    by_verse = {v.verse: v for v in parsed.verses}
+    one, two, three = by_verse["1"], by_verse["2"], by_verse["3"]
+    assert source[one.start:one.head_end] == "Blessed is the man."
+    assert one.tail_spans == ()
+    # The mid-line verse's span starts after its own marker; the `\\q1 ` before it is untouched.
+    assert source[two.start:two.head_end] == "Not so,\n\\q2 like chaff."
+    assert source[two.start - 5:two.start] == "\\v 2 "
+    # Scripture after a heading inside the verse is a tail span; the heading and `\\p` are not.
+    assert source[three.start:three.head_end] == "Head text"
+    assert [source[a:b] for a, b in three.tail_spans] == ["Tail scripture line."]
+    assert three.text == "Head text\nTail scripture line."
+    for verse in parsed.verses:
+        assert _text_from_spans(source, verse) == verse.text

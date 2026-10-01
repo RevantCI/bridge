@@ -506,9 +506,13 @@ change. **This is scheduled work, not accepted behaviour.**
     (a whole aligned Psalms took 277 s), so books are parsed a chapter at a time;
     it is still ~20x slower than a regex, so the import preview reads identity from
     the preamble only and fully parses just the first book. Never hand usfmtc a
-    bare string: it opens anything `os.path.exists` accepts as a file. The other
-    USFM readers (`usfm.py`'s `strip_usfm` on stored verse strings,
-    `usfm_passages.py` and `passage_semantic_runtime.py` for Stages 4–8,
+    bare string: it opens anything `os.path.exists` accepts as a file. **Export
+    is on it too (#190):** `_source_preserving_usfm` writes current text into
+    each verse's parser-reported span (`UsfmVerse.start`/`head_end`/`tail_spans`)
+    and touches nothing else, so between-verse headings survive and a mid-line
+    `\v` is written back; `read_usfm_text` is the one decoder for the preserved
+    source. The other USFM readers (`usfm.py`'s `strip_usfm` on stored verse
+    strings, `usfm_passages.py` and `passage_semantic_runtime.py` for Stages 4–8,
     `aligned_usfm.py`, the frontend's `usfmNotes.ts`) are not on it yet — see #91.
 
 ## Working in this repo

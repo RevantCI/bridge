@@ -24,7 +24,7 @@ from .original_language_resources import (
 )
 from .tc_project import ProjectError, TranslationCoreProject, _write_json_atomic
 from .usfm import whitespace_tokens
-from .usfm_parser import UsfmParseError, identify_usfm, parse_usfm
+from .usfm_parser import UsfmParseError, identify_usfm, parse_usfm, read_usfm_text
 from .version import BRIDGE_VERSION
 
 
@@ -108,15 +108,10 @@ class BookIdentity:
 
 
 def _read_text(path: Path) -> str:
-    raw = path.read_bytes()
-    for encoding in ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"):
-        try:
-            text = raw.decode(encoding)
-            if "\\" in text:
-                return text.replace("\r\n", "\n").replace("\r", "\n")
-        except UnicodeError:
-            continue
-    raise ProjectError(f"{path.name} is not valid UTF-8/UTF-16 Scripture text. Convert it to Unicode before importing.")
+    try:
+        return read_usfm_text(path)
+    except UsfmParseError:
+        raise ProjectError(f"{path.name} is not valid UTF-8/UTF-16 Scripture text. Convert it to Unicode before importing.")
 
 
 def _attrs(value: str) -> dict[str, str]:

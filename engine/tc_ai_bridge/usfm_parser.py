@@ -43,6 +43,7 @@ import bisect
 import contextlib
 import io
 import re
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
 
@@ -95,6 +96,18 @@ class UsfmVerse:
     chapter: str
     verse: str  # opaque: bridges ("3-4") and segments ("3a") are kept as written
     text: str   # the verse's own USFM, cut from the source, headings removed
+    # Where `text` came from, as code-point offsets into the parsed source, so
+    # an export can put edited text back in the same place and leave everything
+    # else -- headings, paragraph markers, the next verse -- exactly as written
+    # (#190). `start` is just after the `\v N ` marker; `head_end` is the end of
+    # the verse's text before any heading inside it (trailing newlines
+    # excluded), so [start, head_end) is the region current text is written to.
+    # `tail_spans` are the Scripture lines that followed a heading *inside* the
+    # verse and were folded into `text`; an export deletes them, because the
+    # whole current text is written at the head.
+    start: int = 0
+    head_end: int = 0
+    tail_spans: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -171,15 +184,28 @@ def _warning_text(error: Any) -> str:
     return str(error)
 
 
-def _strip_marker_lines(piece: str) -> list[str]:
-    """Lines of text that follow a heading, minus bare structure markers.
+_USFM_ENCODINGS = ("utf-8-sig", "utf-16", "utf-16-le", "utf-16-be")
 
-    Valid USFM puts a heading immediately before a ``\\p``/``\\q`` and the next
-    ``\\v``; those bare markers structure the *next* verse and are dropped.
-    Scripture that somehow follows a heading inside the same verse is kept:
-    silently dropping verse text would be the worst possible way to be wrong.
+
+def read_usfm_text(path: Any) -> str:
+    """Decode a USFM file to text with ``\\n`` newlines.
+
+    The one decoder for the preserved source (#190): import, export and the
+    semantic runtime used to carry their own copies of this loop. UTF-8 with or
+    without a BOM, then the UTF-16 variants Paratext and Windows editors
+    produce; a decode that yields no backslash at all is the wrong encoding, not
+    Scripture. Raises :class:`UsfmParseError` when nothing fits; the caller
+    decides whether that is an import refusal or an export fallback.
     """
-    return [line for line in piece.split("\n") if line.strip() and not _MARKER_ONLY_LINE.match(line)]
+    raw = Path(path).read_bytes()
+    for encoding in _USFM_ENCODINGS:
+        try:
+            text = raw.decode(encoding)
+        except UnicodeError:
+            continue
+        if "\\" in text:
+            return text.replace("\r\n", "\n").replace("\r", "\n")
+    raise UsfmParseError(f"{Path(path).name} is not UTF-8 or UTF-16 USFM text.")
 
 
 @dataclass(frozen=True)
@@ -315,26 +341,49 @@ def parse_usfm(text: str) -> ParsedUsfm:
             [(h_at, block_end(h_at), True) for h_at in current["headings"] if h_at < end]
             + [(d_at, d_end, False) for d_at, d_end in current["drops"] if d_at < end]
         )
-        cursor = current["start"]
+        start = current["start"]
+        cursor = start
         after_heading = False
-        head: list[str] = []
-        tail: list[str] = []
         # Text before the first heading is kept exactly; text after one keeps
-        # only its Scripture lines (see _strip_marker_lines).
-        pieces: list[tuple[str, bool]] = []
+        # only its Scripture lines: bare structure markers (`\p`, `\q1`) that
+        # introduce the NEXT verse are dropped, Scripture that somehow follows a
+        # heading inside the same verse is kept -- silently dropping verse text
+        # would be the worst way to be wrong. Everything is
+        # tracked as source ranges so the verse also knows where it came from.
+        pieces: list[tuple[int, int, bool]] = []
         for c_at, c_end, is_heading in cuts:
-            piece = text[cursor:c_at]
-            pieces.append((piece.rstrip("\n") if is_heading and not after_heading else piece, after_heading))
+            piece_end = c_at
+            if is_heading and not after_heading:
+                while piece_end > cursor and text[piece_end - 1] == "\n":
+                    piece_end -= 1
+            pieces.append((cursor, max(cursor, piece_end), after_heading))
             after_heading = after_heading or is_heading
             cursor = max(cursor, c_end)
-        pieces.append((text[cursor:end] if cursor < end else "", after_heading))
-        head_text = "".join(piece for piece, later in pieces if not later)
-        for piece, later in pieces:
-            if later:
-                tail.extend(_strip_marker_lines(piece))
-        head.extend(head_text.split("\n"))
-        verse_text = "\n".join(head + tail).strip()
-        verses.append(UsfmVerse(current["chapter"], current["verse"], verse_text))
+        pieces.append((cursor, max(cursor, end), after_heading))
+        head_pieces = [(a, b) for a, b, later in pieces if not later]
+        head_text = "".join(text[a:b] for a, b in head_pieces)
+        head_end = head_pieces[-1][1] if head_pieces else start
+        # The span an export writes into ends where the text does, not at the
+        # whitespace that separates it from the next marker.
+        while head_end > start and text[head_end - 1].isspace():
+            head_end -= 1
+        tail: list[str] = []
+        tail_spans: list[tuple[int, int]] = []
+        for a, b, later in pieces:
+            if not later:
+                continue
+            line_start = a
+            for line in text[a:b].split("\n"):
+                line_end = line_start + len(line)
+                if line.strip() and not _MARKER_ONLY_LINE.match(line):
+                    tail.append(line)
+                    tail_spans.append((line_start, line_end))
+                line_start = line_end + 1
+        verse_text = "\n".join(head_text.split("\n") + tail).strip()
+        verses.append(UsfmVerse(
+            current["chapter"], current["verse"], verse_text,
+            start=start, head_end=head_end, tail_spans=tuple(tail_spans),
+        ))
         current = None
 
     def file_pending(verse: str) -> None:
