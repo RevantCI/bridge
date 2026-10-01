@@ -52,6 +52,39 @@ Managed-library discovery is cached for duplicate classification and does not
 rehash every project's Scripture tree on each preview. Large-folder inspection
 has a separate bounded desktop timeout from ordinary interactive commands.
 
+## How a book is read
+
+Every book is parsed by `engine/tc_ai_bridge/usfm_parser.py`, which wraps
+[usfmtc](https://pypi.org/project/usfmtc/) — the USFM Technical Committee's
+reference parser — pinned at 0.4.8 (#91). The parser decides where each verse
+starts and ends and which paragraphs are section headings (`\s`, `\ms`, `\mr`,
+`\r`, `\sr`, `\sp`; `\d` is Scripture and stays in its verse). The verse string
+written to `<chapter>.json` is then cut **verbatim** from the source between
+those boundaries, so footnotes, `\w` attributes and `\zaln` milestones are
+byte-identical to the input. Headings go to `<chapter>.headings.json`, keyed by
+the verse they introduce.
+
+Compared with the line regex it replaced, over 443 distinct local USFM files
+(209,715 verses), every verse tokenises identically except where the regex was
+wrong:
+
+- a `\v` that does not start its line (`\q1 \v 1 …`) is a verse — the regex lost
+  263 such verses of ESV poetry outright;
+- a `\v` with no number (`\v \x - \xo 61:2 …` in an IRV Isaiah) is not a verse
+  called `\x`: its text stays with the verse before it, the numberless marker is
+  removed, and `.bridge/import.json` records a warning naming the line.
+
+`.bridge/import.json`'s `scripture.parserWarnings` holds what the parser reported
+(unknown or misplaced markers); none of it stops an import.
+
+The **preview** reads identity (book id, name, language) from each book's
+preamble and shows a `\v` marker count as its size. Only the first book is
+parsed in full at preview time — it is the one an import normalizes
+immediately — so a malformed later book in a collection is reported when it is
+first opened, not in the preview. A full usfmtc parse runs at roughly 2 µs per
+character, about 20× the old regex: a whole Tamil IRV Bible is ~11 s and an
+aligned Psalms ~5–8 s, which is why the preview does not parse every book.
+
 ## Normalized project data
 
 For a single-book import and the first book of a collection, Bridge creates or

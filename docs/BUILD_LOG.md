@@ -13725,6 +13725,117 @@ at 300 ms, that is a real signal rather than runner noise.
 Verified locally: `--p95-budget-ms 300` passes (exit 0); the default 50 ms also
 passes locally at 13.79 ms, so the local gate keeps its teeth.
 
+## 2026-09-29 — One USFM parser for import: usfmtc behind `usfm_parser.py` (#91, step 1–2)
+
+**Re-evaluated first.** The #91 plan (2026-09-17) made "import through a real
+parser" the #92 fix. #180 landed today and already split headings out with a line
+regex, so on the two IRV fixtures the #92 symptom was gone at the token level
+(0 differing verses against usfmtc). What remained of #91 was consolidation, plus
+anything the regex still got wrong — which only a wider corpus could show.
+
+**What landed.** `engine/tc_ai_bridge/usfm_parser.py` wraps usfmtc 0.4.8 (pinned
+exactly; the only module allowed to import it). usfmtc decides where each verse
+starts and ends and which paragraphs are headings; the verse string is then cut
+**verbatim** from the source using usfmtc's element line/column positions, not
+re-serialised — so `\zaln`/`\w` markup, notes and every finding offset survive
+byte-for-byte. `parse_scripture_file` reads through it; the `\id`/`\c`/`\v`/header
+regexes and `_split_trailing_headings` are gone from `project_import.py`.
+`\zaln` alignment extraction (`_verse_alignment`) still walks the stored slice with
+its own regexes, deliberately: it operates on in-verse markup, which is unchanged.
+
+**Parity, measured over 443 distinct local USFM files (209,715 verses).** Every
+verse tokenises identically to the old importer except where the old one was
+wrong:
+- 263 verses the regex **lost outright** — a `\v` that does not start its line
+  (`\q1 \v 1 …`, all of ESV poetry's chapter openings), because text before a
+  chapter's first line-initial `\v` was discarded.
+- 6 "verses" it **invented** from a `\v` with no number: IRV Isaiah's
+  `\v \x - \xo 61:2 …` was stored under the verse key `\x`. The text now stays
+  with the verse before it, the numberless token is removed, and a warning names
+  the line. One case (a Kachchi Psalms `\v \x … \x*6 …`) is really verse 6 with its
+  number after the xref, so it is now folded into 32:5 — wrong, but kept and
+  reported, where the regex's `\x` key was wrong and silent. A judgement call,
+  easy to change.
+- Byte-level differences with identical tokens in 3 verses, all from that fold.
+
+**usfmtc is quadratic, and slow.** Its lexer matches each tag and attribute
+against `self.txt[m.end():]` — a copy of the rest of the input — so aligned USFM
+(a `\w` and a `\zaln` on every word) exploded: 277 s for a 1.9 MB aligned
+Psalms, 71 s for an aligned Genesis, past the 300 s import timeout on the first.
+Parsing per chapter (each chunk padded with newlines so line numbers stay
+absolute) took those to 7.8 s and 2.9 s, with a test that chunked equals whole on
+both IRV fixtures. Even linear it runs at ~2 µs a character, ~20× the regex: all
+66 IRV books take ~11 s. So the import **preview** now reads identity from each
+book's preamble (`identify_usfm`) and fully parses only the first book — the one
+an import normalizes eagerly — keeping `test_import_rejects_duplicate_verse_numbers`
+meaningful. A malformed *later* book in a collection is now reported on first
+open rather than in the preview: a real behaviour change. Parse and identity
+results are cached by (path, size, mtime) because `project.import` previews again
+inside the same sidecar.
+
+**Other measured traps**, recorded in the module docstring: `USX.fromUsfm(str)`
+opens its argument as a file when `os.path.exists` says so, and raises
+FileNotFoundError on any short single-line string (input always goes in as a
+StringIO); `\usfm` is folded into a document attribute, so the header is read back
+from the source; the parse path does not print, but runs under `redirect_stdout`
+anyway because stdout is the protocol.
+
+**Not done in this step, and why** (the revised #91 plan has the detail): Stages
+4–8 still read through `usfm_passages.py` / `passage_semantic_runtime.py`'s line
+parsers, which feed Stage 6B windows and the goldens and parse synthetic USFM built
+from stored verse strings — moving them needs a window-boundary parity snapshot
+first. `strip_usfm`/`whitespace_tokens`, `aligned_usfm.py` masking and
+`usfmNotes.ts` operate on the stored in-verse string, not on documents; the
+frontend one re-parses live while editing, so moving it to the engine is a UI
+design question, not a parser swap.
+
+**Verification.** 20 new tests in `tests/project_io/test_usfm_parser.py`, plus
+`test_a_malformed_later_book_is_reported_when_it_is_first_opened` (a duplicate
+verse in a collection's second book raises on first open and leaves its source
+untouched). Full engine suite on the branch rebased onto 0104670 (#130):
+4,670 passed, 1 skipped, 3 xfailed, 0 failed (both goldens included, fixture
+files untouched).
+
+Frozen, rebuilt on that base: `smoke_sidecars.py` exactly as `release.yml` runs it
+(the hard gate since #130) **passes end to end**, including the new check that the
+frozen exe bounds a heading and a mid-line `\v`.
+
+**The cost, stated plainly.** The smoke's optional `--import-source` 66-book gate
+(10 s, not run by release): branch 10.21 s and 10.74 s, a frozen build of main
+0104670 9.77 s and 9.36 s — **about +0.8 s on a cold 66-book import**, which puts
+the branch just over a budget main clears by under a second. Split, in source:
+`import usfmtc` 0.11 s, identifying 66 preambles 0.27 s, the first book's full parse
+(Genesis, 1,533 verses) 0.44 s. The first two could only go by reading headers
+with a regex again, which is the thing #91 removes; the third is the parser. So it
+is left as a decision rather than tuned away: raise that budget, or accept a
+second, header-only reader. (An earlier alternating benchmark that ran the preview
+*before* timing the import showed the branch faster — 6.8–7.8 s vs 7.7–8.8 s — but
+that preview warmed both caches, so it is not the cold number.) A single aligned
+Psalms: 4.6 s → 9.0 s preview-plus-import. No frontend or Rust changes, so
+npm/cargo gates were not re-run. Desktop not run.
+
+**Decision (maintainer, 2026-09-30, while rebasing the branch onto `main` efb2683 for
+merge):** raise the smoke's default `--max-import-seconds` from 10 to 15 rather than
+add a header-only regex reader back. The +0.8 s is the parser doing real work on the
+first book and 66 preambles, so the new limit carries that cost in its failure message;
+a miss beyond it is a regression. A perf issue for `identify_usfm` is filed separately.
+The rebase itself conflicted only in this file (both sides appended a section) and was
+resolved by keeping both in date order. The full suite on the rebased branch:
+4,670 passed, 1 skipped, 3 xfailed, and one failure —
+`test_progress_cache.py::test_a_decision_is_one_workbench_commit_per_table_not_one_per_row`
+— which passes alone on both the branch and `main`, so it is flaky under `-n auto`,
+not a parser regression; filed rather than fixed here.
+
+Re-measured on the maintainer's machine after the rebase, three cold runs each of the
+same `project.import` alternating a frozen build of `main` efb2683 and the rebased
+branch (`C:\code\tamil\IRV_Tamil`, 66 books): main 18.2 / 17.3 / 19.9 s, branch
+19.2 / 20.0 / 17.8 s. The branch is inside main's own spread, so no regression — but
+this machine is roughly twice as slow on this import as the one the 10.2–10.7 s came
+from, and the new 15 s default fails here for `main` too. The optional gate is a
+per-machine benchmark; the number that matters is branch against main on the same
+box, and the budget default is left at 15 s pending a decision on whether it should
+track a slower reference machine.
+
 ## 2026-09-30 — A Scripture write survives a reader holding the file (#184)
 
 CI failed on `test_job_path_and_live_path_produce_identical_findings` with

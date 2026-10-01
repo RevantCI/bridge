@@ -101,7 +101,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("engine", type=Path, help="Path to frozen bridge-engine executable")
     parser.add_argument("--import-source", type=Path, help="Optional real USFM/Paratext folder to benchmark")
-    parser.add_argument("--max-import-seconds", type=float, default=10.0)
+    # 15 s, not the 10 s it was before #91: the frozen 66-book Tamil IRV import
+    # measured 10.2-10.7 s once usfmtc decides verse boundaries (main was 9.4-9.8 s).
+    # The +0.8 s is `import usfmtc` ~0.1 s, identifying 66 preambles ~0.3 s and
+    # the first book's full parse ~0.4 s -- real work, not a regression to chase.
+    parser.add_argument("--max-import-seconds", type=float, default=15.0)
     args = parser.parse_args()
     engine = args.engine.resolve()
     repository_root = Path(__file__).resolve().parent.parent
@@ -198,7 +202,11 @@ def main() -> int:
 
             raw_source = Path(temp) / "57-TIT.usfm"
             raw_source.write_text(
-                "\\id TIT\n\\h Titus\n\\c 1\n\\v 1 Paul, a servant of God.\n",
+                # A heading and a mid-line \v: both are decided by usfmtc
+                # (tc_ai_bridge/usfm_parser.py, #91), whose pure-Python grammar
+                # is exactly what a freeze can drop without failing to build.
+                "\\id TIT\n\\h Titus\n\\c 1\n\\v 1 Paul, a servant of God.\n"
+                "\\s The work in Crete\n\\q1 \\v 2 In hope of eternal life.\n",
                 encoding="utf-8",
             )
             raw_import = request("original-language-import", "project.import", {
@@ -220,6 +228,19 @@ def main() -> int:
                 or original_resource.get("commit") != "fc95b2b8aad08bb65ab54628ab685413a1139e97"
             ):
                 raise SystemExit(f"Frozen UGNT resource provenance failed: {raw_import}")
+            parsed_chapter = request("usfm-parser-verse-data", "chapter.verseData", {"chapter": "1"})
+            parsed_result = parsed_chapter.get("result", {})
+            parsed_verses = {
+                verse: (item or {}).get("text")
+                for verse, item in (parsed_result.get("verses") or {}).items()
+            }
+            if (
+                not parsed_chapter.get("success")
+                or parsed_verses.get("1") != "Paul, a servant of God."
+                or parsed_verses.get("2") != "In hope of eternal life."
+                or (parsed_result.get("headings") or {}).get("2", [{}])[0].get("text") != "The work in Crete"
+            ):
+                raise SystemExit(f"Frozen USFM parser did not bound verses and headings: {parsed_chapter}")
             raw_alignment = request(
                 "original-language-alignment", "alignment.get", {"chapter": "1", "verse": "1"},
             )
@@ -253,7 +274,9 @@ def main() -> int:
                     raise SystemExit(f"Frozen import returned {len(projects)} projects, expected 66")
                 if elapsed >= args.max_import_seconds:
                     raise SystemExit(
-                        f"Frozen import took {elapsed:.2f}s, limit is {args.max_import_seconds:.2f}s"
+                        f"Frozen import took {elapsed:.2f}s, limit is {args.max_import_seconds:.2f}s "
+                        "(the budget includes ~0.8 s of usfmtc work on the first book and 66 "
+                        "preambles, #91; a miss beyond that is a regression)"
                     )
                 print(f"Frozen 66-book import passed in {elapsed:.2f}s.")
 
