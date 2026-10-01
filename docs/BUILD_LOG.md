@@ -14014,3 +14014,44 @@ changes alignment tokens on that text.
 green; full suite and frozen smoke in the commit message. Frontend untouched
 (`usfmNotes.ts` still parses until Phase 2; its "change both or neither" parity
 comment in `test_language_qa.py` stays true).
+
+## 2026-10-01 — Redundant `\wj*\wj ` pairs: a check with a one-click fix, and a script (#203)
+
+**Found while measuring #91 Phase 1a.** The ESV source closes and reopens
+`\wj` clause by clause with the space *inside* the reopened marker (`many
+lepers\wj*\wj in Israel`). By the USFM spec that space is marker syntax, so a
+faithful reader shows `lepersin` — usfmtc does, and so does `usfm_verse.lift_verse`.
+Counted with the engine's decoder over 1,899 local files: 2,708 such `\wj` pairs,
+2,674 glued to the previous word, all in the ESV. The old `strip_usfm` happened to
+give `lepers in` because it replaces markers with spaces.
+
+**Why the reader is not changed.** The KJV has 53 `\w*\w ` pairs such as
+`who\w*\w soever`, where the glued reading "whosoever" is the *right* one, and
+the corpus has 2,479 back-to-back notes (`\f*\f `, `\x*\x `) that are simply two
+notes. A reader rule that keeps the space whenever an opener is glued to the
+previous word would be wrong in every one of those. The markup is what is wrong,
+and the maintainer chose to fix the markup.
+
+**What landed.** `usfm_verse.redundant_style_reopens(raw)` finds every `\X*\X `
+for a character-style `X` (`STYLE_MARKERS`: `wj nd it bd em add qt k sc tl …`;
+never notes, never `\w`) and proposes the repair: drop the pair, keep one space if
+it was glued. `normalize_style_reopens` applies them. Two consumers:
+
+- **`USFM_REDUNDANT_MARKER`**, a local check in `local_checks.usfm_checks`, one
+  finding per pair with the raw code-point span and the replacement. `QAIssue`
+  gained optional `start_offset`/`end_offset`/`original_text`/`suggested_replacement`
+  and `_qaissue_to_finding` carries them, so the frontend's existing
+  `applySuggestedFindingFix` offers the fix with no UI change and writes it
+  through `verse.edit`, the one Scripture writer, on a reviewer's click. Ids
+  disambiguate by marker and ordinal, so a decision survives a re-check.
+- **`scripts/normalize_usfm_markup.py`**, dry run by default, `--write` to repair
+  source files in place keeping encoding and line endings — for reference texts,
+  where 2,707 clicks is not a workflow. Dry run on the local ESV: 2,707 pairs in 8
+  files (Revelation 124); KJV and IRV Tamil: 0. **Not run with `--write`** — the
+  maintainer owns that corpus.
+
+**Verified.** Detector and normaliser tests (glued vs not, nested `\+nd`, notes
+and `\w` untouched), the RPC test that gets three findings on ESV Luke 4:27 and
+applies them through `verse.edit` until none remain, the script test (dry run
+changes nothing; `--write` keeps a UTF-8 BOM and UTF-16 with CRLF). Full suite and
+frozen smoke in the commit. Desktop not run (QA matrix A89).

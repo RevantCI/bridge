@@ -1104,6 +1104,7 @@ def test_qaissue_categorization_matches_real_local_checks_codes():
         (QAIssue("ALIGN_DUP_TOP", "critical", "x", "y"), FindingCategory.ALIGNMENT),
         (QAIssue("WA_INVALID", "high", "x", "y", "translationCore"), FindingCategory.ALIGNMENT),
         (QAIssue("USFM_BALANCE", "high", "x", "y", "local"), FindingCategory.STRUCTURE),
+        (QAIssue("USFM_REDUNDANT_MARKER", "medium", "x", "y", "local"), FindingCategory.STRUCTURE),
         (QAIssue("SRC_REPEAT_WORD", "medium", "x", "y"), FindingCategory.REPETITION),
         (QAIssue("TGT_HIDDEN_CHAR", "editorial", "x", "y"), FindingCategory.UNICODE),
         (QAIssue("TC_PENDING", "high", "translationWords: unchecked item", "y", "translationCore"), FindingCategory.TRANSLATION_WORD),

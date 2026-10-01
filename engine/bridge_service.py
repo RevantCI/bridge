@@ -305,6 +305,12 @@ def _qaissue_to_finding(issue: QAIssue, *, project_id: str, book: str,
         explanation=f"{issue.title} — {issue.detail}".strip(" —"),
         engine_version=BRIDGE_VERSION,
         resource_versions=dict(resource_versions) if resource_versions else {},
+        # A local check's one-click fix (#203): raw code-point span plus the
+        # replacement, the same contract names/Language QA fixes use.
+        start_offset=issue.start_offset,
+        end_offset=issue.end_offset,
+        original_text=issue.original_text,
+        suggested_replacement=issue.suggested_replacement,
     )
 
 

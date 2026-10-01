@@ -117,6 +117,15 @@ class QAIssue:
     check_id: str = ''
     group_id: str = ''
     confidence: float | None = None
+    # A mechanical fix the reviewer can apply with one click (#203): the raw
+    # code-point span, what is there now, and what replaces it. Carried onto
+    # QaFinding.start_offset/end_offset/original_text/suggested_replacement by
+    # bridge_service._qaissue_to_finding; the frontend's applySuggestedFindingFix
+    # writes it through the ordinary verse.edit path. All four or none.
+    start_offset: int | None = None
+    end_offset: int | None = None
+    original_text: str = ''
+    suggested_replacement: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = {
@@ -132,6 +141,11 @@ class QAIssue:
             data['group_id'] = self.group_id
         if self.confidence is not None:
             data['confidence'] = self.confidence
+        if self.suggested_replacement is not None:
+            data['start_offset'] = self.start_offset
+            data['end_offset'] = self.end_offset
+            data['original_text'] = self.original_text
+            data['suggested_replacement'] = self.suggested_replacement
         return data
 
 

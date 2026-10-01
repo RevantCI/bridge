@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from tc_ai_bridge.usfm_parser import _usfmtc_documents, parse_usfm
-from tc_ai_bridge.usfm_verse import lift_verse
+from tc_ai_bridge.usfm_verse import lift_verse, normalize_style_reopens, redundant_style_reopens
 
 
 def _collapse(text: str) -> str:
@@ -158,6 +158,40 @@ def test_to_dict_is_the_protocol_payload():
     assert payload["notes"][0]["reference"] == "1.6" and payload["notes"][0]["position"] == 5
     assert payload["removed"] == [[5, 29]]
     assert payload["styles"] == [] and payload["warnings"] == []
+
+
+# --- redundant style reopen (#203) -------------------------------------------
+
+def test_redundant_style_reopens_are_found_with_their_repair():
+    raw = "\\wj And \\wj*\\wj there were many lepers\\wj*\\wj in Israel\\wj*"
+    fixes = redundant_style_reopens(raw)
+    assert [(f.marker, f.original, f.replacement) for f in fixes] == [
+        ("wj", "\\wj*\\wj ", ""),    # after "And " -- a space is already there
+        ("wj", "\\wj*\\wj ", " "),   # glued to "lepers" -- keep one space
+    ]
+    assert normalize_style_reopens(raw) == "\\wj And there were many lepers in Israel\\wj*"
+    assert lift_verse(normalize_style_reopens(raw)).plain == "And there were many lepers in Israel"
+
+
+def test_notes_and_aligned_words_back_to_back_are_not_redundant():
+    # Two footnotes in a row are two notes; the KJV's `who\w*\w soever` is one
+    # word on purpose, and the spec reading "whosoever" is the right one.
+    for raw in [
+        "a\\f + \\ft one\\f*\\f + \\ft two\\f* b",
+        "\\x - \\xo 1:1 \\xt Gen 1\\x*\\x - \\xo 1:1 \\xt Gen 2\\x*",
+        '\\w who|strong="G3739"\\w*\\w soever|strong="G1437"\\w*',
+        "\\+w who\\+w*\\+w soever\\+w*",
+    ]:
+        assert redundant_style_reopens(raw) == (), raw
+        assert normalize_style_reopens(raw) == raw
+    assert lift_verse('\\w who|strong="G3739"\\w*\\w soever|strong="G1437"\\w*').plain == "whosoever"
+
+
+def test_nested_style_reopen_is_matched_as_a_pair():
+    raw = "\\wj He said \\+nd Lord\\+nd*\\+nd God\\+nd* to them\\wj*"
+    [fix] = redundant_style_reopens(raw)
+    assert fix.marker == "nd" and fix.replacement == " "
+    assert normalize_style_reopens(raw) == "\\wj He said \\+nd Lord God\\+nd* to them\\wj*"
 
 
 # --- the parity test: this scanner against usfmtc ----------------------------

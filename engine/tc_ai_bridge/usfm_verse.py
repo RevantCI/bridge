@@ -144,6 +144,57 @@ class LiftedVerse:
         }
 
 
+# Character-style markers whose close-then-reopen with nothing between is
+# never meant: `\wj And \wj*\wj there` is one run of red letters, and the
+# space inside the reopened marker is syntax, so a faithful reader (this one,
+# usfmtc) glues the words. Notes are not here (`\f*\f ` is two notes) and
+# neither is `\w` (the KJV's `who\w*\w soever` is one word on purpose). #203.
+STYLE_MARKERS = frozenset({
+    "add", "bd", "bdit", "bk", "dc", "em", "it", "k", "lit", "nd", "no", "ord", "pn",
+    "png", "qac", "qs", "qt", "rq", "sc", "sig", "sls", "sup", "tl", "wj",
+})
+_STYLE_REOPEN = re.compile(r"\\(?P<plus>\+?)(?P<marker>[A-Za-z]+)\*\\(?P=plus)(?P=marker) ")
+
+
+@dataclass(frozen=True)
+class MarkupFix:
+    """One mechanical repair of the raw string: replace raw[start:end] with
+    `replacement`. `original` is raw[start:end], so a stale fix is detectable."""
+    marker: str
+    start: int
+    end: int
+    original: str
+    replacement: str
+
+
+def redundant_style_reopens(raw: str) -> tuple[MarkupFix, ...]:
+    """Every `\\X*\\X ` pair for a character-style X, with the repair: drop the
+    pair, keeping one space when it is glued to the previous word (so
+    `lepers\\wj*\\wj in` becomes `lepers in`, and `And \\wj*\\wj there` becomes
+    `And there`)."""
+    fixes = []
+    for match in _STYLE_REOPEN.finditer(raw):
+        marker = match.group("marker")
+        if marker not in STYLE_MARKERS:
+            continue
+        start, end = match.span()
+        glued = start > 0 and not raw[start - 1].isspace()
+        fixes.append(MarkupFix(marker, start, end, raw[start:end], " " if glued else ""))
+    return tuple(fixes)
+
+
+def normalize_style_reopens(raw: str) -> str:
+    """`raw` with every redundant style reopen repaired (see above)."""
+    out: list[str] = []
+    cursor = 0
+    for fix in redundant_style_reopens(raw):
+        out.append(raw[cursor:fix.start])
+        out.append(fix.replacement)
+        cursor = fix.end
+    out.append(raw[cursor:])
+    return "".join(out)
+
+
 def _note(raw: str, match: re.Match[str], position: int, raw_start: int, raw_end: int) -> VerseNote:
     marker = match.group(1)
     kind = "footnote" if marker in _FOOTNOTE_KINDS else "xref"
