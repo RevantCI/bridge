@@ -1,3 +1,19 @@
+<script context="module" lang="ts">
+  // #301: App.svelte keeps the last drop's path and sequence after it has been
+  // handled, and closing a book mounts a fresh ImportScreen with those same
+  // props. A per-instance counter started at 0 treated that old drop as new:
+  // every return to Projects reopened the last dropped file's review, and a
+  // drop made while a book was open showed the previous file (the new one
+  // arrived while the stale inspect was loading and was refused). The handled
+  // sequence lives here, once per app, so each drop is inspected exactly once.
+  let lastHandledDropSequence = 0;
+
+  /** Tests mount the screen afresh with dropSequence 1 each time. */
+  export function forgetHandledDrops(): void {
+    lastHandledDropSequence = 0;
+  }
+</script>
+
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
   import { iso6393 } from "iso-639-3";
@@ -41,7 +57,6 @@
   let preview: ImportPreview | null = null;
   let languageQuery = "";
   let showLanguages = false;
-  let handledDropSequence = 0;
   let metadata: ImportMetadata = {
     languageId: "", languageName: "", languageDirection: "ltr",
     projectName: "", bibleName: "",
@@ -52,8 +67,8 @@
 
   $: importing = importJob !== null && !IMPORT_TERMINAL.has(importJob.state);
 
-  $: if (dropSequence > handledDropSequence && droppedPath) {
-    handledDropSequence = dropSequence;
+  $: if (dropSequence > lastHandledDropSequence && droppedPath) {
+    lastHandledDropSequence = dropSequence;
     void inspect(droppedPath);
   }
 

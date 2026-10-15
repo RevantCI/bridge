@@ -18,7 +18,7 @@ vi.mock("../../api/bridgeClient", () => ({
   },
 }));
 
-import ImportScreen from "../ImportScreen.svelte";
+import ImportScreen, { forgetHandledDrops } from "../ImportScreen.svelte";
 import { project } from "../../stores";
 import type { ImportJobSnapshot, ImportPreview, ProjectInfo } from "../../types/finding";
 
@@ -74,9 +74,45 @@ async function renderWithPreview() {
   return onOpened;
 }
 
+// #301: App.svelte keeps the last drop's props, and closing a book mounts a
+// fresh ImportScreen with them. Found on the 0.18.0 walk.
+describe("ImportScreen drops (#301)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    forgetHandledDrops();
+    project.set(null);
+    listProjects.mockResolvedValue({ projects: [] });
+    inspectImport.mockResolvedValue(preview());
+  });
+
+  it("does not reopen a handled drop when a fresh screen mounts with the same props", async () => {
+    const first = render(ImportScreen, { props: { onOpened: vi.fn(), droppedPath: SOURCE, dropSequence: 1 } });
+    await screen.findByText("Confirm project details");
+    expect(inspectImport).toHaveBeenCalledTimes(1);
+    first.unmount();
+    // Back to Projects after the import: App passes the same path and sequence.
+    render(ImportScreen, { props: { onOpened: vi.fn(), droppedPath: SOURCE, dropSequence: 1 } });
+    await screen.findByText("Import a file");
+    expect(inspectImport).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Confirm project details")).toBeNull();
+  });
+
+  it("inspects the new file when a drop arrives while a book was open, not the previous one", async () => {
+    const first = render(ImportScreen, { props: { onOpened: vi.fn(), droppedPath: SOURCE, dropSequence: 1 } });
+    await screen.findByText("Confirm project details");
+    first.unmount();
+    // The book closes first (the screen mounts with the old drop), then App sets the new one.
+    const second = render(ImportScreen, { props: { onOpened: vi.fn(), droppedPath: SOURCE, dropSequence: 1 } });
+    await second.component.$set({ droppedPath: "C:/sources/3JN.usfm", dropSequence: 2 });
+    await waitFor(() => expect(inspectImport).toHaveBeenCalledTimes(2));
+    expect(inspectImport).toHaveBeenLastCalledWith("C:/sources/3JN.usfm");
+  });
+});
+
 describe("ImportScreen background import (#231)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    forgetHandledDrops();
     project.set(null);
     listProjects.mockResolvedValue({ projects: [] });
     inspectImport.mockResolvedValue(preview());
